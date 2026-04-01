@@ -10,7 +10,7 @@ Usage:
 
     bar = StatusBar()
     text = bar.get_status_line()
-    # Returns: "MeshForge v0.4.7 | meshtasticd: ● | rnsd: ○ | mqtt: ○"
+    # Returns: "MeshAnchor v0.4.7 | meshtasticd: ● | rnsd: ○ | mqtt: ○"
 
 Enhanced in v0.4.8:
     - Integration with StartupChecker for conflict detection
@@ -79,7 +79,7 @@ class StatusBar:
         """Initialize status bar.
 
         Args:
-            version: MeshForge version string to display.
+            version: MeshAnchor version string to display.
         """
         self.version = version
         self._cache: Dict[str, str] = {}
@@ -125,9 +125,9 @@ class StatusBar:
 
         # Version
         if self.version:
-            parts.append(f"MeshForge v{self.version}")
+            parts.append(f"MeshAnchor v{self.version}")
         else:
-            parts.append("MeshForge")
+            parts.append("MeshAnchor")
 
         # Service statuses
         for service_name, short_name in MONITORED_SERVICES:
@@ -514,9 +514,9 @@ class StatusBar:
 
         # Version
         if self.version:
-            parts.append(f"MeshForge v{self.version}")
+            parts.append(f"MeshAnchor v{self.version}")
         else:
-            parts.append("MeshForge")
+            parts.append("MeshAnchor")
 
         # Root indicator
         if not env.is_root:

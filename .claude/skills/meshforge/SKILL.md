@@ -1,22 +1,22 @@
 ---
-name: MeshForge
+name: MeshAnchor
 description: >
-  MeshForge NOC (Network Operations Center) assistant for LoRa mesh network development.
+  MeshAnchor NOC (Network Operations Center) assistant for LoRa mesh network development.
   Handles Meshtastic and RNS (Reticulum) network operations, configuration, debugging, and development.
 
   Use when working with: (1) Meshtasticd configuration and service management, (2) RNS/Reticulum
   network setup and bridging, (3) LoRa radio configuration (presets, frequencies, regions),
-  (4) MeshForge TUI development, (5) Gateway bridge between Meshtastic and RNS,
+  (4) MeshAnchor TUI development, (5) Gateway bridge between Meshtastic and RNS,
   (6) RF calculations and link budgets, (7) Node discovery and monitoring.
 
-  Triggers: meshtastic, meshtasticd, rnsd, reticulum, lora, meshforge, gateway, rnode, nomadnet
+  Triggers: meshtastic, meshtasticd, rnsd, reticulum, lora, meshanchor, gateway, rnode, nomadnet
 ---
 
-# MeshForge Development Assistant
+# MeshAnchor Development Assistant
 
 ## Project Context
 
-MeshForge is a Network Operations Center (NOC) bridging Meshtastic and Reticulum mesh networks.
+MeshAnchor is a Network Operations Center (NOC) bridging Meshtastic and Reticulum mesh networks.
 First open-source tool to unify these incompatible mesh ecosystems.
 
 **Version:** 0.5.5-beta
@@ -36,11 +36,11 @@ First open-source tool to unify these incompatible mesh ecosystems.
 ### MF001: Path.home() - NEVER use directly
 ```python
 # WRONG
-config = Path.home() / ".config" / "meshforge"
+config = Path.home() / ".config" / "meshanchor"
 
 # CORRECT
 from utils.paths import get_real_user_home
-config = get_real_user_home() / ".config" / "meshforge"
+config = get_real_user_home() / ".config" / "meshanchor"
 ```
 
 ### MF002: shell=True - NEVER use

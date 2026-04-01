@@ -1,4 +1,4 @@
-# MeshForge Development Effort Analysis
+# MeshAnchor Development Effort Analysis
 
 > **Date**: 2026-03-06
 > **Analyst**: Dude AI (Claude Code / Opus 4.6)
@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-MeshForge — the first open-source tool bridging Meshtastic and Reticulum mesh networks —
+MeshAnchor — the first open-source tool bridging Meshtastic and Reticulum mesh networks —
 was built in approximately **9 days** by one human architect (Nursedude) working with
 Claude Code. Using industry-standard estimation models and domain complexity analysis,
 this effort is equivalent to **7-8 full-time developers working for 3-5 years**.
@@ -131,7 +131,7 @@ Adjusted effort = 563 × 0.6 × 0.85 × 0.85 × 1.3 × 1.2
 
 ## 4. Domain Expertise Requirements
 
-MeshForge spans 10+ specialist domains. No single developer covers all of them.
+MeshAnchor spans 10+ specialist domains. No single developer covers all of them.
 
 ### Domain Breakdown
 
@@ -207,7 +207,7 @@ experience to make correctly:
   mesh networks (a design problem, not a coding problem)
 - **Privilege Separation** — Viewer/Admin mode split requiring careful security modeling
 - **Deployment Profiles** — 6 profiles supporting everything from radio-only to full NOC
-- **Service Independence** — MeshForge connects to services, doesn't embed them
+- **Service Independence** — MeshAnchor connects to services, doesn't embed them
 
 These decisions typically require a senior architect with 10+ years of experience.
 
@@ -269,7 +269,7 @@ most commercial projects produce.
 
 ## 8. Conclusion
 
-MeshForge represents approximately **250-400 person-months** of equivalent human
+MeshAnchor represents approximately **250-400 person-months** of equivalent human
 development effort, compressed into **9 days** through AI-assisted development.
 
 The traditional team equivalent would be **7-8 specialist developers working for

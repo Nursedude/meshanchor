@@ -42,14 +42,14 @@ If you have GitHub CLI installed, run these:
 
 ```bash
 # Main branch protection
-gh api repos/Nursedude/meshforge/branches/main/protection -X PUT \
+gh api repos/Nursedude/meshanchor/branches/main/protection -X PUT \
   -F required_status_checks='{"strict":true,"contexts":[]}' \
   -F enforce_admins=true \
   -F required_pull_request_reviews='{"required_approving_review_count":1}' \
   -F restrictions=null
 
 # Beta branch protection
-gh api repos/Nursedude/meshforge/branches/beta/protection -X PUT \
+gh api repos/Nursedude/meshanchor/branches/beta/protection -X PUT \
   -F required_status_checks='{"strict":true,"contexts":[]}' \
   -F enforce_admins=false \
   -F required_pull_request_reviews='{"required_approving_review_count":1}' \

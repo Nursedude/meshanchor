@@ -286,7 +286,7 @@ dest = RNS.Destination(
 message = LXMF.LXMessage(
     dest,                              # Destination
     source,                            # Source
-    "Hello from MeshForge!",           # Content
+    "Hello from MeshAnchor!",           # Content
     "Test Message",                    # Title (optional)
     desired_method=LXMF.LXMessage.DIRECT,
     include_ticket=True
@@ -387,7 +387,7 @@ print(f"The time is: {datetime.datetime.now()}")
 
 ### Integration Possibilities
 
-- Host MeshForge status pages on NomadNet
+- Host MeshAnchor status pages on NomadNet
 - Create gateway status dashboard accessible via RNS
 - Serve node maps and telemetry via NomadNet pages
 
@@ -445,11 +445,11 @@ sideband --daemon
 
 ## Gateway Architecture
 
-### MeshForge Gateway Design
+### MeshAnchor Gateway Design
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    MeshForge Gateway Service                     │
+│                    MeshAnchor Gateway Service                     │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  ┌─────────────────┐              ┌─────────────────┐           │
@@ -560,7 +560,7 @@ Both networks on single map:
 ```python
 #!/usr/bin/env python3
 """
-MeshForge RNS-Meshtastic Gateway Bridge
+MeshAnchor RNS-Meshtastic Gateway Bridge
 """
 
 import RNS
@@ -570,7 +570,7 @@ import threading
 import time
 from queue import Queue
 
-class MeshForgeGateway:
+class MeshAnchorGateway:
     def __init__(self):
         self.running = False
         self.mesh_queue = Queue()
@@ -584,7 +584,7 @@ class MeshForgeGateway:
         self.lxmf_router = LXMF.LXMRouter(storagepath="./gateway_storage")
         self.lxmf_source = self.lxmf_router.register_delivery_identity(
             self.identity,
-            display_name="MeshForge Gateway"
+            display_name="MeshAnchor Gateway"
         )
         self.lxmf_router.register_delivery_callback(self._on_lxmf_message)
 
@@ -660,7 +660,7 @@ class MeshForgeGateway:
                 pass
 
 if __name__ == "__main__":
-    gateway = MeshForgeGateway()
+    gateway = MeshAnchorGateway()
     gateway.start()
 
     try:
@@ -788,9 +788,9 @@ data_speed = 8
 - Coexists with normal Meshtastic traffic
 - Multi-hop routing via mesh topology
 
-### MeshForge Integration
+### MeshAnchor Integration
 
-This interface allows MeshForge to:
+This interface allows MeshAnchor to:
 1. Run RNS applications over existing Meshtastic hardware
 2. Access RNS network from any Meshtastic node
 3. Bridge RNS and Meshtastic messaging
@@ -798,11 +798,11 @@ This interface allows MeshForge to:
 
 ---
 
-## MeshForge Gateway Implementation
+## MeshAnchor Gateway Implementation
 
 ### Hybrid Approach
 
-MeshForge can operate in two modes:
+MeshAnchor can operate in two modes:
 
 **Mode 1: RNS Over Meshtastic**
 - Uses Meshtastic_Interface.py

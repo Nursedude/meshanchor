@@ -3,7 +3,7 @@
     {
       "name": "DS_INFLUXDB",
       "label": "InfluxDB",
-      "description": "MeshForge InfluxDB data source",
+      "description": "MeshAnchor InfluxDB data source",
       "type": "datasource",
       "pluginId": "influxdb",
       "pluginName": "InfluxDB"
@@ -26,7 +26,7 @@
   "annotations": {
     "list": []
   },
-  "description": "MeshForge metrics from InfluxDB",
+  "description": "MeshAnchor metrics from InfluxDB",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -77,7 +77,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "query": "SELECT last(\"healthy\") FROM \"meshforge_service_healthy\" WHERE (\"service\" = 'meshtasticd') AND $timeFilter",
+          "query": "SELECT last(\"healthy\") FROM \"meshanchor_service_healthy\" WHERE (\"service\" = 'meshtasticd') AND $timeFilter",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -121,7 +121,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "query": "SELECT last(\"healthy\") FROM \"meshforge_service_healthy\" WHERE (\"service\" = 'rnsd') AND $timeFilter",
+          "query": "SELECT last(\"healthy\") FROM \"meshanchor_service_healthy\" WHERE (\"service\" = 'rnsd') AND $timeFilter",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -162,7 +162,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "query": "SELECT last(\"total\") FROM \"meshforge_nodes\" WHERE $timeFilter",
+          "query": "SELECT last(\"total\") FROM \"meshanchor_nodes\" WHERE $timeFilter",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -203,7 +203,7 @@
       "pluginVersion": "9.0.0",
       "targets": [
         {
-          "query": "SELECT last(\"with_gps\") FROM \"meshforge_nodes\" WHERE $timeFilter",
+          "query": "SELECT last(\"with_gps\") FROM \"meshanchor_nodes\" WHERE $timeFilter",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -272,14 +272,14 @@
       "targets": [
         {
           "alias": "Total Nodes",
-          "query": "SELECT mean(\"total\") FROM \"meshforge_nodes\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
+          "query": "SELECT mean(\"total\") FROM \"meshanchor_nodes\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         },
         {
           "alias": "With GPS",
-          "query": "SELECT mean(\"with_gps\") FROM \"meshforge_nodes\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
+          "query": "SELECT mean(\"with_gps\") FROM \"meshanchor_nodes\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
           "rawQuery": true,
           "refId": "B",
           "resultFormat": "time_series"
@@ -351,7 +351,7 @@
       "targets": [
         {
           "alias": "$tag_node_id",
-          "query": "SELECT mean(\"snr\") FROM \"meshforge_node\" WHERE $timeFilter GROUP BY time($__interval), \"node_id\" fill(null)",
+          "query": "SELECT mean(\"snr\") FROM \"meshanchor_node\" WHERE $timeFilter GROUP BY time($__interval), \"node_id\" fill(null)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -417,7 +417,7 @@
       "targets": [
         {
           "alias": "$tag_node_id",
-          "query": "SELECT mean(\"battery\") FROM \"meshforge_node\" WHERE $timeFilter GROUP BY time($__interval), \"node_id\" fill(null)",
+          "query": "SELECT mean(\"battery\") FROM \"meshanchor_node\" WHERE $timeFilter GROUP BY time($__interval), \"node_id\" fill(null)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
@@ -505,21 +505,21 @@
       "targets": [
         {
           "alias": "Delivered",
-          "query": "SELECT non_negative_difference(last(\"delivered\")) FROM \"meshforge_messages\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "query": "SELECT non_negative_difference(last(\"delivered\")) FROM \"meshanchor_messages\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
           "rawQuery": true,
           "refId": "A",
           "resultFormat": "time_series"
         },
         {
           "alias": "Failed",
-          "query": "SELECT non_negative_difference(last(\"failed\")) FROM \"meshforge_messages\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "query": "SELECT non_negative_difference(last(\"failed\")) FROM \"meshanchor_messages\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
           "rawQuery": true,
           "refId": "B",
           "resultFormat": "time_series"
         },
         {
           "alias": "Pending",
-          "query": "SELECT last(\"pending\") FROM \"meshforge_messages\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
+          "query": "SELECT last(\"pending\") FROM \"meshanchor_messages\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
           "rawQuery": true,
           "refId": "C",
           "resultFormat": "time_series"
@@ -532,13 +532,13 @@
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["meshforge", "mesh", "rf", "influxdb"],
+  "tags": ["meshanchor", "mesh", "rf", "influxdb"],
   "templating": {
     "list": [
       {
         "current": {},
         "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-        "definition": "SHOW TAG VALUES FROM \"meshforge_node\" WITH KEY = \"node_id\"",
+        "definition": "SHOW TAG VALUES FROM \"meshanchor_node\" WITH KEY = \"node_id\"",
         "description": "Filter by node",
         "hide": 0,
         "includeAll": true,
@@ -546,7 +546,7 @@
         "multi": true,
         "name": "node",
         "options": [],
-        "query": "SHOW TAG VALUES FROM \"meshforge_node\" WITH KEY = \"node_id\"",
+        "query": "SHOW TAG VALUES FROM \"meshanchor_node\" WITH KEY = \"node_id\"",
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
@@ -561,8 +561,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "MeshForge InfluxDB",
-  "uid": "meshforge-influxdb",
+  "title": "MeshAnchor InfluxDB",
+  "uid": "meshanchor-influxdb",
   "version": 1,
   "weekStart": ""
 }

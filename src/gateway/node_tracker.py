@@ -72,7 +72,7 @@ class UnifiedNodeTracker:
     @classmethod
     def get_cache_file(cls) -> Path:
         """Get the cache file path (evaluated at runtime, not import time)"""
-        return get_real_user_home() / ".config" / "meshforge" / "node_cache.json"
+        return get_real_user_home() / ".config" / "meshanchor" / "node_cache.json"
 
     def __init__(self):
         self._nodes: Dict[str, UnifiedNode] = {}
@@ -118,7 +118,7 @@ class UnifiedNodeTracker:
     def _init_rns_main_thread(self):
         """Initialize RNS from main thread, then start background listener.
 
-        IMPORTANT: MeshForge operates as a CLIENT ONLY - it connects to existing
+        IMPORTANT: MeshAnchor operates as a CLIENT ONLY - it connects to existing
         rnsd/NomadNet instances but never creates its own RNS instance that would
         bind interfaces and conflict with NomadNet or other RNS services.
 
@@ -143,7 +143,7 @@ class UnifiedNodeTracker:
             logger.info("RNS module not installed. To enable RNS node discovery:")
             logger.info("  1. Install RNS: pipx install rns")
             logger.info("  2. Start rnsd: sudo systemctl start rnsd")
-            logger.info("  3. Restart MeshForge")
+            logger.info("  3. Restart MeshAnchor")
             return
 
         RNS = _RNS_mod
@@ -160,7 +160,7 @@ class UnifiedNodeTracker:
                 # This would bind AutoInterface port and block NomadNet from starting
                 logger.info("No rnsd detected - skipping RNS node discovery")
                 logger.info("To enable RNS features, start rnsd first: sudo systemctl start rnsd")
-                logger.info("MeshForge will operate without RNS node tracking")
+                logger.info("MeshAnchor will operate without RNS node tracking")
                 self._rns_connected = False
                 return
 
@@ -170,12 +170,12 @@ class UnifiedNodeTracker:
                 # Create a client-only config to avoid interface conflicts
                 # This prevents RNS from trying to bind ports that rnsd already owns
                 import tempfile
-                client_config_dir = Path(tempfile.gettempdir()) / "meshforge_rns_client"
+                client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
                 client_config_dir.mkdir(exist_ok=True)
                 client_config_file = client_config_dir / "config"
 
                 # Write minimal client-only config (no interfaces, just shared transport)
-                client_config_file.write_text("""# MeshForge RNS Client Config (auto-generated)
+                client_config_file.write_text("""# MeshAnchor RNS Client Config (auto-generated)
 # This config connects to existing rnsd without creating interfaces
 
 [reticulum]
@@ -699,7 +699,7 @@ instance_control_port = 37429
 
             # Also save to /tmp for web API access (cross-process sharing)
             try:
-                tmp_path = '/tmp/meshforge_rns_nodes.json'
+                tmp_path = '/tmp/meshanchor_rns_nodes.json'
                 if os.path.islink(tmp_path):
                     logger.warning(f"Refusing to write to symlink: {tmp_path}")
                 else:

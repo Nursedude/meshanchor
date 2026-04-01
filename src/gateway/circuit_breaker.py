@@ -1,5 +1,5 @@
 """
-Circuit Breaker Pattern for MeshForge Gateway.
+Circuit Breaker Pattern for MeshAnchor Gateway.
 
 Prevents cascading failures by temporarily blocking requests to failing
 destinations. Based on the Netflix Hystrix pattern.

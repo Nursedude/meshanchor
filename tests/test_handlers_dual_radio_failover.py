@@ -491,6 +491,6 @@ class TestDualRadioFailoverDeploy:
         h = _make_handler()
         with patch('pathlib.Path.exists', return_value=False):
             config = h._generate_secondary_config()
-        assert "MeshForge Secondary Radio" in config
+        assert "MeshAnchor Secondary Radio" in config
         assert "9444" in config
         assert "sx1262" in config

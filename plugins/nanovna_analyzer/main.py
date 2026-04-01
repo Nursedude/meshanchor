@@ -1,5 +1,5 @@
 """
-NanoVNA Antenna Analyzer Plugin for MeshForge
+NanoVNA Antenna Analyzer Plugin for MeshAnchor
 
 Provides integration with NanoVNA and NanoVNA-H vector network analyzers
 for real-time SWR, impedance, and frequency response measurements.

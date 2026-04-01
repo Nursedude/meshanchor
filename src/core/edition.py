@@ -1,5 +1,5 @@
 """
-MeshForge Edition Detection and Feature Gating
+MeshAnchor Edition Detection and Feature Gating
 
 Determines which edition is running and provides feature flags
 for conditional functionality.
@@ -24,7 +24,7 @@ from utils.paths import get_real_user_home
 
 
 class Edition(Enum):
-    """MeshForge edition identifiers"""
+    """MeshAnchor edition identifiers"""
     PRO = "pro"
     AMATEUR = "amateur"
     IO = "io"
@@ -33,11 +33,11 @@ class Edition(Enum):
     def display_name(self) -> str:
         """Human-readable edition name"""
         names = {
-            Edition.PRO: "MeshForge PRO",
-            Edition.AMATEUR: "MeshForge Amateur Radio",
-            Edition.IO: "MeshForge.io",
+            Edition.PRO: "MeshAnchor PRO",
+            Edition.AMATEUR: "MeshAnchor Amateur Radio",
+            Edition.IO: "MeshAnchor.io",
         }
-        return names.get(self, "MeshForge")
+        return names.get(self, "MeshAnchor")
 
     @property
     def tagline(self) -> str:
@@ -142,11 +142,11 @@ _cached_edition: Optional[Edition] = None
 
 def detect_edition() -> Edition:
     """
-    Detect which MeshForge edition is running.
+    Detect which MeshAnchor edition is running.
 
     Detection priority:
-    1. Environment variable MESHFORGE_EDITION
-    2. Config file ~/.config/meshforge/edition.json
+    1. Environment variable MESHANCHOR_EDITION
+    2. Config file ~/.config/meshanchor/edition.json
     3. Presence of edition marker files
     4. Default to PRO
 
@@ -159,14 +159,14 @@ def detect_edition() -> Edition:
         return _cached_edition
 
     # 1. Check environment variable
-    env_edition = os.environ.get("MESHFORGE_EDITION", "").lower()
+    env_edition = os.environ.get("MESHANCHOR_EDITION", "").lower()
     if env_edition in ["pro", "amateur", "io"]:
         logger.debug(f"Edition from environment: {env_edition}")
         _cached_edition = Edition(env_edition)
         return _cached_edition
 
     # 2. Check config file
-    config_dir = get_real_user_home() / ".config" / "meshforge"
+    config_dir = get_real_user_home() / ".config" / "meshanchor"
     edition_file = config_dir / "edition.json"
 
     if edition_file.exists():
@@ -208,7 +208,7 @@ def set_edition(edition: Edition) -> None:
     """
     global _cached_edition
 
-    config_dir = get_real_user_home() / ".config" / "meshforge"
+    config_dir = get_real_user_home() / ".config" / "meshanchor"
     config_dir.mkdir(parents=True, exist_ok=True)
 
     edition_file = config_dir / "edition.json"
@@ -263,7 +263,7 @@ def require_feature(feature: str) -> None:
         edition = detect_edition()
         raise FeatureNotAvailableError(
             f"Feature '{feature}' is not available in {edition.display_name}. "
-            f"Consider upgrading to MeshForge PRO."
+            f"Consider upgrading to MeshAnchor PRO."
         )
 
 

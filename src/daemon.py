@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MeshForge Daemon — Headless NOC Service Manager
+MeshAnchor Daemon — Headless NOC Service Manager
 
-Runs MeshForge core services without TUI dependency.
+Runs MeshAnchor core services without TUI dependency.
 Designed for long-running unattended operation (days/weeks).
 
 Usage:
@@ -13,8 +13,8 @@ Usage:
     python3 src/daemon.py reload
 
 Via systemd:
-    systemctl start meshforge-daemon
-    systemctl status meshforge-daemon
+    systemctl start meshanchor-daemon
+    systemctl status meshanchor-daemon
 
 Services managed (each toggleable via daemon.yaml):
     - Gateway bridge (RNS <-> Meshtastic)
@@ -54,7 +54,7 @@ load_or_detect_profile, get_profile_by_name, _HAS_PROFILES = safe_import(
     'utils.deployment_profiles', 'load_or_detect_profile', 'get_profile_by_name'
 )
 
-logger = logging.getLogger("meshforged")
+logger = logging.getLogger("meshanchord")
 
 
 # =============================================================================
@@ -619,7 +619,7 @@ class DaemonController:
                 os.kill(old_pid, 0)  # Check if process exists
                 logger.error(
                     f"Daemon already running (PID {old_pid}). "
-                    f"Use 'meshforged stop' first."
+                    f"Use 'meshanchord stop' first."
                 )
                 return 1
             except (ProcessLookupError, ValueError):
@@ -632,7 +632,7 @@ class DaemonController:
         # Setup logging
         self._setup_logging()
 
-        logger.info(f"MeshForge Daemon v{__version__} starting")
+        logger.info(f"MeshAnchor Daemon v{__version__} starting")
         logger.info(f"Profile: {self._profile_name}")
         logger.info(f"Config: {self._config.to_dict()}")
 
@@ -733,7 +733,7 @@ class DaemonController:
             if as_json:
                 print(json.dumps({"status": "stopped"}, indent=2))
             else:
-                print("MeshForge Daemon: stopped")
+                print("MeshAnchor Daemon: stopped")
             return 1
 
         # Read status file
@@ -751,14 +751,14 @@ class DaemonController:
                 if as_json:
                     print(json.dumps({"status": "running", "pid": pid}))
                 else:
-                    print(f"MeshForge Daemon: running (PID {pid})")
+                    print(f"MeshAnchor Daemon: running (PID {pid})")
                     print(f"  Status file error: {e}")
                 return 0
         else:
             if as_json:
                 print(json.dumps({"status": "running", "pid": pid}))
             else:
-                print(f"MeshForge Daemon: running (PID {pid})")
+                print(f"MeshAnchor Daemon: running (PID {pid})")
             return 0
 
     def reload_remote(self) -> int:
@@ -914,12 +914,12 @@ class DaemonController:
 
     def _pid_file_path(self) -> Path:
         """Get PID file path."""
-        pid_dir = Path(self._config.pid_dir if self._config else "/run/meshforge")
-        return pid_dir / "meshforged.pid"
+        pid_dir = Path(self._config.pid_dir if self._config else "/run/meshanchor")
+        return pid_dir / "meshanchord.pid"
 
     def _status_file_path(self) -> Path:
         """Get status file path."""
-        return get_real_user_home() / ".config" / "meshforge" / "daemon_status.json"
+        return get_real_user_home() / ".config" / "meshanchor" / "daemon_status.json"
 
     def _write_pid_file(self) -> None:
         """Write PID file."""
@@ -940,7 +940,7 @@ class DaemonController:
             pass
 
     def _write_status_file(self, status: str = "running") -> None:
-        """Write JSON status file for meshforged status command."""
+        """Write JSON status file for meshanchord status command."""
         now = datetime.now(timezone.utc)
         uptime = (
             (now - self._started_at).total_seconds()
@@ -987,7 +987,7 @@ class DaemonController:
         hours = uptime // 3600
         minutes = (uptime % 3600) // 60
 
-        print(f"MeshForge Daemon v{daemon.get('version', '?')}")
+        print(f"MeshAnchor Daemon v{daemon.get('version', '?')}")
         print(f"  Status:  {daemon.get('status', 'unknown')}")
         print(f"  PID:     {pid}")
         print(f"  Profile: {daemon.get('profile', '?')}")
@@ -1022,12 +1022,12 @@ class DaemonController:
 # =============================================================================
 
 def main():
-    """CLI entry point for meshforged."""
+    """CLI entry point for meshanchord."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="meshforged",
-        description="MeshForge Daemon — Headless NOC Service Manager",
+        prog="meshanchord",
+        description="MeshAnchor Daemon — Headless NOC Service Manager",
     )
     subparsers = parser.add_subparsers(dest="command", help="Command")
 

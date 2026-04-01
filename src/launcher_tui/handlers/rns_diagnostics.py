@@ -165,7 +165,7 @@ class RNSDiagnosticsHandler(BaseHandler):
                 f"  Gateway: {drift_result.gateway_config_dir}\n"
                 f"  rnsd:    {drift_result.rnsd_config_dir}\n\n"
                 f"/etc/reticulum/config already exists.\n\n"
-                f"MeshForge will:\n"
+                f"MeshAnchor will:\n"
                 f"  1. Keep existing /etc/reticulum/config\n"
                 f"  2. Rename old config(s) to .migrated\n"
                 f"  3. Clear stale auth tokens\n"
@@ -177,7 +177,7 @@ class RNSDiagnosticsHandler(BaseHandler):
                 f"Config drift: gateway and rnsd use different paths.\n\n"
                 f"  Gateway: {drift_result.gateway_config_dir}\n"
                 f"  rnsd:    {drift_result.rnsd_config_dir}\n\n"
-                f"MeshForge will:\n"
+                f"MeshAnchor will:\n"
                 f"  1. Migrate {source} to /etc/reticulum/config\n"
                 f"  2. Rename old config to .migrated\n"
                 f"  3. Clear stale auth tokens\n"
@@ -293,7 +293,7 @@ class RNSDiagnosticsHandler(BaseHandler):
                 print(f"\n  \033[0;33mDrift may persist.\033[0m")
                 print(f"  Gateway: {verify.gateway_config_dir}")
                 print(f"  rnsd:    {verify.rnsd_config_dir}")
-                print("  You may need to restart MeshForge for path resolution to update.")
+                print("  You may need to restart MeshAnchor for path resolution to update.")
         else:
             print("  Shared instance not available after 15s.")
             print("  rnsd may be slow to initialize or may have crashed.")
@@ -347,7 +347,7 @@ class RNSDiagnosticsHandler(BaseHandler):
 
         # Fallback: venv path
         if rnsd_path is None:
-            venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+            venv_rnsd = Path('/opt/meshanchor/venv/bin/rnsd')
             if venv_rnsd.exists():
                 rnsd_path = venv_rnsd
 
@@ -715,7 +715,7 @@ class RNSDiagnosticsHandler(BaseHandler):
             self.ctx.dialog.msgbox(
                 "Permission Denied",
                 f"Cannot write to {override_dir}\n\n"
-                "MeshForge needs to run with sudo to fix this.",
+                "MeshAnchor needs to run with sudo to fix this.",
             )
             return False
         except Exception as e:

@@ -1,5 +1,5 @@
 """
-Webhook Support for MeshForge Events
+Webhook Support for MeshAnchor Events
 
 Allows external systems to receive notifications about:
 - Node status changes (online/offline)
@@ -46,7 +46,7 @@ class WebhookEvent:
     event_type: str
     timestamp: str
     data: Dict[str, Any]
-    source: str = "meshforge"
+    source: str = "meshanchor"
     version: str = "1.0"
 
     def to_dict(self) -> Dict:
@@ -98,7 +98,7 @@ class WebhookManager:
 
     def __init__(self, config_path: Optional[Path] = None):
         if config_path is None:
-            config_path = get_real_user_home() / ".config" / "meshforge" / "webhooks.json"
+            config_path = get_real_user_home() / ".config" / "meshanchor" / "webhooks.json"
         self.config_path = config_path
         self.endpoints: List[WebhookEndpoint] = []
         self._event_queue: queue.Queue = queue.Queue()
@@ -253,9 +253,9 @@ class WebhookManager:
 
         headers = {
             'Content-Type': 'application/json',
-            'User-Agent': 'MeshForge-Webhook/1.0',
-            'X-MeshForge-Event': event.event_type,
-            'X-MeshForge-Timestamp': event.timestamp,
+            'User-Agent': 'MeshAnchor-Webhook/1.0',
+            'X-MeshAnchor-Event': event.event_type,
+            'X-MeshAnchor-Timestamp': event.timestamp,
         }
         headers.update(endpoint.headers)
 
@@ -268,7 +268,7 @@ class WebhookManager:
                 payload,
                 hashlib.sha256
             ).hexdigest()
-            headers['X-MeshForge-Signature'] = f'sha256={signature}'
+            headers['X-MeshAnchor-Signature'] = f'sha256={signature}'
 
         for attempt in range(endpoint.retry_count):
             try:

@@ -131,7 +131,7 @@ class AIToolsHandler(BaseHandler):
     def _maybe_auto_start_map(self):
         """Start map server on TUI launch if user has enabled auto-open.
 
-        Prefers systemd service (meshforge-map) for reliability.
+        Prefers systemd service (meshanchor-map) for reliability.
         Falls back to in-process server if systemd unavailable.
         """
         settings_file = self._get_map_settings_file()
@@ -196,14 +196,14 @@ class AIToolsHandler(BaseHandler):
         try:
             # Check if systemd is available
             result = subprocess.run(
-                ['systemctl', 'is-enabled', 'meshforge-map'],
+                ['systemctl', 'is-enabled', 'meshanchor-map'],
                 capture_output=True, timeout=5
             )
             if result.returncode != 0:
                 return False  # Service not installed
 
             # Start the service
-            start_service('meshforge-map')
+            start_service('meshanchor-map')
 
             # Wait briefly for service to start
             for _ in range(5):
@@ -226,7 +226,7 @@ class AIToolsHandler(BaseHandler):
     def _get_map_settings_file(self) -> Path:
         """Get the map settings file path."""
         from utils.paths import get_real_user_home
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "map_settings.json"
 
@@ -305,18 +305,18 @@ class AIToolsHandler(BaseHandler):
                 geojson_str = json.dumps(geojson)
                 inject_script = (
                     f'\n<script>\n'
-                    f'// MeshForge: {node_count} nodes from '
+                    f'// MeshAnchor: {node_count} nodes from '
                     f'meshtasticd({sources.get("meshtasticd", 0)}) '
                     f'mqtt({sources.get("mqtt", 0)}) '
                     f'tracker({sources.get("node_tracker", 0)})\n'
-                    f'window.meshforgeData = {geojson_str};\n'
+                    f'window.meshanchorData = {geojson_str};\n'
                     f'</script>\n</body>'
                 )
                 html_content = html_content.replace('</body>', inject_script)
 
             # Write to user-accessible location
             from utils.paths import get_real_user_home
-            output_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            output_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
             output_dir.mkdir(parents=True, exist_ok=True)
             output_file = output_dir / "live_map.html"
 
@@ -351,7 +351,7 @@ class AIToolsHandler(BaseHandler):
     def _start_map_server(self):
         """Start the map HTTP server for live-updating browser access.
 
-        Prefers systemd service (meshforge-map) for reliability.
+        Prefers systemd service (meshanchor-map) for reliability.
         Falls back to in-process server if systemd unavailable.
         """
         port = 5000
@@ -393,7 +393,7 @@ class AIToolsHandler(BaseHandler):
                 "Open any URL in your browser.\n"
                 "The map pulls fresh data every 30 seconds.\n\n"
                 "Service persists after TUI exits.\n"
-                "Manage with: meshforge-map start|stop|status"
+                "Manage with: meshanchor-map start|stop|status"
             )
             return
 
@@ -432,8 +432,8 @@ class AIToolsHandler(BaseHandler):
                 f"Access via:\n{urls}\n\n"
                 "Open any URL in your browser.\n"
                 "The map pulls fresh data every 30 seconds.\n"
-                "Server runs until MeshForge exits.\n\n"
-                "Tip: Install meshforge-map service for\n"
+                "Server runs until MeshAnchor exits.\n\n"
+                "Tip: Install meshanchor-map service for\n"
                 "persistent operation."
             )
             self.ctx.dialog.msgbox("Map Server Started", msg)
@@ -449,14 +449,14 @@ class AIToolsHandler(BaseHandler):
         try:
             # Check if systemd service is available
             result = subprocess.run(
-                ['systemctl', 'is-enabled', 'meshforge-map'],
+                ['systemctl', 'is-enabled', 'meshanchor-map'],
                 capture_output=True, timeout=5
             )
             if result.returncode != 0:
                 return False  # Service not installed
 
             # Start the service
-            start_service('meshforge-map')
+            start_service('meshanchor-map')
 
             # Wait for service to start (up to 3 seconds)
             for _ in range(6):
@@ -480,7 +480,7 @@ class AIToolsHandler(BaseHandler):
         """Get map server service status for display."""
         try:
             result = subprocess.run(
-                ['systemctl', 'is-active', 'meshforge-map'],
+                ['systemctl', 'is-active', 'meshanchor-map'],
                 capture_output=True, text=True, timeout=5
             )
             status = result.stdout.strip()
@@ -524,7 +524,7 @@ class AIToolsHandler(BaseHandler):
                     urls += ", ..."
                 msg += (
                     "The map server will start automatically\n"
-                    "when MeshForge launches.\n\n"
+                    "when MeshAnchor launches.\n\n"
                     f"Access at: {urls}"
                 )
             else:
@@ -924,7 +924,7 @@ class AIToolsHandler(BaseHandler):
                     return
 
             # Generate map
-            output_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            output_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
             output_dir.mkdir(parents=True, exist_ok=True)
             output_file = output_dir / "coverage_map.html"
 
@@ -1058,7 +1058,7 @@ class AIToolsHandler(BaseHandler):
                 return
 
             # Generate heatmap
-            output_dir = get_real_user_home() / ".local" / "share" / "meshforge"
+            output_dir = get_real_user_home() / ".local" / "share" / "meshanchor"
             output_dir.mkdir(parents=True, exist_ok=True)
             output_file = str(output_dir / "coverage_heatmap.html")
 

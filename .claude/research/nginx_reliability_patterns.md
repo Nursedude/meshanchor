@@ -1,16 +1,16 @@
-# NGINX Reliability Patterns for MeshForge
+# NGINX Reliability Patterns for MeshAnchor
 
 > **Research Date**: 2026-02-01
 > **Author**: Claude Code (Opus 4.5)
-> **Session**: `claude/nginx-meshforge-research-MXS2U`
+> **Session**: `claude/nginx-meshanchor-research-MXS2U`
 
 ## Executive Summary
 
-Deep analysis of the [NGINX GitHub organization](https://github.com/nginx) reveals several patterns that can enhance MeshForge's reliability and functionality as a mesh network NOC. MeshForge already has sophisticated health monitoring and reliability infrastructure—this research identifies **gaps and enhancements** based on proven NGINX patterns.
+Deep analysis of the [NGINX GitHub organization](https://github.com/nginx) reveals several patterns that can enhance MeshAnchor's reliability and functionality as a mesh network NOC. MeshAnchor already has sophisticated health monitoring and reliability infrastructure—this research identifies **gaps and enhancements** based on proven NGINX patterns.
 
 ### Key NGINX Projects Analyzed
 
-| Project | Stars | Relevance to MeshForge |
+| Project | Stars | Relevance to MeshAnchor |
 |---------|-------|------------------------|
 | [nginx](https://github.com/nginx/nginx) | 29.2k | Core reliability patterns, health checks |
 | [nginx-agent](https://github.com/nginx/agent) | 345 | Remote management, metrics collection |
@@ -20,11 +20,11 @@ Deep analysis of the [NGINX GitHub organization](https://github.com/nginx) revea
 
 ---
 
-## Pattern Comparison: NGINX vs MeshForge
+## Pattern Comparison: NGINX vs MeshAnchor
 
-### What MeshForge Already Does Well
+### What MeshAnchor Already Does Well
 
-MeshForge has strong foundations (see `src/utils/service_check.py`, `src/gateway/bridge_health.py`):
+MeshAnchor has strong foundations (see `src/utils/service_check.py`, `src/gateway/bridge_health.py`):
 
 - **Error classification**: Transient vs permanent error patterns
 - **Exponential backoff with jitter**: In `src/gateway/reconnect.py`
@@ -48,7 +48,7 @@ MeshForge has strong foundations (see `src/utils/service_check.py`, `src/gateway
 health_check interval=5s fails=3 passes=2;
 ```
 
-**Current MeshForge Gap**: Health checks are primarily passive (triggered by operations). No dedicated health probe thread for RNS/Meshtastic services.
+**Current MeshAnchor Gap**: Health checks are primarily passive (triggered by operations). No dedicated health probe thread for RNS/Meshtastic services.
 
 **Proposed Implementation**:
 
@@ -111,7 +111,7 @@ upstream backend {
 }
 ```
 
-**Current MeshForge Gap**: Health state is per-process. If gateway and TUI run separately, they don't share health observations.
+**Current MeshAnchor Gap**: Health state is per-process. If gateway and TUI run separately, they don't share health observations.
 
 **Proposed Implementation**:
 
@@ -123,7 +123,7 @@ class SharedHealthState:
     Similar to NGINX zone for shared worker state.
     """
     def __init__(self, db_path: Path = None):
-        self.db_path = db_path or get_real_user_home() / ".config/meshforge/health.db"
+        self.db_path = db_path or get_real_user_home() / ".config/meshanchor/health.db"
         self._init_db()
 
     def mark_service_state(self, service: str, state: str, timestamp: float = None):
@@ -146,7 +146,7 @@ class SharedHealthState:
 
 **Benefits**:
 - Gateway bridge can share health discoveries with TUI
-- Multiple MeshForge instances see same health state
+- Multiple MeshAnchor instances see same health state
 - Survives process restarts
 
 ---
@@ -159,7 +159,7 @@ class SharedHealthState:
 server 192.168.1.1 slow_start=30s;
 ```
 
-**Current MeshForge Gap**: After reconnection, gateway immediately attempts full message throughput. Recently recovered Meshtastic radio can be overwhelmed.
+**Current MeshAnchor Gap**: After reconnection, gateway immediately attempts full message throughput. Recently recovered Meshtastic radio can be overwhelmed.
 
 **Proposed Enhancement** to `src/gateway/reconnect.py`:
 
@@ -216,7 +216,7 @@ curl -X PUT --unix-socket /var/run/unit.sock \
     http://localhost/config
 ```
 
-**Current MeshForge**: Configuration via `SettingsManager` (JSON file) requires restart for some changes.
+**Current MeshAnchor**: Configuration via `SettingsManager` (JSON file) requires restart for some changes.
 
 **Proposed Enhancement**: Add internal REST API for dynamic reconfiguration
 
@@ -284,7 +284,7 @@ proxy_next_upstream_tries 3;
 proxy_next_upstream_timeout 10s;
 ```
 
-**Current MeshForge Gap**: Message retry logic exists but isn't configurable per-error-type.
+**Current MeshAnchor Gap**: Message retry logic exists but isn't configurable per-error-type.
 
 **Proposed Enhancement** to `src/gateway/message_queue.py`:
 
@@ -345,7 +345,7 @@ nginx_ingress_controller_requests_total{...} 12345
 nginx_ingress_controller_upstream_latency_seconds{...} 0.025
 ```
 
-**Current MeshForge**: Metrics stored in SQLite, no standard export format.
+**Current MeshAnchor**: Metrics stored in SQLite, no standard export format.
 
 **Proposed Enhancement**:
 
@@ -353,7 +353,7 @@ nginx_ingress_controller_upstream_latency_seconds{...} 0.025
 # src/utils/metrics_export.py
 class PrometheusExporter:
     """
-    Export MeshForge metrics in Prometheus format.
+    Export MeshAnchor metrics in Prometheus format.
     Enables Grafana dashboards, alerting, etc.
     """
 
@@ -363,26 +363,26 @@ class PrometheusExporter:
     def export(self) -> str:
         """Generate Prometheus exposition format."""
         lines = [
-            "# HELP meshforge_messages_total Total messages processed",
-            "# TYPE meshforge_messages_total counter",
+            "# HELP meshanchor_messages_total Total messages processed",
+            "# TYPE meshanchor_messages_total counter",
         ]
 
         # Message counts
         summary = self.metrics.get_summary()
-        lines.append(f'meshforge_messages_total{{direction="mesh_to_rns"}} {summary.mesh_to_rns}')
-        lines.append(f'meshforge_messages_total{{direction="rns_to_mesh"}} {summary.rns_to_mesh}')
+        lines.append(f'meshanchor_messages_total{{direction="mesh_to_rns"}} {summary.mesh_to_rns}')
+        lines.append(f'meshanchor_messages_total{{direction="rns_to_mesh"}} {summary.rns_to_mesh}')
 
         # Health score
         lines.extend([
-            "# HELP meshforge_health_score Current health score (0-100)",
-            "# TYPE meshforge_health_score gauge",
-            f"meshforge_health_score {summary.health_score}",
+            "# HELP meshanchor_health_score Current health score (0-100)",
+            "# TYPE meshanchor_health_score gauge",
+            f"meshanchor_health_score {summary.health_score}",
         ])
 
         # Per-node metrics
         for node in self.metrics.get_node_summaries():
-            lines.append(f'meshforge_node_snr{{node="{node.id}"}} {node.avg_snr}')
-            lines.append(f'meshforge_node_last_seen{{node="{node.id}"}} {node.last_seen}')
+            lines.append(f'meshanchor_node_snr{{node="{node.id}"}} {node.avg_snr}')
+            lines.append(f'meshanchor_node_last_seen{{node="{node.id}"}} {node.last_seen}')
 
         return "\n".join(lines)
 ```
@@ -432,7 +432,7 @@ class PrometheusExporter:
 ## Session Notes
 
 **Key Takeaways**:
-1. MeshForge already has strong reliability foundations - don't over-engineer
+1. MeshAnchor already has strong reliability foundations - don't over-engineer
 2. Active health probes are the highest-value addition
 3. Slow start recovery prevents radio overwhelm after reconnection
 4. Shared state enables multi-process coordination
@@ -447,4 +447,4 @@ class PrometheusExporter:
 
 ---
 
-*Research conducted for MeshForge mesh network NOC project*
+*Research conducted for MeshAnchor mesh network NOC project*

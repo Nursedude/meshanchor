@@ -1,13 +1,13 @@
-# MeshForge - rnsd User Service
+# MeshAnchor - rnsd User Service
 # ==============================
 #
-# rnsd is the RNS shared instance — the hub that NomadNet, MeshForge,
+# rnsd is the RNS shared instance — the hub that NomadNet, MeshAnchor,
 # rnstatus, and other RNS tools connect to on port 37428.
 #
-# IMPORTANT: rnsd must start BEFORE NomadNet and MeshForge.
+# IMPORTANT: rnsd must start BEFORE NomadNet and MeshAnchor.
 # If NomadNet starts first, it grabs port 37428 and rnsd crash-loops.
 #
-# Start order: rnsd -> nomadnet -> meshforge
+# Start order: rnsd -> nomadnet -> meshanchor
 #
 # Install:
 #   pip install --user rns

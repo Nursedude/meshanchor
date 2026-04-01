@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MeshForge Linter - Check for common issues and coding standards.
+MeshAnchor Linter - Check for common issues and coding standards.
 
 Checks:
 - MF001: Path.home() violations (must use get_real_user_home for sudo compatibility)
@@ -51,8 +51,8 @@ class LintIssue:
         return f"{self.file}:{self.line}: [{icon}] {self.code}: {self.message}"
 
 
-class MeshForgeLinter:
-    """Linter for MeshForge-specific coding standards."""
+class MeshAnchorLinter:
+    """Linter for MeshAnchor-specific coding standards."""
 
     def __init__(self):
         self.issues: List[LintIssue] = []
@@ -363,7 +363,7 @@ def get_all_python_files(directory: str = 'src') -> List[str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='MeshForge Linter')
+    parser = argparse.ArgumentParser(description='MeshAnchor Linter')
     parser.add_argument('files', nargs='*', help='Files to lint')
     parser.add_argument('--all', action='store_true', help='Lint all Python files in src/')
     parser.add_argument('--staged', action='store_true', help='Lint staged files only')
@@ -389,7 +389,7 @@ def main():
         return 0
 
     # Run linter
-    linter = MeshForgeLinter()
+    linter = MeshAnchorLinter()
     issues = linter.lint_files(files)
 
     # Filter by severity

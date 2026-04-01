@@ -307,7 +307,7 @@ class AREDNHandler(BaseHandler):
             print(f"\n  AREDN nodes on map: {1 if node.has_location() else 0} + {neighbors_with_loc} neighbors")
 
             print("\n" + "=" * 50)
-            print("\nAREDN nodes are included in the unified MeshForge map.")
+            print("\nAREDN nodes are included in the unified MeshAnchor map.")
             print("The map shows Meshtastic, RNS, and AREDN nodes together.")
             print("\nTo view the map:")
             print("  1. Main Menu > Maps & Viz > Coverage Map")

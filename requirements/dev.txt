@@ -1,4 +1,4 @@
-# MeshForge Development Dependencies
+# MeshAnchor Development Dependencies
 
 # Testing
 pytest>=7.0.0

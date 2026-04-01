@@ -1,4 +1,4 @@
-# MeshForge Third-Party Security Audit Template
+# MeshAnchor Third-Party Security Audit Template
 
 > **Auditor**: [Tool/Service Name - e.g., Snyk, SonarQube, CodeQL, Manual]
 > **Date**: YYYY-MM-DD
@@ -107,4 +107,4 @@
 ---
 
 *Template version: 1.0*
-*For use with MeshForge Auto-Claude integration*
+*For use with MeshAnchor Auto-Claude integration*

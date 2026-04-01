@@ -36,7 +36,7 @@ from utils.rns_status_parser import (
 # ---------------------------------------------------------------------------
 
 FULL_OUTPUT = """\
- Shared Instance[rns/meshforge moc2 rns]
+ Shared Instance[rns/meshanchor moc2 rns]
     Status    : Up
     Serving   : 0 programs
     Rate      : 1.00 Gbps
@@ -150,7 +150,7 @@ class TestParseInterfaceTypes:
 class TestParseDisplayNames:
     def test_shared_instance_name(self):
         result = parse_rnstatus(FULL_OUTPUT)
-        assert result.interfaces[0].display_name == "rns/meshforge moc2 rns"
+        assert result.interfaces[0].display_name == "rns/meshanchor moc2 rns"
 
     def test_auto_interface_name(self):
         result = parse_rnstatus(FULL_OUTPUT)

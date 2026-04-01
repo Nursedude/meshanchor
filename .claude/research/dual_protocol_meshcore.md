@@ -1,4 +1,4 @@
-# Dual-Protocol Mesh Node: Meshtastic <> MeshCore Bridge for MeshForge
+# Dual-Protocol Mesh Node: Meshtastic <> MeshCore Bridge for MeshAnchor
 
 **Date**: 2026-02-16
 **Author**: Dude AI / WH6GXZ
@@ -8,9 +8,9 @@
 
 ## Context
 
-MeshForge currently bridges **Meshtastic** and **Reticulum (RNS)** — the first open-source tool to unify these incompatible mesh ecosystems. A growing community demand exists for **MeshCore** support, a newer lightweight LoRa mesh protocol with a hybrid routing architecture. MeshCore's rapid adoption (companion radios, room servers, repeaters) and its fundamentally different design philosophy from Meshtastic make it a valuable third protocol for MeshForge's NOC vision.
+MeshAnchor currently bridges **Meshtastic** and **Reticulum (RNS)** — the first open-source tool to unify these incompatible mesh ecosystems. A growing community demand exists for **MeshCore** support, a newer lightweight LoRa mesh protocol with a hybrid routing architecture. MeshCore's rapid adoption (companion radios, room servers, repeaters) and its fundamentally different design philosophy from Meshtastic make it a valuable third protocol for MeshAnchor's NOC vision.
 
-This document researches what a dual-protocol Meshtastic <> MeshCore bridge would require, evaluates existing bridging projects, analyzes protocol incompatibilities, and provides a concrete implementation plan for MeshForge integration.
+This document researches what a dual-protocol Meshtastic <> MeshCore bridge would require, evaluates existing bridging projects, analyzes protocol incompatibilities, and provides a concrete implementation plan for MeshAnchor integration.
 
 ---
 
@@ -94,7 +94,7 @@ This document researches what a dual-protocol Meshtastic <> MeshCore bridge woul
   - Companion mode binary protocol support
   - MQTT transport option with TLS/SSL
 - **License**: GPL-3.0
-- **Relevance to MeshForge**: Closest existing model for what we'd build, but standalone (not integrated into a NOC)
+- **Relevance to MeshAnchor**: Closest existing model for what we'd build, but standalone (not integrated into a NOC)
 
 ### 2.3 meshcore-pi (Pure Python MeshCore Implementation)
 - **Repo**: https://github.com/brianwiddas/meshcore-pi
@@ -173,10 +173,10 @@ Inbound  (app->radio): '<' (0x3C) + 2-byte length (LE) + frame data
 
 ---
 
-## 4. MeshForge Architecture & Extension Points
+## 4. MeshAnchor Architecture & Extension Points
 
 ### 4.1 Current Gateway Architecture
-MeshForge's gateway (`src/gateway/`) already bridges Meshtastic <> RNS using:
+MeshAnchor's gateway (`src/gateway/`) already bridges Meshtastic <> RNS using:
 
 - **MeshtasticHandler** (`meshtastic_handler.py`) — TCP connection to meshtasticd
 - **MQTTBridgeHandler** (`mqtt_bridge_handler.py`) — Zero-interference MQTT approach (recommended)
@@ -211,11 +211,11 @@ The existing `meshcore_proxy_analysis.md` already recommended a `CanonicalMessag
 ### 5.1 Approach: Application-Layer Bridge via meshcore_py
 
 **Why application-layer** (not firmware-level):
-1. MeshForge is a Linux NOC — it has access to USB-connected companion radios
+1. MeshAnchor is a Linux NOC — it has access to USB-connected companion radios
 2. `meshcore_py` provides a mature, async Python API with auto-reconnect
 3. Application-layer allows message context, routing rules, logging, and persistence
 4. No custom firmware needed — use stock MeshCore companion firmware
-5. Consistent with how MeshForge already handles Meshtastic (via meshtasticd)
+5. Consistent with how MeshAnchor already handles Meshtastic (via meshtasticd)
 
 **Hardware requirement**: A MeshCore companion radio connected via USB serial (or TCP if using meshcore-pi/WiFi companion)
 
@@ -374,7 +374,7 @@ class MeshCoreConfig:
     bridge_dms: bool = True            # Bridge direct messages
 ```
 
-**Note:** No `meshcored` daemon exists (unlike meshtasticd). MeshForge manages the connection directly via `meshcore_py`. Add a `check_meshcore_device()` helper to `src/utils/service_check.py` to verify USB serial availability.
+**Note:** No `meshcored` daemon exists (unlike meshtasticd). MeshAnchor manages the connection directly via `meshcore_py`. Add a `check_meshcore_device()` helper to `src/utils/service_check.py` to verify USB serial availability.
 
 #### Phase 4: Node Tracking & Telemetry
 
@@ -402,7 +402,7 @@ class MeshCoreConfig:
 ## 6. Technical Challenges & Mitigations
 
 ### 6.1 Async vs Sync Architecture
-**Challenge**: `meshcore_py` is fully async (asyncio). MeshForge gateway uses threads.
+**Challenge**: `meshcore_py` is fully async (asyncio). MeshAnchor gateway uses threads.
 **Mitigation**: Run MeshCore handler in its own thread with a dedicated asyncio event loop. Pattern: `asyncio.run_coroutine_threadsafe()` for cross-thread communication. This is well-established for mixing threaded and async code.
 
 ### 6.2 Message Size Mismatch
@@ -415,7 +415,7 @@ class MeshCoreConfig:
 
 ### 6.4 No MeshCore Daemon (Unlike meshtasticd)
 **Challenge**: No `meshcored` systemd service exists. MeshCore companion radios are connected directly via USB.
-**Mitigation**: MeshForge manages the connection directly via `meshcore_py`. Add device detection (`/dev/ttyUSB*` scanning with vendor ID matching) and leverage meshcore_py's built-in auto-reconnect (exponential backoff).
+**Mitigation**: MeshAnchor manages the connection directly via `meshcore_py`. Add device detection (`/dev/ttyUSB*` scanning with vendor ID matching) and leverage meshcore_py's built-in auto-reconnect (exponential backoff).
 
 ### 6.5 Channel Message Event Bug
 **Challenge**: `CHANNEL_MSG_RECV` events sometimes don't fire in meshcore_py (GitHub #1232, firmware v1.11.0 on nRF52840).
@@ -430,7 +430,7 @@ class MeshCoreConfig:
 **Mitigation**: Parse `via_mqtt` flag from Meshtastic packets. Set `via_internet=True` on CanonicalMessage. Routing rules drop internet-origin messages destined for MeshCore. Make this configurable per deployment.
 
 ### 6.8 Python Version Requirement
-**Challenge**: `meshcore_py` requires Python 3.10+. MeshForge currently targets 3.9+.
+**Challenge**: `meshcore_py` requires Python 3.10+. MeshAnchor currently targets 3.9+.
 **Mitigation**: Use `safe_import` pattern — MeshCore support is optional. When `meshcore` import fails on Python 3.9, the feature is gracefully unavailable. Document 3.10+ requirement for MeshCore features.
 
 ---
@@ -559,9 +559,9 @@ Raspberry Pi 4
 - [MeshCore vs Meshtastic (Austin Mesh)](https://www.austinmesh.org/learn/meshcore-vs-meshtastic/)
 - [Meshtastic and MeshCore Pros & Cons](https://lucifernet.com/2025/08/29/meshtastic-and-meshcore-pros-cons/)
 - [MeshCore vs Meshtastic (NodakMesh)](https://nodakmesh.org/blog/meshcore-vs-meshtastic-comparison/)
-- Existing MeshForge analysis: `.claude/research/meshcore_proxy_analysis.md`
+- Existing MeshAnchor analysis: `.claude/research/meshcore_proxy_analysis.md`
 
 ---
 
-*Research conducted for MeshForge v0.5.4-beta — Alpha feature track*
+*Research conducted for MeshAnchor v0.5.4-beta — Alpha feature track*
 *Made with aloha for the mesh community*

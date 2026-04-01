@@ -1,8 +1,8 @@
 """
-MeshForge Native Messaging
+MeshAnchor Native Messaging
 
 Unified messaging across Meshtastic and RNS networks.
-Inspired by meshing-around patterns but native to MeshForge architecture.
+Inspired by meshing-around patterns but native to MeshAnchor architecture.
 
 Usage:
     from commands import messaging
@@ -81,7 +81,7 @@ class Message:
 
 def _get_db_path() -> Path:
     """Get path to message database."""
-    db_dir = get_real_user_home() / ".config" / "meshforge"
+    db_dir = get_real_user_home() / ".config" / "meshanchor"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "messages.db"
 

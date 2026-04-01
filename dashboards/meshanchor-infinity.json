@@ -3,7 +3,7 @@
     {
       "name": "DS_INFINITY",
       "label": "Infinity",
-      "description": "MeshForge JSON API data source",
+      "description": "MeshAnchor JSON API data source",
       "type": "datasource",
       "pluginId": "yesoreyeram-infinity-datasource",
       "pluginName": "Infinity"
@@ -26,7 +26,7 @@
   "annotations": {
     "list": []
   },
-  "description": "MeshForge metrics via JSON API (Infinity plugin)",
+  "description": "MeshAnchor metrics via JSON API (Infinity plugin)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -439,7 +439,7 @@
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["meshforge", "mesh", "rf", "infinity", "json"],
+  "tags": ["meshanchor", "mesh", "rf", "infinity", "json"],
   "templating": {
     "list": []
   },
@@ -449,8 +449,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "MeshForge Infinity",
-  "uid": "meshforge-infinity",
+  "title": "MeshAnchor Infinity",
+  "uid": "meshanchor-infinity",
   "version": 1,
   "weekStart": ""
 }

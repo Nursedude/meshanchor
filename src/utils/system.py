@@ -657,7 +657,7 @@ def get_serial_ports() -> List[str]:
     return sorted(ports)
 
 
-def get_config_dir(app_name: str = 'meshforge') -> Path:
+def get_config_dir(app_name: str = 'meshanchor') -> Path:
     """
     Get configuration directory - cross-platform.
 
@@ -705,7 +705,7 @@ def get_rns_interfaces_dir() -> Path:
 
 # =============================================================================
 # Safe Subprocess Execution
-# Enhanced with patterns from MeshForge security audit
+# Enhanced with patterns from MeshAnchor security audit
 # =============================================================================
 
 def safe_run(

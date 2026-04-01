@@ -1,7 +1,7 @@
 """
 Log parsing patterns — extract common errors from service logs.
 
-Parses log output from meshtasticd, rnsd, systemd journal, and MeshForge
+Parses log output from meshtasticd, rnsd, systemd journal, and MeshAnchor
 itself. Identifies known error patterns, classifies severity, and produces
 structured LogEntry objects for the diagnostic engine.
 
@@ -9,7 +9,7 @@ Supported log sources:
 - meshtasticd: Connection errors, serial issues, radio events
 - rnsd/RNS: Transport errors, interface failures, identity issues
 - systemd: Service start/stop/crash, OOM kills, resource exhaustion
-- MeshForge: Application-level errors from Python logging
+- MeshAnchor: Application-level errors from Python logging
 
 Usage:
     from utils.log_parser import LogParser, parse_log_lines
@@ -44,7 +44,7 @@ class LogSource(Enum):
     MESHTASTICD = 'meshtasticd'
     RNSD = 'rnsd'
     SYSTEMD = 'systemd'
-    MESHFORGE = 'meshforge'
+    MESHANCHOR = 'meshanchor'
     UNKNOWN = 'unknown'
 
 
@@ -310,17 +310,17 @@ SYSTEMD_PATTERNS = [
 
 
 # =============================================================================
-# Pattern Definitions — MeshForge application
+# Pattern Definitions — MeshAnchor application
 # =============================================================================
 
-MESHFORGE_PATTERNS = [
+MESHANCHOR_PATTERNS = [
     LogPattern(
         name='config_load_error',
         regex=re.compile(r'(config|settings).*(error|fail|missing|invalid)', re.IGNORECASE),
         severity=LogSeverity.ERROR,
         category='configuration',
-        suggestion='Configuration error — check ~/.config/meshforge/ files',
-        source=LogSource.MESHFORGE,
+        suggestion='Configuration error — check ~/.config/meshanchor/ files',
+        source=LogSource.MESHANCHOR,
     ),
     LogPattern(
         name='mqtt_disconnect',
@@ -328,7 +328,7 @@ MESHFORGE_PATTERNS = [
         severity=LogSeverity.WARNING,
         category='connectivity',
         suggestion='MQTT broker disconnected — will auto-reconnect',
-        source=LogSource.MESHFORGE,
+        source=LogSource.MESHANCHOR,
     ),
     LogPattern(
         name='bridge_failure',
@@ -336,7 +336,7 @@ MESHFORGE_PATTERNS = [
         severity=LogSeverity.ERROR,
         category='connectivity',
         suggestion='Gateway bridge failure — check both Meshtastic and RNS connections',
-        source=LogSource.MESHFORGE,
+        source=LogSource.MESHANCHOR,
     ),
     LogPattern(
         name='database_error',
@@ -344,7 +344,7 @@ MESHFORGE_PATTERNS = [
         severity=LogSeverity.ERROR,
         category='resource',
         suggestion='Database error — check disk space and file permissions',
-        source=LogSource.MESHFORGE,
+        source=LogSource.MESHANCHOR,
     ),
     LogPattern(
         name='map_generation_failed',
@@ -352,7 +352,7 @@ MESHFORGE_PATTERNS = [
         severity=LogSeverity.WARNING,
         category='performance',
         suggestion='Map generation failed — check folium/leaflet dependencies',
-        source=LogSource.MESHFORGE,
+        source=LogSource.MESHANCHOR,
     ),
     LogPattern(
         name='timeout_operation',
@@ -360,7 +360,7 @@ MESHFORGE_PATTERNS = [
         severity=LogSeverity.WARNING,
         category='performance',
         suggestion='Operation timeout — service may be overloaded or unresponsive',
-        source=LogSource.MESHFORGE,
+        source=LogSource.MESHANCHOR,
     ),
     LogPattern(
         name='import_error',
@@ -368,7 +368,7 @@ MESHFORGE_PATTERNS = [
         severity=LogSeverity.ERROR,
         category='configuration',
         suggestion='Module import error — install missing dependency with pip',
-        source=LogSource.MESHFORGE,
+        source=LogSource.MESHANCHOR,
     ),
 ]
 
@@ -378,7 +378,7 @@ ALL_PATTERNS: List[LogPattern] = (
     MESHTASTIC_PATTERNS +
     RNS_PATTERNS +
     SYSTEMD_PATTERNS +
-    MESHFORGE_PATTERNS
+    MESHANCHOR_PATTERNS
 )
 
 

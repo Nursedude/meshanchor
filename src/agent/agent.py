@@ -1,7 +1,7 @@
-"""MeshForge Remote Management Agent Daemon.
+"""MeshAnchor Remote Management Agent Daemon.
 
 Based on NGINX Agent architecture - provides remote management, metrics
-collection, and command execution for MeshForge NOC instances.
+collection, and command execution for MeshAnchor NOC instances.
 
 Features:
 - Connects to management plane for remote control
@@ -14,7 +14,7 @@ Example Usage:
 
     # Create configuration
     config = AgentConfig(
-        instance_id="meshforge-001",
+        instance_id="meshanchor-001",
         management_host="mgmt.example.com",
         management_port=9443,
         auth_token="your-token-here",
@@ -25,7 +25,7 @@ Example Usage:
     agent.start()
 
     # Or run in standalone mode (no management server)
-    config = AgentConfig(instance_id="meshforge-local", standalone=True)
+    config = AgentConfig(instance_id="meshanchor-local", standalone=True)
     agent = AgentDaemon(config)
     agent.start()
 
@@ -125,13 +125,13 @@ class AgentConfig:
             import platform
             import hashlib
             host = platform.node()
-            self.instance_id = f"meshforge-{hashlib.md5(host.encode()).hexdigest()[:8]}"
+            self.instance_id = f"meshanchor-{hashlib.md5(host.encode()).hexdigest()[:8]}"
 
         # Set default data directory
         if not self.data_dir:
             # Use real user's home for sudo compatibility
             home = get_real_user_home()
-            self.data_dir = str(home / ".config" / "meshforge" / "agent")
+            self.data_dir = str(home / ".config" / "meshanchor" / "agent")
 
         # Set default PID file
         if not self.pid_file:
@@ -170,7 +170,7 @@ class AgentConfig:
 
 
 class AgentDaemon:
-    """MeshForge remote management agent daemon.
+    """MeshAnchor remote management agent daemon.
 
     Provides:
     - Connection to management plane (optional)
@@ -683,7 +683,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="MeshForge Remote Management Agent"
+        description="MeshAnchor Remote Management Agent"
     )
     parser.add_argument(
         "-c", "--config",

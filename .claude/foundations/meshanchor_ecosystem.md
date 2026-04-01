@@ -1,6 +1,6 @@
-# MeshForge Ecosystem Architecture
+# MeshAnchor Ecosystem Architecture
 
-> **Document Purpose**: Map the full MeshForge domain across all repositories
+> **Document Purpose**: Map the full MeshAnchor domain across all repositories
 > **Created**: 2026-02-17
 > **Status**: Active reference
 > **Owner**: WH6GXZ (Nursedude)
@@ -9,12 +9,12 @@
 
 ## 1. Ecosystem Overview
 
-MeshForge is not a single repository — it's a **domain** spanning five repos that collectively provide mesh network operations, monitoring, alerting, visualization, and tooling.
+MeshAnchor is not a single repository — it's a **domain** spanning five repos that collectively provide mesh network operations, monitoring, alerting, visualization, and tooling.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    MeshForge NOC (Core Hub)                      │
-│            Nursedude/meshforge · v0.5.4-beta                    │
+│                    MeshAnchor NOC (Core Hub)                      │
+│            Nursedude/meshanchor · v0.5.4-beta                    │
 │       Gateway bridge · TUI · RF tools · Diagnostics             │
 └────────┬──────────┬───────────────┬─────────────────────────────┘
          │          │               │
@@ -38,22 +38,22 @@ MeshForge is not a single repository — it's a **domain** spanning five repos t
 
 ## 2. Repository Ownership Map
 
-### Nursedude/meshforge (Core NOC)
+### Nursedude/meshanchor (Core NOC)
 - **Role**: Central hub — the NOC itself
 - **Status**: Beta (v0.5.4), Alpha branch (v0.6.0-alpha with MeshCore)
 - **Stack**: Python 3.9+, TUI (whiptail/dialog), MQTT, systemd
 - **Owns**: Gateway bridge, node tracker, RF tools, diagnostics, TUI, service management
 - **Branch model**: `alpha/meshcore-bridge` → `main` (beta) → releases
 
-### Nursedude/meshforge-maps (Maps Plugin)
+### Nursedude/meshanchor-maps (Maps Plugin)
 - **Role**: Multi-source mesh network visualization
 - **Status**: Beta (v0.7.0)
 - **Stack**: Python 3.9+, Leaflet.js, D3.js, WebSocket
 - **Owns**: Node mapping, topology visualization, health scoring, alerting dashboard
-- **Runs**: Standalone (ports 8808/8809) OR as MeshForge plugin via `manifest.json`
+- **Runs**: Standalone (ports 8808/8809) OR as MeshAnchor plugin via `manifest.json`
 - **Data sources**: Meshtastic MQTT, Reticulum/RMAP, AREDN, NOAA/OpenHamClock
 
-### Nursedude/meshing_around_meshforge (Bot Alerting)
+### Nursedude/meshing_around_meshanchor (Bot Alerting)
 - **Role**: Monitoring and alerting layer for the meshing-around Meshtastic bot
 - **Status**: Beta (v0.5.0)
 - **Stack**: Python 3.8+, Rich TUI, FastAPI, paho-mqtt
@@ -66,34 +66,34 @@ MeshForge is not a single repository — it's a **domain** spanning five repos t
 - **Status**: Beta (v0.3.2)
 - **Stack**: Bash (Linux/RPi), PowerShell (Windows 11), Python 3.7+
 - **Owns**: RNS/LXMF/NomadNet/MeshChat/Sideband installation, RNODE firmware flashing (21+ boards), backup/restore
-- **Unique**: Only MeshForge ecosystem tool with native Windows support
+- **Unique**: Only MeshAnchor ecosystem tool with native Windows support
 
 ### Nursedude/RNS-Meshtastic-Gateway-Tool (Bridge Driver)
 - **Role**: Original RNS-to-Meshtastic bridge implementation
-- **Status**: Alpha — **migration to MeshForge NOC in progress**
+- **Status**: Alpha — **migration to MeshAnchor NOC in progress**
 - **Stack**: Python, custom `Meshtastic_Interface` extending `RNS.Interfaces.Interface`
-- **Contains**: `MESHFORGE_ANALYSIS.md`, `TO_MESHFORGE.md` (migration plan docs)
-- **Future**: Core driver logic absorbing into `src/gateway/` in MeshForge NOC
+- **Contains**: `MESHANCHOR_ANALYSIS.md`, `TO_MESHANCHOR.md` (migration plan docs)
+- **Future**: Core driver logic absorbing into `src/gateway/` in MeshAnchor NOC
 
 ---
 
 ## 3. Boundary Rules (What Lives Where)
 
-### Gateway & Bridge Logic → meshforge (NOC)
+### Gateway & Bridge Logic → meshanchor (NOC)
 All protocol bridging, message routing, and 3-way MeshCore routing belongs in the core NOC. The RNS-Meshtastic-Gateway-Tool's driver is migrating here.
 
-### Visualization & Mapping → meshforge-maps
-Interactive maps, topology graphs, health dashboards, and map-based alerting. The NOC's `coverage_map.py` generates static Folium maps; meshforge-maps provides the live interactive layer.
+### Visualization & Mapping → meshanchor-maps
+Interactive maps, topology graphs, health dashboards, and map-based alerting. The NOC's `coverage_map.py` generates static Folium maps; meshanchor-maps provides the live interactive layer.
 
-### Bot-Adjacent Alerting → meshing_around_meshforge
+### Bot-Adjacent Alerting → meshing_around_meshanchor
 Alert rules that operate on meshing-around bot data (proximity, EAS/iPAWS, volcano, etc.). This is NOT generic NOC alerting — it's specific to the meshing-around bot ecosystem.
 
 ### RNS Ecosystem Install/Manage → RNS-Management-Tool
 Installing, updating, configuring, and backing up RNS components. The NOC **connects to** running RNS services; this tool **installs and manages** them.
 
 ### NOC Alerting vs Bot Alerting
-- **NOC (meshforge)**: Service health, gateway status, link quality, node tracker events
-- **Bot (meshing_around_meshforge)**: Emergency keywords, proximity geofencing, weather/iPAWS, noisy node detection
+- **NOC (meshanchor)**: Service health, gateway status, link quality, node tracker events
+- **Bot (meshing_around_meshanchor)**: Emergency keywords, proximity geofencing, weather/iPAWS, noisy node detection
 
 ---
 
@@ -102,9 +102,9 @@ Installing, updating, configuring, and backing up RNS components. The NOC **conn
 ### Config Home Directories
 | Repo | Config Location | Notes |
 |------|----------------|-------|
-| meshforge (NOC) | `~/.config/meshforge/` | Settings, propagation, message queue |
-| meshforge-maps | `~/.config/meshforge/plugins/org.meshforge.extension.maps/` | Plugin manifest pattern |
-| meshing_around | `~/.config/meshforge/meshing_around/` | INI-based alert config |
+| meshanchor (NOC) | `~/.config/meshanchor/` | Settings, propagation, message queue |
+| meshanchor-maps | `~/.config/meshanchor/plugins/org.meshanchor.extension.maps/` | Plugin manifest pattern |
+| meshing_around | `~/.config/meshanchor/meshing_around/` | INI-based alert config |
 | RNS-Mgmt-Tool | `~/.reticulum/`, `~/.nomadnetwork/`, `~/.lxmf/` | Standard RNS paths |
 | Gateway-Tool | `.reticulum/` config | Standard RNS interface config |
 
@@ -123,8 +123,8 @@ def get_real_user_home():
 ### Config Formats
 | Repo | Format | Why |
 |------|--------|-----|
-| meshforge (NOC) | JSON/YAML | SettingsManager auto-serialization |
-| meshforge-maps | JSON | Plugin manifest + settings.json |
+| meshanchor (NOC) | JSON/YAML | SettingsManager auto-serialization |
+| meshanchor-maps | JSON | Plugin manifest + settings.json |
 | meshing_around | INI | Human-editable alert config (12 sections) |
 | RNS-Mgmt-Tool | .tar.gz/.zip | Backup archives; RNS uses its own config format |
 | Gateway-Tool | RNS config | Standard `.reticulum` interface definitions |
@@ -141,7 +141,7 @@ def get_real_user_home():
     RNS/Reticulum ────┤     │
                       ▼     ▼
               ┌───────────────────┐
-              │   MeshForge NOC   │ ← Service checks (systemd)
+              │   MeshAnchor NOC   │ ← Service checks (systemd)
               │   Gateway Bridge  │ ← MQTT bridge (meshtasticd)
               │   3-way routing   │ ← LXMF (RNS)
               │   Node tracker    │ ← MeshCore handler (alpha)
@@ -150,7 +150,7 @@ def get_real_user_home():
           GeoJSON API│      │Node events
                      ▼      ▼
               ┌──────────────────┐     ┌───────────────────┐
-              │  meshforge-maps  │     │ meshing_around_mf  │
+              │  meshanchor-maps  │     │ meshing_around_mf  │
               │  :8808 (HTTP)    │     │ Bot alert layer    │
               │  :8809 (WS)     │     │ FastAPI + WS       │
               └──────────────────┘     └───────────────────┘
@@ -168,17 +168,17 @@ def get_real_user_home():
 
 ### API Contracts
 
-**meshforge-maps plugin discovery** (auto-detected by NOC):
+**meshanchor-maps plugin discovery** (auto-detected by NOC):
 ```json
 {
   "manifest.json": {
-    "id": "org.meshforge.extension.maps",
+    "id": "org.meshanchor.extension.maps",
     "ports": {"http": 8808, "ws": 8809}
   }
 }
 ```
 
-**meshforge-maps REST API** (consumed by NOC or standalone):
+**meshanchor-maps REST API** (consumed by NOC or standalone):
 ```
 GET  /api/nodes/geojson          → Merged node FeatureCollection
 GET  /api/node-health            → Per-node scores (0-100)
@@ -188,7 +188,7 @@ GET  /api/analytics/growth       → Unique nodes per time bucket
 GET  /api/health                 → System health + data freshness
 ```
 
-**meshing_around_meshforge REST API**:
+**meshing_around_meshanchor REST API**:
 ```
 GET  /api/status                 → Connection info
 GET  /api/nodes                  → Node list with status
@@ -199,8 +199,8 @@ WS   /ws                        → Real-time alerts, nodes, messages
 
 **MQTT topics** (shared across ecosystem):
 ```
-meshforge/alerts                 → Full alert feed (maps plugin)
-meshforge/alerts/{severity}      → critical, warning, info
+meshanchor/alerts                 → Full alert feed (maps plugin)
+meshanchor/alerts/{severity}      → critical, warning, info
 msh/#                           → Meshtastic MQTT (protobuf)
 ```
 
@@ -209,10 +209,10 @@ msh/#                           → Meshtastic MQTT (protobuf)
 ## 6. Dependency Direction
 
 ```
-meshforge-maps ──depends on──▶ MeshForge NOC (optional, can run standalone)
+meshanchor-maps ──depends on──▶ MeshAnchor NOC (optional, can run standalone)
 meshing_around ──depends on──▶ meshing-around bot (required external)
-RNS-Mgmt-Tool ──independent──  (receives patterns from MeshForge)
-Gateway-Tool ───merging into──▶ MeshForge NOC gateway/
+RNS-Mgmt-Tool ──independent──  (receives patterns from MeshAnchor)
+Gateway-Tool ───merging into──▶ MeshAnchor NOC gateway/
 ```
 
 **Rule**: Satellite repos may depend on the NOC. The NOC never depends on satellites. The NOC *discovers* plugins but runs fine without them.
@@ -250,7 +250,7 @@ meshcore_py        → MeshCore companion radio protocol
 
 ## 8. Branch Strategy Across Repos
 
-### meshforge (NOC)
+### meshanchor (NOC)
 - `main` — Stable beta releases (v0.5.4-beta)
 - `alpha/meshcore-bridge` — MeshCore 3-way routing (v0.6.0-alpha target)
 - `claude/*` — AI-generated feature branches
@@ -279,7 +279,7 @@ The `alpha/meshcore-bridge` branch adds **MeshCore as a third protocol** alongsi
 ```
 Meshtastic LoRa ◄──►┐
                      │
-RNS/Reticulum   ◄──►├──► MeshForge Gateway (canonical_message.py)
+RNS/Reticulum   ◄──►├──► MeshAnchor Gateway (canonical_message.py)
                      │        │
 MeshCore Heltec ◄──►┘        ▼
                          RoutingClassifier
@@ -320,7 +320,7 @@ MeshCore Heltec ◄──►┘        ▼
 - **MF004**: Always include `timeout=` on subprocess calls
 
 ### Service Independence
-MeshForge NOC **connects to** services; it doesn't embed them. Each external service (meshtasticd, rnsd, HamClock, MeshCore) runs independently under systemd. Satellite repos follow the same principle.
+MeshAnchor NOC **connects to** services; it doesn't embed them. Each external service (meshtasticd, rnsd, HamClock, MeshCore) runs independently under systemd. Satellite repos follow the same principle.
 
 ### Plugin Discovery Pattern
 Satellites that integrate with the NOC use `manifest.json` auto-discovery. The NOC scans for plugins at startup but never requires them.
@@ -331,18 +331,18 @@ Satellites that integrate with the NOC use `manifest.json` auto-discovery. The N
 
 | If you're adding... | Put it in... |
 |---------------------|-------------|
-| Protocol bridging / routing | meshforge (NOC) `gateway/` |
-| Map visualization / topology | meshforge-maps |
-| Bot alert types / notifications | meshing_around_meshforge |
+| Protocol bridging / routing | meshanchor (NOC) `gateway/` |
+| Map visualization / topology | meshanchor-maps |
+| Bot alert types / notifications | meshing_around_meshanchor |
 | RNS/NomadNet install/update scripts | RNS-Management-Tool |
-| RF calculations / link budgets | meshforge (NOC) `utils/rf.py` |
-| Service management (systemd) | meshforge (NOC) `utils/service_check.py` |
-| Node tracking / discovery | meshforge (NOC) `gateway/node_tracker.py` |
-| TUI menus / NOC interface | meshforge (NOC) `launcher_tui/` |
-| Static coverage maps | meshforge (NOC) `utils/coverage_map.py` |
-| Live interactive maps | meshforge-maps |
+| RF calculations / link budgets | meshanchor (NOC) `utils/rf.py` |
+| Service management (systemd) | meshanchor (NOC) `utils/service_check.py` |
+| Node tracking / discovery | meshanchor (NOC) `gateway/node_tracker.py` |
+| TUI menus / NOC interface | meshanchor (NOC) `launcher_tui/` |
+| Static coverage maps | meshanchor (NOC) `utils/coverage_map.py` |
+| Live interactive maps | meshanchor-maps |
 | RNODE firmware flashing | RNS-Management-Tool |
-| MeshCore protocol handler | meshforge (NOC) `gateway/meshcore_handler.py` |
+| MeshCore protocol handler | meshanchor (NOC) `gateway/meshcore_handler.py` |
 
 ---
 

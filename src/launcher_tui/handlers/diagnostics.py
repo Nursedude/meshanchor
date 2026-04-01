@@ -1,7 +1,7 @@
 """
 CLI diagnostics handler — run diagnostic and status scripts.
 
-Batch 10b: Extracted from MeshForgeLauncher._run_diagnostics()
+Batch 10b: Extracted from MeshAnchorLauncher._run_diagnostics()
 and _run_terminal_status() in main.py.
 """
 
@@ -36,7 +36,7 @@ class DiagnosticsHandler(BaseHandler):
             self.ctx.safe_call(*entry)
 
     def _run_diagnostics(self):
-        """Run the MeshForge diagnostic tool."""
+        """Run the MeshAnchor diagnostic tool."""
         from backend import clear_screen
 
         clear_screen()
@@ -60,7 +60,7 @@ class DiagnosticsHandler(BaseHandler):
             print()
 
     def _run_terminal_status(self):
-        """Run meshforge-status (terminal-native one-shot status)."""
+        """Run meshanchor-status (terminal-native one-shot status)."""
         from backend import clear_screen
 
         clear_screen()

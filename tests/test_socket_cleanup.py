@@ -1,5 +1,5 @@
 """
-Tests for socket cleanup patterns in MeshForge GTK UI.
+Tests for socket cleanup patterns in MeshAnchor GTK UI.
 
 These tests verify that socket operations properly close sockets
 in all code paths (success, failure, exception) to prevent

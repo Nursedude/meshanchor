@@ -9,13 +9,13 @@
 
 **Verdict: Viable as a PLUGIN, not core**
 
-Firmware development (C++/PlatformIO) should remain separate from MeshForge (Python), but MeshForge can integrate:
+Firmware development (C++/PlatformIO) should remain separate from MeshAnchor (Python), but MeshAnchor can integrate:
 1. Firmware flashing/updating (Python wrappers)
 2. Device-specific configuration profiles
 3. Build automation scripts
 4. Hardware documentation
 
-This approach won't break MeshForge's existing architecture.
+This approach won't break MeshAnchor's existing architecture.
 
 ---
 
@@ -29,7 +29,7 @@ This approach won't break MeshForge's existing architecture.
 | Flash Method | UF2 drag-and-drop, nrfjprog |
 | Bootloader | Adafruit nRF52 UF2 |
 | Build System | PlatformIO (Nordic framework) |
-| MeshForge Support | Existing hardware detection |
+| MeshAnchor Support | Existing hardware detection |
 
 **Variants**:
 - RAK4631 (nRF52840 + SX1262)
@@ -44,7 +44,7 @@ This approach won't break MeshForge's existing architecture.
 | Flash Method | esptool.py, Web Flasher |
 | Build System | PlatformIO (ESP-IDF/Arduino) |
 | Output Power | V3: 20dBm, V4: 28dBm |
-| MeshForge Support | Existing hardware detection |
+| MeshAnchor Support | Existing hardware detection |
 
 **Key Difference**: V4 has higher TX power, same pinout as V3.
 
@@ -56,7 +56,7 @@ This approach won't break MeshForge's existing architecture.
 | Flash Method | esptool.py |
 | Build System | PlatformIO |
 | Form Factor | Base station with ethernet |
-| MeshForge Support | Not yet in hardware.py |
+| MeshAnchor Support | Not yet in hardware.py |
 
 ---
 
@@ -65,7 +65,7 @@ This approach won't break MeshForge's existing architecture.
 ### Option A: Separate Firmware Repository (Recommended)
 
 ```
-meshforge/              # Python NOC (existing)
+meshanchor/              # Python NOC (existing)
 ├── src/
 ├── plugins/
 │   └── firmware/       # Firmware plugin
@@ -74,7 +74,7 @@ meshforge/              # Python NOC (existing)
 │       └── __init__.py
 └── ...
 
-meshforge-firmware/     # Separate repo (C++/PlatformIO)
+meshanchor-firmware/     # Separate repo (C++/PlatformIO)
 ├── platformio.ini
 ├── src/
 │   └── main.cpp
@@ -88,7 +88,7 @@ meshforge-firmware/     # Separate repo (C++/PlatformIO)
 **Pros**:
 - Clean separation of concerns
 - Different build toolchains don't conflict
-- MeshForge stays Python-only
+- MeshAnchor stays Python-only
 - Firmware repo can be forked independently
 
 **Cons**:
@@ -98,7 +98,7 @@ meshforge-firmware/     # Separate repo (C++/PlatformIO)
 ### Option B: Embedded Firmware Directory
 
 ```
-meshforge/
+meshanchor/
 ├── src/
 ├── firmware/           # C++/PlatformIO embedded
 │   ├── platformio.ini
@@ -119,11 +119,11 @@ meshforge/
 
 ### Recommendation: Option A
 
-Firmware in separate repo with MeshForge plugin for flashing.
+Firmware in separate repo with MeshAnchor plugin for flashing.
 
 ---
 
-## MeshForge Integration Points
+## MeshAnchor Integration Points
 
 ### 1. Firmware Flasher Plugin
 
@@ -198,9 +198,9 @@ For gateway nodes, consider custom firmware with:
 
 1. **Longer packet queues** - Gateway handles more traffic
 2. **MQTT optimizations** - Direct bridge to home automation
-3. **JSON API enabled** - For MeshForge API integration
+3. **JSON API enabled** - For MeshAnchor API integration
 4. **Watchdog timers** - Auto-reboot on hang
-5. **Remote OTA** - Update firmware via MeshForge
+5. **Remote OTA** - Update firmware via MeshAnchor
 
 ### Device-Specific
 
@@ -258,7 +258,7 @@ jobs:
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | Firmware bricks device | Medium | High | Test builds, recovery docs |
-| Build breaks MeshForge | Low | Medium | Separate repo (Option A) |
+| Build breaks MeshAnchor | Low | Medium | Separate repo (Option A) |
 | Toolchain conflicts | Medium | Low | Virtual environments |
 | Upstream Meshtastic changes | High | Medium | Track releases, test regularly |
 
@@ -276,7 +276,7 @@ jobs:
 - [ ] Fork Meshtastic firmware
 - [ ] Create gateway-optimized variants
 - [ ] Build automation (CI/CD)
-- [ ] MeshForge integration for OTA
+- [ ] MeshAnchor integration for OTA
 
 ### Phase 3: Advanced
 - [ ] Automated firmware testing
@@ -299,13 +299,13 @@ jobs:
 
 **Recommended approach**:
 
-1. **Don't embed firmware source in MeshForge** - Keep it Python-focused
+1. **Don't embed firmware source in MeshAnchor** - Keep it Python-focused
 2. **Create firmware plugin** - Handle flashing, config, OTA
 3. **Separate firmware repo** - For custom gateway builds
 4. **Start with profiles** - Configure official firmware optimally
 5. **Custom builds later** - Only if needed for gateway features
 
-This preserves MeshForge's stability while enabling firmware tooling.
+This preserves MeshAnchor's stability while enabling firmware tooling.
 
 ---
 

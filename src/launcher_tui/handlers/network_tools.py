@@ -531,7 +531,7 @@ class NetworkToolsHandler(BaseHandler):
 
     def _run_terminal_network(self):
         clear_screen()
-        print("MeshForge Network Status")
+        print("MeshAnchor Network Status")
         print("=" * 50)
         print()
         print("Port Checks:")

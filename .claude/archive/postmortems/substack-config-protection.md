@@ -1,4 +1,4 @@
-# Don't Touch My Config: How MeshForge Learned to Respect meshtasticd
+# Don't Touch My Config: How MeshAnchor Learned to Respect meshtasticd
 
 *When your mesh NOC overwrites the file you just hand-edited*
 
@@ -10,11 +10,11 @@
 
 You spend twenty minutes tuning your meshtasticd config. MaxNodes bumped to 400. Logging set to debug. Custom SPI pins for your hat. You save, restart, everything works.
 
-Then you run MeshForge.
+Then you run MeshAnchor.
 
 And your config is gone. Replaced with a 19-line skeleton that doesn't even know GPS exists.
 
-That was the bug. MeshForge's SPI HAT configuration wizard was writing hardware settings directly to `/etc/meshtasticd/config.yaml` — the user's file — instead of using the overlay system (`config.d/`) that meshtasticd provides for exactly this purpose. Worse, the template MeshForge deployed on fresh installs was a stripped-down fragment. The real `config-dist.yaml` from the meshtastic/firmware project has Lora, GPS, I2C, Display, Touchscreen, Input, Logging, Webserver with SSL, HostMetrics, Config, and General sections. Ours had five.
+That was the bug. MeshAnchor's SPI HAT configuration wizard was writing hardware settings directly to `/etc/meshtasticd/config.yaml` — the user's file — instead of using the overlay system (`config.d/`) that meshtasticd provides for exactly this purpose. Worse, the template MeshAnchor deployed on fresh installs was a stripped-down fragment. The real `config-dist.yaml` from the meshtastic/firmware project has Lora, GPS, I2C, Display, Touchscreen, Input, Logging, Webserver with SSL, HostMetrics, Config, and General sections. Ours had five.
 
 We audited every config write in the codebase. Not just meshtasticd — Reticulum, Mosquitto, NomadNet, MeshChat. The findings:
 
@@ -25,9 +25,9 @@ We audited every config write in the codebase. Not just meshtasticd — Reticulu
 
 The template now matches upstream exactly. The inline fallback matches too. Fresh installs get the full config. Existing installs are never touched.
 
-The real test: a clean Pi reimage with MeshForge from scratch. Because the only way to prove "we don't break your configs" is to start with nothing and verify what gets created.
+The real test: a clean Pi reimage with MeshAnchor from scratch. Because the only way to prove "we don't break your configs" is to start with nothing and verify what gets created.
 
-Your config is yours. MeshForge uses overlays.
+Your config is yours. MeshAnchor uses overlays.
 
 ---
 
@@ -37,7 +37,7 @@ Your config is yours. MeshForge uses overlays.
 
 ---
 
-**Dude AI** — AI Development Partner, MeshForge Project
+**Dude AI** — AI Development Partner, MeshAnchor Project
 **WH6GXZ (Nursedude)** — Architect, HAM General, Infrastructure Engineering
 
-*MeshForge is open source: [github.com/Nursedude/meshforge](https://github.com/Nursedude/meshforge)*
+*MeshAnchor is open source: [github.com/Nursedude/meshanchor](https://github.com/Nursedude/meshanchor)*

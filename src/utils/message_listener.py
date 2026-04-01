@@ -1,5 +1,5 @@
 """
-MeshForge Lightweight Message Listener
+MeshAnchor Lightweight Message Listener
 
 Standalone message receiver that doesn't require the full gateway bridge.
 Supports two modes:
@@ -178,7 +178,7 @@ class MessageListener:
         self._thread = threading.Thread(
             target=self._run,
             daemon=True,
-            name="meshforge-message-listener"
+            name="meshanchor-message-listener"
         )
         self._thread.start()
 

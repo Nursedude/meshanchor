@@ -33,7 +33,7 @@ class WebClientHandler(BaseHandler):
             self._open_web_client()
 
     def _open_web_client(self):
-        """Show/open Meshtastic web client served by MeshForge."""
+        """Show/open Meshtastic web client served by MeshAnchor."""
         local_ip = "localhost"
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -46,21 +46,21 @@ class WebClientHandler(BaseHandler):
         except OSError as e:
             logger.debug("Local IP detection failed: %s", e)
 
-        meshforge_port = 5000
-        web_url = f"http://{local_ip}:{meshforge_port}/mesh/"
-        localhost_url = f"http://localhost:{meshforge_port}/mesh/"
+        meshanchor_port = 5000
+        web_url = f"http://{local_ip}:{meshanchor_port}/mesh/"
+        localhost_url = f"http://localhost:{meshanchor_port}/mesh/"
 
-        meshforge_ok = False
+        meshanchor_ok = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 sock.settimeout(2)
-                if sock.connect_ex(("localhost", meshforge_port)) == 0:
-                    meshforge_ok = True
+                if sock.connect_ex(("localhost", meshanchor_port)) == 0:
+                    meshanchor_ok = True
             finally:
                 sock.close()
         except Exception as e:
-            logger.debug("Socket check for MeshForge web server: %s", e)
+            logger.debug("Socket check for MeshAnchor web server: %s", e)
 
         meshtasticd_ok = False
         try:
@@ -74,10 +74,10 @@ class WebClientHandler(BaseHandler):
         except Exception as e:
             logger.debug("Socket check for meshtasticd: %s", e)
 
-        if not meshforge_ok:
+        if not meshanchor_ok:
             self.ctx.dialog.msgbox(
-                "MeshForge Web Server Not Running",
-                "MeshForge web server is NOT responding on port 5000.\n\n"
+                "MeshAnchor Web Server Not Running",
+                "MeshAnchor web server is NOT responding on port 5000.\n\n"
                 "The web server starts with the NOC map.\n"
                 "Check Maps & Viz > NOC Node Map to start it.\n\n"
                 "Or start it from command line:\n"
@@ -120,7 +120,7 @@ class WebClientHandler(BaseHandler):
             choice = self.ctx.dialog.menu(
                 "Meshtastic Web Client",
                 "Web Client available at port 5000/mesh/\n"
-                "Served by MeshForge (multiplexed API proxy)\n\n"
+                "Served by MeshAnchor (multiplexed API proxy)\n\n"
                 "Full radio configuration via browser:\n"
                 "  Config, Channels, Device, Position, Messaging\n\n"
                 "Requires a graphical browser (JavaScript).\n"
@@ -197,10 +197,10 @@ class WebClientHandler(BaseHandler):
             f"  http://localhost:5000/mesh/\n\n"
             f"Access from OTHER devices on network:\n"
             f"  http://{local_ip}:5000/mesh/\n\n"
-            f"MeshForge NOC Map:\n"
+            f"MeshAnchor NOC Map:\n"
             f"  http://{local_ip}:5000/\n\n"
             f"Requires graphical browser (JavaScript).\n"
-            f"Port 5000 = MeshForge (web client + NOC)\n"
+            f"Port 5000 = MeshAnchor (web client + NOC)\n"
             f"Port 4403 = TCP API (CLI/SDK)",
             height=18, width=60
         )
@@ -263,7 +263,7 @@ class WebClientHandler(BaseHandler):
             self.ctx.dialog.msgbox(
                 "Root Required",
                 "Certificate generation requires root privileges.\n\n"
-                "MeshForge should already be running with sudo.\n"
+                "MeshAnchor should already be running with sudo.\n"
                 "If not, restart with: sudo python3 src/launcher_tui/main.py"
             )
             return

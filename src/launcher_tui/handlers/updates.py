@@ -51,7 +51,7 @@ class UpdatesHandler(BaseHandler):
             choices = [
                 ("check", "Check for Updates"),
                 ("update-all", "Update All Components"),
-                ("meshforge", "Update MeshForge"),
+                ("meshanchor", "Update MeshAnchor"),
                 ("meshtasticd", "Update meshtasticd"),
                 ("cli", "Update Meshtastic CLI"),
                 ("meshtastic-lib", "Update Meshtastic Library"),
@@ -71,7 +71,7 @@ class UpdatesHandler(BaseHandler):
             dispatch = {
                 "check": ("Check Updates", self._check_updates),
                 "update-all": ("Update All", self._update_all),
-                "meshforge": ("Update MeshForge", self._update_meshforge),
+                "meshanchor": ("Update MeshAnchor", self._update_meshanchor),
                 "meshtasticd": ("Update meshtasticd", self._update_meshtasticd),
                 "cli": ("Update CLI", self._update_cli),
                 "meshtastic-lib": ("Update Meshtastic Lib", self._update_meshtastic_lib),
@@ -140,7 +140,7 @@ class UpdatesHandler(BaseHandler):
         updates_needed = []
         for key, info in versions.items():
             if info.update_available and info.update_command:
-                if key not in ('firmware', 'meshforge'):
+                if key not in ('firmware', 'meshanchor'):
                     updates_needed.append((key, info))
 
         if not updates_needed:
@@ -368,9 +368,9 @@ class UpdatesHandler(BaseHandler):
         """
         from pathlib import Path
 
-        meshforge_dir = Path(__file__).parent.parent.parent.parent
-        venv_pip = meshforge_dir / 'venv' / 'bin' / 'pip'
-        no_venv_marker = meshforge_dir / '.no-venv'
+        meshanchor_dir = Path(__file__).parent.parent.parent.parent
+        venv_pip = meshanchor_dir / 'venv' / 'bin' / 'pip'
+        no_venv_marker = meshanchor_dir / '.no-venv'
 
         if venv_pip.exists() and not no_venv_marker.exists():
             pip_cmd = [str(venv_pip), 'install']
@@ -459,25 +459,25 @@ class UpdatesHandler(BaseHandler):
             height=22
         )
 
-    def _update_meshforge(self):
-        """Update MeshForge itself (git pull + pip install)."""
+    def _update_meshanchor(self):
+        """Update MeshAnchor itself (git pull + pip install)."""
         from pathlib import Path
         from utils.paths import get_real_user_home
 
-        meshforge_dir = Path(__file__).parent.parent.parent.parent
+        meshanchor_dir = Path(__file__).parent.parent.parent.parent
 
-        git_dir = meshforge_dir / '.git'
+        git_dir = meshanchor_dir / '.git'
         if not git_dir.exists():
             self.ctx.dialog.msgbox(
                 "Not a Git Repository",
-                "MeshForge is not installed via git.\n\n"
+                "MeshAnchor is not installed via git.\n\n"
                 "To update, re-run the installer:\n\n"
-                "curl -sSL https://raw.githubusercontent.com/Nursedude/meshforge/main/install.sh | sudo bash"
+                "curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh | sudo bash"
             )
             return
 
         if not self.ctx.dialog.yesno(
-            "Update MeshForge",
+            "Update MeshAnchor",
             "This will:\n\n"
             "1. Pull latest code from GitHub (git pull)\n"
             "2. Install/update Python dependencies\n"
@@ -486,12 +486,12 @@ class UpdatesHandler(BaseHandler):
         ):
             return
 
-        self.ctx.dialog.infobox("Updating MeshForge", "Step 1/3: Pulling latest code from GitHub...")
+        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 1/3: Pulling latest code from GitHub...")
 
         try:
             result = subprocess.run(
                 ['git', 'pull', 'origin', 'main'],
-                cwd=str(meshforge_dir),
+                cwd=str(meshanchor_dir),
                 capture_output=True,
                 text=True,
                 timeout=60
@@ -512,15 +512,15 @@ class UpdatesHandler(BaseHandler):
             self.ctx.dialog.msgbox("Error", f"Git pull failed: {e}")
             return
 
-        self.ctx.dialog.infobox("Updating MeshForge", "Step 2/3: Installing Python dependencies...")
+        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 2/3: Installing Python dependencies...")
 
-        requirements_file = meshforge_dir / 'requirements.txt'
+        requirements_file = meshanchor_dir / 'requirements.txt'
         if not requirements_file.exists():
             self.ctx.dialog.msgbox("Error", "requirements.txt not found!")
             return
 
-        venv_pip = meshforge_dir / 'venv' / 'bin' / 'pip'
-        no_venv_marker = meshforge_dir / '.no-venv'
+        venv_pip = meshanchor_dir / 'venv' / 'bin' / 'pip'
+        no_venv_marker = meshanchor_dir / '.no-venv'
 
         try:
             if venv_pip.exists() and not no_venv_marker.exists():
@@ -550,19 +550,19 @@ class UpdatesHandler(BaseHandler):
             self.ctx.dialog.msgbox("Error", f"Pip install failed: {e}")
             return
 
-        self.ctx.dialog.infobox("Updating MeshForge", "Step 3/3: Updating service files...")
+        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 3/3: Updating service files...")
 
         svc_msgs = []
         try:
-            svc_src = meshforge_dir / 'scripts' / 'meshforge.service'
-            svc_dst = Path('/etc/systemd/system/meshforge.service')
+            svc_src = meshanchor_dir / 'scripts' / 'meshanchor.service'
+            svc_dst = Path('/etc/systemd/system/meshanchor.service')
             if svc_src.exists() and svc_dst.exists():
                 import shutil
                 shutil.copy2(str(svc_src), str(svc_dst))
-                svc_msgs.append("meshforge.service")
+                svc_msgs.append("meshanchor.service")
 
             user_svc_dir = get_real_user_home() / '.config' / 'systemd' / 'user'
-            templates_dir = meshforge_dir / 'templates' / 'systemd'
+            templates_dir = meshanchor_dir / 'templates' / 'systemd'
             if templates_dir.exists():
                 user_svc_dir.mkdir(parents=True, exist_ok=True)
                 for tmpl in templates_dir.glob('*-user.service'):
@@ -585,11 +585,11 @@ class UpdatesHandler(BaseHandler):
 
         self.ctx.dialog.msgbox(
             "Update Complete",
-            "MeshForge has been updated!\n\n"
+            "MeshAnchor has been updated!\n\n"
             f"Git: {git_output.strip()[:200]}\n"
             f"{svc_info}\n"
-            "Please restart MeshForge to apply changes.\n\n"
-            "Run: meshforge"
+            "Please restart MeshAnchor to apply changes.\n\n"
+            "Run: meshanchor"
         )
 
     def _run_update_command(self, component: str, command: str) -> Tuple[bool, str]:

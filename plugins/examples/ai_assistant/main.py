@@ -1,5 +1,5 @@
 """
-AI Development Assistant Plugin for MeshForge.io
+AI Development Assistant Plugin for MeshAnchor.io
 
 Provides AI-powered tools for:
 - Code generation with mesh networking context
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Import plugin base if available
 try:
-    from meshforge.core.plugin_base import Plugin, PluginContext
+    from meshanchor.core.plugin_base import Plugin, PluginContext
 except ImportError:
     # Fallback for standalone testing
     class Plugin:
@@ -200,7 +200,7 @@ class CodeAnalyzer:
             r'No such file or directory.*config': DebugSuggestion(
                 issue="Configuration file not found",
                 likely_cause="Config not created or wrong path",
-                suggested_fix="Run: meshforge --init-config",
+                suggested_fix="Run: meshanchor --init-config",
                 confidence="medium"
             ),
             r'ModuleNotFoundError.*meshtastic': DebugSuggestion(

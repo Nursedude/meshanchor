@@ -1,4 +1,4 @@
-# MeshForge Example: USB LoRa Device Configuration
+# MeshAnchor Example: USB LoRa Device Configuration
 #
 # For USB-connected Meshtastic devices (Heltec V3, T-Beam, RAK4631, etc.)
 # Copy to: /etc/meshtasticd/config.d/usb-device.yaml
@@ -13,7 +13,7 @@
 #   Baud: 115200            # Default baud rate
 
 # === TCP Interface ===
-# This is what MeshForge connects to
+# This is what MeshAnchor connects to
 TCP:
   Port: 4403                # Default port (don't change unless needed)
   # BindAddress: 127.0.0.1  # Uncomment to restrict to localhost only

@@ -1,12 +1,12 @@
 # Run Tests
 
-Execute the MeshForge test suite and report results.
+Execute the MeshAnchor test suite and report results.
 
 ## Instructions
 
 1. Run all test files:
 ```bash
-cd /opt/meshforge
+cd /opt/meshanchor
 python3 -m pytest tests/ -v --tb=short 2>&1 | head -100
 ```
 

@@ -28,7 +28,7 @@ class TestCreateIdentities:
         rns_config_dir.mkdir()
         (rns_config_dir / "config").touch()
 
-        gw_dir = tmp_path / "meshforge"
+        gw_dir = tmp_path / "meshanchor"
         gw_path = gw_dir / "gateway_identity"
 
         mock_identity = MagicMock()
@@ -56,7 +56,7 @@ class TestCreateIdentities:
         (rns_config_dir / "config").touch()
         (rns_config_dir / "identity").touch()  # Already exists
 
-        gw_dir = tmp_path / "meshforge"
+        gw_dir = tmp_path / "meshanchor"
         gw_dir.mkdir()
         gw_path = gw_dir / "gateway_identity"
         gw_path.touch()  # Already exists
@@ -78,7 +78,7 @@ class TestCreateIdentities:
         (rns_config_dir / "config").touch()
         (rns_config_dir / "identity").touch()
 
-        gw_path = tmp_path / "meshforge" / "gateway_identity"
+        gw_path = tmp_path / "meshanchor" / "gateway_identity"
 
         mock_identity = MagicMock()
         mock_rns = MagicMock()
@@ -101,7 +101,7 @@ class TestCreateIdentities:
         rns_config_dir = tmp_path / "reticulum"
         rns_config_dir.mkdir()
         (rns_config_dir / "config").touch()
-        gw_path = tmp_path / "meshforge" / "gateway_identity"
+        gw_path = tmp_path / "meshanchor" / "gateway_identity"
 
         with patch('commands.rns.ReticulumPaths.get_config_dir', return_value=rns_config_dir), \
              patch('commands.rns.get_identity_path', return_value=gw_path), \
@@ -127,7 +127,7 @@ class TestConnectivityWarnings:
         (rns_config_dir / "config").touch()
         # No identity file
 
-        gw_path = tmp_path / "meshforge" / "gateway_identity"
+        gw_path = tmp_path / "meshanchor" / "gateway_identity"
         # No gateway identity
 
         mock_status = MagicMock()
@@ -169,7 +169,7 @@ class TestConnectivityWarnings:
         (rns_config_dir / "config").touch()
         (rns_config_dir / "identity").touch()
 
-        gw_dir = tmp_path / "meshforge"
+        gw_dir = tmp_path / "meshanchor"
         gw_dir.mkdir()
         gw_path = gw_dir / "gateway_identity"
         gw_path.touch()

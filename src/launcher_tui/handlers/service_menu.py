@@ -177,7 +177,7 @@ class ServiceMenuHandler(BaseHandler):
         msg = "Pre-flight checks found issues:\n\n"
         for i, issue in enumerate(issues, 1):
             msg += f"  {i}. {issue}\n"
-        msg += "\nMeshForge can fix these automatically."
+        msg += "\nMeshAnchor can fix these automatically."
 
         if not self.ctx.dialog.yesno("Bridge Pre-Flight", msg + "\n\nFix now?"):
             return False
@@ -273,7 +273,7 @@ class ServiceMenuHandler(BaseHandler):
                 except OSError:
                     pass
             log_fd, log_path_str = tempfile.mkstemp(
-                suffix='.log', prefix='meshforge-gateway-'
+                suffix='.log', prefix='meshanchor-gateway-'
             )
             log_path = Path(log_path_str)
             self._bridge_log_path = log_path
@@ -372,7 +372,7 @@ class ServiceMenuHandler(BaseHandler):
 
         try:
             logs = sorted(
-                Path('/tmp').glob('meshforge-gateway-*.log'),
+                Path('/tmp').glob('meshanchor-gateway-*.log'),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True
             )
@@ -461,8 +461,8 @@ class ServiceMenuHandler(BaseHandler):
         failed_services = []
         use_direct_rnsd = not self._has_systemd_unit('rnsd')
 
-        for svc in ['meshtasticd', 'rnsd', 'meshforge']:
-            if svc == 'meshforge':
+        for svc in ['meshtasticd', 'rnsd', 'meshanchor']:
+            if svc == 'meshanchor':
                 is_systemd = False
                 try:
                     svc_status = check_service(svc)
@@ -542,8 +542,8 @@ class ServiceMenuHandler(BaseHandler):
             choice = self.ctx.dialog.menu(
                 "Port 9443 Lockdown",
                 f"Current: {status_str}\n\n"
-                "MeshForge proxies meshtasticd at :5000/mesh/\n"
-                "Locking port 9443 forces traffic through MeshForge.",
+                "MeshAnchor proxies meshtasticd at :5000/mesh/\n"
+                "Locking port 9443 forces traffic through MeshAnchor.",
                 choices
             )
 
@@ -588,7 +588,7 @@ class ServiceMenuHandler(BaseHandler):
                     print("  \033[0;31m●\033[0m Port 9443: OPEN (external access allowed)")
                 print()
                 print("  Lock blocks external access via iptables.")
-                print("  MeshForge proxies at :5000/mesh/ with filtering.")
+                print("  MeshAnchor proxies at :5000/mesh/ with filtering.")
                 self.ctx.wait_for_enter()
 
     def _restart_meshtasticd_service(self):
@@ -1027,7 +1027,7 @@ WantedBy=multi-user.target
                 ("start", "Start OpenHamClock"),
                 ("stop", "Stop OpenHamClock"),
                 ("logs", "View Logs"),
-                ("configure", "Configure in MeshForge"),
+                ("configure", "Configure in MeshAnchor"),
                 ("back", "Back"),
             ]
 
@@ -1129,12 +1129,12 @@ WantedBy=multi-user.target
                 )
                 if result.returncode == 0:
                     print("\033[0;32m✓\033[0m OpenHamClock started on port 3000")
-                    print("\nAuto-configuring MeshForge...")
+                    print("\nAuto-configuring MeshAnchor...")
                     propagation.configure_source(
                         propagation.DataSource.OPENHAMCLOCK,
                         host="localhost", port=3000
                     )
-                    print("\033[0;32m✓\033[0m MeshForge configured for OpenHamClock")
+                    print("\033[0;32m✓\033[0m MeshAnchor configured for OpenHamClock")
                 else:
                     print(f"\033[0;31mError:\033[0m {result.stderr}")
 
@@ -1258,7 +1258,7 @@ WantedBy=multi-user.target
             f"  • Topic: {topic_pattern}\n\n"
             "Test with:\n"
             f"  mosquitto_sub -h localhost -t 'msh/#' -v\n\n"
-            "MeshForge will now receive messages via MQTT\n"
+            "MeshAnchor will now receive messages via MQTT\n"
             "alongside other consumers like meshing-around."
         )
 

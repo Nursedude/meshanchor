@@ -1,18 +1,18 @@
 #!/bin/bash
-# MeshForge SSH Login Message
-# Installed to /etc/profile.d/meshforge.sh
+# MeshAnchor SSH Login Message
+# Installed to /etc/profile.d/meshanchor.sh
 
 # Only show for interactive shells
 [ -z "$PS1" ] && return
 
-# Check if MeshForge is installed
-if [ -x /usr/local/bin/meshforge ] || [ -f /opt/meshforge/src/launcher_tui/main.py ]; then
+# Check if MeshAnchor is installed
+if [ -x /usr/local/bin/meshanchor ] || [ -f /opt/meshanchor/src/launcher_tui/main.py ]; then
     # Show message on SSH login
     if [ -n "$SSH_TTY" ] || [ -n "$SSH_CLIENT" ]; then
         echo ""
         echo "  ┌─────────────────────────────────────┐"
-        echo "  │  MeshForge NOC is installed         │"
-        echo "  │  Type 'meshforge' to launch         │"
+        echo "  │  MeshAnchor NOC is installed         │"
+        echo "  │  Type 'meshanchor' to launch         │"
         echo "  └─────────────────────────────────────┘"
         echo ""
     fi

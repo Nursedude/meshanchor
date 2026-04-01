@@ -1,5 +1,5 @@
 """
-QR Code Transport for MeshForge Tactical Messaging.
+QR Code Transport for MeshAnchor Tactical Messaging.
 
 Encodes tactical messages as QR codes for field check-in scenarios:
 - Staging area check-in (scan QR to register presence)

@@ -406,7 +406,7 @@ class RNSInterfacesHandler(BaseHandler):
     def _fix_rns_ownership(self):
         """Audit and fix ownership/permissions on all RNS-related paths.
 
-        Addresses the root/user ownership mismatch caused by MeshForge
+        Addresses the root/user ownership mismatch caused by MeshAnchor
         running with sudo while rnsd and NomadNet run as the real user.
         """
         import stat

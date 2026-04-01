@@ -1,4 +1,4 @@
-"""Communication protocol for MeshForge Agent.
+"""Communication protocol for MeshAnchor Agent.
 
 Based on NGINX Agent communication patterns - provides secure, reliable
 communication between agent and management plane.

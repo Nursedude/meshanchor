@@ -1,5 +1,5 @@
 """
-RF Calculator Plugin for MeshForge.io
+RF Calculator Plugin for MeshAnchor.io
 
 Provides essential RF calculations:
 - Free Space Path Loss (FSPL)
@@ -17,7 +17,7 @@ from gi.repository import Gtk, Adw
 
 # Import plugin base - handle both installed and development scenarios
 try:
-    from meshforge.core.plugin_base import Plugin, PluginContext
+    from meshanchor.core.plugin_base import Plugin, PluginContext
 except ImportError:
     import sys
     from pathlib import Path
@@ -381,7 +381,7 @@ class RFCalculatorPanel(Gtk.Box):
 
 
 class RFCalculatorPlugin(Plugin):
-    """RF Calculator plugin for MeshForge.io"""
+    """RF Calculator plugin for MeshAnchor.io"""
 
     def activate(self, context: PluginContext) -> None:
         """Called when plugin is activated"""

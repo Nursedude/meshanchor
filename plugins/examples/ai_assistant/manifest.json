@@ -1,13 +1,13 @@
 {
-    "id": "com.meshforge.ai_assistant",
+    "id": "com.meshanchor.ai_assistant",
     "name": "AI Development Assistant",
     "version": "1.0.0",
     "description": "AI-powered coding, debugging, and code review assistant for mesh development",
-    "author": "MeshForge Team",
+    "author": "MeshAnchor Team",
     "type": "panel",
     "entry_point": "main.py",
-    "min_meshforge_version": "1.0.0",
-    "homepage": "https://github.com/meshforge/plugins",
+    "min_meshanchor_version": "1.0.0",
+    "homepage": "https://github.com/meshanchor/plugins",
     "license": "MIT",
     "icon": "system-run-symbolic",
     "category": "Development",
@@ -18,7 +18,7 @@
     "settings_schema": {
         "context_project": {
             "type": "string",
-            "default": "meshforge",
+            "default": "meshanchor",
             "label": "Project Context",
             "description": "Project name for AI context"
         },

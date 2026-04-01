@@ -1,15 +1,15 @@
-# MeshForge AI Principles & Human-Centered Design
+# MeshAnchor AI Principles & Human-Centered Design
 
 > Foundational guide for AI-assisted mesh networking
 > Philosophy, Psychology, and Sociology for our Community
 
 ---
 
-## Part I: Philosophy of MeshForge
+## Part I: Philosophy of MeshAnchor
 
 ### 1.1 Core Philosophy: Decentralization as Liberation
 
-MeshForge embodies the philosophical principle that **communication is a fundamental human right**. Our technology philosophy rests on three pillars:
+MeshAnchor embodies the philosophical principle that **communication is a fundamental human right**. Our technology philosophy rests on three pillars:
 
 #### Autonomy
 > "The mesh belongs to no one, therefore it belongs to everyone."
@@ -36,7 +36,7 @@ MeshForge embodies the philosophical principle that **communication is a fundame
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│              MESHFORGE ETHICAL HIERARCHY             │
+│              MESHANCHOR ETHICAL HIERARCHY             │
 ├─────────────────────────────────────────────────────┤
 │  1. Safety First    - Never compromise human safety │
 │  2. Privacy Default - Encryption is non-negotiable  │
@@ -104,7 +104,7 @@ PRINCIPLE: Don't make users think during emergencies
 PRINCIPLE: Users should feel more capable over time
 
 ✓ Mastery paths (beginner → expert journey)
-✓ Visible progress (MeshForge University)
+✓ Visible progress (MeshAnchor University)
 ✓ Skill validation (assessments, certifications)
 ✓ Achievement recognition (without gamification excess)
 ```
@@ -173,7 +173,7 @@ In emergencies, humans experience:
 - **Recognition currency**: Respect, not money
 
 #### Role Differentiation
-| Role | Function | MeshForge Support |
+| Role | Function | MeshAnchor Support |
 |------|----------|-------------------|
 | Elmer/Mentor | Teaches newcomers | University, documentation |
 | Net Control | Coordinates communication | Channel management |
@@ -186,7 +186,7 @@ In emergencies, humans experience:
 **Barrier Reduction Strategy:**
 
 1. **Economic barriers**
-   - Free tier (MeshForge.io)
+   - Free tier (MeshAnchor.io)
    - Open source always
    - Commodity hardware support
 
@@ -230,7 +230,7 @@ In emergencies, humans experience:
 └────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 AI Ethics for MeshForge
+### 4.2 AI Ethics for MeshAnchor
 
 #### Transparency
 - AI suggestions clearly marked as AI-generated
@@ -361,5 +361,5 @@ Inclusion checklist:
 
 ---
 
-*This document guides all MeshForge development decisions.*
+*This document guides all MeshAnchor development decisions.*
 *Last updated: 2026-02-21*

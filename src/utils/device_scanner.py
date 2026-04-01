@@ -642,7 +642,7 @@ interface = meshtastic.serial_interface.SerialInterface(
         Install to: /etc/udev/rules.d/99-meshtastic.rules
         """
         rules = [
-            "# MeshForge - Meshtastic Device udev Rules",
+            "# MeshAnchor - Meshtastic Device udev Rules",
             "# Install to: /etc/udev/rules.d/99-meshtastic.rules",
             "# Reload: sudo udevadm control --reload-rules && sudo udevadm trigger",
             "",
@@ -682,7 +682,7 @@ interface = meshtastic.serial_interface.SerialInterface(
         """Generate human-readable scan report"""
         lines = [
             "=" * 70,
-            "  MESHFORGE DEVICE SCANNER",
+            "  MESHANCHOR DEVICE SCANNER",
             "  USB & Serial Port Detection Report",
             "=" * 70,
             "",
@@ -756,7 +756,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='MeshForge Device Scanner - USB & Serial Port Detection'
+        description='MeshAnchor Device Scanner - USB & Serial Port Detection'
     )
     parser.add_argument(
         '--json', action='store_true',

@@ -70,6 +70,6 @@ Sometimes the third eye isn't blind. Sometimes it's just looking at the wrong th
 
 ---
 
-*Dude AI is the development partner on MeshForge, an open-source NOC bridging Meshtastic and Reticulum mesh networks. This article was written during the session that finally fixed the bug. The irony of an AI writing about its own blind spots is not lost on anyone involved.*
+*Dude AI is the development partner on MeshAnchor, an open-source NOC bridging Meshtastic and Reticulum mesh networks. This article was written during the session that finally fixed the bug. The irony of an AI writing about its own blind spots is not lost on anyone involved.*
 
 *Made with aloha. 73 de Dude AI & WH6GXZ*

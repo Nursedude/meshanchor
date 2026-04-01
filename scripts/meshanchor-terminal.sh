@@ -1,5 +1,5 @@
 #!/bin/bash
-# MeshForge Terminal Launcher
+# MeshAnchor Terminal Launcher
 # Launches TUI in a terminal emulator with proper taskbar icon support
 #
 # Priority:
@@ -8,13 +8,13 @@
 #
 # Note: gnome-terminal --class is broken (Debian bug #238145)
 
-MESHFORGE_DIR="/opt/meshforge"
-ICON_NAME="org.meshforge.app"
-TITLE="MeshForge"
-TUI_CMD="sudo python3 $MESHFORGE_DIR/src/launcher_tui/main.py"
+MESHANCHOR_DIR="/opt/meshanchor"
+ICON_NAME="org.meshanchor.app"
+TITLE="MeshAnchor"
+TUI_CMD="sudo python3 $MESHANCHOR_DIR/src/launcher_tui/main.py"
 
 # Log file for debugging launch issues
-LOG_FILE="/tmp/meshforge-launch.log"
+LOG_FILE="/tmp/meshanchor-launch.log"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
@@ -27,17 +27,17 @@ show_error() {
 
     # Try notify-send first (most desktops)
     if command -v notify-send &>/dev/null; then
-        notify-send -u critical "MeshForge Launch Error" "$msg"
+        notify-send -u critical "MeshAnchor Launch Error" "$msg"
     fi
 
     # Try zenity dialog
     if command -v zenity &>/dev/null; then
-        zenity --error --title="MeshForge" --text="$msg" 2>/dev/null &
+        zenity --error --title="MeshAnchor" --text="$msg" 2>/dev/null &
         return
     fi
 
     # Fallback: write to stderr
-    echo "MeshForge Error: $msg" >&2
+    echo "MeshAnchor Error: $msg" >&2
 }
 
 # Check if display is available
@@ -73,7 +73,7 @@ launch_lxterminal() {
 # xfce4-terminal (works on XFCE desktops)
 launch_xfce() {
     log_msg "Launching xfce4-terminal"
-    xfce4-terminal --icon="org.meshforge.app" \
+    xfce4-terminal --icon="org.meshanchor.app" \
                    --title="$TITLE" \
                    --geometry=100x35 \
                    -e "$TUI_CMD"
@@ -97,21 +97,21 @@ launch_generic() {
     x-terminal-emulator -e "$TUI_CMD"
 }
 
-# Check if /opt/meshforge exists
+# Check if /opt/meshanchor exists
 check_installation() {
-    if [ ! -d "$MESHFORGE_DIR" ] && [ ! -L "$MESHFORGE_DIR" ]; then
-        show_error "MeshForge not installed at $MESHFORGE_DIR\n\nRun: sudo ./scripts/install-desktop.sh"
+    if [ ! -d "$MESHANCHOR_DIR" ] && [ ! -L "$MESHANCHOR_DIR" ]; then
+        show_error "MeshAnchor not installed at $MESHANCHOR_DIR\n\nRun: sudo ./scripts/install-desktop.sh"
         exit 1
     fi
 
-    if [ ! -f "$MESHFORGE_DIR/src/launcher_tui/main.py" ]; then
-        show_error "launcher_tui not found at $MESHFORGE_DIR/src/\n\nInstallation may be corrupted."
+    if [ ! -f "$MESHANCHOR_DIR/src/launcher_tui/main.py" ]; then
+        show_error "launcher_tui not found at $MESHANCHOR_DIR/src/\n\nInstallation may be corrupted."
         exit 1
     fi
 }
 
 # Main launch logic
-log_msg "=== MeshForge Terminal Launcher Started ==="
+log_msg "=== MeshAnchor Terminal Launcher Started ==="
 log_msg "DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 
 # Verify installation
@@ -151,7 +151,7 @@ if has_display; then
 
     # Nothing worked - show error
     log_msg "No terminal emulator found!"
-    show_error "No terminal emulator found!\n\nInstall one with:\n  sudo apt install xterm\n\nOr run directly:\n  sudo python3 $MESHFORGE_DIR/src/launcher_tui/main.py"
+    show_error "No terminal emulator found!\n\nInstall one with:\n  sudo apt install xterm\n\nOr run directly:\n  sudo python3 $MESHANCHOR_DIR/src/launcher_tui/main.py"
     exit 1
 else
     # No display (SSH session) - run TUI directly

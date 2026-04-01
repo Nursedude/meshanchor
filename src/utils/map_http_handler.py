@@ -1,5 +1,5 @@
 """
-Map HTTP Handler - HTTP request handling for MeshForge Map Server.
+Map HTTP Handler - HTTP request handling for MeshAnchor Map Server.
 
 Provides the HTTP endpoint logic for the live map and APIs.
 This module is used by MapServer in map_data_service.py.
@@ -17,18 +17,18 @@ Endpoints:
 - GET /api/status    -> server health check + history stats
 - GET /*             -> static files from web/
 
-Meshtastic API Proxy (MeshForge-owned):
+Meshtastic API Proxy (MeshAnchor-owned):
 - GET  /api/v1/fromradio -> multiplexed protobuf packets from meshtasticd
 - PUT  /api/v1/toradio   -> forwarded to meshtasticd
 - GET  /json/nodes       -> proxied + sanitized from meshtasticd
 - GET  /json/report      -> proxied from meshtasticd
 
-Meshtastic Web Client (MeshForge-owned, served from disk):
+Meshtastic Web Client (MeshAnchor-owned, served from disk):
 - GET  /mesh/            -> meshtastic web client (from /usr/share/meshtasticd/web/)
-- GET  /mesh/api/v1/*    -> routed through MeshForge multiplexed proxy
-- GET  /mesh/json/*      -> routed through MeshForge sanitized proxy
+- GET  /mesh/api/v1/*    -> routed through MeshAnchor multiplexed proxy
+- GET  /mesh/json/*      -> routed through MeshAnchor sanitized proxy
 
-Radio Control API (MeshForge-owned):
+Radio Control API (MeshAnchor-owned):
 - GET /api/radio/info     -> radio device information
 - GET /api/radio/nodes    -> nodes from connected radio
 - GET /api/radio/channels -> channels from connected radio
@@ -150,7 +150,7 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         elif self.path == '/api/weather' or self.path == '/api/weather/':
             self._serve_weather()
         # ─────────────────────────────────────────────────────────────
-        # Meshtastic API Proxy - MeshForge owns the web client API
+        # Meshtastic API Proxy - MeshAnchor owns the web client API
         # ─────────────────────────────────────────────────────────────
         elif self.path.startswith('/api/v1/fromradio'):
             self._proxy_fromradio()
@@ -165,7 +165,7 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         elif self.path == '/api/proxy/status' or self.path == '/api/proxy/status/':
             self._serve_proxy_status()
         # ─────────────────────────────────────────────────────────────
-        # Radio Control API - MeshForge-owned radio access
+        # Radio Control API - MeshAnchor-owned radio access
         # ─────────────────────────────────────────────────────────────
         elif self.path == '/api/radio/info' or self.path == '/api/radio/info/':
             self._serve_radio_info()

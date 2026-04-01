@@ -1,5 +1,5 @@
 """
-MeshForge Updates Module
+MeshAnchor Updates Module
 
 Provides version checking and update functionality for:
 - meshtasticd (Linux native daemon)

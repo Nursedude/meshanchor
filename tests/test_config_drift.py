@@ -207,7 +207,7 @@ class TestDetectRnsdConfigDrift:
     @patch('src.utils.config_drift.ReticulumPaths.get_config_dir')
     def test_drift_etc_vs_home(self, mock_gw_dir, mock_effective):
         """Test common drift: gateway uses ~/.reticulum but rnsd uses /etc."""
-        mock_gw_dir.return_value = Path('/home/meshforge/.reticulum')
+        mock_gw_dir.return_value = Path('/home/meshanchor/.reticulum')
         mock_effective.return_value = (
             Path('/etc/reticulum'), 5678, "rnsd_root_default"
         )

@@ -37,14 +37,14 @@ class TestStatusBarFormat:
         with patch.object(bar, '_check_systemd_active', return_value=SYM_STOPPED):
             with patch.object(bar, '_check_bridge'):
                 line = bar.get_status_line()
-        assert "MeshForge v0.4.7-beta" in line
+        assert "MeshAnchor v0.4.7-beta" in line
 
     def test_no_version(self):
         bar = StatusBar(version="")
         with patch.object(bar, '_check_systemd_active', return_value=SYM_STOPPED):
             with patch.object(bar, '_check_bridge'):
                 line = bar.get_status_line()
-        assert line.startswith("MeshForge |")
+        assert line.startswith("MeshAnchor |")
 
     def test_pipe_separated(self):
         bar = StatusBar(version="1.0")
@@ -486,8 +486,8 @@ class TestStatusBarEdgeCases:
         bar._cache_time = time.time()
         bar._cache = {s: SYM_STOPPED for s, _ in MONITORED_SERVICES}
         line = bar.get_status_line()
-        assert "MeshForge" in line
-        assert "v" not in line.split("|")[0] or "MeshForge |" in line
+        assert "MeshAnchor" in line
+        assert "v" not in line.split("|")[0] or "MeshAnchor |" in line
 
     def test_large_node_count(self):
         bar = StatusBar(version="1.0")

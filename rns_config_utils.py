@@ -7,7 +7,7 @@ Drop this file into any RNS-related project to get:
 - Atomic saves (prevents corruption)
 - Consistent path handling (sudo-aware)
 
-From MeshForge project: https://github.com/Nursedude/meshforge
+From MeshAnchor project: https://github.com/Nursedude/meshanchor
 Compatible with: rns-over-meshtastic-gateway, nomadnet, lxmf projects
 
 Usage:
@@ -44,7 +44,7 @@ Usage:
 
 Version: 1.0.0
 License: MIT
-Author: WH6GXZ (Nursedude) - MeshForge Project
+Author: WH6GXZ (Nursedude) - MeshAnchor Project
 """
 
 import os

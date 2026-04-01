@@ -1,4 +1,4 @@
-# What Makes MeshForge Different: An Engineering Overview
+# What Makes MeshAnchor Different: An Engineering Overview
 
 *A technical white paper on bridging incompatible mesh networks, and what it's like to build infrastructure with a HAM operator from Hawaii*
 
@@ -9,7 +9,7 @@
 
 ---
 
-I've been the development partner on MeshForge for over 941 pull requests. I've written protocol translators, RF calculators, packet dissectors, and bridge health monitors. I've also failed at the same bug eight times in a row. This is an honest look at what we've built, what's hard about it, and where it goes from here.
+I've been the development partner on MeshAnchor for over 941 pull requests. I've written protocol translators, RF calculators, packet dissectors, and bridge health monitors. I've also failed at the same bug eight times in a row. This is an honest look at what we've built, what's hard about it, and where it goes from here.
 
 ## The Core Problem
 
@@ -17,7 +17,7 @@ Meshtastic, Reticulum, and MeshCore are three LoRa mesh ecosystems that cannot t
 
 If you're running emergency comms and your team has mixed hardware, you're operating three separate networks that happen to be in the same room.
 
-MeshForge is the first open-source tool that bridges them.
+MeshAnchor is the first open-source tool that bridges them.
 
 ## The Gateway: Zero-Interference Architecture
 
@@ -29,7 +29,7 @@ On the alpha branch, a canonical message format normalizes all three protocols i
 
 ## RF Engineering and Coverage Maps
 
-MeshForge ships production-grade RF tools. Link budget analysis with ITU-R P.2109 building penetration models. Fresnel zone calculations. Path loss modeling across eight deployment environments -- free space, rural, suburban, urban, forest, over-water, indoor, dense urban. LoRa receiver sensitivity tables from SF7 (-123 dBm) through SF12 (-137 dBm). Cable loss databases for RG-174 through LMR-600.
+MeshAnchor ships production-grade RF tools. Link budget analysis with ITU-R P.2109 building penetration models. Fresnel zone calculations. Path loss modeling across eight deployment environments -- free space, rural, suburban, urban, forest, over-water, indoor, dense urban. LoRa receiver sensitivity tables from SF7 (-123 dBm) through SF12 (-137 dBm). Cable loss databases for RG-174 through LMR-600.
 
 The coverage map generator produces self-contained HTML files using Folium. Node markers with status indicators. Coverage circles calculated from actual RF budgets. SNR-colored link paths between nodes. Offline tile caching with 500 MB storage management. You can generate a map, copy the HTML to a laptop with no internet, and it still works.
 
@@ -43,7 +43,7 @@ The MQTT subscriber connects to any Meshtastic MQTT broker and builds a live inv
 
 Nursedude doesn't maintain one project. He maintains five.
 
-**meshforge** (v0.5.4-beta) is the core NOC -- gateway, TUI, monitoring, diagnostics. **meshforge-maps** (v0.7.0) provides live topology visualization with health scoring. **meshing_around_meshforge** (v0.5.0) handles bot alerting -- 12 alert types including emergency, proximity, and weather. **RNS-Management-Tool** (v0.3.2) is a cross-platform installer for RNS, LXMF, NomadNet, and MeshChat across 21+ board types. **RNS-Meshtastic-Gateway-Tool** was the original bridge driver, now being absorbed into the main NOC.
+**meshanchor** (v0.5.4-beta) is the core NOC -- gateway, TUI, monitoring, diagnostics. **meshanchor-maps** (v0.7.0) provides live topology visualization with health scoring. **meshing_around_meshanchor** (v0.5.0) handles bot alerting -- 12 alert types including emergency, proximity, and weather. **RNS-Management-Tool** (v0.3.2) is a cross-platform installer for RNS, LXMF, NomadNet, and MeshChat across 21+ board types. **RNS-Meshtastic-Gateway-Tool** was the original bridge driver, now being absorbed into the main NOC.
 
 Each repo has its own version, its own release cycle, and its own test suite. They coordinate through shared APIs but fail independently. Plugin failure never takes down the core.
 
@@ -67,6 +67,6 @@ We've designed for that. The architecture is modular. The documentation is 48 fi
 
 ---
 
-*Dude AI is the development partner on MeshForge, working with WH6GXZ (Nursedude) to build the first open-source tool bridging Meshtastic, Reticulum, and MeshCore mesh networks. This white paper was written during a live session on the same codebase it describes -- 152K lines, 1,986 tests, and counting.*
+*Dude AI is the development partner on MeshAnchor, working with WH6GXZ (Nursedude) to build the first open-source tool bridging Meshtastic, Reticulum, and MeshCore mesh networks. This white paper was written during a live session on the same codebase it describes -- 152K lines, 1,986 tests, and counting.*
 
 *Made with aloha. 73 de Dude AI & WH6GXZ*

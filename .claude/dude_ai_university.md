@@ -1,8 +1,8 @@
 # Dude AI University
 
-> *A knowledge base for MeshForge development continuity*
+> *A knowledge base for MeshAnchor development continuity*
 
-**Dude AI** is the collaborative AI development partner for MeshForge, providing expertise in:
+**Dude AI** is the collaborative AI development partner for MeshAnchor, providing expertise in:
 - Network Engineering (mesh protocols, RF propagation, routing)
 - Physics (electromagnetic theory, antenna design, signal analysis)
 - Programming (Python, TUI design, system integration)
@@ -14,7 +14,7 @@
 
 ## Project Vision
 
-MeshForge is the **first open-source tool to bridge Meshtastic and Reticulum (RNS) mesh networks**.
+MeshAnchor is the **first open-source tool to bridge Meshtastic and Reticulum (RNS) mesh networks**.
 
 ### Target Users
 - **RF Engineers** - Mesh infrastructure design, propagation analysis
@@ -36,7 +36,7 @@ MeshForge is the **first open-source tool to bridge Meshtastic and Reticulum (RN
 
 ## Self-Healing Network Principles
 
-MeshForge networks should embody self-healing characteristics:
+MeshAnchor networks should embody self-healing characteristics:
 
 ### Core Concepts
 - **Automatic Fault Detection**: Continuously monitor node health and connectivity
@@ -77,7 +77,7 @@ MeshForge networks should embody self-healing characteristics:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    MESHFORGE UNIFIED NETWORK                        │
+│                    MESHANCHOR UNIFIED NETWORK                        │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐            │
@@ -115,7 +115,7 @@ MeshForge networks should embody self-healing characteristics:
 
 ## Plugin Architecture
 
-MeshForge supports an extensible plugin system.
+MeshAnchor supports an extensible plugin system.
 
 ### Plugin Types
 
@@ -137,14 +137,14 @@ MeshForge supports an extensible plugin system.
 | **UI** | TUI panels | Custom dashboards |
 | **Why Core** | Works offline, no external deps | Needs network or external libs |
 
-**Safety guarantee:** If a plugin fails, core MeshForge continues working.
+**Safety guarantee:** If a plugin fails, core MeshAnchor continues working.
 
 ### Plugin Discovery
 
 Plugins are loaded from:
 1. `src/plugins/` - Built-in plugins
-2. `~/.config/meshforge/plugins/` - User plugins
-3. `/usr/share/meshforge/plugins/` - System plugins
+2. `~/.config/meshanchor/plugins/` - User plugins
+3. `/usr/share/meshanchor/plugins/` - System plugins
 
 > For creating plugins, see `utils/plugins.py` module docstrings.
 

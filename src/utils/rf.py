@@ -1,5 +1,5 @@
 """
-RF calculation utilities for MeshForge.
+RF calculation utilities for MeshAnchor.
 
 Pure functions for radio frequency calculations - no UI dependencies.
 

@@ -1,7 +1,7 @@
 """
 Startup Health Handler — Pre-main-menu config sanity checks.
 
-Extracted from MeshForgeLauncher (main.py) to follow the dispatcher principle:
+Extracted from MeshAnchorLauncher (main.py) to follow the dispatcher principle:
 the TUI selects what to run, handlers contain the logic.
 
 Runs during startup (called explicitly like FirstRunHandler) to detect and

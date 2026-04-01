@@ -58,7 +58,7 @@ def _make_mock_config():
     config.mqtt_bridge.password = ""
 
     # RNS sub-config
-    config.rns.identity_name = "meshforge_gateway"
+    config.rns.identity_name = "meshanchor_gateway"
     config.rns.announce_interval = 300
     config.rns.config_dir = ""
 
@@ -106,7 +106,7 @@ class TestGatewayStatus:
         text = h.ctx.dialog.last_msgbox_text
         assert "localhost" in text
         assert "bidirectional" in text
-        assert "meshforge_gateway" in text  # RNS identity
+        assert "meshanchor_gateway" in text  # RNS identity
 
     def test_show_status_mqtt_mode(self):
         h = _make_gateway()

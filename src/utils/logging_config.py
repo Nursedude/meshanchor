@@ -1,5 +1,5 @@
 """
-MeshForge Logging Configuration
+MeshAnchor Logging Configuration
 
 Unified logging module — all logging setup in one place.
 
@@ -13,7 +13,7 @@ Provides:
 - UI callback forwarding for real-time log display
 
 Designed for Raspberry Pi deployments with journalctl integration:
-    - Logs to journald when available (viewable via: journalctl -t meshforge)
+    - Logs to journald when available (viewable via: journalctl -t meshanchor)
     - Falls back to file/console logging
     - Structured logging for easy parsing
 
@@ -24,15 +24,15 @@ Usage:
 
 Or for module-level configuration:
     from utils.logging_config import setup_logging
-    setup_logging(level=logging.DEBUG, log_file="/var/log/meshforge.log")
+    setup_logging(level=logging.DEBUG, log_file="/var/log/meshanchor.log")
 
 TUI mode (suppress console to avoid whiptail corruption):
     setup_logging(log_level=logging.DEBUG, log_to_file=True, log_to_console=False)
 
 View logs on RPi:
-    journalctl -t meshforge -f          # Follow live logs
-    journalctl -t meshforge --since today
-    journalctl -t meshforge -p err      # Errors only
+    journalctl -t meshanchor -f          # Follow live logs
+    journalctl -t meshanchor --since today
+    journalctl -t meshanchor -p err      # Errors only
 """
 
 import functools
@@ -71,7 +71,7 @@ LEVEL_COLORS = {
 RESET = '\033[0m'
 
 # Default log directory — uses real user's home even when running with sudo
-LOG_DIR = get_real_user_home() / ".config" / "meshforge" / "logs"
+LOG_DIR = get_real_user_home() / ".config" / "meshanchor" / "logs"
 
 # Global log level setting (can be changed at runtime)
 _global_log_level = logging.DEBUG
@@ -261,7 +261,7 @@ def setup_logging(
         elif log_to_file:
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             _fix_directory_ownership(LOG_DIR)
-            file_path = LOG_DIR / f"meshforge_{datetime.now().strftime('%Y%m%d')}.log"
+            file_path = LOG_DIR / f"meshanchor_{datetime.now().strftime('%Y%m%d')}.log"
 
         if file_path:
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -441,7 +441,7 @@ CRITICAL = logging.CRITICAL
 
 def cleanup_old_logs(max_age_days: int = 30) -> int:
     """
-    Remove log files older than max_age_days from the MeshForge log directory.
+    Remove log files older than max_age_days from the MeshAnchor log directory.
 
     Prevents disk exhaustion on long-running deployments (RPi, gateways).
 
@@ -459,7 +459,7 @@ def cleanup_old_logs(max_age_days: int = 30) -> int:
 
     log_dirs = [
         LOG_DIR,
-        get_real_user_home() / ".cache" / "meshforge" / "logs",
+        get_real_user_home() / ".cache" / "meshanchor" / "logs",
     ]
 
     for log_dir in log_dirs:
@@ -507,7 +507,7 @@ def is_journald_available() -> bool:
 
 def setup_journald_logging(
     level: int = logging.INFO,
-    identifier: str = "meshforge",
+    identifier: str = "meshanchor",
     suppress_libs: bool = True,
 ) -> bool:
     """
@@ -515,7 +515,7 @@ def setup_journald_logging(
 
     This is the preferred logging method on Raspberry Pi and other
     systemd-based systems. Logs can be viewed with:
-        journalctl -t meshforge -f
+        journalctl -t meshanchor -f
 
     Args:
         level: Logging level
@@ -624,7 +624,7 @@ def enable_ui_logging() -> None:
 def setup_smart_logging(
     level: int = logging.INFO,
     log_file: Optional[str] = None,
-    identifier: str = "meshforge",
+    identifier: str = "meshanchor",
     use_colors: bool = True,
     enable_callbacks: bool = True,
 ) -> str:
@@ -860,7 +860,7 @@ def setup_structured_logging(
     Add structured JSON logging handler to root logger.
 
     Args:
-        log_dir: Directory for log files (default: ~/.config/meshforge/logs/)
+        log_dir: Directory for log files (default: ~/.config/meshanchor/logs/)
         max_bytes: Max file size before rotation
         backup_count: Number of rotated files to keep
         min_level: Minimum log level to capture
@@ -869,10 +869,10 @@ def setup_structured_logging(
         The configured handler (for testing/removal)
     """
     if log_dir is None:
-        log_dir = get_real_user_home() / ".config" / "meshforge" / "logs"
+        log_dir = get_real_user_home() / ".config" / "meshanchor" / "logs"
 
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "meshforge_structured.jsonl"
+    log_file = log_dir / "meshanchor_structured.jsonl"
 
     handler = logging.handlers.RotatingFileHandler(
         log_file,

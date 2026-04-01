@@ -204,7 +204,7 @@ class TestDashboardReports:
     @patch('subprocess.run')
     def test_reports_generate_and_view(self, mock_run, mock_gen):
         mock_run.return_value = MagicMock(returncode=0)
-        mock_gen.return_value = "=== MeshForge Report ===\nAll OK"
+        mock_gen.return_value = "=== MeshAnchor Report ===\nAll OK"
 
         h = _make_dashboard()
         h.ctx.dialog._menu_returns = ["generate", None]

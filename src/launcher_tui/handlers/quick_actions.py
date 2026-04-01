@@ -92,10 +92,10 @@ class QuickActionsHandler(BaseHandler):
         clear_screen()
         print("=== Quick Service Status ===\n")
 
-        services = ['meshtasticd', 'rnsd', 'mosquitto', 'meshforge']
+        services = ['meshtasticd', 'rnsd', 'mosquitto', 'meshanchor']
         warnings = []
         for svc in services:
-            if svc == 'meshforge':
+            if svc == 'meshanchor':
                 is_systemd = False
                 try:
                     is_running, _ = check_systemd_service(svc)
@@ -285,7 +285,7 @@ class QuickActionsHandler(BaseHandler):
         try:
             from utils.paths import get_real_user_home
 
-            path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+            path = get_real_user_home() / ".config" / "meshanchor" / "node_inventory.json"
             inv = NodeInventory(path=path)
 
             stats = inv.get_stats()
@@ -332,13 +332,13 @@ class QuickActionsHandler(BaseHandler):
         try:
             from utils.paths import get_real_user_home
 
-            config_path = get_real_user_home() / ".config" / "meshforge" / "operator_position.json"
+            config_path = get_real_user_home() / ".config" / "meshanchor" / "operator_position.json"
             gps = GPSManager(config_path=config_path)
 
             nodes = []
             try:
                 from utils.node_inventory import NodeInventory as _NodeInv
-                inv_path = get_real_user_home() / ".config" / "meshforge" / "node_inventory.json"
+                inv_path = get_real_user_home() / ".config" / "meshanchor" / "node_inventory.json"
                 inv = _NodeInv(path=inv_path)
                 for node in inv.get_all_nodes():
                     if node.has_position:

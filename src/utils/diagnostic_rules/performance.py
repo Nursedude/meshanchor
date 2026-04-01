@@ -1,4 +1,4 @@
-"""Performance diagnostic rules for MeshForge Diagnostic Engine."""
+"""Performance diagnostic rules for MeshAnchor Diagnostic Engine."""
 
 from typing import TYPE_CHECKING
 

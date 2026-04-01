@@ -1,4 +1,4 @@
-"""Common utilities for MeshForge - centralized to reduce code duplication.
+"""Common utilities for MeshAnchor - centralized to reduce code duplication.
 
 This module provides:
 - Settings management (save/load JSON with defaults)
@@ -30,7 +30,7 @@ from utils.paths import get_real_user_home
 
 
 # Default config directory - use real user's home when running with sudo
-CONFIG_DIR = get_real_user_home() / ".config" / "meshforge"
+CONFIG_DIR = get_real_user_home() / ".config" / "meshanchor"
 
 
 class SettingsManager:
@@ -266,7 +266,7 @@ def ensure_config_dir(subdir: Optional[str] = None) -> Path:
     return path
 
 
-def get_data_dir(app_name: str = "meshforge") -> Path:
+def get_data_dir(app_name: str = "meshanchor") -> Path:
     """Get the application data directory.
 
     Uses real user's home when running with sudo.
@@ -284,7 +284,7 @@ def get_data_dir(app_name: str = "meshforge") -> Path:
     return data_dir
 
 
-def get_cache_dir(app_name: str = "meshforge") -> Path:
+def get_cache_dir(app_name: str = "meshanchor") -> Path:
     """Get the application cache directory.
 
     Uses real user's home when running with sudo.

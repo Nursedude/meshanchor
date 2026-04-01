@@ -1,5 +1,5 @@
 """
-Review pattern definitions for MeshForge Auto-Review System.
+Review pattern definitions for MeshAnchor Auto-Review System.
 
 Centralized pattern dictionaries used by ReviewAgent to scan for
 security, redundancy, performance, and reliability issues.
@@ -26,7 +26,7 @@ class ReviewPatterns:
     """
     Centralized review patterns for each agent category.
 
-    These patterns align with the MeshForge Auto-Review Principles.
+    These patterns align with the MeshAnchor Auto-Review Principles.
     """
 
     # Security patterns (Priority order: CRITICAL, HIGH, MEDIUM)

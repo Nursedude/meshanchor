@@ -2,7 +2,7 @@
 Demo Mode Manager — Simulated mesh traffic for hardware-free testing.
 
 Uses meshing_around's MockMeshtasticAPI when available, otherwise provides
-a minimal built-in simulation. All events are translated to MeshForge's
+a minimal built-in simulation. All events are translated to MeshAnchor's
 event_bus types (MessageEvent, NodeEvent, AlertEvent).
 
 Degrades gracefully if meshing_around is not installed.
@@ -26,7 +26,7 @@ from utils.safe_import import safe_import
 logger = logging.getLogger(__name__)
 
 # Add meshing_around to path if available
-_MA_PATH = "/opt/meshing_around_meshforge"
+_MA_PATH = "/opt/meshing_around_meshanchor"
 if _MA_PATH not in sys.path:
     sys.path.insert(0, _MA_PATH)
 
@@ -97,11 +97,11 @@ class DemoModeManager:
             config.interface_type = "mock"
             config.host = "localhost"
             config.port = 4403
-            config.node_name = "MeshForge Demo"
+            config.node_name = "MeshAnchor Demo"
 
             self._mock_api = _MockAPI(config)
 
-            # Register callbacks that translate to MeshForge event_bus
+            # Register callbacks that translate to MeshAnchor event_bus
             self._mock_api.register_callback("on_message", self._on_ma_message)
             self._mock_api.register_callback("on_node_update", self._on_ma_node_update)
             self._mock_api.register_callback("on_alert", self._on_ma_alert)
@@ -185,7 +185,7 @@ class DemoModeManager:
     # ── meshing_around callback translators ─────────────────────
 
     def _on_ma_message(self, *args) -> None:
-        """Translate meshing_around message to MeshForge event_bus."""
+        """Translate meshing_around message to MeshAnchor event_bus."""
         if not args:
             return
         msg = args[0] if len(args) == 1 else args
@@ -204,7 +204,7 @@ class DemoModeManager:
             self._stats["message_count"] += 1
 
     def _on_ma_node_update(self, *args) -> None:
-        """Translate meshing_around node update to MeshForge event_bus."""
+        """Translate meshing_around node update to MeshAnchor event_bus."""
         if not args:
             return
         node_id = args[0] if isinstance(args[0], str) else getattr(args[0], 'node_id', '')
@@ -219,7 +219,7 @@ class DemoModeManager:
                 self._stats["node_count"] += 1
 
     def _on_ma_alert(self, *args) -> None:
-        """Translate meshing_around alert to MeshForge event_bus."""
+        """Translate meshing_around alert to MeshAnchor event_bus."""
         if not args:
             return
         alert = args[0]
@@ -234,7 +234,7 @@ class DemoModeManager:
             self._stats["alert_count"] += 1
 
     def _on_ma_telemetry(self, *args) -> None:
-        """Translate meshing_around telemetry to MeshForge node update."""
+        """Translate meshing_around telemetry to MeshAnchor node update."""
         if not args:
             return
         node_id = args[0] if isinstance(args[0], str) else getattr(args[0], 'node_id', '')

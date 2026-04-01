@@ -1,5 +1,5 @@
 """
-Dual-Radio Failover & Load Balancing for MeshForge Gateway.
+Dual-Radio Failover & Load Balancing for MeshAnchor Gateway.
 
 Monitors two meshtasticd instances and automatically switches the active
 transmitter when channel utilization exceeds safe thresholds. Designed to
@@ -802,7 +802,7 @@ class LoadBalancerConfig:
 
 class RadioLoadBalancer:
     """
-    Weighted TX load balancer for dual-radio MeshForge gateways.
+    Weighted TX load balancer for dual-radio MeshAnchor gateways.
 
     Distributes outbound gateway traffic across two meshtasticd instances
     based on each radio's tx_utilization (its own TX airtime contribution).

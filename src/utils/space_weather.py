@@ -140,7 +140,7 @@ class SpaceWeatherAPI:
 
         try:
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'MeshForge/1.0 (Space Weather Monitor)')
+            req.add_header('User-Agent', 'MeshAnchor/1.0 (Space Weather Monitor)')
             req.add_header('Accept', 'application/json')
 
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
@@ -261,7 +261,7 @@ class SpaceWeatherAPI:
 
         try:
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'MeshForge/1.0 (Space Weather Monitor)')
+            req.add_header('User-Agent', 'MeshAnchor/1.0 (Space Weather Monitor)')
 
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 text = response.read().decode('utf-8')

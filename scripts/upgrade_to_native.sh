@@ -188,9 +188,9 @@ fi
 # ─────────────────────────────────────────────────────────────────
 # Update NOC config
 # ─────────────────────────────────────────────────────────────────
-echo -e "${CYAN}[4/5] Updating MeshForge NOC config...${NC}"
+echo -e "${CYAN}[4/5] Updating MeshAnchor NOC config...${NC}"
 
-NOC_CONFIG="/etc/meshforge/noc.yaml"
+NOC_CONFIG="/etc/meshanchor/noc.yaml"
 if [[ -f "$NOC_CONFIG" ]]; then
     # Update daemon type from usb-direct to native-usb
     if grep -q 'daemon: "usb-direct"' "$NOC_CONFIG" 2>/dev/null || \
@@ -276,6 +276,6 @@ LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 echo -e "  ${BOLD}https://${LOCAL_IP}:9443${NC}"
 echo ""
 echo -e "${CYAN}Commands:${NC}"
-echo -e "  ${GREEN}meshforge-web${NC}         - Open web client"
-echo -e "  ${GREEN}meshforge-noc --status${NC} - Check service status"
+echo -e "  ${GREEN}meshanchor-web${NC}         - Open web client"
+echo -e "  ${GREEN}meshanchor-noc --status${NC} - Check service status"
 echo ""

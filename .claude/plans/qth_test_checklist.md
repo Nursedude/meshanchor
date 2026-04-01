@@ -1,4 +1,4 @@
-# MeshForge QTH Hardware Test Checklist
+# MeshAnchor QTH Hardware Test Checklist
 
 > **Date**: 2026-01-17
 > **Updated**: 2026-02-27 — Rewritten for TUI (GTK removed in v0.5.x)
@@ -10,14 +10,14 @@
 ## Pre-Test Setup
 
 ### Environment Verification
-- [ ] MeshForge version: `python3 -c "from src.__version__ import __version__; print(__version__)"` → 0.5.4-beta
+- [ ] MeshAnchor version: `python3 -c "from src.__version__ import __version__; print(__version__)"` → 0.5.4-beta
 - [ ] All tests passing: `python3 -m pytest tests/ -v --tb=short` → ~1,986 passed
 - [ ] Branch: `git branch` → main (or feature branch)
 
 ### Services Running
 - [ ] meshtasticd: `systemctl status meshtasticd` or port 4403 open
 - [ ] rnsd: `systemctl status rnsd` or UDP port 37428 (check with `ss -ulnp | grep 37428`)
-- [ ] MeshForge TUI launches: `sudo python3 src/launcher_tui/main.py`
+- [ ] MeshAnchor TUI launches: `sudo python3 src/launcher_tui/main.py`
 
 ---
 
@@ -52,7 +52,7 @@
 - [ ] Navigate through several menus
 - [ ] Exit via Back/Quit
 - [ ] **VERIFY**: Clean shutdown (no errors in console)
-- [ ] **VERIFY**: No orphan processes: `ps aux | grep meshforge`
+- [ ] **VERIFY**: No orphan processes: `ps aux | grep meshanchor`
 
 **Pass Criteria**: Clean shutdown, no orphans
 
@@ -71,9 +71,9 @@
 - [ ] **RECORD**: Status shown (queued/sent/delivered)?
 
 ### 2.2 Message Queue Database
-- [ ] Check queue: `sqlite3 ~/.config/meshforge/message_queue.db "SELECT * FROM messages ORDER BY created_at DESC LIMIT 5"`
+- [ ] Check queue: `sqlite3 ~/.config/meshanchor/message_queue.db "SELECT * FROM messages ORDER BY created_at DESC LIMIT 5"`
 - [ ] **VERIFY**: Test message appears in database
-- [ ] Check lifecycle: `sqlite3 ~/.config/meshforge/message_queue.db "SELECT * FROM message_lifecycle ORDER BY timestamp DESC LIMIT 10"`
+- [ ] Check lifecycle: `sqlite3 ~/.config/meshanchor/message_queue.db "SELECT * FROM message_lifecycle ORDER BY timestamp DESC LIMIT 10"`
 - [ ] **VERIFY**: Lifecycle events recorded (CREATED, QUEUED, etc.)
 
 ### 2.3 Message Trace (New API)
@@ -99,8 +99,8 @@ print(f"Summary: {summary}")
 **Goal**: Test predictive health monitoring added today
 
 ### 3.1 Analytics Store
-- [ ] Check analytics DB exists: `ls ~/.config/meshforge/analytics.db`
-- [ ] Check tables: `sqlite3 ~/.config/meshforge/analytics.db ".tables"`
+- [ ] Check analytics DB exists: `ls ~/.config/meshanchor/analytics.db`
+- [ ] Check tables: `sqlite3 ~/.config/meshanchor/analytics.db ".tables"`
 - [ ] **VERIFY**: Tables include `link_budget_history`, `network_health`
 
 ### 3.2 Predictive Analyzer
@@ -158,7 +158,7 @@ print(forecast)
 - [ ] TUI Hardware menu detects?
 
 ### 4.4 Sensors
-| Sensor | Detection Command | MeshForge Sees? |
+| Sensor | Detection Command | MeshAnchor Sees? |
 |--------|------------------|-----------------|
 | GPS | `ls /dev/ttyUSB* /dev/ttyACM*` | [ ] Yes [ ] No |
 | SDR (RTL) | `lsusb \| grep RTL` | [ ] Yes [ ] No |
@@ -214,9 +214,9 @@ print(forecast)
 
 ## Quick Reference
 
-### Start MeshForge
+### Start MeshAnchor
 ```bash
-cd /home/user/meshforge
+cd /home/user/meshanchor
 sudo python3 src/launcher_tui/main.py
 ```
 
@@ -235,10 +235,10 @@ python3 -c "from utils.service_check import check_service; print(check_service('
 ### Message Queue Queries
 ```bash
 # Recent messages
-sqlite3 ~/.config/meshforge/message_queue.db "SELECT id, destination, status, created_at FROM messages ORDER BY created_at DESC LIMIT 10"
+sqlite3 ~/.config/meshanchor/message_queue.db "SELECT id, destination, status, created_at FROM messages ORDER BY created_at DESC LIMIT 10"
 
 # Lifecycle events
-sqlite3 ~/.config/meshforge/message_queue.db "SELECT message_id, state, timestamp FROM message_lifecycle ORDER BY timestamp DESC LIMIT 20"
+sqlite3 ~/.config/meshanchor/message_queue.db "SELECT message_id, state, timestamp FROM message_lifecycle ORDER BY timestamp DESC LIMIT 20"
 ```
 
 ---

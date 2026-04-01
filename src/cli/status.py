@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-MeshForge Status - One-shot terminal status display.
+MeshAnchor Status - One-shot terminal status display.
 
 Usage:
-    meshforge-status          # Full status
-    meshforge-status --brief  # One-line per service
-    meshforge-status --json   # Machine-readable
+    meshanchor-status          # Full status
+    meshanchor-status --brief  # One-line per service
+    meshanchor-status --json   # Machine-readable
 
 Shows: services, radio info, web client URL, recent errors, system resources.
 Designed for headless/SSH use - rich terminal output with ANSI colors.
@@ -81,9 +81,9 @@ def check_service(name):
             )
             status = result.stdout.strip()
 
-        # If meshforge systemd service isn't active, check for interactive process
-        if name == 'meshforge' and status != 'active':
-            if _is_meshforge_process_running():
+        # If meshanchor systemd service isn't active, check for interactive process
+        if name == 'meshanchor' and status != 'active':
+            if _is_meshanchor_process_running():
                 return 'interactive'
 
         return status
@@ -91,15 +91,15 @@ def check_service(name):
         return 'unknown'
 
 
-def _is_meshforge_process_running():
-    """Check if MeshForge is running as an interactive process (not systemd).
+def _is_meshanchor_process_running():
+    """Check if MeshAnchor is running as an interactive process (not systemd).
 
     Note: This is a specialized check that filters out the status script itself,
     so it doesn't use the generic check_process_running() from service_check.
     """
     try:
         result = subprocess.run(
-            ['pgrep', '-af', 'python.*meshforge|python.*launcher'],
+            ['pgrep', '-af', 'python.*meshanchor|python.*launcher'],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
@@ -310,7 +310,7 @@ def print_status(brief=False, as_json=False):
     services = {
         'meshtasticd': {'status': check_service('meshtasticd'), 'ports': [4403, 9443]},
         'rnsd': {'status': check_service('rnsd'), 'ports': [37428]},
-        'meshforge': {'status': check_service('meshforge'), 'ports': []},
+        'meshanchor': {'status': check_service('meshanchor'), 'ports': []},
     }
 
     # Check ports
@@ -342,7 +342,7 @@ def print_status(brief=False, as_json=False):
 
     # Full output
     print()
-    print(f"{C.BOLD}MeshForge NOC Status{C.NC}")
+    print(f"{C.BOLD}MeshAnchor NOC Status{C.NC}")
     print(f"{C.DIM}{'─' * 50}{C.NC}")
 
     # Services
@@ -439,7 +439,7 @@ def print_status(brief=False, as_json=False):
 
     # Quick commands
     print(f"\n{C.DIM}{'─' * 50}{C.NC}")
-    print(f"{C.DIM}Commands: meshforge (TUI)  meshforge-web (browser)  meshforge-status --brief{C.NC}")
+    print(f"{C.DIM}Commands: meshanchor (TUI)  meshanchor-web (browser)  meshanchor-status --brief{C.NC}")
     print()
 
 

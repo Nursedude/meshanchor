@@ -1,6 +1,6 @@
 """Meshtastic HTTP API proxy methods for MapRequestHandler.
 
-Proxies meshtasticd's HTTP/protobuf API through MeshForge's map server,
+Proxies meshtasticd's HTTP/protobuf API through MeshAnchor's map server,
 providing per-client packet multiplexing and phantom node filtering.
 
 Extracted from map_http_handler.py for file size compliance (CLAUDE.md #6).
@@ -37,7 +37,7 @@ class MeshtasticProxyMixin:
         session_id = ''
         for part in cookie_header.split(';'):
             part = part.strip()
-            if part.startswith('meshforge_session='):
+            if part.startswith('meshanchor_session='):
                 session_id = part.split('=', 1)[1]
                 break
 
@@ -63,7 +63,7 @@ class MeshtasticProxyMixin:
 
         # Check if we need to set a session cookie (for per-tab multiplexing)
         cookie_header = self.headers.get('Cookie', '')
-        needs_cookie = 'meshforge_session=' not in cookie_header
+        needs_cookie = 'meshanchor_session=' not in cookie_header
 
         if packet:
             self.send_response(200)
@@ -74,7 +74,7 @@ class MeshtasticProxyMixin:
             if needs_cookie:
                 session = os.urandom(8).hex()
                 self.send_header('Set-Cookie',
-                                 f'meshforge_session={session}; Path=/; SameSite=Lax')
+                                 f'meshanchor_session={session}; Path=/; SameSite=Lax')
             self.end_headers()
             self.wfile.write(packet)
         else:
@@ -87,7 +87,7 @@ class MeshtasticProxyMixin:
             if needs_cookie:
                 session = os.urandom(8).hex()
                 self.send_header('Set-Cookie',
-                                 f'meshforge_session={session}; Path=/; SameSite=Lax')
+                                 f'meshanchor_session={session}; Path=/; SameSite=Lax')
             self.end_headers()
 
     def _proxy_toradio(self):

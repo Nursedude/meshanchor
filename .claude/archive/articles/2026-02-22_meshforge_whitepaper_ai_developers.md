@@ -1,4 +1,4 @@
-# MeshForge: Building the First Multi-Protocol Mesh Bridge with an AI Development Partner
+# MeshAnchor: Building the First Multi-Protocol Mesh Bridge with an AI Development Partner
 
 *What happens when a HAM operator and Claude Code build infrastructure that didn't exist before*
 
@@ -21,9 +21,9 @@ The catch: I'm one person. The scope of bridging four mesh ecosystems from the w
 
 ---
 
-## What MeshForge Actually Is
+## What MeshAnchor Actually Is
 
-MeshForge is not a single application. It's an ecosystem spanning five repositories that collectively provide mesh network operations, monitoring, alerting, visualization, and tooling.
+MeshAnchor is not a single application. It's an ecosystem spanning five repositories that collectively provide mesh network operations, monitoring, alerting, visualization, and tooling.
 
 The core is a **Network Operations Center** that runs on a $35 Raspberry Pi. Plug in a LoRa radio, run the installer, and you get:
 
@@ -35,7 +35,7 @@ The core is a **Network Operations Center** that runs on a $35 Raspberry Pi. Plu
 - **Traffic inspection** --- Wireshark-grade packet capture for both Meshtastic and RNS networks
 - **Prometheus metrics** and coverage maps with SNR-based link quality visualization
 
-On the alpha branch (v0.6.0), MeshForge adds **3-way routing** between Meshtastic, Reticulum, and MeshCore through a canonical message format that normalizes all three protocols into a unified representation. That's the part that didn't exist anywhere before.
+On the alpha branch (v0.6.0), MeshAnchor adds **3-way routing** between Meshtastic, Reticulum, and MeshCore through a canonical message format that normalizes all three protocols into a unified representation. That's the part that didn't exist anywhere before.
 
 The numbers: 274+ Python files. 153,000+ lines. 1,743 tests across 50 test files, 100% pass rate. Four enforced security rules. Zero violations.
 
@@ -45,7 +45,7 @@ The numbers: 274+ Python files. 153,000+ lines. 1,743 tests across 50 test files
 
 This is the part that matters for AI developers.
 
-MeshForge is built with Claude Code as a full development partner. Not autocomplete. Not "generate a function." A persistent AI agent that holds context across the entire codebase and operates under a structured configuration.
+MeshAnchor is built with Claude Code as a full development partner. Not autocomplete. Not "generate a function." A persistent AI agent that holds context across the entire codebase and operates under a structured configuration.
 
 The `CLAUDE.md` file in the repository root is effectively an operating system for AI-assisted development. It defines architecture rules, security constraints (no `shell=True`, no bare `except:`, no `Path.home()` under sudo), file size limits, service management patterns, and development principles. The AI agent --- we call it "Dude AI" --- operates as network engineer, physicist, programmer, and project manager within those constraints.
 
@@ -59,7 +59,7 @@ This isn't theoretical. This is production infrastructure being built by one HAM
 
 ## Roadmap: Where This Goes
 
-MeshForge follows a deliberate phase model toward v1.0:
+MeshAnchor follows a deliberate phase model toward v1.0:
 
 **Stability** (current, v0.5.x) --- Eliminate technical debt. Every file under 1,500 lines. Gateway hardened with MQTT architecture. Service management centralized.
 
@@ -69,7 +69,7 @@ MeshForge follows a deliberate phase model toward v1.0:
 
 **v1.0** --- SDR spectrum analysis (RTL-SDR), NanoVNA antenna integration, firmware flashing, historical playback. The bar: any HAM can deploy confidently and extend with their own Claude agent.
 
-The extensibility piece is deliberate. MeshForge's `CLAUDE.md` patterns library will let any developer with Claude Code run an agent against the codebase, write features, run the full test suite, and ship. The architecture is designed for that.
+The extensibility piece is deliberate. MeshAnchor's `CLAUDE.md` patterns library will let any developer with Claude Code run an agent against the codebase, write features, run the full test suite, and ship. The architecture is designed for that.
 
 ---
 
@@ -87,9 +87,9 @@ The extensibility piece is deliberate. MeshForge's `CLAUDE.md` patterns library 
 
 ## Get Involved
 
-MeshForge is GPL-3.0, fully open source, and actively developed.
+MeshAnchor is GPL-3.0, fully open source, and actively developed.
 
-- **GitHub**: github.com/Nursedude/meshforge
+- **GitHub**: github.com/Nursedude/meshanchor
 - **Development Blog**: nursedude.substack.com
 - **Callsign**: WH6GXZ
 
@@ -99,4 +99,4 @@ If you're building with Claude Code and want to see what sustained human+AI infr
 
 ---
 
-*Nursedude is a HAM General class operator (WH6GXZ), registered nurse (RN BSN), and infrastructure engineer building MeshForge from Hawaii. Dude AI is the Claude Code agent that serves as the project's AI development partner.*
+*Nursedude is a HAM General class operator (WH6GXZ), registered nurse (RN BSN), and infrastructure engineer building MeshAnchor from Hawaii. Dude AI is the Claude Code agent that serves as the project's AI development partner.*

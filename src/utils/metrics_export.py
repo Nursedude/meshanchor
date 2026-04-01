@@ -1,5 +1,5 @@
 """
-Prometheus and InfluxDB Metrics Export for MeshForge.
+Prometheus and InfluxDB Metrics Export for MeshAnchor.
 
 This module provides backward compatibility by re-exporting from
 the split modules:
@@ -20,11 +20,11 @@ Usage:
     # Prometheus can now scrape http://localhost:9090/metrics
 
     # Option 3: Write to file for pushgateway or file-based collection
-    exporter.write_to_file("/var/lib/meshforge/metrics.prom")
+    exporter.write_to_file("/var/lib/meshanchor/metrics.prom")
 
     # InfluxDB export
     from utils.metrics_export import InfluxDBExporter, start_influxdb_exporter
-    exporter = InfluxDBExporter(url="http://localhost:8086", database="meshforge")
+    exporter = InfluxDBExporter(url="http://localhost:8086", database="meshanchor")
     exporter.write_metrics()
 
 Reference:

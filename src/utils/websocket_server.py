@@ -1,10 +1,10 @@
 """
-MeshForge WebSocket Server - Real-time message broadcast.
+MeshAnchor WebSocket Server - Real-time message broadcast.
 
 Solves the "one client" limitation of Meshtastic HTTP API by providing
 a WebSocket endpoint that broadcasts messages to multiple web clients.
 
-MeshForge becomes the single authoritative client to meshtasticd, and
+MeshAnchor becomes the single authoritative client to meshtasticd, and
 this server pushes messages to all connected browsers in real-time.
 
 Usage:
@@ -119,7 +119,7 @@ class MessageWebSocketServer:
         self._thread = threading.Thread(
             target=self._run_server,
             daemon=True,
-            name="meshforge-websocket-server"
+            name="meshanchor-websocket-server"
         )
         self._thread.start()
 
@@ -251,7 +251,7 @@ class MessageWebSocketServer:
             # Send connection confirmation
             await websocket.send(json.dumps({
                 'type': 'connected',
-                'message': 'Connected to MeshForge message stream',
+                'message': 'Connected to MeshAnchor message stream',
                 'timestamp': datetime.now().isoformat()
             }))
 
@@ -391,7 +391,7 @@ def is_websocket_available() -> bool:
 # =============================================================================
 # Event Bus Integration (Issue #20 Phase 3)
 #
-# Subscribe to the MeshForge event bus so that RX messages, service status
+# Subscribe to the MeshAnchor event bus so that RX messages, service status
 # changes, and node updates are pushed to all WebSocket clients in real-time.
 # =============================================================================
 

@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug to help improve MeshForge
+about: Report a bug to help improve MeshAnchor
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -27,7 +27,7 @@ If applicable, add screenshots to help explain your problem.
 ## Environment
 - **OS**: [e.g., Raspberry Pi OS Bookworm, Ubuntu 22.04]
 - **Python version**: [e.g., 3.11]
-- **MeshForge version**: [e.g., 0.4.6-beta]
+- **MeshAnchor version**: [e.g., 0.4.6-beta]
 - **Interface**: [e.g., GTK, TUI, Web]
 - **Hardware**: [e.g., Pi 4, Heltec V3]
 

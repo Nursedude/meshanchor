@@ -239,7 +239,7 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
     def _fix_user_directory_ownership(self) -> bool:
         """Fix ownership of user directories if they were created by root.
 
-        When MeshForge runs with sudo, any user-space applications (NomadNet,
+        When MeshAnchor runs with sudo, any user-space applications (NomadNet,
         rnstatus, etc.) that were previously launched as root may have created
         ~/.reticulum or ~/.nomadnetwork with root ownership.
 
@@ -795,7 +795,7 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
         """Launch NomadNet in interactive text UI mode.
 
         This takes over the terminal (like running nomadnet directly).
-        The user returns to MeshForge when they exit NomadNet.
+        The user returns to MeshAnchor when they exit NomadNet.
 
         When running via sudo, launches as the real user so NomadNet
         uses their config (~/.nomadnetwork) instead of root's.
@@ -809,7 +809,7 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
             return
 
         # Fix ownership of user directories if they were created by root
-        # This is a common issue when MeshForge runs with sudo
+        # This is a common issue when MeshAnchor runs with sudo
         if not self._fix_user_directory_ownership():
             return
 
@@ -830,7 +830,7 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
         print("=== Launching NomadNet ===")
         if rns_config_path:
             print(f"Using RNS config: {rns_config_path}")
-        print("Exit NomadNet (Ctrl+Q) to return to MeshForge.\n")
+        print("Exit NomadNet (Ctrl+Q) to return to MeshAnchor.\n")
 
         # When running via sudo, we must run NomadNet as the real user.
         # Just setting HOME is not enough - RPC authentication between
@@ -870,14 +870,14 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                 self._show_launch_error(result.returncode, result.stderr)
             else:
                 print("NomadNet exited normally.")
-            print("\nPress Enter to return to MeshForge...")
+            print("\nPress Enter to return to MeshAnchor...")
             try:
                 input()
             except (EOFError, KeyboardInterrupt):
                 pass
         except KeyboardInterrupt:
             print("\n\nAborted.")
-            print("\nReturning to MeshForge...")
+            print("\nReturning to MeshAnchor...")
         except FileNotFoundError:
             print(f"\nError: NomadNet binary not found at: {nn_path}")
             print("\nPress Enter to continue...")

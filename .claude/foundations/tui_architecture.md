@@ -1,6 +1,6 @@
 # TUI Architecture Guide
 
-> Code-level documentation for MeshForge's Terminal UI (launcher_tui)
+> Code-level documentation for MeshAnchor's Terminal UI (launcher_tui)
 
 **Date**: 2026-03-09
 **Status**: Living Document
@@ -10,7 +10,7 @@
 
 ## Overview
 
-The TUI is MeshForge's primary interface, using whiptail/dialog for a raspi-config style experience. The architecture uses a **handler registry pattern** where each feature is a self-contained handler class dispatched through a central registry.
+The TUI is MeshAnchor's primary interface, using whiptail/dialog for a raspi-config style experience. The architecture uses a **handler registry pattern** where each feature is a self-contained handler class dispatched through a central registry.
 
 ### Key Design Decisions
 
@@ -30,7 +30,7 @@ src/launcher_tui/
 ├── Entry Points
 │   ├── __init__.py           # Package exports
 │   ├── __main__.py           # python -m launcher_tui
-│   └── main.py               # MeshForgeLauncher class + orchestration (~1,160 lines)
+│   └── main.py               # MeshAnchorLauncher class + orchestration (~1,160 lines)
 │
 ├── Core Infrastructure
 │   ├── handler_protocol.py   # CommandHandler Protocol + TUIContext + BaseHandler
@@ -141,7 +141,7 @@ src/launcher_tui/
 
 ### TUIContext (`handler_protocol.py`)
 
-Shared state dataclass created once in `MeshForgeLauncher.__init__()`:
+Shared state dataclass created once in `MeshAnchorLauncher.__init__()`:
 
 ```python
 @dataclass
@@ -155,7 +155,7 @@ class TUIContext:
     src_dir: Path                  # src/ directory
     env: dict                      # Environment detection
     registry: Optional[HandlerRegistry]  # Back-reference
-    daemon_active: bool            # meshforged ownership
+    daemon_active: bool            # meshanchord ownership
 
     # Utility methods
     def feature_enabled(feature: str) -> bool  # Profile check
@@ -265,7 +265,7 @@ class EnvironmentState:
 Persistent status shown at top of every dialog:
 
 ```
-MeshForge v0.5.5 | meshtasticd: ● | rnsd: ○ | mqtt: ○ | Conflicts: 0
+MeshAnchor v0.5.5 | meshtasticd: ● | rnsd: ○ | mqtt: ○ | Conflicts: 0
 ```
 
 ---
@@ -277,7 +277,7 @@ python -m launcher_tui
     ↓
 __main__.py → main.main()
     ↓
-MeshForgeLauncher()
+MeshAnchorLauncher()
     ├── __init__()
     │   ├── self.dialog = DialogBackend()
     │   ├── self._setup_status_bar()
@@ -306,7 +306,7 @@ MeshForgeLauncher()
 ### Anatomy of a Handler
 
 ```python
-"""My Feature handler for MeshForge TUI."""
+"""My Feature handler for MeshAnchor TUI."""
 
 from handler_protocol import BaseHandler
 
@@ -488,7 +488,7 @@ Always use `get_real_user_home()` instead of `Path.home()`:
 
 ```python
 from utils.paths import get_real_user_home
-config = get_real_user_home() / ".config" / "meshforge"
+config = get_real_user_home() / ".config" / "meshanchor"
 ```
 
 ### Subprocess Safety

@@ -1,5 +1,5 @@
 """
-MeshForge Startup Health Summary
+MeshAnchor Startup Health Summary
 
 Provides instant health check on startup showing:
 - Service status (meshtasticd, rnsd)
@@ -431,7 +431,7 @@ def print_health_summary(summary: HealthSummary, use_color: bool = True) -> str:
     lines = []
 
     # Header with optional profile name
-    header = f"{BOLD}MeshForge v{summary.version}{RESET}"
+    header = f"{BOLD}MeshAnchor v{summary.version}{RESET}"
     if summary.profile_name:
         header += f"  [{summary.profile_name}]"
     lines.append(header)

@@ -1,4 +1,4 @@
-# MeshForge Development Priorities
+# MeshAnchor Development Priorities
 
 > **Last Updated:** 2026-03-03
 > **Maintainer:** WH6GXZ / Dude AI

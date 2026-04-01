@@ -106,7 +106,7 @@ class TestWizardConfig:
                 'channel': 0
             },
             'rns': {
-                'identity_name': 'meshforge_gateway',
+                'identity_name': 'meshanchor_gateway',
                 'announce_interval': 300
             }
         }
@@ -140,11 +140,11 @@ class TestConfigSave:
             # Simulate the path logic from the wizard
             sudo_user = os.environ.get('SUDO_USER')
             if sudo_user and sudo_user != 'root':
-                config_dir = Path(f'/home/{sudo_user}') / '.config' / 'meshforge'
+                config_dir = Path(f'/home/{sudo_user}') / '.config' / 'meshanchor'
             else:
-                config_dir = Path.home() / '.config' / 'meshforge'
+                config_dir = Path.home() / '.config' / 'meshanchor'
 
-            assert str(config_dir) == '/home/testuser/.config/meshforge'
+            assert str(config_dir) == '/home/testuser/.config/meshanchor'
 
     def test_config_path_without_sudo(self):
         """Config uses home when no SUDO_USER."""
@@ -156,12 +156,12 @@ class TestConfigSave:
 
             sudo_user = os.environ.get('SUDO_USER')
             if sudo_user and sudo_user != 'root':
-                config_dir = Path(f'/home/{sudo_user}') / '.config' / 'meshforge'
+                config_dir = Path(f'/home/{sudo_user}') / '.config' / 'meshanchor'
             else:
-                config_dir = Path.home() / '.config' / 'meshforge'
+                config_dir = Path.home() / '.config' / 'meshanchor'
 
             # Should use Path.home()
-            assert '.config/meshforge' in str(config_dir)
+            assert '.config/meshanchor' in str(config_dir)
 
 
 @pytest.mark.skipif(not GTK_AVAILABLE, reason="GTK4 not available")

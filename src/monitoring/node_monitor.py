@@ -25,9 +25,18 @@ logger = logging.getLogger(__name__)
 if not logger.handlers:
     logger.setLevel(logging.WARNING)
 
-from utils.meshtastic_connection import (
-    MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown, safe_close_interface
-)
+# Meshtastic connection — optional gateway in MeshAnchor
+try:
+    from utils.meshtastic_connection import (
+        MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown, safe_close_interface
+    )
+    _HAS_MESHTASTIC_CONN = True
+except ImportError:
+    import threading as _threading
+    MESHTASTIC_CONNECTION_LOCK = _threading.Lock()
+    wait_for_cooldown = lambda: None
+    safe_close_interface = lambda x: None
+    _HAS_MESHTASTIC_CONN = False
 from utils.safe_import import safe_import
 
 # Module-level safe imports for external dependencies

@@ -1,4 +1,4 @@
-# MeshForge Core Dependencies (required for all profiles)
+# MeshAnchor Core Dependencies (required for all profiles)
 
 # Terminal formatting (TUI)
 rich>=13.0.0

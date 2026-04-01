@@ -1,5 +1,5 @@
 """
-MeshForge Setup Wizard - Interactive First-Run Configuration
+MeshAnchor Setup Wizard - Interactive First-Run Configuration
 
 Detects existing services, shows status, guides user through setup decisions,
 and logs all choices for troubleshooting.
@@ -76,7 +76,7 @@ class WizardDecision:
 
 class SetupWizard:
     """
-    Interactive setup wizard for MeshForge first-run configuration.
+    Interactive setup wizard for MeshAnchor first-run configuration.
 
     Detects services, shows status, asks for user input, logs decisions.
     """
@@ -117,7 +117,7 @@ class SetupWizard:
         Initialize the setup wizard.
 
         Args:
-            log_dir: Directory for setup logs. Defaults to ~/.meshforge/logs/
+            log_dir: Directory for setup logs. Defaults to ~/.meshanchor/logs/
             interactive: If True, prompt for user input. If False, just report.
         """
         self.interactive = interactive
@@ -129,7 +129,7 @@ class SetupWizard:
             self.log_dir = Path(log_dir)
         else:
             home = self._get_real_home()
-            self.log_dir = home / ".meshforge" / "logs"
+            self.log_dir = home / ".meshanchor" / "logs"
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = self.log_dir / f"setup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -447,12 +447,12 @@ class SetupWizard:
             return
 
         self._print("\n=== Deployment Profile ===", "header")
-        self._print("Choose how you plan to use MeshForge:\n")
+        self._print("Choose how you plan to use MeshAnchor:\n")
 
         profiles = _list_profiles()
         for i, p in enumerate(profiles, 1):
             self._print(f"  {i}. {p.display_name:15s} {p.description}", "dim")
-        self._print(f"  a. Auto-detect       Let MeshForge detect your setup", "dim")
+        self._print(f"  a. Auto-detect       Let MeshAnchor detect your setup", "dim")
 
         choices = [str(i) for i in range(1, len(profiles) + 1)] + ['a']
         choice = self._ask("\nSelect profile", choices, 'a')
@@ -473,7 +473,7 @@ class SetupWizard:
     def run_interactive_setup(self):
         """Run the interactive setup wizard"""
         self._print("\n" + "="*60, "header")
-        self._print("  MeshForge Setup Wizard", "header")
+        self._print("  MeshAnchor Setup Wizard", "header")
         self._print("="*60, "header")
         self._print("\nThis wizard will detect installed services and guide you")
         self._print("through configuration options.\n")
@@ -538,7 +538,7 @@ class SetupWizard:
 
         self._print("\n=== Setup Complete ===", "header")
         self._print(f"Log saved to: {self.log_file}", "dim")
-        self._print("\nRun 'meshforge' to start the application.\n", "success")
+        self._print("\nRun 'meshanchor' to start the application.\n", "success")
 
     def _start_service(self, name: str):
         """Start a service"""
@@ -604,7 +604,7 @@ class SetupWizard:
         try:
             # Prefer venv rnsd — it has all dependencies (meshtastic, etc.)
             # System rnsd uses system Python which may lack required modules
-            venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+            venv_rnsd = Path('/opt/meshanchor/venv/bin/rnsd')
             rnsd_path = str(venv_rnsd) if venv_rnsd.exists() else (
                 shutil.which('rnsd') or '/usr/local/bin/rnsd'
             )
@@ -660,12 +660,12 @@ WantedBy=multi-user.target
 
     def check_first_run(self) -> bool:
         """Check if this is a first run (no marker file exists)"""
-        marker = self._get_real_home() / ".meshforge" / ".setup_complete"
+        marker = self._get_real_home() / ".meshanchor" / ".setup_complete"
         return not marker.exists()
 
     def mark_setup_complete(self):
         """Mark setup as complete"""
-        marker = self._get_real_home() / ".meshforge" / ".setup_complete"
+        marker = self._get_real_home() / ".meshanchor" / ".setup_complete"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(datetime.now().isoformat())
         self._log("Setup marked as complete")
@@ -700,7 +700,7 @@ def check_status():
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="MeshForge Setup Wizard")
+    parser = argparse.ArgumentParser(description="MeshAnchor Setup Wizard")
     parser.add_argument('--check', action='store_true', help="Just check status, no prompts")
     parser.add_argument('--force', action='store_true', help="Run wizard even if already completed")
     args = parser.parse_args()

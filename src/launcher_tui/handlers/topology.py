@@ -933,7 +933,7 @@ class TopologyHandler(BaseHandler):
             elif export_format == "json":
                 import json
                 from utils.paths import get_real_user_home
-                export_dir = get_real_user_home() / ".cache" / "meshforge"
+                export_dir = get_real_user_home() / ".cache" / "meshanchor"
                 export_dir.mkdir(parents=True, exist_ok=True)
 
                 topo_dict = topology.to_dict()

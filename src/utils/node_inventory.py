@@ -19,7 +19,7 @@ Usage:
     report = inv.format_inventory()
 
 Persistence:
-    Stores JSON in ~/.config/meshforge/node_inventory.json
+    Stores JSON in ~/.config/meshanchor/node_inventory.json
     Auto-saves on every update (debounced).
 """
 
@@ -136,7 +136,7 @@ class NodeInventory:
 
     def _get_default_path(self) -> Path:
         """Get default persistence path."""
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         return config_dir / "node_inventory.json"
 
     def _load(self) -> None:

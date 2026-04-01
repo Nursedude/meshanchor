@@ -176,7 +176,7 @@ won't break, but new code should use the new paths.
 
 - **Main**: Targets Python 3.9+
 - **Alpha**: Requires Python 3.10+ for meshcore_py
-- **Resolution**: Keep 3.9+ as the minimum for MeshForge. MeshCore features are
+- **Resolution**: Keep 3.9+ as the minimum for MeshAnchor. MeshCore features are
   gated behind `safe_import('meshcore')` — Python 3.9 users get full
   Meshtastic + RNS functionality, MeshCore is simply unavailable.
 - **Note**: Raspberry Pi OS Bookworm ships Python 3.11, so 3.10+ is not a
@@ -217,10 +217,10 @@ Expected test count after convergence: ~3,000+ (main's 2,459 + alpha's unique te
 
 ## Decision: REVISED — MeshAnchor Split (2026-03-05)
 
-> **Previous decision** (2026-03-03): MeshCore stays in MeshForge, converge branches.
+> **Previous decision** (2026-03-03): MeshCore stays in MeshAnchor, converge branches.
 >
 > **New decision** (2026-03-05): Alpha branch will become **MeshAnchor** (`Nursedude/meshanchor`),
-> a standalone sister app where MeshCore is the primary radio. MeshForge main continues with
+> a standalone sister app where MeshCore is the primary radio. MeshAnchor main continues with
 > Meshtastic as primary. The convergence described above is **superseded** by the split plan.
 
 **Why the change**: The `RadioMode` abstraction on alpha already models two distinct apps —
@@ -233,7 +233,7 @@ for interop.
 **Sequence**:
 1. Field test alpha with real MeshCore hardware (validate before split)
 2. Create `Nursedude/meshanchor` from alpha (clean history)
-3. Archive `alpha/meshcore-bridge` branch on MeshForge
+3. Archive `alpha/meshcore-bridge` branch on MeshAnchor
 4. Both repos maintain independent copies (fork-and-diverge), cherry-pick critical fixes
 
 ---

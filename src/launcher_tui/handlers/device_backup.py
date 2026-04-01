@@ -37,7 +37,7 @@ class BackupHandler(BaseHandler):
         while True:
             choices = [
                 ("create", "Create Backup       Backup current device"),
-                ("full", "Full Config Backup  MeshForge + device configs"),
+                ("full", "Full Config Backup  MeshAnchor + device configs"),
                 ("list", "List Backups        View saved backups"),
                 ("restore", "Restore Backup      Restore from backup"),
                 ("delete", "Delete Backup       Remove old backups"),
@@ -141,14 +141,14 @@ class BackupHandler(BaseHandler):
             )
 
     def _full_config_backup(self):
-        """Archive all MeshForge configs (~/.config/meshforge/) to backup dir."""
-        config_dir = get_real_user_home() / ".config" / "meshforge"
+        """Archive all MeshAnchor configs (~/.config/meshanchor/) to backup dir."""
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
         backup_dir = get_backup_dir()
 
         if not config_dir.exists():
             self.ctx.dialog.msgbox(
                 "No Config",
-                f"MeshForge config directory not found:\n{config_dir}\n\n"
+                f"MeshAnchor config directory not found:\n{config_dir}\n\n"
                 "Nothing to back up.")
             return
 
@@ -161,7 +161,7 @@ class BackupHandler(BaseHandler):
 
         confirm = self.ctx.dialog.yesno(
             "Full Config Backup",
-            f"Back up all MeshForge configuration?\n\n"
+            f"Back up all MeshAnchor configuration?\n\n"
             f"Source: {config_dir}\n"
             f"Files:  {file_count}\n\n"
             "Includes: gateway config, broker profiles,\n"
@@ -173,20 +173,20 @@ class BackupHandler(BaseHandler):
             return
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        archive_name = f"meshforge-config-{timestamp}.tar.gz"
+        archive_name = f"meshanchor-config-{timestamp}.tar.gz"
         archive_path = backup_dir / archive_name
 
         try:
             backup_dir.mkdir(parents=True, exist_ok=True)
             with tarfile.open(archive_path, "w:gz") as tar:
-                tar.add(str(config_dir), arcname="meshforge")
+                tar.add(str(config_dir), arcname="meshanchor")
             archive_path.chmod(0o600)  # May contain credentials
             self.ctx.dialog.msgbox(
                 "Backup Created",
                 f"Full config backup saved!\n\n"
                 f"Archive: {archive_path}\n"
                 f"Files:   {file_count}\n\n"
-                "Restore: extract to ~/.config/meshforge/")
+                "Restore: extract to ~/.config/meshanchor/")
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Backup failed:\n{e}")
 

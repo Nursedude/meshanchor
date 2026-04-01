@@ -1,5 +1,5 @@
 """
-MeshForge Startup Checks - Environment Detection & Conflict Resolution
+MeshAnchor Startup Checks - Environment Detection & Conflict Resolution
 
 Detects the runtime environment at startup:
 - Service states (meshtasticd, rnsd, etc.)
@@ -7,7 +7,7 @@ Detects the runtime environment at startup:
 - Hardware (SPI, USB serial devices)
 - First-run status
 
-This module enables "no-dependencies" startup where MeshForge can
+This module enables "no-dependencies" startup where MeshAnchor can
 launch and display status even if services aren't running.
 
 Usage:
@@ -191,7 +191,7 @@ class EnvironmentState:
 
 
 class StartupChecker:
-    """Performs environment checks at MeshForge startup."""
+    """Performs environment checks at MeshAnchor startup."""
 
     # Services to check with their expected ports
     SERVICES_TO_CHECK = {
@@ -199,7 +199,7 @@ class StartupChecker:
         'rnsd': {'port': RNS_SHARED_INSTANCE_PORT, 'port_type': 'unix_socket', 'systemd': True},
     }
 
-    # Ports that MeshForge needs
+    # Ports that MeshAnchor needs
     REQUIRED_PORTS = {
         MESHTASTICD_PORT: 'meshtasticd',
         RNS_SHARED_INSTANCE_PORT: 'rnsd',
@@ -274,7 +274,7 @@ class StartupChecker:
         the user can restart from the service menu.
 
         Previous versions auto-restarted rnsd here, which caused the #1
-        "gotcha": running sudo meshforge would restart rnsd under root
+        "gotcha": running sudo meshanchor would restart rnsd under root
         context, regenerating shared_instance auth tokens and breaking
         RNS connectivity for the normal user.
         """
@@ -291,7 +291,7 @@ class StartupChecker:
         Returns True if there are files that could cause PermissionError
         for rnsd Transport jobs.
 
-        Note: Cannot use os.access(os.W_OK) here because MeshForge runs
+        Note: Cannot use os.access(os.W_OK) here because MeshAnchor runs
         as root (sudo), and root always passes access checks regardless
         of actual file mode bits.  Instead, inspect the mode directly:
         files need 0o666 (world-writable) and directories need 0o777.
@@ -594,8 +594,8 @@ class StartupChecker:
         Returns:
             Tuple of (is_first_run, config_exists)
         """
-        config_dir = get_real_user_home() / ".config" / "meshforge"
-        flag_file = config_dir / ".meshforge_setup_complete"
+        config_dir = get_real_user_home() / ".config" / "meshanchor"
+        flag_file = config_dir / ".meshanchor_setup_complete"
         settings_file = config_dir / "settings.json"
 
         is_first_run = not flag_file.exists()

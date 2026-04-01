@@ -1,4 +1,4 @@
-"""Command handlers for MeshForge Agent.
+"""Command handlers for MeshAnchor Agent.
 
 Provides command registration and execution for remote management operations.
 
@@ -748,7 +748,7 @@ class CommandHandler:
             version = _version_mod if _HAS_VERSION else "unknown"
 
             return CommandResult.success({
-                "meshforge_version": version,
+                "meshanchor_version": version,
                 "python_version": platform.python_version(),
                 "platform": platform.system(),
                 "platform_release": platform.release(),
@@ -769,7 +769,7 @@ class CommandHandler:
     )
     def system_logs(args: Dict[str, Any], context: CommandContext) -> CommandResult:
         """Get recent log entries."""
-        service = args.get("service", "meshforge")
+        service = args.get("service", "meshanchor")
         lines = args.get("lines", 100)
 
         try:

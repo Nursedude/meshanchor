@@ -1,5 +1,5 @@
 """
-MQTT to WebSocket Bridge for MeshForge.
+MQTT to WebSocket Bridge for MeshAnchor.
 
 Connects the MQTT subscriber to the WebSocket server, enabling web UI
 to receive mesh data without the Gateway Bridge running.

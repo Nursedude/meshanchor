@@ -91,7 +91,7 @@ def validate_rnsd_service_file() -> bool:
         current_rnsd = exec_match.group(1).strip()
         current_rnsd_binary = current_rnsd.split()[0]
 
-    venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+    venv_rnsd = Path('/opt/meshanchor/venv/bin/rnsd')
 
     if current_rnsd_binary:
         if not Path(current_rnsd_binary).exists():
@@ -135,7 +135,7 @@ def validate_rnsd_service_file() -> bool:
 
     if not Path(rnsd_path).exists():
         print(f"  ERROR: No rnsd binary found on this system.")
-        print(f"  Checked: /opt/meshforge/venv/bin/rnsd, PATH, /usr/local/bin/rnsd")
+        print(f"  Checked: /opt/meshanchor/venv/bin/rnsd, PATH, /usr/local/bin/rnsd")
         print(f"  Install RNS: pip install rns")
         return False
 
@@ -215,7 +215,7 @@ def repair_rns_shared_instance(handler) -> bool:
             print(f"  Ensured: {ReticulumPaths.ETC_INTERFACES}")
         else:
             print("  ERROR: Could not create /etc/reticulum/ directories")
-            print("  (Run MeshForge with sudo)")
+            print("  (Run MeshAnchor with sudo)")
             return False
 
         existing_config = ReticulumPaths.get_config_file()
@@ -232,7 +232,7 @@ def repair_rns_shared_instance(handler) -> bool:
                 print("  Run: rnsd --exampleconfig > /etc/reticulum/config")
     except (OSError, PermissionError) as e:
         print(f"  ERROR: {e}")
-        print("  (Run MeshForge with sudo)")
+        print("  (Run MeshAnchor with sudo)")
         return False
 
     # Step 2: Validate rnsd.service file
@@ -487,7 +487,7 @@ def _handle_rnsd_crash(ctx) -> bool:
     print("  FAILED: rnsd crashed on startup")
     print()
 
-    venv_rnsd = Path('/opt/meshforge/venv/bin/rnsd')
+    venv_rnsd = Path('/opt/meshanchor/venv/bin/rnsd')
     rnsd_path = str(venv_rnsd) if venv_rnsd.exists() else (
         shutil.which('rnsd') or '/usr/local/bin/rnsd'
     )
@@ -523,13 +523,13 @@ def _handle_rnsd_crash(ctx) -> bool:
     if 'meshtastic' in output.lower():
         print()
         print("  Cause: Meshtastic_Interface.py plugin needs the meshtastic module")
-        venv_pip = Path('/opt/meshforge/venv/bin/pip')
+        venv_pip = Path('/opt/meshanchor/venv/bin/pip')
         if venv_pip.exists() and ctx.dialog.yesno(
             "Install meshtastic Module",
             "The Meshtastic_Interface.py plugin requires the\n"
             "meshtastic Python module, which is not installed.\n\n"
             "Install it now?\n\n"
-            "  pip install meshtastic (into MeshForge venv)",
+            "  pip install meshtastic (into MeshAnchor venv)",
         ):
             print("  Installing meshtastic module...")
             pip_r = subprocess.run(

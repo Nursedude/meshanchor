@@ -6,11 +6,11 @@
 
 ## The Bug
 
-Two menus in MeshForge's TUI wouldn't render. You'd select "Meshtastic Radio" or "Configuration" from the main menu and get a black flash — then right back where you started. Every other menu worked fine. Same dialog backend, same whiptail binary, same terminal. No crash, no traceback, no error. Just... nothing.
+Two menus in MeshAnchor's TUI wouldn't render. You'd select "Meshtastic Radio" or "Configuration" from the main menu and get a black flash — then right back where you started. Every other menu worked fine. Same dialog backend, same whiptail binary, same terminal. No crash, no traceback, no error. Just... nothing.
 
 ## The Wrong Turns
 
-The first instinct was terminal sizing. MeshForge runs on Raspberry Pis, small terminals, SSH sessions with weird geometries. We added auto-fit logic to shrink menus when the terminal was too small. Didn't fix it.
+The first instinct was terminal sizing. MeshAnchor runs on Raspberry Pis, small terminals, SSH sessions with weird geometries. We added auto-fit logic to shrink menus when the terminal was too small. Didn't fix it.
 
 Next hypothesis: stale terminal input. Maybe leftover keystrokes from the previous menu were being consumed by whiptail, causing it to immediately exit. We added `termios.tcflush()` before every dialog launch. Defensive, reasonable, and completely beside the point.
 
@@ -41,7 +41,7 @@ Dialog exited 1 (output='--- Radio Config ---: unknown option')
 
 *Unknown option.* Whiptail thought `--- Radio Config ---` was a command-line flag.
 
-MeshForge uses separator descriptions like `--- Radio Config ---` and `--- Service ---` to visually group menu items into sections. These get passed as arguments to whiptail:
+MeshAnchor uses separator descriptions like `--- Radio Config ---` and `--- Service ---` to visually group menu items into sections. These get passed as arguments to whiptail:
 
 ```
 whiptail --title "Radio Tools" --menu "text" 22 78 14 _cfg_ "--- Radio Config ---" ...
@@ -81,4 +81,4 @@ The `--` was always the answer. We just couldn't hear the question until we gave
 ---
 
 *WH6GXZ & Dude AI — Built with aloha for the mesh community*
-*MeshForge: [github.com/Nursedude/meshforge](https://github.com/Nursedude/meshforge)*
+*MeshAnchor: [github.com/Nursedude/meshanchor](https://github.com/Nursedude/meshanchor)*
