@@ -34,6 +34,7 @@ Requires: pip install meshcore (Python 3.10+)
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -60,14 +61,80 @@ def detect_meshcore_devices() -> List[str]:
     """
     Scan for potential MeshCore companion radio serial devices.
 
-    Returns list of device paths (e.g., ['/dev/ttyUSB0', '/dev/ttyACM1']).
-    Does NOT verify that the device is actually running MeshCore firmware.
+    Returns list of device paths including the persistent /dev/ttyMeshCore
+    symlink (if udev rules are installed) and standard ttyUSB/ttyACM devices.
     """
     import glob
     devices = []
+    # Persistent symlink first (from scripts/99-meshcore.rules)
+    if os.path.exists('/dev/ttyMeshCore'):
+        devices.append('/dev/ttyMeshCore')
     for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*']:
-        devices.extend(sorted(glob.glob(pattern)))
+        for dev in sorted(glob.glob(pattern)):
+            # Skip if it's the same device as ttyMeshCore symlink
+            if '/dev/ttyMeshCore' in devices:
+                try:
+                    if os.path.realpath(dev) == os.path.realpath('/dev/ttyMeshCore'):
+                        continue
+                except OSError:
+                    pass
+            devices.append(dev)
     return devices
+
+
+def validate_meshcore_device(device_path: str, baud_rate: int = 115200,
+                              timeout: float = 3.0) -> Dict[str, Any]:
+    """
+    Pre-flight validation: probe a serial device to check if it responds.
+
+    Sends a newline and checks for any response within the timeout.
+    Does NOT require meshcore_py — uses raw serial to avoid import issues.
+
+    Returns:
+        dict with keys:
+        - 'exists': bool — device file exists
+        - 'readable': bool — device can be opened
+        - 'responds': bool — device sent data back
+        - 'error': str or None — error message if any
+    """
+    import os
+    result = {
+        'exists': False,
+        'readable': False,
+        'responds': False,
+        'error': None,
+    }
+
+    if not os.path.exists(device_path):
+        result['error'] = f"Device not found: {device_path}"
+        return result
+    result['exists'] = True
+
+    try:
+        import serial
+    except ImportError:
+        # pyserial not installed — can only check existence
+        result['error'] = "pyserial not installed (pip install pyserial)"
+        return result
+
+    try:
+        with serial.Serial(device_path, baud_rate, timeout=timeout) as ser:
+            result['readable'] = True
+            # Send a newline and wait for any response
+            ser.reset_input_buffer()
+            ser.write(b'\n')
+            response = ser.read(64)
+            if response:
+                result['responds'] = True
+    except serial.SerialException as e:
+        result['error'] = f"Serial error: {e}"
+    except PermissionError:
+        result['error'] = (f"Permission denied: {device_path} — "
+                          "add user to 'dialout' group or use sudo")
+    except OSError as e:
+        result['error'] = f"OS error: {e}"
+
+    return result
 
 
 class MeshCoreSimulator:
@@ -343,6 +410,23 @@ class MeshCoreHandler(BaseMessageHandler):
             baud_rate = getattr(meshcore_config, 'baud_rate', 115200)
 
             if conn_type == 'serial':
+                # Pre-flight: verify device exists and is accessible
+                preflight = validate_meshcore_device(device_path, baud_rate, timeout=2.0)
+                if not preflight['exists']:
+                    logger.error(f"MeshCore device not found: {device_path}")
+                    logger.info("Run 'Detect Devices' from the MeshCore TUI menu, "
+                                "or check USB connection")
+                    return
+                if not preflight['readable']:
+                    logger.error(f"MeshCore device not accessible: "
+                                 f"{preflight['error']}")
+                    return
+                if preflight['responds']:
+                    logger.info(f"MeshCore device responds on {device_path}")
+                else:
+                    logger.warning(f"MeshCore device at {device_path} exists but "
+                                   "did not respond to probe — attempting connection anyway")
+
                 logger.info(f"Connecting to MeshCore via serial: {device_path}")
                 self._meshcore = await MeshCore.create_serial(
                     device_path, baud_rate

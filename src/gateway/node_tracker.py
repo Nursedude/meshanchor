@@ -67,6 +67,7 @@ class UnifiedNodeTracker:
     """
 
     OFFLINE_THRESHOLD = 900  # 15 minutes — consistent with map_data_collector default
+    STALE_PURGE_THRESHOLD = 86400  # 24 hours — purge nodes not seen in a day
     MAX_NODES = 10000  # Prevent unbounded memory growth
 
     @classmethod
@@ -579,7 +580,8 @@ instance_control_port = 37429
 
             with self._lock:
                 now = datetime.now()
-                for node in self._nodes.values():
+                stale_ids = []
+                for nid, node in self._nodes.items():
                     # Use state machine for timeout checking if available
                     if node._state_machine is not None:
                         node.check_timeout()
@@ -588,6 +590,15 @@ instance_control_port = 37429
                         age = (now - node.last_seen).total_seconds()
                         if age > self.OFFLINE_THRESHOLD:
                             node.is_online = False
+                        # Purge nodes not seen in 24 hours
+                        if age > self.STALE_PURGE_THRESHOLD:
+                            stale_ids.append(nid)
+
+                if stale_ids:
+                    for nid in stale_ids:
+                        del self._nodes[nid]
+                    logger.info(f"Purged {len(stale_ids)} stale node(s) "
+                                f"(not seen in {self.STALE_PURGE_THRESHOLD // 3600}h)")
 
             # Save cache every 5 minutes
             self._save_cache()
