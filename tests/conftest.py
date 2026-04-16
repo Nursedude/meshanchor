@@ -10,6 +10,7 @@ Handles CI-specific settings:
 
 import os
 import sys
+import warnings
 import weakref
 import pytest
 from unittest.mock import MagicMock, patch
@@ -37,19 +38,29 @@ def pytest_configure(config):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Shut down the event_bus thread pool before pytest closes IO.
+    """Shut down global background state before pytest closes IO.
 
-    Background worker threads in src/utils/event_bus.py dispatch callbacks
-    (e.g. StatusBar._on_service_event) that log via `logger.debug`. Without
-    this shutdown, those workers can fire after pytest has closed the
-    captured stderr stream, producing `ValueError: I/O operation on
-    closed file` noise in CI logs.
+    - event_bus thread pool: background workers in src/utils/event_bus.py
+      otherwise fire callbacks (e.g. StatusBar._on_service_event) that log
+      to pytest-closed streams, producing `ValueError: I/O operation on
+      closed file` noise.
+    - meshtastic thread guard: src/utils/meshtastic_connection.py globally
+      mutates `threading.excepthook` on import. Restore it here so the
+      hook doesn't leak into later tooling that shares the process.
     """
     try:
         from utils.event_bus import event_bus
         event_bus.shutdown()
-    except Exception:
+    except Exception as e:
+        warnings.warn(f"event_bus shutdown failed: {e}", stacklevel=2)
+
+    try:
+        from utils.meshtastic_connection import uninstall_meshtastic_thread_guard
+        uninstall_meshtastic_thread_guard()
+    except ImportError:
         pass
+    except Exception as e:
+        warnings.warn(f"thread guard uninstall failed: {e}", stacklevel=2)
 
 
 @pytest.fixture(autouse=True)
@@ -64,13 +75,14 @@ def _reset_event_bus_subscribers():
     try:
         from utils.event_bus import event_bus
         event_bus.clear_subscribers()
-    except Exception:
-        pass
+    except Exception as e:
+        warnings.warn(f"event_bus.clear_subscribers failed: {e}", stacklevel=2)
 
 
 # Track RNSMeshtasticBridge instances so we can stop leaked background threads.
 # Threads like _bridge_loop otherwise keep calling emit_service_status after
 # pytest closes captured streams, producing "I/O operation on closed file" noise.
+# Module-level WeakSet is per-process; each pytest-xdist worker has its own.
 _live_bridges: "weakref.WeakSet" = weakref.WeakSet()
 
 
@@ -110,8 +122,8 @@ def _stop_leaked_bridges():
                 stop_event = getattr(bridge, "_stop_event", None)
                 if stop_event is not None:
                     stop_event.set()
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.warn(f"bridge teardown failed: {e}", stacklevel=2)
 
 
 def pytest_collection_modifyitems(config, items):
