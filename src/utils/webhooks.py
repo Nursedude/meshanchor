@@ -10,6 +10,7 @@ Allows external systems to receive notifications about:
 
 import json
 import logging
+import time
 import threading
 import queue
 from dataclasses import dataclass, asdict
@@ -307,10 +308,12 @@ class WebhookManager:
                     f"(attempt {attempt + 1}/{endpoint.retry_count})"
                 )
 
-            # Exponential backoff
+            # Exponential backoff — poll _running so shutdown isn't blocked
             if attempt < endpoint.retry_count - 1:
-                import time
-                time.sleep(2 ** attempt)
+                backoff = 2 ** attempt
+                deadline = time.monotonic() + backoff
+                while time.monotonic() < deadline and self._running:
+                    time.sleep(0.25)
 
         logger.error(f"Webhook delivery failed after {endpoint.retry_count} attempts: {endpoint.name}")
         return False
@@ -318,14 +321,17 @@ class WebhookManager:
 
 # Singleton instance
 _webhook_manager: Optional[WebhookManager] = None
+_webhook_manager_lock = threading.Lock()
 
 
 def get_webhook_manager() -> WebhookManager:
-    """Get the global webhook manager instance."""
+    """Get the global webhook manager instance (thread-safe)."""
     global _webhook_manager
     if _webhook_manager is None:
-        _webhook_manager = WebhookManager()
-        _webhook_manager.start()
+        with _webhook_manager_lock:
+            if _webhook_manager is None:
+                _webhook_manager = WebhookManager()
+                _webhook_manager.start()
     return _webhook_manager
 
 

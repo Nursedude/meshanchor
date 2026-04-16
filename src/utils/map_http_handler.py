@@ -95,6 +95,19 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
     # Default allowed origins when none explicitly configured
     _DEFAULT_ORIGINS = ['http://localhost', 'https://localhost']
 
+    def _is_localhost(self) -> bool:
+        """Check if the request originates from localhost.
+
+        All mutating endpoints (radio TX, device restart, toradio proxy)
+        MUST gate on this to prevent LAN/mesh clients from controlling
+        the radio or device. Handles IPv4, IPv6, and mapped addresses.
+        """
+        try:
+            client_ip = ipaddress.ip_address(self.client_address[0])
+            return client_ip.is_loopback
+        except ValueError:
+            return False
+
     def _send_cors_header(self):
         """Send appropriate CORS header based on configuration.
 
@@ -186,7 +199,15 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
                 super().do_GET()
 
     def do_POST(self):
-        """Handle POST requests for radio control and meshtastic API proxy."""
+        """Handle POST requests for radio control and meshtastic API proxy.
+
+        All mutating endpoints are restricted to localhost via _is_localhost().
+        GET endpoints (node data, status, map tiles) remain open for LAN/AREDN access.
+        """
+        if not self._is_localhost():
+            self.send_error(403, "Radio control only allowed from localhost")
+            return
+
         # ─────────────────────────────────────────────────────────────
         # Meshtastic API Proxy - POST endpoints
         # ─────────────────────────────────────────────────────────────
@@ -197,34 +218,24 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         elif self.path in ('/json/blink', '/json/blink/', '/mesh/json/blink', '/mesh/json/blink/'):
             self._proxy_toradio_json('/json/blink')
         elif self.path in ('/restart', '/restart/', '/mesh/restart', '/mesh/restart/'):
-            # Restrict device restart to localhost only (handles IPv4, IPv6, mapped addresses)
-            try:
-                client_ip = ipaddress.ip_address(self.client_address[0])
-            except ValueError:
-                client_ip = None
-            if client_ip is None or not client_ip.is_loopback:
-                self.send_error(403, "Restart only allowed from localhost")
-            else:
-                self._proxy_toradio_json('/restart')
+            self._proxy_toradio_json('/restart')
         # ─────────────────────────────────────────────────────────────
         # Radio Control API - POST endpoints
         # ─────────────────────────────────────────────────────────────
         elif self.path == '/api/radio/message' or self.path == '/api/radio/message/':
-            # Restrict message send to localhost only — prevents LAN/mesh users
-            # from transmitting through our radio (same guard as /restart)
-            try:
-                client_ip = ipaddress.ip_address(self.client_address[0])
-            except ValueError:
-                client_ip = None
-            if client_ip is None or not client_ip.is_loopback:
-                self.send_error(403, "Message send only allowed from localhost")
-            else:
-                self._handle_send_message()
+            self._handle_send_message()
         else:
             self.send_error(404, "Not Found")
 
     def do_PUT(self):
-        """Handle PUT requests (meshtastic web client uses PUT for toradio)."""
+        """Handle PUT requests (meshtastic web client uses PUT for toradio).
+
+        All PUT endpoints are mutating (radio TX) — restricted to localhost.
+        """
+        if not self._is_localhost():
+            self.send_error(403, "Radio control only allowed from localhost")
+            return
+
         if self.path.startswith('/api/v1/toradio'):
             self._proxy_toradio()
         elif self.path.startswith('/mesh/api/v1/toradio'):
