@@ -210,7 +210,16 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         # Radio Control API - POST endpoints
         # ─────────────────────────────────────────────────────────────
         elif self.path == '/api/radio/message' or self.path == '/api/radio/message/':
-            self._handle_send_message()
+            # Restrict message send to localhost only — prevents LAN/mesh users
+            # from transmitting through our radio (same guard as /restart)
+            try:
+                client_ip = ipaddress.ip_address(self.client_address[0])
+            except ValueError:
+                client_ip = None
+            if client_ip is None or not client_ip.is_loopback:
+                self.send_error(403, "Message send only allowed from localhost")
+            else:
+                self._handle_send_message()
         else:
             self.send_error(404, "Not Found")
 
