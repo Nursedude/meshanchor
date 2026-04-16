@@ -1125,24 +1125,9 @@ class TestRNSConnectionFlow:
 
     def test_connect_rns_import_error_is_permanent(self, bridge):
         bridge._rns_pre_initialized = False
-        import builtins
-        original_import = builtins.__import__
 
-        def mock_import(name, *args, **kwargs):
-            if name in ('RNS', 'LXMF'):
-                raise ImportError("No module")
-            return original_import(name, *args, **kwargs)
-
-        with patch('builtins.__import__', side_effect=mock_import):
-            saved_rns = sys.modules.pop('RNS', None)
-            saved_lxmf = sys.modules.pop('LXMF', None)
-            try:
-                bridge._connect_rns()
-            finally:
-                if saved_rns:
-                    sys.modules['RNS'] = saved_rns
-                if saved_lxmf:
-                    sys.modules['LXMF'] = saved_lxmf
+        with patch('gateway._rns_bridge_connection._HAS_RNS', False):
+            bridge._connect_rns()
 
         assert bridge._connected_rns is False
         assert bridge._rns_init_failed_permanently is True
