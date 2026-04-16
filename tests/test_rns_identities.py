@@ -105,11 +105,7 @@ class TestCreateIdentities:
 
         with patch('commands.rns.ReticulumPaths.get_config_dir', return_value=rns_config_dir), \
              patch('commands.rns.get_identity_path', return_value=gw_path), \
-             patch.dict(sys.modules, {'RNS': None}):
-            # Force re-import to hit the ImportError
-            import importlib
-            import commands.rns as rns_mod
-            # Manually test with a direct import that will fail
+             patch('commands.rns._HAS_RNS', False):
             from commands.rns import create_identities
             result = create_identities()
 

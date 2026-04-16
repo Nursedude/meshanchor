@@ -5,7 +5,10 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 
 from utils.logger import log, log_exception
-from config.hardware import HardwareDetector
+try:
+    from config.hardware import HardwareDetector
+except ImportError:
+    HardwareDetector = None
 from utils.safe_import import safe_import
 
 # Meshtastic library (optional, needed for device configuration)
@@ -24,7 +27,7 @@ class DeviceConfigurator:
 
     def __init__(self):
         self.interface = None
-        self.hardware_detector = HardwareDetector()
+        self.hardware_detector = HardwareDetector() if HardwareDetector else None
 
     def interactive_configure(self):
         """Interactive device configuration wizard"""
@@ -32,12 +35,16 @@ class DeviceConfigurator:
 
         # Detect hardware
         console.print("[cyan]Detecting hardware...[/cyan]")
-        hardware = self.hardware_detector.detect_all()
+        if self.hardware_detector:
+            hardware = self.hardware_detector.detect_all()
 
-        if not hardware:
-            console.print("[yellow]No hardware detected. Configuration may be limited.[/yellow]")
+            if not hardware:
+                console.print("[yellow]No hardware detected. Configuration may be limited.[/yellow]")
 
-        self.hardware_detector.show_hardware_info()
+            self.hardware_detector.show_hardware_info()
+        else:
+            hardware = {}
+            console.print("[yellow]Hardware detection unavailable (config.hardware not installed)[/yellow]")
 
         # Connect to device
         if not self._connect_to_device():
@@ -79,7 +86,7 @@ class DeviceConfigurator:
 
         try:
             # Get connection method
-            hardware = self.hardware_detector.detected_hardware
+            hardware = self.hardware_detector.detected_hardware if self.hardware_detector else {}
 
             connection_type = "auto"
 

@@ -741,9 +741,8 @@ class TestConnection:
 
     def test_connect_import_error(self, transport):
         """Missing meshtastic library returns False."""
-        with patch.dict('sys.modules', {'meshtastic': None}):
-            with patch('builtins.__import__', side_effect=ImportError("no meshtastic")):
-                result = transport._connect()
+        with patch('gateway.rns_transport._HAS_MESHTASTIC', False):
+            result = transport._connect()
         assert result is False
 
     def test_disconnect(self, transport):
