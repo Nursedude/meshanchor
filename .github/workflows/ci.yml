@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 10  # Kill job if tests hang
     permissions:
       contents: read
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -66,47 +65,95 @@ jobs:
           path: /tmp/pytest.log
           if-no-files-found: ignore
 
-      - name: Post failure summary to PR
-        if: failure() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+  pr-comment:
+    name: PR Failure Comment
+    runs-on: ubuntu-latest
+    # Scoped write permission lives ONLY on this job — it never runs user code
+    # from the PR branch, so GITHUB_TOKEN cannot be exfiltrated by test code.
+    permissions:
+      pull-requests: write
+    needs: test
+    if: always() && needs.test.result == 'failure' && github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11']
+    steps:
+      - name: Download pytest log
+        id: download
+        uses: actions/download-artifact@v4
         with:
-          script: |
-            const fs = require('fs');
-            let log = '';
-            try {
-              log = fs.readFileSync('/tmp/pytest.log', 'utf8');
-            } catch (e) {
-              core.warning(`Could not read /tmp/pytest.log: ${e.message}`);
-              return;
-            }
+          name: pytest-log-py${{ matrix.python-version }}
+          path: /tmp/pytest-artifact
+        continue-on-error: true
 
-            const lines = log.split('\n');
-            const failedLines = lines.filter(l => /^FAILED |^ERROR |^E {3}/.test(l)).slice(0, 30);
-            const shortSummary = lines.slice(-60).join('\n');
-            const pyVersion = '${{ matrix.python-version }}';
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+      - name: Build sanitized comment body
+        id: build
+        if: steps.download.outcome == 'success'
+        env:
+          PY_VERSION: ${{ matrix.python-version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -o pipefail
+          python3 - <<'PY'
+          import os, re, sys
+          from pathlib import Path
 
-            const body = [
-              `## Pytest failure (Python ${pyVersion})`,
-              ``,
-              `Job failed on \`${context.sha.substring(0, 7)}\`. [View full run](${runUrl}).`,
-              ``,
-              failedLines.length ? `### Failures/Errors\n\n\`\`\`\n${failedLines.join('\n')}\n\`\`\`` : '',
-              `### Tail of pytest output`,
-              ``,
+          log_path = Path('/tmp/pytest-artifact/pytest.log')
+          if not log_path.exists():
+              print('No pytest log artifact; skipping comment', file=sys.stderr)
+              sys.exit(0)
+
+          raw = log_path.read_text(encoding='utf-8', errors='replace')
+          # Replace triple-backtick runs so pytest output cannot break out of the
+          # markdown code fence. U+200B (zero-width space) keeps the glyphs visible.
+          ZWSP = '\u200b'
+          sanitized = raw.replace('```', f'`{ZWSP}`{ZWSP}`')
+
+          lines = sanitized.splitlines()
+          failed = [l for l in lines if re.match(r'^(FAILED |ERROR |E {3})', l)][:30]
+          tail = '\n'.join(lines[-60:])
+
+          py = os.environ['PY_VERSION']
+          run_url = os.environ['RUN_URL']
+          sha = os.environ['SHA'][:7]
+
+          parts = [
+              f'## Pytest failure (Python {py})',
+              '',
+              f'Job failed on `{sha}`. [View full run]({run_url}).',
+              '',
+          ]
+          if failed:
+              parts.extend([
+                  '### Failures/Errors',
+                  '',
+                  '```',
+                  '\n'.join(failed),
+                  '```',
+                  '',
+              ])
+          parts.extend([
+              '### Tail of pytest output',
+              '',
               '```',
-              shortSummary,
+              tail,
               '```',
-              ``,
-              `_Full log available as artifact \`pytest-log-py${pyVersion}\`._`,
-            ].filter(Boolean).join('\n');
+              '',
+              f'_Full log available as artifact `pytest-log-py{py}`._',
+          ])
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body,
-            });
+          Path('/tmp/pr-comment.md').write_text('\n'.join(parts), encoding='utf-8')
+          print(f'Wrote /tmp/pr-comment.md ({len(failed)} failure lines, {len(lines)} total lines)')
+          PY
+
+      - name: Post sticky comment
+        if: steps.download.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pytest-py${{ matrix.python-version }}
+          path: /tmp/pr-comment.md
 
   syntax-check:
     name: Syntax Check
@@ -121,6 +168,7 @@ jobs:
 
       - name: Check Python syntax
         run: |
+          set -o pipefail
           find src -name "*.py" -type f -exec python -m py_compile {} \;
           echo "Syntax check passed"
 
@@ -132,6 +180,7 @@ jobs:
 
       - name: Check for shell=True violations (MF002)
         run: |
+          set -o pipefail
           # Only fail on actual shell=True in subprocess calls, not comments
           VIOLATIONS=$(grep -rn "subprocess\.\(run\|Popen\|call\).*shell\s*=\s*True" src/ --include="*.py" 2>/dev/null || true)
           if [ -n "$VIOLATIONS" ]; then
@@ -143,6 +192,7 @@ jobs:
 
       - name: Check for hardcoded secrets
         run: |
+          set -o pipefail
           # Basic check for potential secrets
           if grep -rn "password\s*=\s*['\"][^'\"]\+" src/ --include="*.py" | grep -v "password\s*=\s*['\"]['\"]" | grep -v "#" | head -5; then
             echo "Warning: Potential hardcoded passwords found"
