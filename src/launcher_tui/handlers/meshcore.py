@@ -375,8 +375,12 @@ class MeshCoreHandler(BaseHandler):
             self.ctx.wait_for_enter()
             return
 
-        print(f"  {len(nodes)} node(s) discovered:\n")
-        for node in sorted(nodes, key=lambda n: n.name or n.id):
+        online = [n for n in nodes if n.is_online]
+        offline = [n for n in nodes if not n.is_online]
+        print(f"  {len(nodes)} node(s) discovered "
+              f"({len(online)} online, {len(offline)} offline):\n")
+
+        for node in sorted(nodes, key=lambda n: (not n.is_online, n.name or n.id)):
             name = node.name or node.short_name or "(unnamed)"
             status = "ONLINE" if node.is_online else "offline"
             role = node.meshcore_role or ""
@@ -390,7 +394,8 @@ class MeshCoreHandler(BaseHandler):
 
             last = ""
             if node.last_seen:
-                delta = (__import__('datetime').datetime.now() - node.last_seen).total_seconds()
+                from datetime import datetime as dt
+                delta = (dt.now() - node.last_seen).total_seconds()
                 if delta < 60:
                     last = f"{int(delta)}s ago"
                 elif delta < 3600:

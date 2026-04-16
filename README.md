@@ -9,7 +9,7 @@
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-2744%20passing-blue.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-2729%20passing-blue.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -29,14 +29,14 @@ Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the arch
 
 > **ALPHA SOFTWARE — We need your help testing.**
 >
-> MeshAnchor has **2,744 tests passing** against mocks, but **no field validation has been
+> MeshAnchor has **2,729 tests passing** against mocks, but **no field validation has been
 > performed** with real MeshCore hardware. If you have a MeshCore companion radio
 > (RAK4631, Heltec V3, T-Deck, T-Echo), your testing and feedback is the single most
 > valuable contribution right now. See [Contributing](#contributing).
 
 Plug in a MeshCore companion radio, run the installer, and you get:
 
-- **MeshCore integration** — direct companion radio management via meshcore_py
+- **MeshCore integration** — direct companion radio management via meshcore_py, pre-flight device validation, persistent udev naming
 - **Gateway bridge** — bidirectional MeshCore to Meshtastic/RNS message routing via CanonicalMessage
 - **RF engineering tools** — link budget, Fresnel zone, FSPL, coverage maps, space weather (NOAA)
 - **TUI interface** — 65 handler commands, raspi-config style (whiptail/dialog), SSH-friendly
@@ -220,6 +220,8 @@ sudo python3 src/launcher_tui/main.py
 | `Local changes would be overwritten` | `git stash` before pull, or use clean reinstall |
 | Service won't start | `journalctl -u meshanchor -n 50` |
 | `meshcore` module not found | `pip install meshcore` (or `--break-system-packages` on Bookworm+) |
+| USB device path changes on reboot | Install udev rules: `sudo cp scripts/99-meshcore.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules` |
+| Permission denied on serial port | Add user to dialout group: `sudo usermod -aG dialout $USER` then log out/in |
 | `meshtastic` module not found | `pip install meshtastic --break-system-packages --ignore-installed` |
 | Config file conflicts | Restore from `~/meshanchor-backup-*` or regenerate via TUI |
 | Stale `.pyc` files | Clean reinstall handles this automatically |
@@ -240,7 +242,8 @@ sudo python3 src/launcher_tui/main.py
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| Companion radio detection | -- | Serial USB scan for MeshCore devices |
+| Companion radio detection | -- | Serial USB scan + udev persistent naming (`/dev/ttyMeshCore`) |
+| Pre-flight device validation | -- | Serial probe before connection, permission + existence checks |
 | meshcore_py connection | 602 | Async event loop, reconnect, message handling |
 | CanonicalMessage bridging | 553 | Protocol-agnostic message format, N-protocol routing |
 | 3-way routing classifier | 684 | MeshCore + Meshtastic + RNS tri-bridge tests |
@@ -283,7 +286,7 @@ sudo python3 src/launcher_tui/main.py
 | Traffic inspector | -- | Packet capture, protocol tree, display filters |
 | RNS packet sniffer | -- | Wireshark-grade capture, announce tracking |
 | Prometheus exporter | -- | 50+ metric families, Grafana-compatible |
-| Node tracker | 68 | Unified node inventory across protocols |
+| Node tracker | 68 | Unified node inventory, 15m offline threshold, 24h stale purge |
 
 ### Testing Reality Check
 
@@ -619,7 +622,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # 75 test files, 2,744 tests
+tests/                     # 81 test files, 2,729 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
@@ -673,7 +676,7 @@ Gateway-specific templates in `config_templates/`:
 
 ### Test Coverage
 
-**2,744 tests** across 75 test files:
+**2,729 tests** across 75 test files:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -728,6 +731,10 @@ git config core.hooksPath .githooks    # Enable pre-commit hooks
 - **Handler isolation** — registry dispatch with per-handler exception boundaries
 - **Persistent queue** — SQLite message queue survives restarts
 - **Shared connection manager** — prevents TCP:4403 client contention
+- **Pre-flight validation** — device probes before connection, service checks before operations
+- **Stale node purge** — 24h TTL on offline nodes, prevents ghost entries in node tracker
+- **Localhost-only control** — all mutating HTTP endpoints restricted to loopback
+- **Permission hardening** — narrow Bash subcommand patterns with explicit deny list (CVE-2026-21852)
 
 ---
 
