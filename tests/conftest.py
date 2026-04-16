@@ -10,6 +10,7 @@ Handles CI-specific settings:
 
 import os
 import sys
+import weakref
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -65,6 +66,52 @@ def _reset_event_bus_subscribers():
         event_bus.clear_subscribers()
     except Exception:
         pass
+
+
+# Track RNSMeshtasticBridge instances so we can stop leaked background threads.
+# Threads like _bridge_loop otherwise keep calling emit_service_status after
+# pytest closes captured streams, producing "I/O operation on closed file" noise.
+_live_bridges: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def _install_bridge_tracker():
+    """Wrap RNSMeshtasticBridge.__init__ once to register instances."""
+    try:
+        from gateway.rns_bridge import RNSMeshtasticBridge
+    except Exception:
+        return
+
+    if getattr(RNSMeshtasticBridge.__init__, "_meshanchor_tracked", False):
+        return
+
+    original_init = RNSMeshtasticBridge.__init__
+
+    def tracked_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        _live_bridges.add(self)
+
+    tracked_init._meshanchor_tracked = True  # type: ignore[attr-defined]
+    RNSMeshtasticBridge.__init__ = tracked_init
+
+
+_install_bridge_tracker()
+
+
+@pytest.fixture(autouse=True)
+def _stop_leaked_bridges():
+    """Stop any RNSMeshtasticBridge instances still running after a test."""
+    yield
+    for bridge in list(_live_bridges):
+        try:
+            if getattr(bridge, "_running", False):
+                bridge.stop()
+            else:
+                # Ensure background threads that only check _stop_event wake up.
+                stop_event = getattr(bridge, "_stop_event", None)
+                if stop_event is not None:
+                    stop_event.set()
+        except Exception:
+            pass
 
 
 def pytest_collection_modifyitems(config, items):
