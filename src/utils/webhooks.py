@@ -134,6 +134,14 @@ class WebhookManager:
 
     def add_endpoint(self, endpoint: WebhookEndpoint) -> bool:
         """Add a new webhook endpoint."""
+        # Validate URL scheme — block file://, ftp://, and other non-HTTP schemes
+        # to prevent SSRF against local files or cloud metadata endpoints
+        from urllib.parse import urlparse
+        parsed = urlparse(endpoint.url)
+        if parsed.scheme not in ('http', 'https'):
+            logger.warning(f"Rejected webhook: scheme must be http/https, got {parsed.scheme!r}")
+            return False
+
         # Check for duplicate URL
         if any(ep.url == endpoint.url for ep in self.endpoints):
             logger.warning(f"Endpoint already exists: {endpoint.url}")
