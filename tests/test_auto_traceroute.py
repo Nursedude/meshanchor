@@ -376,7 +376,7 @@ class TestTracerouteLogging:
         with patch(
             'utils.automation_engine.get_real_user_home',
             return_value=Path("/home/testuser"),
-        ):
+        ), patch.object(Path, 'mkdir'):
             from utils.automation_engine import _get_traceroute_log_path
             path = _get_traceroute_log_path()
         assert "/home/testuser" in str(path)
@@ -386,7 +386,7 @@ class TestTracerouteLogging:
         with patch(
             'utils.automation_engine.get_real_user_home',
             return_value=Path("/home/testuser"),
-        ):
+        ), patch.object(Path, 'mkdir'):
             from utils.automation_engine import _get_traceroute_db_path
             path = _get_traceroute_db_path()
         assert "/home/testuser" in str(path)

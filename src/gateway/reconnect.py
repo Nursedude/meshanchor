@@ -102,6 +102,8 @@ class ReconnectStrategy:
         if stop_event:
             stop_event.wait(delay)  # Returns immediately if event is set
         else:
+            logger.warning("ReconnectStrategy.wait() called without stop_event — "
+                           "shutdown will be non-interruptible for %.1fs", delay)
             time.sleep(delay)
         return delay
 

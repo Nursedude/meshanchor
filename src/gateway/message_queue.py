@@ -460,6 +460,7 @@ class PersistentMessageQueue:
         self._process_thread = None
         self._stop_event = threading.Event()
         self._last_auto_cleanup = 0.0
+        self._wal_initialized = False
 
         # Callbacks
         self._send_callbacks: Dict[str, Callable] = {}  # destination -> send_fn
@@ -485,12 +486,15 @@ class PersistentMessageQueue:
     def _get_connection(self):
         """Get database connection with context management.
 
-        Enables WAL journal mode for crash resilience and better
-        concurrent read/write performance on resource-constrained systems.
+        WAL journal mode is set once on first connection for crash
+        resilience — it persists in the database file so subsequent
+        connections inherit it without the per-query overhead.
         """
         conn = sqlite3.connect(self._db_path, timeout=30)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        if not self._wal_initialized:
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._wal_initialized = True
         try:
             yield conn
             conn.commit()
