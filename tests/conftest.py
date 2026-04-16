@@ -10,6 +10,7 @@ Handles CI-specific settings:
 
 import os
 import sys
+import weakref
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -33,6 +34,84 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "network: mark test as requiring network access"
     )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Shut down the event_bus thread pool before pytest closes IO.
+
+    Background worker threads in src/utils/event_bus.py dispatch callbacks
+    (e.g. StatusBar._on_service_event) that log via `logger.debug`. Without
+    this shutdown, those workers can fire after pytest has closed the
+    captured stderr stream, producing `ValueError: I/O operation on
+    closed file` noise in CI logs.
+    """
+    try:
+        from utils.event_bus import event_bus
+        event_bus.shutdown()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_event_bus_subscribers():
+    """Clear event_bus subscribers between tests.
+
+    Prevents stale callbacks (e.g. a StatusBar instance from a prior test)
+    from firing on the shared thread pool after their owning test has torn
+    down, which would otherwise log to a pytest-closed stream.
+    """
+    yield
+    try:
+        from utils.event_bus import event_bus
+        event_bus.clear_subscribers()
+    except Exception:
+        pass
+
+
+# Track RNSMeshtasticBridge instances so we can stop leaked background threads.
+# Threads like _bridge_loop otherwise keep calling emit_service_status after
+# pytest closes captured streams, producing "I/O operation on closed file" noise.
+_live_bridges: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def _install_bridge_tracker():
+    """Wrap RNSMeshtasticBridge.__init__ once to register instances."""
+    try:
+        from gateway.rns_bridge import RNSMeshtasticBridge
+    except Exception:
+        return
+
+    if getattr(RNSMeshtasticBridge.__init__, "_meshanchor_tracked", False):
+        return
+
+    original_init = RNSMeshtasticBridge.__init__
+
+    def tracked_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        _live_bridges.add(self)
+
+    tracked_init._meshanchor_tracked = True  # type: ignore[attr-defined]
+    RNSMeshtasticBridge.__init__ = tracked_init
+
+
+_install_bridge_tracker()
+
+
+@pytest.fixture(autouse=True)
+def _stop_leaked_bridges():
+    """Stop any RNSMeshtasticBridge instances still running after a test."""
+    yield
+    for bridge in list(_live_bridges):
+        try:
+            if getattr(bridge, "_running", False):
+                bridge.stop()
+            else:
+                # Ensure background threads that only check _stop_event wake up.
+                stop_event = getattr(bridge, "_stop_event", None)
+                if stop_event is not None:
+                    stop_event.set()
+        except Exception:
+            pass
 
 
 def pytest_collection_modifyitems(config, items):

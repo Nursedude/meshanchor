@@ -388,7 +388,10 @@ class TestRunCliAsync:
             results['success'] = success
             results['stderr'] = stderr
 
-        with patch('shutil.which', return_value=None):
+        # Patch the resolver directly — mocking only shutil.which leaks through
+        # to fallback filesystem checks (/usr/local/bin, ~/.local/bin, etc.)
+        # when meshtastic is installed in the test environment (e.g. CI).
+        with patch('src.utils.common.find_meshtastic_cli', return_value=None):
             thread = run_cli_async(['--info'], callback, cli_path=None)
             thread.join(timeout=5)
 
