@@ -35,6 +35,38 @@ def pytest_configure(config):
     )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Shut down the event_bus thread pool before pytest closes IO.
+
+    Background worker threads in src/utils/event_bus.py dispatch callbacks
+    (e.g. StatusBar._on_service_event) that log via `logger.debug`. Without
+    this shutdown, those workers can fire after pytest has closed the
+    captured stderr stream, producing `ValueError: I/O operation on
+    closed file` noise in CI logs.
+    """
+    try:
+        from utils.event_bus import event_bus
+        event_bus.shutdown()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_event_bus_subscribers():
+    """Clear event_bus subscribers between tests.
+
+    Prevents stale callbacks (e.g. a StatusBar instance from a prior test)
+    from firing on the shared thread pool after their owning test has torn
+    down, which would otherwise log to a pytest-closed stream.
+    """
+    yield
+    try:
+        from utils.event_bus import event_bus
+        event_bus.clear_subscribers()
+    except Exception:
+        pass
+
+
 def pytest_collection_modifyitems(config, items):
     """Auto-skip certain tests in CI environment."""
     if not (CI or MESHANCHOR_CI):
