@@ -32,6 +32,36 @@ _version_mod, _HAS_VERSION = safe_import('__version__', '__version__')
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Service Allowlist (SEC-CRITICAL: prevents command injection via systemctl)
+# =============================================================================
+
+ALLOWED_SERVICE_NAMES = frozenset({
+    "meshanchor",
+    "meshtasticd",
+    "rnsd",
+    "nomadnet",
+    "mosquitto",
+    "meshforge",
+    "meshing-around",
+})
+
+
+def _validate_service_name(name: str) -> Optional[str]:
+    """Validate a service name against the allowlist.
+
+    Returns the name if valid, or None if rejected.  Prevents arbitrary
+    arguments from being passed to systemctl/journalctl via the remote
+    management protocol.
+    """
+    if not name or not isinstance(name, str):
+        return None
+    clean = name.removesuffix(".service")
+    if clean in ALLOWED_SERVICE_NAMES:
+        return clean
+    logger.warning("Rejected disallowed service name from agent command: %r", name)
+    return None
+
 
 # =============================================================================
 # Data Classes
@@ -420,7 +450,9 @@ class CommandHandler:
     )
     def service_status(args: Dict[str, Any], context: CommandContext) -> CommandResult:
         """Get service status."""
-        service_name = args["name"]
+        service_name = _validate_service_name(args["name"])
+        if not service_name:
+            return CommandResult.error("Service not in allowlist", CommandStatus.INVALID_ARGS)
 
         try:
             result = subprocess.run(
@@ -473,7 +505,9 @@ class CommandHandler:
     )
     def service_start(args: Dict[str, Any], context: CommandContext) -> CommandResult:
         """Start a service."""
-        service_name = args["name"]
+        service_name = _validate_service_name(args["name"])
+        if not service_name:
+            return CommandResult.error("Service not in allowlist", CommandStatus.INVALID_ARGS)
 
         try:
             result = subprocess.run(
@@ -502,7 +536,9 @@ class CommandHandler:
     )
     def service_stop(args: Dict[str, Any], context: CommandContext) -> CommandResult:
         """Stop a service."""
-        service_name = args["name"]
+        service_name = _validate_service_name(args["name"])
+        if not service_name:
+            return CommandResult.error("Service not in allowlist", CommandStatus.INVALID_ARGS)
 
         try:
             result = subprocess.run(
@@ -531,7 +567,9 @@ class CommandHandler:
     )
     def service_restart(args: Dict[str, Any], context: CommandContext) -> CommandResult:
         """Restart a service."""
-        service_name = args["name"]
+        service_name = _validate_service_name(args["name"])
+        if not service_name:
+            return CommandResult.error("Service not in allowlist", CommandStatus.INVALID_ARGS)
 
         try:
             result = subprocess.run(
@@ -769,8 +807,10 @@ class CommandHandler:
     )
     def system_logs(args: Dict[str, Any], context: CommandContext) -> CommandResult:
         """Get recent log entries."""
-        service = args.get("service", "meshanchor")
-        lines = args.get("lines", 100)
+        service = _validate_service_name(args.get("service", "meshanchor"))
+        if not service:
+            return CommandResult.error("Service not in allowlist", CommandStatus.INVALID_ARGS)
+        lines = min(max(int(args.get("lines", 100)), 1), 10000)
 
         try:
             result = subprocess.run(
