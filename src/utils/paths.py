@@ -261,6 +261,35 @@ class ReticulumPaths:
         """Get RNS custom interfaces directory (for plugins like Meshtastic_Interface)"""
         return cls.get_config_dir() / 'interfaces'
 
+    @classmethod
+    def get_configured_instance_name(cls) -> str:
+        """Read the ``instance_name`` option from the active RNS config.
+
+        RNS namespaces its shared-instance socket as ``@rns/<instance_name>``.
+        Default is ``default`` when the option is omitted. If rnsd runs under
+        a non-default instance_name (e.g. ``volcano ai rns``) and a MeshAnchor
+        client config omits the name, the client binds its OWN fresh
+        shared-instance socket instead of attaching to rnsd — path_table
+        comes up empty and callers see "no RNS peers" even though rnsd is
+        healthy.
+
+        Every client-config writer must propagate what rnsd is actually using.
+        """
+        try:
+            text = cls.get_config_file().read_text()
+        except (OSError, PermissionError):
+            return 'default'
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            name, _, value = line.partition('=')
+            if name.strip() == 'instance_name':
+                return value.strip() or 'default'
+        return 'default'
+
 
 class MeshAnchorPaths:
     """Paths related to MeshAnchor application"""

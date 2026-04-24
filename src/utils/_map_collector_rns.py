@@ -22,6 +22,27 @@ _msgpack, _HAS_MSGPACK = safe_import('msgpack')
 logger = logging.getLogger(__name__)
 
 
+def _rns_is_initialized() -> bool:
+    """Return True if an RNS.Reticulum instance has already been constructed.
+
+    RNS uses a process-wide singleton — ``RNS.Reticulum()`` raises
+    ``OSError("Attempt to reinitialise Reticulum, when it was already
+    running")`` on the second construction. The collector runs every
+    cycle; we must init exactly once per process and read
+    ``Transport.path_table`` directly on subsequent cycles.
+
+    Uses the public ``RNS.Reticulum.get_instance()`` rather than peeking
+    at the name-mangled ``_Reticulum__instance`` attribute, which is
+    fragile across rns minor versions.
+    """
+    if not _HAS_RNS:
+        return False
+    try:
+        return _RNS.Reticulum.get_instance() is not None
+    except Exception:
+        return False
+
+
 class RNSDataCollectorMixin:
     """Mixin providing RNS data collection methods for MapDataCollector."""
 
@@ -53,21 +74,46 @@ class RNSDataCollectorMixin:
         rns_positions = self._load_rns_position_cache()
 
         try:
-            # Connect as a client to the running rnsd shared instance.
-            # Use a temp client-only config to avoid:
-            # 1. Creating a default config at /root/.reticulum/ (Path.home() bug MF001)
-            # 2. Initializing interfaces that conflict with rnsd's bindings
-            import tempfile
-            client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
-            client_config_dir.mkdir(exist_ok=True)
-            client_config_file = client_config_dir / "config"
-            client_config_file.write_text(
-                "[reticulum]\n"
-                "  share_instance = Yes\n"
-                "  shared_instance_port = 37428\n"
-                "  instance_control_port = 37429\n"
-            )
-            reticulum = _RNS.Reticulum(configdir=str(client_config_dir))
+            # Initialize the Reticulum client ONCE per process. Subsequent
+            # cycles read Transport.path_table directly — it's a class-level
+            # singleton that stays live. Calling Reticulum(...) a second
+            # time raises OSError (see _rns_is_initialized() above).
+            if not _rns_is_initialized():
+                # Connect as a client to the running rnsd shared instance.
+                # Use a temp client-only config to avoid:
+                # 1. Creating a default config at /root/.reticulum/ (MF001)
+                # 2. Initializing interfaces that conflict with rnsd.
+                import tempfile
+                from utils.paths import ReticulumPaths
+                instance_name = ReticulumPaths.get_configured_instance_name()
+                client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
+                client_config_dir.mkdir(exist_ok=True)
+                client_config_file = client_config_dir / "config"
+                client_config_file.write_text(
+                    "[reticulum]\n"
+                    "  share_instance = Yes\n"
+                    "  shared_instance_port = 37428\n"
+                    "  instance_control_port = 37429\n"
+                    f"  instance_name = {instance_name}\n"
+                )
+                try:
+                    _RNS.Reticulum(configdir=str(client_config_dir))
+                except (OSError, ValueError) as e:
+                    # Two known cases where init fails but Transport is still
+                    # usable and we should not bail:
+                    #   1. "Attempt to reinitialise Reticulum" — another
+                    #      component beat us to init.
+                    #   2. "signal only works in main thread of the main
+                    #      interpreter" — init ran in a ThreadingHTTPServer
+                    #      worker and failed at signal.signal() registration.
+                    #      At that point Reticulum.__instance is ALREADY set
+                    #      (before the signal call), so get_instance() returns
+                    #      a usable object and Transport is running.
+                    msg = str(e).lower()
+                    if "reinitialise" in msg or "main thread" in msg:
+                        logger.debug("RNS already partially-initialized (%s) — reusing", e)
+                    else:
+                        raise
 
             # Check for known destinations in path table
             if hasattr(_RNS.Transport, 'path_table') and _RNS.Transport.path_table:

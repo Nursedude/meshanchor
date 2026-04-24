@@ -171,19 +171,25 @@ class UnifiedNodeTracker:
                 # Create a client-only config to avoid interface conflicts
                 # This prevents RNS from trying to bind ports that rnsd already owns
                 import tempfile
+                from utils.paths import ReticulumPaths
+                instance_name = ReticulumPaths.get_configured_instance_name()
                 client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
                 client_config_dir.mkdir(exist_ok=True)
                 client_config_file = client_config_dir / "config"
 
-                # Write minimal client-only config (no interfaces, just shared transport)
-                client_config_file.write_text("""# MeshAnchor RNS Client Config (auto-generated)
-# This config connects to existing rnsd without creating interfaces
-
-[reticulum]
-share_instance = Yes
-shared_instance_port = 37428
-instance_control_port = 37429
-""")
+                # Write minimal client-only config (no interfaces, just shared transport).
+                # instance_name MUST match what rnsd actually uses — the shared-instance
+                # socket is namespaced as @rns/<instance_name> and a mismatch makes the
+                # client spawn its own fresh socket instead of attaching to rnsd.
+                client_config_file.write_text(
+                    "# MeshAnchor RNS Client Config (auto-generated)\n"
+                    "# Connects to existing rnsd without creating interfaces\n\n"
+                    "[reticulum]\n"
+                    "share_instance = Yes\n"
+                    "shared_instance_port = 37428\n"
+                    "instance_control_port = 37429\n"
+                    f"instance_name = {instance_name}\n"
+                )
 
                 # Pre-flight: check if shared instance port is listening
                 try:

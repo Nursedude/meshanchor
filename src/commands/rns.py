@@ -1065,11 +1065,15 @@ def _init_rns_client():
     See: .claude/foundations/persistent_issues.md Issue #12
     """
     import tempfile
+    from utils.paths import ReticulumPaths
 
+    instance_name = ReticulumPaths.get_configured_instance_name()
     client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
     client_config_dir.mkdir(exist_ok=True)
     client_config_file = client_config_dir / "config"
 
+    # instance_name MUST match rnsd's configured value — the shared-instance
+    # socket is namespaced as @rns/<instance_name>.
     client_config_file.write_text(
         "# MeshAnchor RNS Client Config (auto-generated)\n"
         "# Connects to existing rnsd without creating interfaces\n\n"
@@ -1077,6 +1081,7 @@ def _init_rns_client():
         "share_instance = Yes\n"
         "shared_instance_port = 37428\n"
         "instance_control_port = 37429\n"
+        f"instance_name = {instance_name}\n"
     )
 
     return RNS.Reticulum(configdir=str(client_config_dir))
