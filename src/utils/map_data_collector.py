@@ -19,6 +19,7 @@ import math
 import os
 import socket
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -93,6 +94,10 @@ class MapDataCollector(RNSDataCollectorMixin):
         self._cache_file = self._cache_dir / "map_nodes.geojson"
         self._last_collect: Optional[float] = None
         self._cached_geojson: Optional[Dict] = None
+        # Serializes expensive collect() runs when ThreadingHTTPServer
+        # dispatches concurrent requests. Without this, every worker
+        # re-runs the full path_table walk + MeshCore/MQTT fetch at once.
+        self._collect_lock = threading.Lock()
 
         # User-configurable cache age settings
         self._settings = SettingsManager(
@@ -302,11 +307,22 @@ class MapDataCollector(RNSDataCollectorMixin):
         Returns:
             GeoJSON FeatureCollection with all known nodes.
         """
-        # Use cache if fresh enough
+        # Fast-path cache check without lock — safe because both attrs are
+        # written atomically at the end of _collect_locked().
         if (self._cached_geojson and self._last_collect and
                 time.time() - self._last_collect < max_age_seconds):
             return self._cached_geojson
 
+        with self._collect_lock:
+            # Re-check cache under the lock: another worker may have just
+            # finished a collect while we waited.
+            if (self._cached_geojson and self._last_collect and
+                    time.time() - self._last_collect < max_age_seconds):
+                return self._cached_geojson
+            return self._collect_locked()
+
+    def _collect_locked(self) -> Dict[str, Any]:
+        """Actual collection body. Caller MUST hold self._collect_lock."""
         features: Dict[str, Dict] = {}  # id -> feature (dedup by id)
 
         # Source 0: UnifiedNodeTracker (richest data — includes RNS + Meshtastic)
