@@ -35,7 +35,7 @@ If you have:
 - **A Raspberry Pi** you can dedicate, or just a Linux box
 - **The patience to be tester #2**
 
-Clone it. Break it. File issues. The repo is at [github.com/Nursedude/meshanchor](https://github.com/Nursedude/meshanchor). Issues #7–#10 are already open thanks to cogwheel886 — follow that pattern. Installation is one script; if that script fails on your setup, that alone is a useful bug report.
+Clone it. Break it. File issues. The repo is at [github.com/Nursedude/meshanchor](https://github.com/Nursedude/meshanchor). Issues #7–#10, filed by cogwheel886 and since fixed, are the pattern to follow — specific symptom, the exact command that produced it, what your setup looks like. Installation is one script; if that script fails on your setup, that alone is a useful bug report.
 
 What I'm *not* asking for: perfection. It's alpha. It will misbehave. I want to find where it misbehaves before we ship the first real release.
 
