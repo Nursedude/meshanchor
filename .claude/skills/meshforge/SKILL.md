@@ -1,26 +1,33 @@
 ---
 name: MeshAnchor
 description: >
-  MeshAnchor NOC (Network Operations Center) assistant for LoRa mesh network development.
-  Handles Meshtastic and RNS (Reticulum) network operations, configuration, debugging, and development.
+  MeshAnchor NOC (Network Operations Center) assistant — **MeshCore-primary** LoRa mesh with
+  Meshtastic and RNS (Reticulum) as optional gateways. Sister project to MeshForge
+  (Meshtastic-primary); shares TUI framework, gateway bridge, and CanonicalMessage contract.
 
-  Use when working with: (1) Meshtasticd configuration and service management, (2) RNS/Reticulum
-  network setup and bridging, (3) LoRa radio configuration (presets, frequencies, regions),
-  (4) MeshAnchor TUI development, (5) Gateway bridge between Meshtastic and RNS,
+  Use when working with: (1) MeshCore node fleet and primary radio operations,
+  (2) Optional Meshtasticd/rnsd gateways feeding the MeshCore NOC, (3) LoRa radio configuration
+  (presets, frequencies, regions), (4) MeshAnchor TUI development, (5) Cross-protocol bridge code,
   (6) RF calculations and link budgets, (7) Node discovery and monitoring.
 
-  Triggers: meshtastic, meshtasticd, rnsd, reticulum, lora, meshanchor, gateway, rnode, nomadnet
+  Triggers: meshcore, meshanchor, meshtastic, meshtasticd, rnsd, reticulum, lora, gateway, rnode, nomadnet
 ---
 
 # MeshAnchor Development Assistant
 
 ## Project Context
 
-MeshAnchor is a Network Operations Center (NOC) bridging Meshtastic and Reticulum mesh networks.
-First open-source tool to unify these incompatible mesh ecosystems.
+MeshAnchor is a **MeshCore-primary** Network Operations Center. Unlike its sister project
+[MeshForge](https://github.com/Nursedude/meshforge) (Meshtastic-primary), MeshAnchor treats
+MeshCore as the home radio and brings Meshtastic/RNS in as optional gateways.
 
-**Version:** 0.5.5-beta
+**Version:** 0.1.0-alpha — forked from MeshForge main on 2026-04-01. Not yet field-tested; first
+external tester (cogwheel886, RAK4631) filed issues #7–#10.
+
 **Callsign:** WH6GXZ (Nursedude)
+
+**Shared contract:** `src/gateway/canonical_message.py` must stay compatible with MeshForge's
+version. Two flagships, one protocol.
 
 ## Development Principles
 
@@ -67,6 +74,29 @@ except Exception as e:
 ```python
 subprocess.run(["cmd"], timeout=30)  # Always specify timeout
 ```
+
+### MF007–MF010: Architectural contracts (regression-guarded)
+
+- **MF007**: Never create `TCPInterface()` directly. Use `get_connection_manager()` or
+  `MeshtasticConnection` context manager. Long-lived needs `MESHTASTIC_CONNECTION_LOCK`.
+- **MF008**: Service state decisions go through `utils/service_check.py:check_service()` — never
+  raw `systemctl is-active`.
+- **MF009**: `RNS.Reticulum()` always needs `configdir=` (or EADDRINUSE when rnsd is running).
+- **MF010**: Daemon loops use `self._stop_event.wait(seconds)`, never `time.sleep()`.
+
+### MF012: Context-loaded doc size cap
+`.claude/foundations/persistent_issues.md` must stay under 40,000 chars. When the cap trips,
+move the oldest resolved issues to the archive file — do NOT raise the limit.
+
+### RNS client-config instance_name (Issue #32 + fleet-host bug, 2026-04-24)
+Never hardcode `instance_name = default` in client-only RNS configs. Always:
+```python
+from utils.paths import ReticulumPaths
+instance_name = ReticulumPaths.get_configured_instance_name()
+# Write "instance_name = {instance_name}" into the client config
+```
+The shared-instance socket is namespaced `@rns/<instance_name>`. Mismatches cause empty path_table
+on boxes where rnsd runs under a non-default name (e.g. "volcano ai rns" on this dev box).
 
 ## Key Ports
 
@@ -135,7 +165,7 @@ src/
 │   ├── handler_protocol.py  # CommandHandler Protocol + TUIContext + BaseHandler
 │   ├── handler_registry.py  # HandlerRegistry — register/lookup/dispatch
 │   ├── backend.py           # DialogBackend (whiptail/dialog abstraction)
-│   └── handlers/            # 60 registered command handlers
+│   └── handlers/            # 64 registered command handlers
 ├── gateway/           # RNS-Meshtastic bridge
 │   ├── rns_bridge.py  # Main gateway (MQTT transport)
 │   ├── canonical_message.py   # Multi-protocol message format
