@@ -32,6 +32,7 @@ from typing import Optional, List, Dict, Any, Callable
 from dataclasses import dataclass, field
 
 from .base import CommandResult
+from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
 
 from utils.event_bus import emit_message
@@ -46,6 +47,12 @@ logger = logging.getLogger(__name__)
 
 # Maximum message length before chunking
 MAX_MESSAGE_LENGTH = 160
+
+# Auto-prune cadence for messages.db. Closes the manual-only retention
+# gap that mirrored meshforge core's Phase 1 closure (commit 2743ded).
+_MESSAGE_RETENTION_DAYS = 30
+_MESSAGE_PRUNE_INTERVAL_SECONDS = 3600
+_last_message_prune_ts: float = 0.0
 
 
 @dataclass
@@ -89,7 +96,7 @@ def _get_db_path() -> Path:
 def _init_db() -> sqlite3.Connection:
     """Initialize message database."""
     db_path = _get_db_path()
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_tuned(db_path)
     conn.row_factory = sqlite3.Row
 
     conn.execute('''
@@ -120,6 +127,38 @@ def _init_db() -> sqlite3.Connection:
 
     conn.commit()
     return conn
+
+
+def _maybe_prune_messages(now: Optional[float] = None) -> None:
+    """Hourly auto-prune of messages older than retention.
+
+    Mirrors meshforge core's Phase 1 closure (commit 2743ded). Idempotent
+    and cheap when the cadence window hasn't elapsed."""
+    global _last_message_prune_ts
+    if _MESSAGE_PRUNE_INTERVAL_SECONDS <= 0 or _MESSAGE_RETENTION_DAYS <= 0:
+        return
+    if now is None:
+        now = time.time()
+    if now - _last_message_prune_ts < _MESSAGE_PRUNE_INTERVAL_SECONDS:
+        return
+    try:
+        conn = _init_db()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM messages WHERE timestamp < datetime('now', ? || ' days')",
+                (f'-{_MESSAGE_RETENTION_DAYS}',),
+            )
+            conn.commit()
+            deleted = cursor.rowcount
+            _last_message_prune_ts = now
+            if deleted > 0:
+                logger.info(
+                    f"Messages auto-prune: deleted {deleted} rows older than {_MESSAGE_RETENTION_DAYS}d"
+                )
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Messages auto-prune failed: {e}")
 
 
 def _chunk_message(content: str, max_length: int = MAX_MESSAGE_LENGTH) -> List[str]:
@@ -518,6 +557,8 @@ def store_incoming(
         conn.close()
 
         logger.info(f"Stored message {message_id} from {from_id}")
+
+        _maybe_prune_messages()
 
         return CommandResult.ok(
             f"Message stored",

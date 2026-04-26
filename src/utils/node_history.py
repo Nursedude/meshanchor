@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
@@ -83,12 +84,17 @@ class NodeHistoryDB:
         self.retention_seconds = retention_seconds
         self._lock = threading.Lock()
         self._last_recorded: Dict[str, float] = {}  # node_id -> last record time
+        # Hourly auto-prune cadence — without this, retention relied on
+        # manual cleanup() calls, the same trap that wedged fleet-host's
+        # node_history.db at 1.95 GB on 2026-04-26. 0 disables for tests.
+        self._last_prune_ts: float = 0.0
+        self._prune_interval_seconds: int = 3600
         self._init_db()
 
     def _init_db(self) -> None:
         """Create tables and indexes if they don't exist."""
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             try:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS node_observations (
@@ -184,10 +190,12 @@ class NodeHistoryDB:
             }
 
         if not to_insert:
+            self._maybe_prune(now)
             return 0
 
+        inserted = 0
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             try:
                 conn.executemany("""
                     INSERT INTO node_observations
@@ -197,10 +205,45 @@ class NodeHistoryDB:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, to_insert)
                 conn.commit()
-                return len(to_insert)
+                inserted = len(to_insert)
             except sqlite3.Error as e:
                 logger.error(f"Failed to record observations: {e}")
-                return 0
+                inserted = 0
+            finally:
+                conn.close()
+
+        # Run pruning OUTSIDE the insert lock — separate transaction.
+        self._maybe_prune(now)
+        return inserted
+
+    def _maybe_prune(self, now: float) -> None:
+        """Hourly auto-prune of observations past retention.
+
+        Mirrors meshforge core's pattern (commit fe11e83 → 2743ded).
+        Skips VACUUM — SQLite reuses freed pages on subsequent inserts
+        and VACUUM rewrites the entire DB which is multi-minute on Pi
+        SD cards. Operators wanting full reclaim use cleanup()."""
+        if self._prune_interval_seconds <= 0 or self.retention_seconds <= 0:
+            return
+        if now - self._last_prune_ts < self._prune_interval_seconds:
+            return
+        cutoff = now - self.retention_seconds
+        with self._lock:
+            conn = connect_tuned(self.db_path)
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM node_observations WHERE timestamp < ?",
+                    (cutoff,),
+                )
+                conn.commit()
+                deleted = cursor.rowcount
+                self._last_prune_ts = now
+                if deleted > 0:
+                    logger.info(
+                        f"Node history auto-prune: deleted {deleted} rows older than {self.retention_seconds // 86400}d"
+                    )
+            except sqlite3.Error as e:
+                logger.error(f"Auto-prune failed: {e}")
             finally:
                 conn.close()
 
@@ -219,7 +262,7 @@ class NodeHistoryDB:
         cutoff = time.time() - (hours * 3600)
 
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
                 rows = conn.execute("""
@@ -249,7 +292,7 @@ class NodeHistoryDB:
         window_start = timestamp - window_seconds
 
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
                 # Get latest observation per node within the window
@@ -280,7 +323,7 @@ class NodeHistoryDB:
         cutoff = time.time() - (hours * 3600)
 
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
                 rows = conn.execute("""
@@ -339,7 +382,7 @@ class NodeHistoryDB:
             Dict with total_observations, unique_nodes, oldest_record, newest_record, db_size_kb.
         """
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             try:
                 total = conn.execute(
                     "SELECT COUNT(*) FROM node_observations"
@@ -380,7 +423,7 @@ class NodeHistoryDB:
         cutoff = time.time() - self.retention_seconds
 
         with self._lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = connect_tuned(self.db_path)
             try:
                 cursor = conn.execute(
                     "DELETE FROM node_observations WHERE timestamp < ?",

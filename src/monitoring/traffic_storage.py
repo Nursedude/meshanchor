@@ -35,6 +35,7 @@ from .packet_dissectors import (
 )
 
 # Sudo-safe home directory — first-party, always available (MF001)
+from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
 
 logger = logging.getLogger(__name__)
@@ -95,8 +96,11 @@ class TrafficCapture:
 
     @contextmanager
     def _get_connection(self):
-        """Get database connection with context management."""
-        conn = sqlite3.connect(self._db_path, timeout=30)
+        """Get database connection with context management.
+
+        Tuned via utils.db_helpers.connect_tuned (WAL + sync=NORMAL +
+        64MB journal cap). Phase 1 of post-fleet-host-2026-04-26 closure."""
+        conn = connect_tuned(self._db_path)
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -786,8 +790,11 @@ class PacketArchive:
 
     @contextmanager
     def _get_connection(self):
-        """Get database connection with context management."""
-        conn = sqlite3.connect(self._db_path, timeout=30)
+        """Get database connection with context management.
+
+        Tuned via utils.db_helpers.connect_tuned (WAL + sync=NORMAL +
+        64MB journal cap). Phase 1 of post-fleet-host-2026-04-26 closure."""
+        conn = connect_tuned(self._db_path)
         conn.row_factory = sqlite3.Row
         try:
             yield conn

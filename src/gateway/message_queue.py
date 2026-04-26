@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Callable, Any
 from contextlib import contextmanager
 
 # Import centralized path utility for sudo compatibility
+from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
 from utils.timeouts import MESSAGE_STALE as _MESSAGE_STALE_TIMEOUT
 
@@ -490,11 +491,14 @@ class PersistentMessageQueue:
         resilience — it persists in the database file so subsequent
         connections inherit it without the per-query overhead.
         """
-        conn = sqlite3.connect(self._db_path, timeout=30)
+        # Tuned via connect_tuned: WAL + sync=NORMAL + 64MB journal cap
+        # + 30s busy_timeout. Phase 1 of post-fleet-host-2026-04-26 closure
+        # — was missing sync=NORMAL and journal_size_limit before.
+        conn = connect_tuned(self._db_path)
         conn.row_factory = sqlite3.Row
-        if not self._wal_initialized:
-            conn.execute("PRAGMA journal_mode=WAL")
-            self._wal_initialized = True
+        # _wal_initialized stays around for compat with any callers reading
+        # it; the helper applies WAL on every connect (idempotent on header).
+        self._wal_initialized = True
         try:
             yield conn
             conn.commit()
