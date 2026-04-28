@@ -321,6 +321,31 @@ class MapDataCollector(RNSDataCollectorMixin):
                 return self._cached_geojson
             return self._collect_locked()
 
+    @staticmethod
+    def _tag_source_origin(features: List[Dict[str, Any]], origin: str) -> List[Dict[str, Any]]:
+        """Stamp `properties.source_origin` on every feature in-place.
+
+        Drives the directory-table tiered retention (Issue #49):
+        external-bulk origins (meshcore_public, aredn_worldmap,
+        mqtt_global) age out at 7d; locally-RX'd origins (local_radio,
+        rns_path_table, aredn_local, mqtt_local) age out at 30d.
+
+        The unified_tracker source produces a mix — its features can be
+        either Meshtastic (local_radio) or RNS (rns_path_table); that
+        method tags itself per-feature based on `properties.network`.
+        Other sources are uniform per call site.
+
+        First-tag-wins: if a feature already carries a source_origin (set
+        by a higher-trust collector earlier this cycle), don't overwrite.
+        """
+        for f in features:
+            props = f.get("properties")
+            if not isinstance(props, dict):
+                continue
+            if not props.get("source_origin"):
+                props["source_origin"] = origin
+        return features
+
     def _collect_locked(self) -> Dict[str, Any]:
         """Actual collection body. Caller MUST hold self._collect_lock."""
         features: Dict[str, Dict] = {}  # id -> feature (dedup by id)
@@ -328,6 +353,7 @@ class MapDataCollector(RNSDataCollectorMixin):
         # Source 0: UnifiedNodeTracker (richest data — includes RNS + Meshtastic)
         # This is the same data source the topology view uses (378 nodes).
         # It includes nodes from RNS path table, meshtasticd, and gateway bridge.
+        # Tagging is per-feature inside _collect_unified_tracker (mixed RNS + Meshtastic).
         tracker_unified_features = self._collect_unified_tracker()
         for f in tracker_unified_features:
             fid = f["properties"].get("id", "")
@@ -335,7 +361,7 @@ class MapDataCollector(RNSDataCollectorMixin):
                 features[fid] = f
 
         # Source 1: meshtasticd TCP
-        tcp_features = self._collect_meshtasticd()
+        tcp_features = self._tag_source_origin(self._collect_meshtasticd(), "local_radio")
         for f in tcp_features:
             fid = f["properties"].get("id", "")
             if fid:
@@ -345,14 +371,15 @@ class MapDataCollector(RNSDataCollectorMixin):
         # Only try this if TCP returned nothing (avoids double-connection)
         direct_radio_features = []
         if not tcp_features:
-            direct_radio_features = self._collect_direct_radio()
+            direct_radio_features = self._tag_source_origin(self._collect_direct_radio(), "local_radio")
             for f in direct_radio_features:
                 fid = f["properties"].get("id", "")
                 if fid:
                     features[fid] = f
 
-        # Source 2: MQTT subscriber (if running)
-        mqtt_features = self._collect_mqtt()
+        # Source 2: MQTT subscriber (if running). Local subscriber → mqtt_local
+        # tier; external/global firehoses (when added) should tag mqtt_global.
+        mqtt_features = self._tag_source_origin(self._collect_mqtt(), "mqtt_local")
         for f in mqtt_features:
             fid = f["properties"].get("id", "")
             if fid and fid not in features:
@@ -361,30 +388,31 @@ class MapDataCollector(RNSDataCollectorMixin):
                 # Merge: prefer newer data
                 self._merge_feature(features[fid], f)
 
-        # Source 3: Node tracker cache files
-        tracker_features = self._collect_node_tracker()
+        # Source 3: Node tracker cache files (locally-cached, replayed on cold start)
+        tracker_features = self._tag_source_origin(self._collect_node_tracker(), "node_tracker")
         for f in tracker_features:
             fid = f["properties"].get("id", "")
             if fid and fid not in features:
                 features[fid] = f
 
         # Source 4: AREDN mesh network
-        aredn_features = self._collect_aredn()
+        aredn_features = self._tag_source_origin(self._collect_aredn(), "aredn_local")
         for f in aredn_features:
             fid = f["properties"].get("id", "")
             if fid and fid not in features:
                 features[fid] = f
 
         # Source 5: RNS direct query (from rnsd path table)
-        rns_direct_features = self._collect_rns_direct()
+        rns_direct_features = self._tag_source_origin(self._collect_rns_direct(), "rns_path_table")
         for f in rns_direct_features:
             fid = f["properties"].get("id", "")
             if fid and fid not in features:
                 features[fid] = f
 
-        # Source 6: Last-known cache (fill gaps)
+        # Source 6: Last-known cache (fill gaps). node_tracker tier — the
+        # cache is whatever this box has previously seen locally.
         if not features:
-            cache_features = self._load_cache()
+            cache_features = self._tag_source_origin(self._load_cache(), "node_tracker")
             for f in cache_features:
                 fid = f["properties"].get("id", "")
                 if fid:
@@ -425,12 +453,47 @@ class MapDataCollector(RNSDataCollectorMixin):
         self._last_collect = time.time()
         self._save_cache(geojson)
 
-        # Record to history database
-        if self._history and geojson["features"]:
-            try:
-                self._history.record_observations(geojson["features"])
-            except Exception as e:
-                logger.debug(f"History recording error: {e}")
+        # Record to history database. Pass BOTH positioned features AND
+        # position-less nodes (synthesized into geometry-less features)
+        # so the directory table (Issue #49) gets a row per node we
+        # heard about — including MeshCore adverts and RNS announces
+        # that carry no GPS by protocol design. The observation-stream
+        # writer in record_observations skips position-less rows itself
+        # (it requires lat/lon for the time-series); the directory
+        # writer handles them via NULL last_lat/last_lon.
+        if self._history:
+            history_features = list(geojson["features"])
+            for entry in self._nodes_without_position:
+                nid = entry.get("id")
+                if not nid:
+                    continue
+                # Tier-aware origin tagging mirrors the per-source path:
+                # MeshCore via the unified tracker is local-RX (gateway
+                # bridge), RNS announces are rns_path_table, everything
+                # else falls into local_radio. Position-less features
+                # never came through one of the threshold-gated external
+                # collectors, so they don't get external_bulk tags.
+                net = (entry.get("network") or "").lower()
+                if net == "rns":
+                    origin = "rns_path_table"
+                else:
+                    origin = "local_radio"
+                history_features.append({
+                    "type": "Feature",
+                    "geometry": {},  # explicit no-position
+                    "properties": {
+                        "id": nid,
+                        "name": entry.get("name", nid),
+                        "network": entry.get("network", "unknown"),
+                        "is_online": entry.get("is_online", False),
+                        "source_origin": origin,
+                    },
+                })
+            if history_features:
+                try:
+                    self._history.record_observations(history_features)
+                except Exception as e:
+                    logger.debug(f"History recording error: {e}")
 
         return geojson
 
@@ -462,6 +525,19 @@ class MapDataCollector(RNSDataCollectorMixin):
                         props["role"] = ""
                     if "source" not in props:
                         props["source"] = "unified_tracker"
+                    # Tier-aware tagging for the directory (Issue #49):
+                    # the unified tracker mixes RNS + Meshtastic; route
+                    # each by its protocol so retention applies correctly.
+                    if not props.get("source_origin"):
+                        net = (props.get("network") or "").lower()
+                        if net == "meshtastic":
+                            props["source_origin"] = "local_radio"
+                        elif net == "rns":
+                            props["source_origin"] = "rns_path_table"
+                        else:
+                            # MeshCore via tracker is local-RX (gateway bridge);
+                            # everything else falls into local_radio bucket.
+                            props["source_origin"] = "local_radio"
 
                 logger.debug(
                     f"UnifiedNodeTracker: {len(features)} nodes with position "
