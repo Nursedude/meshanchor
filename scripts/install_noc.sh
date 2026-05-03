@@ -1657,7 +1657,7 @@ fi
 # node tracker, MQTT subscriber — feeds /api/status when no TUI is running).
 # Pre-create XDG dirs under /root so systemd's ReadWritePaths bind-mounts succeed
 # (User=root + ProtectHome=read-only otherwise blocks first-run dir creation).
-mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor
+mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor /root/.cache/meshanchor
 if [[ -f "$INSTALL_DIR/scripts/meshanchor-daemon.service" ]]; then
     cp "$INSTALL_DIR/scripts/meshanchor-daemon.service" /etc/systemd/system/
     echo -e "  ${GREEN}✓ meshanchor-daemon.service installed${NC}"
@@ -1685,7 +1685,7 @@ RuntimeDirectory=meshanchor
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/log /tmp /home /run/meshanchor -/root/.config/meshanchor -/root/.local/share/meshanchor
+ReadWritePaths=/var/log /tmp /home /run/meshanchor -/root/.config/meshanchor -/root/.local/share/meshanchor -/root/.cache/meshanchor
 PrivateTmp=true
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/meshanchor/src
