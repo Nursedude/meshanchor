@@ -52,7 +52,7 @@ jobs:
         id: pytest
         run: |
           set -o pipefail
-          python -m pytest tests/ -v --tb=short --timeout=30 --timeout-method=thread -x --ignore=tests/test_bridge_integration.py 2>&1 | tee /tmp/pytest.log | head -500
+          python -m pytest tests/ -v --tb=short --timeout=30 --timeout-method=thread --ignore=tests/test_bridge_integration.py 2>&1 | tee /tmp/pytest.log | head -500
         env:
           CI: true
           MESHANCHOR_CI: true
