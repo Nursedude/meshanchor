@@ -1005,6 +1005,14 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         """Handle GET requests."""
+        # Chat endpoints — independent of the config API, just hosted on
+        # the same :8081 port. Read-only paths are LAN-accessible (same
+        # convention as the map server), since they expose chat history
+        # the operator may want from another box.
+        if self.path.startswith("/chat/") or self.path == "/chat":
+            self._handle_chat_get()
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1124,7 +1132,15 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._send_error_json(400, result.error or "Unknown error")
 
     def do_POST(self):
-        """Handle POST requests (reset)."""
+        """Handle POST requests (reset, chat send)."""
+        # Chat send — localhost-only since it actuates the radio.
+        if self.path == "/chat/send":
+            if not self._check_localhost():
+                self._send_error_json(403, "Forbidden — localhost only")
+                return
+            self._handle_chat_send()
+            return
+
         if not self._check_localhost():
             self._send_error_json(403, "Forbidden — localhost only")
             return
@@ -1142,6 +1158,86 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
                 self._send_error_json(400, result.error or "Reset failed")
         else:
             self._send_error_json(400, f"Unknown POST action: {action}")
+
+    # ─────────────────────────────────────────────────────────────────
+    # Chat endpoints — bridge between the daemon's MeshCoreHandler and
+    # the TUI / web clients. The handler lives in the same process; we
+    # reach it via gateway.meshcore_handler.get_active_handler().
+    # ─────────────────────────────────────────────────────────────────
+
+    def _handle_chat_get(self) -> None:
+        try:
+            from gateway.meshcore_handler import get_active_handler
+        except ImportError:
+            self._send_error_json(503, "MeshCore module not loaded")
+            return
+
+        handler = get_active_handler()
+        if handler is None:
+            self._send_error_json(503, "MeshCore handler not active")
+            return
+
+        # /chat/messages?since=<id>
+        if self.path.startswith("/chat/messages"):
+            since_id = 0
+            if "?" in self.path:
+                query = self.path.split("?", 1)[1]
+                for param in query.split("&"):
+                    if param.startswith("since="):
+                        try:
+                            since_id = int(param.split("=", 1)[1])
+                        except ValueError:
+                            pass
+            entries = handler.get_recent_chat(since_id=since_id)
+            self._send_json({"count": len(entries), "messages": entries})
+            return
+
+        if self.path.rstrip("/") == "/chat/channels":
+            self._send_json({"channels": handler.get_known_channels()})
+            return
+
+        self._send_error_json(404, f"Unknown chat path: {self.path}")
+
+    def _handle_chat_send(self) -> None:
+        try:
+            from gateway.meshcore_handler import get_active_handler
+        except ImportError:
+            self._send_error_json(503, "MeshCore module not loaded")
+            return
+
+        handler = get_active_handler()
+        if handler is None:
+            self._send_error_json(503, "MeshCore handler not active")
+            return
+
+        body = self._read_body()
+        if not isinstance(body, dict):
+            self._send_error_json(400, "Body must be JSON object")
+            return
+
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            self._send_error_json(400, "`text` is required")
+            return
+
+        destination = body.get("destination")
+        if destination is not None and not isinstance(destination, str):
+            self._send_error_json(400, "`destination` must be a string if provided")
+            return
+
+        channel = body.get("channel", 0)
+        try:
+            channel = int(channel)
+        except (TypeError, ValueError):
+            self._send_error_json(400, "`channel` must be an integer")
+            return
+
+        ok = handler.send_text(text, destination=destination, channel=channel)
+        if ok:
+            self._send_json({"queued": True, "text": text,
+                             "destination": destination, "channel": channel})
+        else:
+            self._send_error_json(503, "MeshCore send queue full or not connected")
 
 
 class ConfigAPIServer:

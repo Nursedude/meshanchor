@@ -37,9 +37,10 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from queue import Empty, Full, Queue
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional
 
 from .base_handler import BaseMessageHandler
 from .canonical_message import CanonicalMessage, Protocol
@@ -300,6 +301,16 @@ class MeshCoreHandler(BaseMessageHandler):
         }
         self._metrics_log_interval = 50  # Log summary every N poll cycles
 
+        # Chat ring buffer — feeds the daemon's HTTP chat API and TUI.
+        # Bounded so a long-running daemon can't grow unbounded; 200 entries
+        # is ~30 min of moderate chat or ~6 hours of fleet-rate adverts.
+        self._chat_buffer: Deque[Dict[str, Any]] = deque(maxlen=200)
+        self._chat_buffer_lock = threading.Lock()
+        self._chat_seq = 0  # Monotonically increasing entry id
+
+        # Register as the active handler for cross-module access (config_api).
+        _set_active_handler(self)
+
     def connect(self) -> bool:
         """MeshCore connection is managed by run_loop() via async _connect()."""
         logger.warning("MeshCoreHandler.connect() called directly; use run_loop()")
@@ -503,6 +514,16 @@ class MeshCoreHandler(BaseMessageHandler):
         try:
             msg = CanonicalMessage.from_meshcore(event)
 
+            # Mirror to chat buffer regardless of routing-rule decision —
+            # operators want to see incoming traffic in the TUI even when
+            # bridging is suppressed for a given source.
+            self.record_chat_message(
+                direction="rx",
+                text=msg.content or "",
+                channel=None,
+                sender=msg.source_address,
+            )
+
             # Check routing rules
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug(f"MeshCore message blocked by routing rules")
@@ -555,6 +576,14 @@ class MeshCoreHandler(BaseMessageHandler):
             if is_poll_dup:
                 logger.debug("Channel message already delivered via poll, skipping event path")
                 return
+
+            # Mirror to chat buffer (independent of routing-rule outcome).
+            self.record_chat_message(
+                direction="rx",
+                text=msg.content or "",
+                channel=getattr(msg, "channel", None),
+                sender=msg.source_address,
+            )
 
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug("MeshCore channel message blocked by routing rules")
@@ -924,6 +953,14 @@ class MeshCoreHandler(BaseMessageHandler):
                 source_network=Protocol.MESHCORE.value,
             )
             self._send_queue.put_nowait(msg)
+            # Record outbound for TUI parity — operators need to see what
+            # they sent alongside what came in.
+            self.record_chat_message(
+                direction="tx",
+                text=message,
+                channel=channel if destination is None else None,
+                destination=destination,
+            )
             return True
         except Full:
             logger.warning("MeshCore send queue full")
@@ -966,7 +1003,71 @@ class MeshCoreHandler(BaseMessageHandler):
         self._connected = False
         self._meshcore = None
         self._subscriptions.clear()
+        # Release the module-level handle if we were the active handler.
+        _clear_active_handler(self)
         self._notify_status("meshcore_disconnected")
+
+    # ─────────────────────────────────────────────────────────────────
+    # Chat buffer — feeds /api/chat/* in config_api and the TUI handler.
+    #
+    # The gateway daemon owns the radio's serial port; the TUI runs in a
+    # separate process and can't open it directly. Instead, the TUI polls
+    # an HTTP endpoint that pulls from this in-memory buffer, and POSTs
+    # outbound messages back through send_text().
+    # ─────────────────────────────────────────────────────────────────
+
+    def record_chat_message(
+        self,
+        direction: str,
+        text: str,
+        channel: Optional[int] = None,
+        sender: Optional[str] = None,
+        destination: Optional[str] = None,
+    ) -> None:
+        """Append a chat entry to the ring buffer.
+
+        Called from RX handlers (channel + DM) and from outbound send
+        wrappers. `direction` is "rx" or "tx". Other fields are best-effort.
+        """
+        with self._chat_buffer_lock:
+            self._chat_seq += 1
+            self._chat_buffer.append({
+                "id": self._chat_seq,
+                "ts": time.time(),
+                "direction": direction,
+                "channel": channel,
+                "sender": sender,
+                "destination": destination,
+                "text": text,
+            })
+
+    def get_recent_chat(self, since_id: int = 0, limit: int = 200) -> List[Dict[str, Any]]:
+        """Return chat entries with id > since_id (oldest first), capped at `limit`.
+
+        Polling clients pass the largest id they've seen; the buffer is a
+        ring, so very-stale `since_id` values just get the full buffer.
+        """
+        with self._chat_buffer_lock:
+            out = [e for e in self._chat_buffer if e["id"] > since_id]
+        return out[-limit:] if limit and len(out) > limit else out
+
+    def get_known_channels(self) -> List[Dict[str, Any]]:
+        """Best-effort snapshot of channel slots seen in the chat buffer.
+
+        Returns the channels we've actually carried traffic on (with
+        last-seen timestamp). For a full firmware-side slot list, the
+        TUI uses meshcore_py directly when the daemon is stopped — that
+        path lives in /tmp/meshcore_chat.py and operator runbooks.
+        """
+        with self._chat_buffer_lock:
+            seen: Dict[int, float] = {}
+            for entry in self._chat_buffer:
+                ch = entry.get("channel")
+                if ch is None:
+                    continue
+                seen[ch] = max(seen.get(ch, 0.0), entry["ts"])
+        return [{"channel": ch, "last_seen": ts} for ch, ts in sorted(seen.items())]
+
 
     async def _async_disconnect(self) -> None:
         """Async disconnect cleanup."""
@@ -1046,3 +1147,44 @@ class MeshCoreHandler(BaseMessageHandler):
                     except Exception:
                         pass
         return False
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Module-level active-handler accessor.
+#
+# config_api lives in a different module but the same process; it needs
+# read/write access to the running MeshCoreHandler without import-cycle
+# tangles. This pattern matches gateway_cli's `_active_bridge` — at most
+# one handler is active per daemon process.
+# ─────────────────────────────────────────────────────────────────────
+
+_active_handler: Optional["MeshCoreHandler"] = None
+_active_handler_lock = threading.Lock()
+
+
+def _set_active_handler(handler: "MeshCoreHandler") -> None:
+    global _active_handler
+    with _active_handler_lock:
+        _active_handler = handler
+
+
+def _clear_active_handler(handler: "MeshCoreHandler") -> None:
+    """Clear only if the caller is the currently-registered handler.
+
+    Without the identity check, a stale disconnect from a previous
+    handler could clobber a freshly-connected one.
+    """
+    global _active_handler
+    with _active_handler_lock:
+        if _active_handler is handler:
+            _active_handler = None
+
+
+def get_active_handler() -> Optional["MeshCoreHandler"]:
+    """Return the currently-registered MeshCoreHandler, or None.
+
+    Callers (e.g. config_api chat endpoints) should treat None as
+    "MeshCore not configured / not connected" and return 503.
+    """
+    with _active_handler_lock:
+        return _active_handler

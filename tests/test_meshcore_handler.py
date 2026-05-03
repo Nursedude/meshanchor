@@ -600,3 +600,94 @@ class TestStats:
             assert handler.stats.get('meshcore_acks', 0) >= 1
         finally:
             loop.close()
+
+
+# =============================================================================
+# Chat buffer + module-level active-handler accessor
+# =============================================================================
+
+class TestChatBuffer:
+    """Ring buffer feeds the daemon's HTTP chat API and TUI handler."""
+
+    def test_record_appends_with_monotonic_id(self, handler):
+        handler.record_chat_message(direction="rx", text="hello", channel=2)
+        handler.record_chat_message(direction="tx", text="world", channel=2)
+        out = handler.get_recent_chat()
+        assert [e["text"] for e in out] == ["hello", "world"]
+        assert out[1]["id"] > out[0]["id"]
+        assert out[0]["direction"] == "rx"
+        assert out[1]["direction"] == "tx"
+
+    def test_since_id_filters(self, handler):
+        handler.record_chat_message(direction="rx", text="a")
+        handler.record_chat_message(direction="rx", text="b")
+        handler.record_chat_message(direction="rx", text="c")
+        all_entries = handler.get_recent_chat()
+        midpoint = all_entries[1]["id"]
+        recent = handler.get_recent_chat(since_id=midpoint)
+        assert [e["text"] for e in recent] == ["c"]
+
+    def test_buffer_capacity_is_bounded(self, handler):
+        # Buffer maxlen=200; fill past it and confirm oldest get dropped.
+        for i in range(250):
+            handler.record_chat_message(direction="rx", text=f"msg-{i}")
+        out = handler.get_recent_chat()
+        assert len(out) == 200
+        # Oldest 50 were evicted; first surviving entry is msg-50.
+        assert out[0]["text"] == "msg-50"
+        assert out[-1]["text"] == "msg-249"
+
+    def test_known_channels_aggregates_from_buffer(self, handler):
+        handler.record_chat_message(direction="rx", text="x", channel=1)
+        handler.record_chat_message(direction="tx", text="y", channel=2)
+        handler.record_chat_message(direction="rx", text="z", channel=1)
+        chans = {c["channel"]: c["last_seen"] for c in handler.get_known_channels()}
+        assert set(chans.keys()) == {1, 2}
+        # Channel 1's last_seen should be at-or-after channel 2's (it has
+        # the most recent entry — z).
+        assert chans[1] >= chans[2]
+
+
+class TestActiveHandlerAccessor:
+    """Module-level singleton — config_api needs to find the running handler
+    from another module without import-cycle tangles."""
+
+    def test_handler_registers_on_init(self, handler):
+        from gateway.meshcore_handler import get_active_handler
+        assert get_active_handler() is handler
+
+    def test_disconnect_clears_active(self, handler):
+        from gateway.meshcore_handler import get_active_handler
+        handler.disconnect()
+        assert get_active_handler() is None
+
+    def test_stale_disconnect_does_not_clobber_new_handler(
+        self, mock_config, mock_health, mock_node_tracker
+    ):
+        """Identity-checked clear: an older handler's disconnect must not
+        evict a newer handler that has already taken over the slot."""
+        from gateway.meshcore_handler import get_active_handler
+
+        stop_event = threading.Event()
+        stats = {}
+        lock = threading.Lock()
+        queue = Queue(maxsize=10)
+
+        old = MeshCoreHandler(
+            config=mock_config, node_tracker=mock_node_tracker,
+            health=mock_health, stop_event=stop_event, stats=stats,
+            stats_lock=lock, message_queue=queue,
+        )
+        new = MeshCoreHandler(
+            config=mock_config, node_tracker=mock_node_tracker,
+            health=mock_health, stop_event=stop_event, stats=stats,
+            stats_lock=lock, message_queue=queue,
+        )
+        # `new` registered itself in __init__.
+        assert get_active_handler() is new
+        # Stale disconnect from `old` should NOT clear the slot.
+        old.disconnect()
+        assert get_active_handler() is new
+        # `new`'s own disconnect clears it.
+        new.disconnect()
+        assert get_active_handler() is None
