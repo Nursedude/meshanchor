@@ -1458,7 +1458,20 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 logger.warning(f"Tactical auto-ingest failed: {e}")
 
     def _start_websocket_server(self):
-        """Start WebSocket server for real-time message broadcast to web UI."""
+        """Start WebSocket server for real-time message broadcast to web UI.
+
+        Default-off: meshanchor-map.service owns :5001. With both processes
+        bound, second-to-bind loses with EADDRINUSE. Enable
+        config.enable_websocket only when the gateway runs without
+        meshanchor-map — otherwise map-served WS clients won't see events
+        emitted into this process's in-memory event_bus regardless.
+        """
+        if not getattr(self.config, 'enable_websocket', False):
+            logger.info(
+                "Gateway WebSocket disabled (config.enable_websocket=False); "
+                "meshanchor-map.service owns :5001"
+            )
+            return
         if not HAS_WEBSOCKET:
             return
         try:

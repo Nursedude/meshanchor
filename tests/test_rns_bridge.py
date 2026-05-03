@@ -134,6 +134,7 @@ def _mock_gateway_config(**overrides):
     config.routing_rules = overrides.get("routing_rules", [])
     config.log_level = "DEBUG"
     config.log_messages = True
+    config.enable_websocket = overrides.get("enable_websocket", False)
     config.rns = MagicMock()
     config.rns.config_dir = None
     config.meshtastic = MagicMock()
@@ -1526,3 +1527,27 @@ class TestWebSocketServer:
     def test_stop_websocket_when_not_started(self, bridge):
         bridge._websocket_started = False
         bridge._stop_websocket_server()  # Should not raise
+
+    def test_start_websocket_default_off_skips_bind(self, bridge):
+        """Default config.enable_websocket=False must not call into the
+        websocket server start path. meshanchor-map.service is the
+        canonical :5001 owner; binding here causes EADDRINUSE."""
+        bridge.config.enable_websocket = False
+        with patch("gateway.rns_bridge.start_websocket_server") as mock_start, \
+             patch("gateway.rns_bridge.is_websocket_available", return_value=True), \
+             patch("gateway.rns_bridge.HAS_WEBSOCKET", True):
+            bridge._start_websocket_server()
+        mock_start.assert_not_called()
+        assert bridge._websocket_started is False
+
+    def test_start_websocket_opt_in_calls_bind(self, bridge):
+        """When enable_websocket=True (standalone-daemon profile) the
+        original bind path runs."""
+        bridge.config.enable_websocket = True
+        with patch("gateway.rns_bridge.start_websocket_server",
+                   return_value=True) as mock_start, \
+             patch("gateway.rns_bridge.is_websocket_available", return_value=True), \
+             patch("gateway.rns_bridge.HAS_WEBSOCKET", True):
+            bridge._start_websocket_server()
+        mock_start.assert_called_once_with(port=5001)
+        assert bridge._websocket_started is True

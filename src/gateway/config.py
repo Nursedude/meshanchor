@@ -480,6 +480,15 @@ class GatewayConfig:
     log_level: str = "INFO"
     log_messages: bool = True
 
+    # WebSocket (port 5001) for real-time UI push.
+    # Default False: meshanchor-map.service is the canonical :5001 owner.
+    # When the gateway runs in the same systemd graph as meshanchor-map,
+    # enabling this here causes EADDRINUSE — second-to-bind loses. Flip
+    # True only when the gateway runs without meshanchor-map (standalone
+    # daemon profile), accepting that gateway events emitted via
+    # event_bus stay in-process and can't reach map-served clients.
+    enable_websocket: bool = False
+
     # Dual-radio failover (requires two meshtasticd instances)
     failover_enabled: bool = False
     failover_utilization_threshold: float = 25.0   # % channel utilization trigger
