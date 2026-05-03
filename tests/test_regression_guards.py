@@ -473,3 +473,28 @@ class TestSqliteConnectContract:
             f"the sister :5000 service for 16 minutes (fleet-host 2026-04-26).\n\n"
             f"Violations:\n" + "\n".join(violations)
         )
+
+
+class TestRNSAnnounceHandlerContract:
+    """Enforce: received_announce() handlers use the canonical kwarg name
+    `destination_hash`, not the legacy `dest_hash`. RNS calls these by
+    keyword; a mismatch raises TypeError on every announce, silently
+    breaking node discovery (observed on meshanchor-server 2026-05-02
+    after pulling 94d78f21 — three handlers were stale)."""
+
+    def test_no_dest_hash_in_received_announce(self):
+        matches = _scan_python_files(
+            r'def\s+received_announce\s*\(',
+        )
+        violations = []
+        for filepath, lineno, line in matches:
+            if 'dest_hash' in line and 'destination_hash' not in line:
+                violations.append(f"{filepath}:{lineno}: {line.strip()}")
+
+        assert len(violations) == 0, (
+            f"Found {len(violations)} received_announce() handler(s) using "
+            f"the legacy `dest_hash` kwarg. RNS Transport invokes the "
+            f"handler with `destination_hash=...` — mismatched name raises "
+            f"TypeError on every received announce.\n\n"
+            f"Violations:\n" + "\n".join(violations)
+        )
