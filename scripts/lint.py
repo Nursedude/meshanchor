@@ -16,6 +16,7 @@ Checks:
 - MF011: Repair logic in _nomadnet_rns_checks.py (must be in _rns_repair.py/diagnostics)
 - MF012: Context-loaded doc size (persistent_issues.md must stay under 40k chars)
 - MF013: Bare sqlite3.connect() outside db_helpers.py (must use connect_tuned)
+- MF016: @patch('src.utils.paths.…') in tests — production imports via bare 'utils.paths', divergent class objects
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -64,6 +65,11 @@ class MeshAnchorLinter:
         issues = []
 
         if not filepath.endswith('.py'):
+            return issues
+
+        # Self-skip: the linter source legitimately contains every pattern
+        # it detects (in detection regexes, docstrings, allowlist comments).
+        if os.path.basename(filepath) == 'lint.py' and 'scripts' in filepath.split(os.sep):
             return issues
 
         try:
@@ -328,6 +334,24 @@ class MeshAnchorLinter:
                     filepath, lineno, Severity.ERROR, "MF013",
                     "Bare sqlite3.connect() — use utils.db_helpers.connect_tuned "
                     "(WAL + sync=NORMAL + 64MB journal cap)"
+                ))
+
+        # MF016: @patch('src.utils.paths.…') silently no-ops because production
+        # code imports via `from utils.paths import …` and conftest puts only
+        # `src/` on sys.path — `src.utils.paths` and `utils.paths` resolve to
+        # different module objects with different ReticulumPaths class objects.
+        # See sister-repo project_ci_red_2026_05_03_cascade.md for the full
+        # diagnosis. Cure: patch at the consumer's namespace OR use bare
+        # 'utils.paths.…'.
+        basename_lc = os.path.basename(filepath)
+        if (basename_lc.startswith('test_') or '/tests/' in filepath) and '@patch' in line:
+            if re.search(r"@patch\(\s*['\"]src\.utils\.paths\.", line):
+                issues.append(LintIssue(
+                    filepath, lineno, Severity.ERROR, "MF016",
+                    "@patch('src.utils.paths.…') silently no-ops — production "
+                    "imports via 'from utils.paths import …' (different module "
+                    "object). Use 'utils.paths.…' or patch at the consumer's "
+                    "namespace (Issue: 2026-05-03 CI cascade)"
                 ))
 
         # MF010: time.sleep() in daemon loops (should use _stop_event.wait())
