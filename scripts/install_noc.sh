@@ -1680,7 +1680,7 @@ ExecReload=/bin/kill -HUP $MAINPID
 PIDFile=/run/meshanchor/meshanchord.pid
 Restart=on-failure
 RestartSec=10
-WatchdogSec=120
+# No WatchdogSec: daemon.py does not sd_notify; would cause SIGABRT loop.
 RuntimeDirectory=meshanchor
 NoNewPrivileges=true
 ProtectSystem=strict

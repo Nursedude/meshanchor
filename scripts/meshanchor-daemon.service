@@ -16,7 +16,8 @@ ExecReload=/bin/kill -HUP $MAINPID
 PIDFile=/run/meshanchor/meshanchord.pid
 Restart=on-failure
 RestartSec=10
-WatchdogSec=120
+# WatchdogSec intentionally absent: daemon.py does not send sd_notify(WATCHDOG=1).
+# Adding one would SIGABRT the process every <interval>s for no reason.
 
 # Runtime directory (auto-created by systemd)
 RuntimeDirectory=meshanchor
