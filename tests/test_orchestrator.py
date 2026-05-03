@@ -483,4 +483,88 @@ class TestPostPortCrashDetection:
             mock_journal.assert_called()
 
 
+class TestApplyManagedOverrides:
+    """Verify `services.<name>.managed: false` opts a service out of the daemon."""
+
+    def _build_orchestrator(self, services_cfg):
+        """Build an orchestrator whose loaded config has the given services block."""
+        with patch('core.orchestrator.Path.exists', return_value=False), \
+             patch('core.orchestrator._detect_radio_hardware', return_value={
+                 'has_spi': False, 'has_usb': True,
+                 'spi_devices': [], 'usb_devices': ['/dev/ttyUSB0'],
+                 'usb_device': '/dev/ttyUSB0', 'hardware_type': 'usb',
+             }):
+            from core.orchestrator import ServiceOrchestrator
+            orch = ServiceOrchestrator(config_path=Path('/nonexistent'))
+            # Replace services block and re-apply overrides — simulates noc.yaml load
+            orch.config['services'] = services_cfg
+            # Reset SERVICES + STARTUP_ORDER from class defaults so overrides apply cleanly
+            orch.SERVICES = dict(orch.__class__.SERVICES)
+            orch.STARTUP_ORDER = list(orch.__class__.STARTUP_ORDER)
+            orch._configure_meshtasticd()
+            orch._apply_managed_overrides()
+            return orch
+
+    def test_meshtasticd_disabled_drops_from_startup_order(self):
+        """MeshCore-only box: meshtasticd absent from STARTUP_ORDER."""
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': False, 'auto_start': False},
+            'rnsd': {'managed': True, 'auto_start': True},
+        })
+        assert 'meshtasticd' not in orch.STARTUP_ORDER
+        assert 'rnsd' in orch.STARTUP_ORDER
+
+    def test_meshtasticd_disabled_marked_not_required(self):
+        """Demoted service must be optional so _preflight_check passes without binary."""
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': False, 'auto_start': False},
+        })
+        assert orch.SERVICES['meshtasticd'].required is False
+
+    def test_meshtasticd_disabled_clears_dependency_from_rnsd(self):
+        """rnsd depends on meshtasticd by default; dropping meshtasticd must clear that."""
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': False, 'auto_start': False},
+            'rnsd': {'managed': True, 'auto_start': True},
+        })
+        assert 'meshtasticd' not in orch.SERVICES['rnsd'].dependencies
+
+    def test_meshtasticd_disabled_preflight_passes(self):
+        """End-to-end: _preflight_check returns empty when meshtasticd disabled and not installed."""
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': False, 'auto_start': False},
+            'rnsd': {'managed': True, 'auto_start': True},
+        })
+        # rnsd is still required — pretend it's installed so we isolate the meshtasticd behavior
+        with patch.object(orch, 'is_installed', return_value=True):
+            missing = orch._preflight_check()
+        assert missing == []
+
+    def test_default_managed_true_unchanged(self):
+        """Services with managed: true (default) keep their original config."""
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': True, 'auto_start': True},
+            'rnsd': {'managed': True, 'auto_start': True},
+        })
+        assert 'meshtasticd' in orch.STARTUP_ORDER
+        assert orch.SERVICES['meshtasticd'].required is True
+        assert 'meshtasticd' in orch.SERVICES['rnsd'].dependencies
+
+    def test_unknown_service_in_config_is_ignored(self):
+        """Override entry for a service not in SERVICES doesn't crash."""
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': True},
+            'phantom_service': {'managed': False},
+        })
+        assert 'meshtasticd' in orch.STARTUP_ORDER
+
+    def test_non_dict_service_entry_is_ignored(self):
+        """Malformed config (e.g. `meshtasticd: false`) doesn't crash."""
+        orch = self._build_orchestrator({
+            'meshtasticd': False,  # malformed — not a dict
+        })
+        # Should fall through unaffected
+        assert 'meshtasticd' in orch.STARTUP_ORDER
+
+
 # TestEEPROMTemplateMatching removed — config.hardware is Meshtastic-specific (not in MeshAnchor)

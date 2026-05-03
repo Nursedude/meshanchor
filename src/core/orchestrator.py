@@ -160,6 +160,14 @@ class ServiceOrchestrator:
         # Adjust meshtasticd service based on daemon type
         self._configure_meshtasticd()
 
+        # Apply per-service `managed: false` overrides from noc.yaml. This is
+        # how MeshCore-only boxes opt out of meshtasticd: noc.yaml says
+        # `services.meshtasticd.managed: false`, and we honor it by dropping
+        # the service from STARTUP_ORDER and clearing it from any other
+        # service's dependencies. Without this, the daemon's preflight
+        # rejects the deploy because meshtasticd is `required=True` by default.
+        self._apply_managed_overrides()
+
     def _load_config(self):
         """Load NOC configuration from /etc/meshanchor/noc.yaml."""
         # Default config
@@ -292,6 +300,63 @@ class ServiceOrchestrator:
                 install_command=['pip3', 'install', 'meshtastic'],
             )
             logger.info("Configured for Python meshtastic CLI (USB radio)")
+
+    def _apply_managed_overrides(self):
+        """Honor `services.<name>.managed: false` from noc.yaml.
+
+        For each service explicitly set to `managed: false`:
+          - drop it from STARTUP_ORDER (so the daemon doesn't try to start it)
+          - clear it from every other service's dependencies (so dependents
+            aren't skipped)
+          - mark its ServiceConfig as `required=False` (so _preflight_check
+            doesn't reject the deploy when the binary isn't installed)
+
+        This is the supported way to run a MeshCore-only box: meshtasticd
+        is set to `managed: false` and the daemon ignores it entirely.
+        """
+        services_cfg = self.config.get('services', {}) or {}
+        for svc_name, svc_cfg in services_cfg.items():
+            if not isinstance(svc_cfg, dict):
+                continue
+            if svc_cfg.get('managed', True):
+                continue
+            if svc_name not in self.SERVICES:
+                continue
+
+            # Drop from startup order
+            if svc_name in self.STARTUP_ORDER:
+                self.STARTUP_ORDER = [s for s in self.STARTUP_ORDER if s != svc_name]
+
+            # Clear from dependents (rebuild ServiceConfig — dataclass is frozen-by-convention here)
+            for other_name, other_cfg in list(self.SERVICES.items()):
+                if svc_name in other_cfg.dependencies:
+                    self.SERVICES[other_name] = ServiceConfig(
+                        name=other_cfg.name,
+                        systemd_name=other_cfg.systemd_name,
+                        check_binary=other_cfg.check_binary,
+                        check_port=other_cfg.check_port,
+                        check_command=other_cfg.check_command,
+                        startup_delay=other_cfg.startup_delay,
+                        required=other_cfg.required,
+                        install_command=other_cfg.install_command,
+                        dependencies=[d for d in other_cfg.dependencies if d != svc_name],
+                    )
+
+            # Demote to optional so preflight doesn't reject when binary missing
+            current = self.SERVICES[svc_name]
+            self.SERVICES[svc_name] = ServiceConfig(
+                name=current.name,
+                systemd_name=current.systemd_name,
+                check_binary=current.check_binary,
+                check_port=current.check_port,
+                check_command=current.check_command,
+                startup_delay=current.startup_delay,
+                required=False,
+                install_command=current.install_command,
+                dependencies=current.dependencies,
+            )
+
+            logger.info("Service %s opted out via noc.yaml (managed: false)", svc_name)
 
     def _check_meshtasticd_config(self) -> bool:
         """Check that meshtasticd has a radio config in config.d/.
