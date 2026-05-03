@@ -35,6 +35,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Dict, Optional, List
 from enum import Enum
 
@@ -572,21 +573,61 @@ def create_gateway_health_probe(
     """
     probe = ActiveHealthProbe(interval=interval, fails=fails, passes=passes)
 
-    # Register standard gateway service checks
-    probe.register_check(
-        "meshtasticd",
-        lambda: probe.check_tcp_port(4403),
-    )
-    probe.register_check(
-        "rnsd",
-        lambda: probe.check_rns_port(37428),
-    )
-    probe.register_check(
-        "mosquitto",
-        lambda: probe.check_tcp_port(1883),
-    )
+    # Honor noc.yaml's `services.<name>.managed: false` so MeshCore-only
+    # boxes (e.g. meshanchor-server, --skip-meshtasticd installs) don't
+    # generate UNHEALTHY noise for services they intentionally don't run.
+    # Mirrors the orchestrator's _apply_managed_overrides pattern.
+    unmanaged = _unmanaged_services()
+
+    if "meshtasticd" not in unmanaged:
+        probe.register_check(
+            "meshtasticd",
+            lambda: probe.check_tcp_port(4403),
+        )
+    if "rnsd" not in unmanaged:
+        probe.register_check(
+            "rnsd",
+            lambda: probe.check_rns_port(37428),
+        )
+    if "mosquitto" not in unmanaged:
+        probe.register_check(
+            "mosquitto",
+            lambda: probe.check_tcp_port(1883),
+        )
 
     # Wire state changes to EventBus for push-based status updates
     probe.register_callback("on_state_change", _emit_state_change)
 
     return probe
+
+
+def _unmanaged_services() -> set:
+    """Return service names with `managed: false` in /etc/meshanchor/noc.yaml.
+
+    Returns empty set if noc.yaml is absent, malformed, or PyYAML is
+    unavailable — preserving the all-checks-on default for unconfigured
+    boxes.
+    """
+    try:
+        import yaml as _yaml
+    except ImportError:
+        return set()
+
+    config_path = Path("/etc/meshanchor/noc.yaml")
+    if not config_path.exists():
+        return set()
+
+    try:
+        with open(config_path) as f:
+            data = _yaml.safe_load(f) or {}
+    except Exception:
+        return set()
+
+    services = data.get('services', {}) or {}
+    if not isinstance(services, dict):
+        return set()
+
+    return {
+        name for name, cfg in services.items()
+        if isinstance(cfg, dict) and cfg.get('managed', True) is False
+    }
