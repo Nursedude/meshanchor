@@ -177,6 +177,29 @@ class MQTTSubscriberService(DaemonService):
 
     def start(self) -> bool:
         try:
+            # Pre-flight TCP probe — the underlying subscriber is async, so
+            # without this the watchdog sees start() succeed, the connection
+            # times out 10s later, the service goes dead, watchdog respawns,
+            # repeat forever on a box where mosquitto isn't running.
+            # Returning False here lets the watchdog's max_restarts cap fire.
+            import socket
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(2)
+                    if s.connect_ex((self._broker, self._port)) != 0:
+                        logger.warning(
+                            f"MQTT broker {self._broker}:{self._port} unreachable "
+                            f"— skipping subscriber start (set `mqtt: false` in "
+                            f"noc.yaml if no broker is intended)"
+                        )
+                        return False
+            except OSError as e:
+                logger.warning(
+                    f"MQTT broker reachability check failed ({self._broker}:"
+                    f"{self._port}): {e}"
+                )
+                return False
+
             from monitoring.mqtt_subscriber import MQTTNodelessSubscriber
             # MQTTNodelessSubscriber accepts only `config: dict`; instantiate
             # with file/default config, then overlay daemon broker/port so the
@@ -251,63 +274,6 @@ class ConfigAPIService(DaemonService):
         if not self._server:
             return False
         return getattr(self._server, '_running', False)
-
-    def get_status(self) -> dict:
-        return {
-            "name": self.name,
-            "alive": self.is_alive(),
-            "port": self._port,
-        }
-
-
-class MapServerService(DaemonService):
-    """Wraps map server subprocess."""
-
-    name = "map_server"
-
-    def __init__(self, port: int = 5000):
-        self._port = port
-        self._process = None
-
-    def start(self) -> bool:
-        import subprocess
-        try:
-            map_script = Path(__file__).parent / "utils" / "coverage_map.py"
-            if not map_script.exists():
-                logger.warning("Map server script not found")
-                return False
-
-            self._process = subprocess.Popen(
-                [sys.executable, str(map_script), "--serve",
-                 "--port", str(self._port)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            # Verify process started successfully
-            import time
-            time.sleep(1)
-            if self._process.poll() is not None:
-                logger.warning(f"Map server exited immediately: rc={self._process.returncode}")
-                return False
-            return True
-        except Exception as e:
-            logger.error(f"Map server start failed: {e}")
-            return False
-
-    def stop(self, timeout: float = 5.0) -> None:
-        if self._process:
-            try:
-                self._process.terminate()
-                self._process.wait(timeout=timeout)
-            except Exception as e:
-                logger.error(f"Map server stop error: {e}")
-                if self._process:
-                    self._process.kill()
-
-    def is_alive(self) -> bool:
-        if not self._process:
-            return False
-        return self._process.poll() is None
 
     def get_status(self) -> dict:
         return {
@@ -907,8 +873,19 @@ class DaemonController:
             )
 
         if cfg.map_server_enabled:
-            self._registry.register(
-                MapServerService(port=cfg.map_server_port)
+            # MapServerService removed 2026-05-02: meshanchor-map.service is
+            # the canonical :5000 map owner (it's also the canonical :5001 WS
+            # owner per commit 94d78f21). The previous shim subprocess'd
+            # `coverage_map.py --serve` — but that script has no __main__
+            # block, so the subprocess exited immediately and the watchdog
+            # restart-looped forever (~30s cadence on meshanchor-server
+            # 2026-05-02 post-restart). Honor the legacy flag with a clear
+            # one-liner so operators flipping `map_server: true` in noc.yaml
+            # see why nothing happens and where to redirect.
+            logger.warning(
+                "noc.yaml `map_server: true` is no-op in daemon mode — "
+                "use meshanchor-map.service for the :5000 map server "
+                "(see scripts/meshanchor-map.service)"
             )
 
         if cfg.telemetry_enabled:

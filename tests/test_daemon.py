@@ -466,13 +466,39 @@ class TestServiceWrappers:
             def stop(self):
                 pass
 
+        # Pre-flight expects broker reachable — mock connect_ex to return 0.
+        fake_sock = MagicMock()
+        fake_sock.__enter__ = MagicMock(return_value=fake_sock)
+        fake_sock.__exit__ = MagicMock(return_value=False)
+        fake_sock.connect_ex = MagicMock(return_value=0)
+
         svc = MQTTSubscriberService(broker="example.org", port=8883)
-        with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}):
+        with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}), \
+             patch('socket.socket', return_value=fake_sock):
             ok = svc.start()
         assert ok is True
         assert captured['started'] is True
         assert captured['final_broker'] == "example.org"
         assert captured['final_port'] == 8883
+
+    def test_mqtt_service_start_returns_false_when_broker_unreachable(self):
+        """When the pre-flight TCP probe fails, start() returns False so the
+        watchdog's max-restart cap fires. Without this, an unreachable
+        mosquitto causes a permanent watchdog restart loop (subscriber's
+        async connection times out 10s after each launch). Observed on
+        meshanchor-server 2026-05-02."""
+        from daemon import MQTTSubscriberService
+
+        fake_sock = MagicMock()
+        fake_sock.__enter__ = MagicMock(return_value=fake_sock)
+        fake_sock.__exit__ = MagicMock(return_value=False)
+        fake_sock.connect_ex = MagicMock(return_value=111)  # ECONNREFUSED
+
+        svc = MQTTSubscriberService(broker="localhost", port=1883)
+        with patch('socket.socket', return_value=fake_sock):
+            ok = svc.start()
+        assert ok is False
+        assert svc._subscriber is None
 
     def test_config_api_service_interface(self):
         """ConfigAPIService has required methods."""
@@ -481,13 +507,37 @@ class TestServiceWrappers:
         assert svc.name == "config_api"
         assert hasattr(svc, 'start')
 
-    def test_map_server_service_interface(self):
-        """MapServerService has required methods."""
-        from daemon import MapServerService
-        svc = MapServerService(port=5000)
-        assert svc.name == "map_server"
-        assert hasattr(svc, 'start')
-        assert not svc.is_alive()
+    def test_map_server_legacy_flag_no_op(self, caplog):
+        """noc.yaml `map_server: true` is honored with a clear warning but
+        no service registration. Removed 2026-05-02 — meshanchor-map.service
+        is canonical; the previous in-daemon shim restart-looped because
+        coverage_map.py has no __main__ block."""
+        import logging as _logging
+        from daemon_config import DaemonConfig
+        from daemon import DaemonController, ServiceRegistry
+
+        controller = DaemonController()
+        controller._config = DaemonConfig(
+            gateway_enabled=False,
+            health_probe_enabled=False,
+            mqtt_enabled=False,
+            config_api_enabled=False,
+            map_server_enabled=True,  # legacy flag — must NOT register a service
+            telemetry_enabled=False,
+            node_tracker_enabled=False,
+        )
+        controller._registry = ServiceRegistry()
+        with caplog.at_level(_logging.WARNING):
+            controller._register_services()
+
+        status = controller._registry.get_all_status()
+        assert "map_server" not in status, (
+            "map_server must not register — meshanchor-map.service is canonical"
+        )
+        assert any(
+            "map_server" in record.message and "no-op" in record.message
+            for record in caplog.records
+        ), "Expected one-liner warning redirecting operators to meshanchor-map.service"
 
     def test_telemetry_service_interface(self):
         """TelemetryPollerService has required methods."""
