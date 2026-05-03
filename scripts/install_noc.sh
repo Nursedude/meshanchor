@@ -1654,7 +1654,10 @@ MAP_SERVICE
 fi
 
 # Install MeshAnchor Daemon systemd service (headless NOC services: gateway bridge,
-# node tracker, MQTT subscriber — feeds /api/status when no TUI is running)
+# node tracker, MQTT subscriber — feeds /api/status when no TUI is running).
+# Pre-create XDG dirs under /root so systemd's ReadWritePaths bind-mounts succeed
+# (User=root + ProtectHome=read-only otherwise blocks first-run dir creation).
+mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor
 if [[ -f "$INSTALL_DIR/scripts/meshanchor-daemon.service" ]]; then
     cp "$INSTALL_DIR/scripts/meshanchor-daemon.service" /etc/systemd/system/
     echo -e "  ${GREEN}✓ meshanchor-daemon.service installed${NC}"
@@ -1682,7 +1685,7 @@ RuntimeDirectory=meshanchor
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/log /tmp /home /run/meshanchor
+ReadWritePaths=/var/log /tmp /home /run/meshanchor -/root/.config/meshanchor -/root/.local/share/meshanchor
 PrivateTmp=true
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/meshanchor/src

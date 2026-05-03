@@ -25,7 +25,10 @@ RuntimeDirectory=meshanchor
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/log /tmp /home /run/meshanchor
+# /root paths needed because User=root: ProtectHome=read-only otherwise blocks
+# the gateway's status file write to /root/.config/meshanchor and node-history
+# DB writes under /root/.local/share/meshanchor.
+ReadWritePaths=/var/log /tmp /home /run/meshanchor -/root/.config/meshanchor -/root/.local/share/meshanchor
 PrivateTmp=true
 
 # Environment
