@@ -555,6 +555,67 @@ class TestServiceWrappers:
         assert svc.name == "node_tracker"
         assert not svc.is_alive()
 
+    def test_gateway_get_status_has_alive_key(self):
+        """ThreadWatchdog reads `status.get("alive", False)`. The gateway
+        shim borrows gateway_cli's stats dict (which uses `running`) and
+        must translate to `alive`. Without this, every watchdog cycle
+        sees the bridge as dead and respawns it on the 60s interval —
+        observed on meshanchor-server 2026-05-02 post-2e1c0797."""
+        from daemon import GatewayBridgeService
+
+        svc = GatewayBridgeService()
+
+        fake_stats = {
+            'running': True,
+            'status': 'Running',
+            'meshtastic_connected': False,
+            'rns_connected': False,
+        }
+        with patch('gateway.gateway_cli.get_gateway_stats', return_value=fake_stats), \
+             patch('gateway.gateway_cli.is_gateway_running', return_value=True):
+            status = svc.get_status()
+
+        assert 'alive' in status, (
+            "get_status() must include `alive` key — ThreadWatchdog reads it "
+            "directly via _check_services."
+        )
+        assert status['alive'] is True
+
+    def test_all_service_shim_statuses_carry_alive_key(self):
+        """Architectural invariant: every DaemonService.get_status() must
+        return a dict with an `alive` key. ThreadWatchdog._check_services
+        reads `status.get("alive", False)`; missing key reads as dead and
+        triggers a restart loop. Codebase scan rather than per-shim
+        instantiation since some shims need real subsystems."""
+        import ast
+        import os
+
+        daemon_path = os.path.join(SRC_DIR, 'daemon.py')
+        with open(daemon_path) as f:
+            tree = ast.parse(f.read())
+
+        violations = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.ClassDef) and any(
+                isinstance(b, ast.Name) and b.id == 'DaemonService'
+                for b in node.bases
+            )):
+                continue
+            for child in node.body:
+                if not (isinstance(child, ast.FunctionDef) and child.name == 'get_status'):
+                    continue
+                # Walk the function body looking for a Return whose value
+                # is a Dict literal containing "alive" as a key — or a
+                # statement that subscript-assigns "alive" before return.
+                src = ast.unparse(child)
+                if '"alive"' not in src and "'alive'" not in src:
+                    violations.append(node.name)
+
+        assert not violations, (
+            f"DaemonService subclasses missing `alive` key in get_status(): "
+            f"{violations}. Watchdog respawns these every interval."
+        )
+
     def test_node_tracker_flushes_to_history_db(self, tmp_path, monkeypatch):
         """start() must spin up a writer thread that calls
         NodeHistoryDB.record_observations with tracker.to_geojson()

@@ -122,6 +122,13 @@ class GatewayBridgeService(DaemonService):
             from gateway.gateway_cli import get_gateway_stats
             stats = get_gateway_stats()
             stats["name"] = self.name
+            # ThreadWatchdog reads `status.get("alive", False)` — gateway_cli's
+            # dict uses `running`, not `alive`. Without normalizing, every
+            # watchdog cycle saw the bridge as dead and respawned it on the
+            # 60s interval (observed on meshanchor-server 2026-05-02). Other
+            # service shims set this directly; the gateway shim borrows
+            # gateway_cli's stats dict and must translate.
+            stats["alive"] = self.is_alive()
             return stats
         except Exception:
             return {"name": self.name, "alive": False, "status": "error"}
