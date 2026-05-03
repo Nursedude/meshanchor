@@ -443,6 +443,37 @@ class TestServiceWrappers:
         assert hasattr(svc, 'is_alive')
         assert hasattr(svc, 'get_status')
 
+    def test_mqtt_service_start_passes_config_dict(self):
+        """start() must construct MQTTNodelessSubscriber with no positional/kw
+        broker/port — the underlying class accepts only `config: dict`.
+        Regression for daemon.py:836-841 TypeError on boot."""
+        from daemon import MQTTSubscriberService
+
+        captured = {}
+
+        class FakeSub:
+            def __init__(self, config=None):
+                # Mirror real signature — refuse stray kwargs the way the
+                # real class would, so the test fails if start() regresses.
+                captured['config'] = config
+                self._config = {'broker': 'default', 'port': 1883}
+
+            def start(self):
+                captured['started'] = True
+                captured['final_broker'] = self._config['broker']
+                captured['final_port'] = self._config['port']
+
+            def stop(self):
+                pass
+
+        svc = MQTTSubscriberService(broker="example.org", port=8883)
+        with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}):
+            ok = svc.start()
+        assert ok is True
+        assert captured['started'] is True
+        assert captured['final_broker'] == "example.org"
+        assert captured['final_port'] == 8883
+
     def test_config_api_service_interface(self):
         """ConfigAPIService has required methods."""
         from daemon import ConfigAPIService
@@ -471,6 +502,72 @@ class TestServiceWrappers:
         svc = NodeTrackerService()
         assert svc.name == "node_tracker"
         assert not svc.is_alive()
+
+    def test_node_tracker_flushes_to_history_db(self, tmp_path, monkeypatch):
+        """start() must spin up a writer thread that calls
+        NodeHistoryDB.record_observations with tracker.to_geojson()
+        features. This is the daemon→map data-path bridge: without it,
+        the map process's /api/status sees no daemon-side observations."""
+        import daemon as daemon_mod
+        from daemon import NodeTrackerService
+
+        # Tracker singleton stub — to_geojson returns one feature.
+        feature = {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-117.16, 32.71]},
+            "properties": {"id": "!abc12345", "name": "test", "network": "meshtastic"},
+        }
+
+        class FakeTracker:
+            def to_geojson(self):
+                return {"type": "FeatureCollection", "features": [feature]}
+
+            def get_all_nodes(self):
+                return []
+
+            def stop(self, timeout=5.0):
+                pass
+
+        monkeypatch.setattr(
+            'gateway.node_tracker.get_node_tracker',
+            lambda: FakeTracker(),
+            raising=False,
+        )
+
+        # NodeHistoryDB stub — captures the call.
+        recorded = []
+
+        class FakeHistory:
+            def __init__(self):
+                pass
+
+            def record_observations(self, features):
+                recorded.append(list(features))
+                return len(features)
+
+        monkeypatch.setattr(
+            'utils.node_history.NodeHistoryDB',
+            FakeHistory,
+        )
+
+        # Tighten the cadence so the test doesn't sleep 30s.
+        svc = NodeTrackerService()
+        svc.HISTORY_FLUSH_INTERVAL = 0.05
+
+        assert svc.start() is True
+        try:
+            # Allow at least one flush tick.
+            deadline = time.time() + 2.0
+            while not recorded and time.time() < deadline:
+                time.sleep(0.05)
+        finally:
+            svc.stop(timeout=2.0)
+
+        assert recorded, "writer thread never flushed to NodeHistoryDB"
+        assert recorded[0] == [feature]
+        status = svc.get_status()
+        assert status['history_persistence'] is True
+        assert status['last_flush_observations'] == 1
 
 
 # =============================================================================

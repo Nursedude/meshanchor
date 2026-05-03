@@ -178,9 +178,13 @@ class MQTTSubscriberService(DaemonService):
     def start(self) -> bool:
         try:
             from monitoring.mqtt_subscriber import MQTTNodelessSubscriber
-            self._subscriber = MQTTNodelessSubscriber(
-                broker=self._broker, port=self._port
-            )
+            # MQTTNodelessSubscriber accepts only `config: dict`; instantiate
+            # with file/default config, then overlay daemon broker/port so the
+            # service shim can target a non-default broker without dropping
+            # channel/topic settings from the loaded config.
+            self._subscriber = MQTTNodelessSubscriber()
+            self._subscriber._config['broker'] = self._broker
+            self._subscriber._config['port'] = self._port
             self._subscriber.start()
             return True
         except Exception as e:
@@ -352,23 +356,78 @@ class TelemetryPollerService(DaemonService):
 
 
 class NodeTrackerService(DaemonService):
-    """Wraps UnifiedNodeTracker singleton."""
+    """Wraps UnifiedNodeTracker singleton + periodic NodeHistoryDB flush.
+
+    The map service runs in a separate process (meshanchor-map.service)
+    and reads node_history.db to populate /api/status. Without this
+    flush, the daemon's tracker observations stay in-process and never
+    reach the map — its tracker singleton is a different instance and
+    its own collect cycle pulls from a different in-memory view.
+    Writing tracker state to the shared SQLite DB (WAL mode, concurrent-
+    safe) lets the map process pick it up on the next /api/status read.
+    """
 
     name = "node_tracker"
+    HISTORY_FLUSH_INTERVAL = 30  # seconds — matches map collector cadence
 
     def __init__(self):
         self._tracker = None
+        self._history = None
+        self._writer_thread = None
+        self._stop_event = threading.Event()
+        self._last_flush_count = 0
 
     def start(self) -> bool:
         try:
             from gateway.node_tracker import get_node_tracker
             self._tracker = get_node_tracker()
-            return True
         except Exception as e:
             logger.error(f"Node tracker start failed: {e}")
             return False
 
+        self._stop_event.clear()
+        try:
+            from utils.node_history import NodeHistoryDB
+            self._history = NodeHistoryDB()
+            self._writer_thread = threading.Thread(
+                target=self._flush_loop,
+                daemon=True,
+                name="node-history-writer",
+            )
+            self._writer_thread.start()
+        except Exception as e:
+            # Non-fatal: tracker stays useful in-process even without DB.
+            logger.warning(f"NodeHistory persistence disabled: {e}")
+            self._history = None
+
+        return True
+
+    def _flush_loop(self) -> None:
+        """Periodically flush tracker state to NodeHistoryDB.
+
+        record_observations() throttles per-node, so calling at a fixed
+        cadence is safe regardless of tracker churn.
+        """
+        while not self._stop_event.wait(self.HISTORY_FLUSH_INTERVAL):
+            try:
+                if not (self._tracker and self._history):
+                    continue
+                geojson = self._tracker.to_geojson()
+                features = (
+                    geojson.get("features", [])
+                    if isinstance(geojson, dict)
+                    else []
+                )
+                if not features:
+                    continue
+                self._last_flush_count = self._history.record_observations(features)
+            except Exception as e:
+                logger.debug(f"node-history flush failed: {e}")
+
     def stop(self, timeout: float = 5.0) -> None:
+        self._stop_event.set()
+        if self._writer_thread and self._writer_thread.is_alive():
+            self._writer_thread.join(timeout=timeout)
         if self._tracker and hasattr(self._tracker, 'stop'):
             try:
                 self._tracker.stop(timeout=timeout)
@@ -387,6 +446,8 @@ class NodeTrackerService(DaemonService):
                 status["node_count"] = len(nodes) if nodes else 0
             except Exception:
                 status["node_count"] = 0
+        status["history_persistence"] = self._history is not None
+        status["last_flush_observations"] = self._last_flush_count
         return status
 
 
