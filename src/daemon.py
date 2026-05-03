@@ -177,29 +177,6 @@ class MQTTSubscriberService(DaemonService):
 
     def start(self) -> bool:
         try:
-            # Pre-flight TCP probe — the underlying subscriber is async, so
-            # without this the watchdog sees start() succeed, the connection
-            # times out 10s later, the service goes dead, watchdog respawns,
-            # repeat forever on a box where mosquitto isn't running.
-            # Returning False here lets the watchdog's max_restarts cap fire.
-            import socket
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(2)
-                    if s.connect_ex((self._broker, self._port)) != 0:
-                        logger.warning(
-                            f"MQTT broker {self._broker}:{self._port} unreachable "
-                            f"— skipping subscriber start (set `mqtt: false` in "
-                            f"noc.yaml if no broker is intended)"
-                        )
-                        return False
-            except OSError as e:
-                logger.warning(
-                    f"MQTT broker reachability check failed ({self._broker}:"
-                    f"{self._port}): {e}"
-                )
-                return False
-
             from monitoring.mqtt_subscriber import MQTTNodelessSubscriber
             # MQTTNodelessSubscriber accepts only `config: dict`; instantiate
             # with file/default config, then overlay daemon broker/port so the
@@ -222,9 +199,20 @@ class MQTTSubscriberService(DaemonService):
                 logger.error(f"MQTT subscriber stop error: {e}")
 
     def is_alive(self) -> bool:
+        # The subscriber has internal reconnect logic (auto_reconnect +
+        # exp. backoff), so transient connection failures (e.g. mosquitto
+        # not yet ready at daemon boot) shouldn't count as dead — that
+        # restart-looped on meshanchor-server 2026-05-02 because the
+        # previous check used `_running`, which doesn't exist on this
+        # class, so getattr defaulted to False every cycle. The right
+        # liveness signal is whether `stop()` was called: as long as
+        # _stop_event isn't set, the subscriber is owning its retries.
         if not self._subscriber:
             return False
-        return getattr(self._subscriber, '_running', False)
+        stop_event = getattr(self._subscriber, '_stop_event', None)
+        if stop_event is None:
+            return False
+        return not stop_event.is_set()
 
     def get_status(self) -> dict:
         status = {"name": self.name, "alive": self.is_alive()}

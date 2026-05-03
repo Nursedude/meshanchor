@@ -32,20 +32,36 @@ class TestUnmanagedServices:
         with patch.object(ahp, 'Path', return_value=bad):
             assert ahp._unmanaged_services() == set()
 
-    def test_extracts_managed_false_services(self, tmp_path):
+    def test_extracts_managed_false_services_nested(self, tmp_path):
+        """install_noc.sh emits services nested under top-level `noc:` —
+        this is the canonical shape on every fleet box."""
+        from utils import active_health_probe as ahp
+        cfg = tmp_path / "noc.yaml"
+        cfg.write_text(
+            "noc:\n"
+            "  services:\n"
+            "    meshtasticd:\n"
+            "      managed: false\n"
+            "    rnsd:\n"
+            "      managed: true\n"
+            "    mosquitto:\n"
+            "      managed: false\n"
+        )
+        with patch.object(ahp, 'Path', return_value=cfg):
+            assert ahp._unmanaged_services() == {"meshtasticd", "mosquitto"}
+
+    def test_extracts_managed_false_services_flat(self, tmp_path):
+        """Hand-edited flat configs (no `noc:` wrapper) must still work —
+        this was the fixture shape used pre-fix."""
         from utils import active_health_probe as ahp
         cfg = tmp_path / "noc.yaml"
         cfg.write_text(
             "services:\n"
             "  meshtasticd:\n"
             "    managed: false\n"
-            "  rnsd:\n"
-            "    managed: true\n"
-            "  mosquitto:\n"
-            "    managed: false\n"
         )
         with patch.object(ahp, 'Path', return_value=cfg):
-            assert ahp._unmanaged_services() == {"meshtasticd", "mosquitto"}
+            assert ahp._unmanaged_services() == {"meshtasticd"}
 
     def test_default_managed_true_when_unspecified(self, tmp_path):
         """Service entry without explicit `managed:` defaults to managed=True
@@ -53,9 +69,10 @@ class TestUnmanagedServices:
         from utils import active_health_probe as ahp
         cfg = tmp_path / "noc.yaml"
         cfg.write_text(
-            "services:\n"
-            "  meshtasticd:\n"
-            "    auto_start: true\n"
+            "noc:\n"
+            "  services:\n"
+            "    meshtasticd:\n"
+            "      auto_start: true\n"
         )
         with patch.object(ahp, 'Path', return_value=cfg):
             assert ahp._unmanaged_services() == set()

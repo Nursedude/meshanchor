@@ -623,7 +623,11 @@ def _unmanaged_services() -> set:
     except Exception:
         return set()
 
-    services = data.get('services', {}) or {}
+    # noc.yaml nests under a top-level `noc:` key (see orchestrator
+    # _load_config). install_noc.sh has emitted that shape since 2026-04-19;
+    # accept both shapes so flat hand-edited configs still work.
+    noc = data.get('noc', data) if isinstance(data.get('noc'), dict) else data
+    services = noc.get('services', {}) or {}
     if not isinstance(services, dict):
         return set()
 

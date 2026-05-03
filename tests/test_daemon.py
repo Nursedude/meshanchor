@@ -466,39 +466,41 @@ class TestServiceWrappers:
             def stop(self):
                 pass
 
-        # Pre-flight expects broker reachable — mock connect_ex to return 0.
-        fake_sock = MagicMock()
-        fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-        fake_sock.__exit__ = MagicMock(return_value=False)
-        fake_sock.connect_ex = MagicMock(return_value=0)
-
         svc = MQTTSubscriberService(broker="example.org", port=8883)
-        with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}), \
-             patch('socket.socket', return_value=fake_sock):
+        with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}):
             ok = svc.start()
         assert ok is True
         assert captured['started'] is True
         assert captured['final_broker'] == "example.org"
         assert captured['final_port'] == 8883
 
-    def test_mqtt_service_start_returns_false_when_broker_unreachable(self):
-        """When the pre-flight TCP probe fails, start() returns False so the
-        watchdog's max-restart cap fires. Without this, an unreachable
-        mosquitto causes a permanent watchdog restart loop (subscriber's
-        async connection times out 10s after each launch). Observed on
-        meshanchor-server 2026-05-02."""
+    def test_mqtt_service_is_alive_uses_stop_event(self):
+        """is_alive() must check `_stop_event`, not the non-existent
+        `_running` attribute. The previous implementation defaulted to
+        False every watchdog cycle, causing a permanent restart loop
+        (observed on meshanchor-server 2026-05-02 — mosquitto needs ~17s
+        to be ready, but watchdog respawned the subscriber every 30s
+        and the wrong attr name made it look perpetually dead even
+        after successful connect)."""
         from daemon import MQTTSubscriberService
 
-        fake_sock = MagicMock()
-        fake_sock.__enter__ = MagicMock(return_value=fake_sock)
-        fake_sock.__exit__ = MagicMock(return_value=False)
-        fake_sock.connect_ex = MagicMock(return_value=111)  # ECONNREFUSED
-
         svc = MQTTSubscriberService(broker="localhost", port=1883)
-        with patch('socket.socket', return_value=fake_sock):
-            ok = svc.start()
-        assert ok is False
-        assert svc._subscriber is None
+        assert svc.is_alive() is False  # No subscriber yet
+
+        # Subscriber with stop_event NOT set → alive
+        sub_alive = MagicMock()
+        sub_alive._stop_event = threading.Event()
+        svc._subscriber = sub_alive
+        assert svc.is_alive() is True
+
+        # Subscriber with stop_event set → dead
+        sub_alive._stop_event.set()
+        assert svc.is_alive() is False
+
+        # Subscriber missing _stop_event → defensive False
+        sub_no_event = MagicMock(spec=[])
+        svc._subscriber = sub_no_event
+        assert svc.is_alive() is False
 
     def test_config_api_service_interface(self):
         """ConfigAPIService has required methods."""
