@@ -691,3 +691,121 @@ class TestActiveHandlerAccessor:
         # `new`'s own disconnect clears it.
         new.disconnect()
         assert get_active_handler() is None
+
+
+class TestSendPath:
+    """Regression coverage for the three send-path bugs that surfaced
+    on meshanchor-server 2026-05-02 once the chat API actually drove
+    outbound traffic:
+
+    1. `send_channel_txt_msg` doesn't exist on meshcore_py's CommandHandler;
+       real method is `send_chan_msg(chan, msg)`.
+    2. `get_contacts()` returns an Event; iterating it directly raised
+       "Event object is not iterable".
+    3. CanonicalMessage was protocol-agnostic but the channel slot was
+       being dropped between send_text() and _process_outbound, defaulting
+       every send to slot 0 (Public) regardless of TUI/API choice.
+    """
+
+    def test_extract_contacts_from_event_payload_dict(self, handler):
+        evt = SimpleNamespace(payload={
+            "alpha": {"adv_name": "alpha", "public_key": b"\x01\x02"},
+            "beta":  {"adv_name": "beta",  "public_key": b"\x03\x04"},
+        })
+        contacts = handler._extract_contacts(evt)
+        assert len(contacts) == 2
+        names = {c["adv_name"] for c in contacts}
+        assert names == {"alpha", "beta"}
+
+    def test_extract_contacts_from_plain_list(self, handler):
+        evt = SimpleNamespace(payload=[{"adv_name": "x"}])
+        assert handler._extract_contacts(evt) == [{"adv_name": "x"}]
+
+    def test_extract_contacts_handles_none(self, handler):
+        assert handler._extract_contacts(None) == []
+
+    def test_extract_contacts_unknown_shape_returns_empty(self, handler):
+        # Stringly-typed payload should NOT be iterated — that was the
+        # exact pre-fix bug that surfaced "Event object is not iterable".
+        evt = SimpleNamespace(payload="this-is-not-iterable-as-contacts")
+        assert handler._extract_contacts(evt) == []
+
+    def test_send_text_carries_channel_via_metadata(self, handler):
+        handler._connected = True
+        ok = handler.send_text("hello slot 2", channel=2)
+        assert ok is True
+        msg = handler._send_queue.get_nowait()
+        assert isinstance(msg, CanonicalMessage)
+        assert msg.metadata.get('channel') == 2
+        assert msg.content == "hello slot 2"
+        assert msg.is_broadcast is True
+
+    def test_send_message_uses_send_chan_msg_for_broadcast(self, handler):
+        """Broadcast path must call send_chan_msg(channel, text) — not
+        the nonexistent send_channel_txt_msg."""
+        fake_commands = MagicMock()
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        # AsyncMock for any attr — but DON'T provide send_channel_txt_msg
+        # so a regression that calls it would AttributeError.
+        del fake_commands.send_channel_txt_msg
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+
+        loop = asyncio.new_event_loop()
+        try:
+            ok = loop.run_until_complete(
+                handler._send_message("hi", destination=None, channel=2)
+            )
+        finally:
+            loop.close()
+        assert ok is True
+        fake_commands.send_chan_msg.assert_awaited_once_with(2, "hi")
+
+    def test_send_message_dm_extracts_contacts_from_event(self, handler):
+        """DM path: get_contacts() returns Event; _send_message must
+        unwrap .payload before iterating."""
+        contact = {"adv_name": "p3", "public_key": b"\xab\xcd\xef\x01"}
+        contacts_evt = SimpleNamespace(payload={"p3": contact})
+
+        fake_commands = MagicMock()
+        fake_commands.get_contacts = AsyncMock(return_value=contacts_evt)
+        fake_commands.send_msg = AsyncMock(return_value=None)
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+
+        loop = asyncio.new_event_loop()
+        try:
+            ok = loop.run_until_complete(
+                handler._send_message("ping", destination="abcd")
+            )
+        finally:
+            loop.close()
+        assert ok is True
+        fake_commands.send_msg.assert_awaited_once_with(contact, "ping")
+        # Did NOT fall through to channel broadcast since contact resolved.
+        fake_commands.send_chan_msg.assert_not_awaited()
+
+    def test_send_message_dm_falls_back_to_channel_when_contact_missing(self, handler):
+        """If contact resolution fails, fall back to broadcast on the
+        passed channel — not slot 0 unless that's the channel."""
+        contacts_evt = SimpleNamespace(payload={})  # empty contacts
+
+        fake_commands = MagicMock()
+        fake_commands.get_contacts = AsyncMock(return_value=contacts_evt)
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+
+        loop = asyncio.new_event_loop()
+        try:
+            ok = loop.run_until_complete(
+                handler._send_message("ping", destination="missing-id", channel=1)
+            )
+        finally:
+            loop.close()
+        assert ok is True
+        fake_commands.send_chan_msg.assert_awaited_once_with(1, "ping")

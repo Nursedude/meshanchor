@@ -822,17 +822,23 @@ class MeshCoreHandler(BaseMessageHandler):
             return
 
         try:
+            channel = 0
             if isinstance(msg, CanonicalMessage):
                 text = msg.to_meshcore_text()
                 dest = msg.destination_address
+                # MeshCore channel slot rides on metadata since
+                # CanonicalMessage is protocol-agnostic. send_text() stashes
+                # it; routing fallbacks default to slot 0 (Public).
+                channel = int(msg.metadata.get('channel', 0) or 0)
             elif isinstance(msg, dict):
                 text = msg.get('message', '')
                 dest = msg.get('destination')
+                channel = int(msg.get('channel', 0) or 0)
             else:
                 text = str(msg)
                 dest = None
 
-            success = await self._send_message(text, dest)
+            success = await self._send_message(text, dest, channel=channel)
 
             if success:
                 with self._stats_lock:
@@ -847,13 +853,20 @@ class MeshCoreHandler(BaseMessageHandler):
         except Exception as e:
             logger.error(f"Error processing outbound MeshCore message: {e}")
 
-    async def _send_message(self, text: str, destination: Optional[str] = None) -> bool:
+    async def _send_message(
+        self,
+        text: str,
+        destination: Optional[str] = None,
+        channel: int = 0,
+    ) -> bool:
         """
         Send a text message to the MeshCore network.
 
         Args:
             text: Message text (will be truncated to 160 bytes if needed)
             destination: Destination address (None = channel broadcast)
+            channel: Channel slot for broadcasts (0 = Public; 1+ = private
+                slots set up via meshcore_set_channel.py / Node-Connect).
 
         Returns:
             True if sent successfully.
@@ -863,26 +876,32 @@ class MeshCoreHandler(BaseMessageHandler):
 
         try:
             if destination:
-                # Direct message — need to resolve contact
+                # Direct message — resolve the contact first. get_contacts()
+                # returns an Event whose payload is the actual dict/list of
+                # contacts; older code iterated the Event itself, which
+                # raised "Event object is not iterable".
                 if hasattr(self._meshcore, 'commands'):
-                    contacts = await self._meshcore.commands.get_contacts()
+                    contacts_evt = await self._meshcore.commands.get_contacts()
+                    contacts = self._extract_contacts(contacts_evt)
                     contact = self._find_contact(contacts, destination)
                     if contact:
                         await self._meshcore.commands.send_msg(contact, text)
                         return True
-                    else:
-                        logger.warning(
-                            f"MeshCore contact not found for {destination}, "
-                            f"sending as channel broadcast"
-                        )
-                # Fall through to broadcast
-                await self._meshcore.commands.send_channel_txt_msg(text)
+                    logger.warning(
+                        f"MeshCore contact not found for {destination}, "
+                        f"falling back to channel {channel} broadcast"
+                    )
+                # Fall through to broadcast — meshcore_py method is
+                # send_chan_msg(chan, msg), not send_channel_txt_msg.
+                await self._meshcore.commands.send_chan_msg(channel, text)
                 return True
             else:
                 # Channel broadcast
                 if hasattr(self._meshcore, 'commands'):
-                    await self._meshcore.commands.send_channel_txt_msg(text)
+                    await self._meshcore.commands.send_chan_msg(channel, text)
                 elif hasattr(self._meshcore, 'send_channel_txt_msg'):
+                    # Simulator path — keeps the historical method name
+                    # for backwards-compat with MeshCoreSimulator.
                     await self._meshcore.send_channel_txt_msg(text)
                 else:
                     logger.error("MeshCore instance has no send method")
@@ -892,6 +911,23 @@ class MeshCoreHandler(BaseMessageHandler):
         except Exception as e:
             logger.error(f"Failed to send MeshCore message: {e}")
             return False
+
+    @staticmethod
+    def _extract_contacts(contacts_evt: Any) -> List[Any]:
+        """Pull the contact list out of meshcore_py's get_contacts Event.
+
+        Real Event has `.payload` (dict keyed by name or list); simulator
+        returns a plain list. Both shapes flow through here.
+        """
+        if contacts_evt is None:
+            return []
+        payload = getattr(contacts_evt, 'payload', contacts_evt)
+        if isinstance(payload, dict):
+            return list(payload.values())
+        if isinstance(payload, list):
+            return payload
+        # Unknown shape — be defensive, don't iterate the Event itself.
+        return []
 
     def _find_contact(self, contacts: List[Any], address: str) -> Optional[Any]:
         """
@@ -952,6 +988,10 @@ class MeshCoreHandler(BaseMessageHandler):
                 is_broadcast=destination is None,
                 source_network=Protocol.MESHCORE.value,
             )
+            # Carry the channel slot through metadata so _process_outbound
+            # can route to the right slot (CanonicalMessage is protocol-
+            # agnostic; channel is a MeshCore-specific concept).
+            msg.metadata['channel'] = int(channel)
             self._send_queue.put_nowait(msg)
             # Record outbound for TUI parity — operators need to see what
             # they sent alongside what came in.
