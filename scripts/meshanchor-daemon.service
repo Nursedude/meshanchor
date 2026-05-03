@@ -9,8 +9,9 @@ After=meshtasticd.service
 Type=simple
 User=root
 WorkingDirectory=/opt/meshanchor
-ExecStart=/usr/bin/python3 /opt/meshanchor/src/daemon.py start --foreground
-ExecStop=/usr/bin/python3 /opt/meshanchor/src/daemon.py stop
+# Use venv if available, fall back to system Python (mirrors meshanchor-map.service)
+ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py start --foreground; else exec python3 /opt/meshanchor/src/daemon.py start --foreground; fi'
+ExecStop=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py stop; else exec python3 /opt/meshanchor/src/daemon.py stop; fi'
 ExecReload=/bin/kill -HUP $MAINPID
 PIDFile=/run/meshanchor/meshanchord.pid
 Restart=on-failure

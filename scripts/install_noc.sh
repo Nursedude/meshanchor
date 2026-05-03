@@ -1653,6 +1653,46 @@ MAP_SERVICE
     echo -e "  ${GREEN}✓ meshanchor-map.service created${NC}"
 fi
 
+# Install MeshAnchor Daemon systemd service (headless NOC services: gateway bridge,
+# node tracker, MQTT subscriber — feeds /api/status when no TUI is running)
+if [[ -f "$INSTALL_DIR/scripts/meshanchor-daemon.service" ]]; then
+    cp "$INSTALL_DIR/scripts/meshanchor-daemon.service" /etc/systemd/system/
+    echo -e "  ${GREEN}✓ meshanchor-daemon.service installed${NC}"
+else
+    # Inline service definition (fallback)
+    cat > /etc/systemd/system/meshanchor-daemon.service << 'DAEMON_SERVICE'
+[Unit]
+Description=MeshAnchor Daemon - Headless NOC Services
+Documentation=https://github.com/Nursedude/meshanchor
+After=network.target rnsd.service
+After=meshtasticd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshanchor
+ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py start --foreground; else exec python3 /opt/meshanchor/src/daemon.py start --foreground; fi'
+ExecStop=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py stop; else exec python3 /opt/meshanchor/src/daemon.py stop; fi'
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/run/meshanchor/meshanchord.pid
+Restart=on-failure
+RestartSec=10
+WatchdogSec=120
+RuntimeDirectory=meshanchor
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log /tmp /home /run/meshanchor
+PrivateTmp=true
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/meshanchor/src
+
+[Install]
+WantedBy=multi-user.target
+DAEMON_SERVICE
+    echo -e "  ${GREEN}✓ meshanchor-daemon.service created${NC}"
+fi
+
 # Update systemd service to use orchestrator
 # Start order: meshtasticd -> rnsd -> meshanchor
 cat > /etc/systemd/system/meshanchor.service << 'MESHANCHOR_SERVICE'
@@ -1833,6 +1873,19 @@ if systemctl is-active --quiet meshanchor-map; then
     echo -e "  ${GREEN}✓ Map Server running: http://${LOCAL_IP}:5000/${NC}"
 else
     echo -e "  ${YELLOW}⚠ Map Server not running (check: journalctl -u meshanchor-map)${NC}"
+fi
+
+# Enable and start MeshAnchor Daemon (headless NOC services that feed /api/status)
+echo ""
+echo -e "${CYAN}Enabling MeshAnchor Daemon...${NC}"
+systemctl enable meshanchor-daemon 2>/dev/null || true
+systemctl start meshanchor-daemon 2>/dev/null || true
+
+sleep 2
+if systemctl is-active --quiet meshanchor-daemon; then
+    echo -e "  ${GREEN}✓ MeshAnchor Daemon running (gateway bridge + node tracker active)${NC}"
+else
+    echo -e "  ${YELLOW}⚠ MeshAnchor Daemon not running (check: journalctl -u meshanchor-daemon)${NC}"
 fi
 
 # Offer to start services (only if services can actually run)
