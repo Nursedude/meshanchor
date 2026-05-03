@@ -9,7 +9,7 @@
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-2729%20passing-blue.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-2884%20passing-blue.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -27,12 +27,17 @@
 
 Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the architecture: **MeshCore is primary, Meshtastic and RNS are optional gateways.** Same TUI framework. Same gateway bridge pattern. Same RF tools. Different home radio.
 
-> **ALPHA SOFTWARE — We need your help testing.**
+> **ALPHA SOFTWARE — Field validation has begun. We need your help testing.**
 >
-> MeshAnchor has **2,729 tests passing** against mocks, but **no field validation has been
-> performed** with real MeshCore hardware. If you have a MeshCore companion radio
-> (RAK4631, Heltec V3, T-Deck, T-Echo), your testing and feedback is the single most
-> valuable contribution right now. See [Contributing](#contributing).
+> MeshAnchor has **2,884 tests passing** against mocks. As of 2026-05-02 the
+> first field deployment (Pi 4B + RAK Heltec V3 in Serial Companion mode) is
+> running an end-to-end MeshCore stack: bidirectional channel messaging on
+> Public + private channels via the daemon's chat API, daemon-managed gateway,
+> RNS announce reception. Gateway-bridge end-to-end (MeshCore ↔ RNS LXMF
+> delivery), coverage maps with live position data, and 3-way routing remain
+> unvalidated. If you have a MeshCore companion radio (RAK4631, Heltec V3,
+> T-Deck, T-Echo), your testing and feedback is the single most valuable
+> contribution right now. See [Contributing](#contributing).
 
 Plug in a MeshCore companion radio, run the installer, and you get:
 
@@ -153,7 +158,7 @@ headless operation. Navigation is keyboard-driven with max 10 items per menu lev
 Main Menu (MeshAnchor NOC)
 ├── 1. Dashboard             Service status, health, alerts, data path check
 ├── 2. Mesh Networks         MeshCore, Meshtastic, RNS, AREDN, MQTT, Gateway
-│       └── MeshCore submenu Status, detect, config, nodes, stats
+│       └── MeshCore submenu Status, detect, config, nodes, stats, chat, daemon
 │       └── RNS submenu      NomadNet Client (install/manage)
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
 ├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
@@ -238,16 +243,18 @@ sudo python3 src/launcher_tui/main.py
 | **Inherited** | Carried from MeshForge where it was field-tested. Untested in MeshAnchor context. |
 | **Code-Ready** | Implemented and compiles. Needs real hardware/services to validate. |
 
-### MeshCore Integration (Code-Ready)
+### MeshCore Integration (Code-Ready, MeshCore-only path Field-Validated 2026-05-02)
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
 | Companion radio detection | -- | Serial USB scan + udev persistent naming (`/dev/ttyMeshCore`) |
 | Pre-flight device validation | -- | Serial probe before connection, permission + existence checks |
-| meshcore_py connection | 602 | Async event loop, reconnect, message handling |
+| meshcore_py connection | 602 | Async event loop, reconnect, message handling. **Field-validated** with RAK Heltec V3 in Serial Companion mode (2026-05-02). |
 | CanonicalMessage bridging | 553 | Protocol-agnostic message format, N-protocol routing |
-| 3-way routing classifier | 684 | MeshCore + Meshtastic + RNS tri-bridge tests |
-| MeshCore TUI menu | -- | Status, detect, config, nodes, stats |
+| 3-way routing classifier | 684 | MeshCore + Meshtastic + RNS tri-bridge tests (mock-only) |
+| MeshCore TUI menu | -- | Status, detect, config, nodes, stats, chat, daemon control |
+| Chat HTTP API (`/chat/*` on :8081) | 19 | Daemon-side ring buffer + send/receive endpoints. Bidirectional Public + private-channel messaging field-validated 2026-05-02. |
+| Daemon control in TUI | 5 | start / stop / restart / journal / live tail through `service_check` SSOT |
 
 ### Gateway Bridge (Inherited + Code-Ready)
 
@@ -290,17 +297,27 @@ sudo python3 src/launcher_tui/main.py
 
 ### Testing Reality Check
 
-MeshAnchor has **2,744 automated tests** across 75 test files. However, automated tests
+MeshAnchor has **2,884 automated tests** across 76 test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.
 
-**What has never been tested with real hardware in MeshAnchor:**
-- MeshCore companion radio connection and messaging
-- Gateway bridge end-to-end message delivery
+**What has been validated with real hardware (first field deployment, 2026-05-02):**
+- MeshCore companion radio connection (RAK Heltec V3, Serial Companion firmware via USB)
+- Bidirectional channel messaging on Public (slot 0) and private channels (`meshanchor`
+  on slot 1/2) — RX from a paired BLE Companion + iOS, TX from the daemon's chat API
+  through the TUI, both directions confirmed
+- Daemon stability under restart cycles (5 boot/restart-loop fixes landed during
+  bring-up; full restart now produces a clean 5/5 services, no watchdog churn)
+- Chat HTTP API + TUI Chat menu (since-id polling, channel + DM send paths)
+- TUI daemon control (status / start / stop / restart / journal / live tail)
+- RNS announce reception (gateway sees external `MeshForge Gateway (moc)` etc.)
+
+**What has not yet been tested with real hardware in MeshAnchor:**
+- Gateway bridge end-to-end message delivery (MeshCore → RNS LXMF and back)
 - Coverage maps with real GPS position data
 - Live NOC map with live node data
-- 3-way routing (MeshCore <> Meshtastic <> RNS)
+- 3-way routing (MeshCore <> Meshtastic <> RNS) with concurrent traffic
 
 **What was field-tested in MeshForge** (inherited, likely works): TUI, meshtasticd config,
 RF tools, RNS/rnsd integration, NomadNet, service management, standalone tools.
