@@ -194,4 +194,8 @@ def get_all_handlers() -> List[Type]:
         DemoHandler,
     ])
 
+    # Batch 16 — Phase 6: meshforge-maps :8808 plugin scaffold
+    from handlers.meshforge_maps import MeshforgeMapsHandler
+    handlers.append(MeshforgeMapsHandler)
+
     return handlers
