@@ -12,7 +12,7 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 | # | Phase | Status | Branch / PR | Last touched |
 |---|---|---|---|---|
-| 1 | Map data flip — MeshCore as source | **PR open, awaiting review** | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) | 2026-05-03 |
+| 1 | Map data flip — MeshCore as source | **MERGED** ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) (merge 0b91289c) | 2026-05-03 |
 | 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | not started | — | — |
 | 3 | Handler feature-flag audit (~40 Meshtastic handlers) | not started | — | — |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | not started | — | — |
@@ -66,6 +66,12 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - All gates green: lint clean, 17 regression guards passing, 85 node_tracker tests passing, 8 new tests passing, related meshcore/tactical_map tests passing.
 - Decided MeshCore positions are deferred to Phase 1.5 — `_on_advertisement()` line 610 in `meshcore_handler.py` doesn't extract GPS because meshcore_py advertisements don't expose it. Position-less side panel covers MeshCore nodes for now.
 - **Next session resume point**: wait for PR #13 review/merge, then start Phase 2 (TUI menu restructure — MeshCore primary, Optional Gateways submenu). Add Phase 2 "Key contract findings" + "Implementation outline" sections mirroring Phase 1's structure before coding.
+
+**2026-05-03 (Phase 1 MERGED)**:
+- PR #13 merged into main as merge commit 0b91289c.
+- Three commits landed: `60175708` (feat — main implementation), `7562c77c` (tracker session-state update), `72ff06fc` (CI fix: pr_overdue_check fetches base via FETCH_HEAD).
+- **CI fix propagated**: same `--prune` bug existed in MeshForge's mirror workflow. Fixed in [MeshForge PR #1154](https://github.com/Nursedude/meshforge/pull/1154) — the workflow being fixed ran on the fix-PR itself and passed (6s), so the fix is meta-verified. Bug scope confirmed limited to MeshAnchor + MeshForge (only 2 of 9 `/opt/` repos mirror this workflow).
+- **Next session resume point**: start Phase 2. Begin by adding a Phase 2 "Key contract findings" section to this tracker (mirror Phase 1's structure). Phase 2 = TUI menu restructure: top-level menu reordered so MeshCore is primary, Meshtastic + RNS handlers grouped under an "Optional Gateways" submenu. Touches `handler_registry.py` aggregation + per-handler `menu_section`. No handler removed. Branch convention: `claude/mc-phase2-menu-restructure`.
 
 ---
 
