@@ -1022,6 +1022,13 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._handle_radio_get()
             return
 
+        # Startup health — profile-aware snapshot. LAN-readable so an
+        # external dashboard can poll it without firing false-red alarms
+        # when an Optional Gateway isn't configured.
+        if self.path == "/health" or self.path.startswith("/health?"):
+            self._handle_health_get()
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1225,6 +1232,10 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
     def _handle_radio_put(self) -> None:
         from utils.radio_api import handle_put
         handle_put(self)
+
+    def _handle_health_get(self) -> None:
+        from utils.health_api import handle_get
+        handle_get(self)
 
     def _handle_chat_send(self) -> None:
         try:

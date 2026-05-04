@@ -38,12 +38,21 @@ __version__ = getattr(_version_mod, '__version__', "0.5.0-beta") if _HAS_VERSION
 
 @dataclass
 class ServiceHealth:
-    """Health status of a single service."""
+    """Health status of a single service.
+
+    `not_applicable` means the service is irrelevant under the active
+    deployment profile (e.g. meshtasticd under MESHCORE). It's still
+    reported so the operator can see "we know about this service, it's
+    not running, but that's fine for your profile" — but it does NOT
+    gate `overall_status`. Defaults to False so callers without a
+    profile keep the prior behaviour.
+    """
     name: str
     running: bool
     port: Optional[int] = None
     status_text: str = ""
     optional: bool = False
+    not_applicable: bool = False
     fix_hint: str = ""
 
 
@@ -76,12 +85,16 @@ class HealthSummary:
 
     @property
     def is_ready(self) -> bool:
-        """Check if system is ready for operation."""
-        # At minimum, meshtasticd should be running
-        for svc in self.services:
-            if svc.name == "meshtasticd" and svc.running:
-                return True
-        return False
+        """Check if system is ready for operation.
+
+        Profile-aware: derives readiness from `overall_status` (set by
+        `run_health_check` based on the active profile's required/optional
+        service lists). "ready" or "degraded" both count as ready —
+        degraded just means some optional service is down. A MESHCORE-only
+        deployment with meshtasticd absent is `ready` because meshtasticd
+        is not_applicable for that profile.
+        """
+        return self.overall_status in ("ready", "degraded")
 
 
 def check_meshtasticd() -> ServiceHealth:
@@ -368,14 +381,18 @@ def run_health_check(profile=None) -> HealthSummary:
 
     for name, health in service_checks.items():
         if required_services is not None:
-            # Profile-aware: override optional flag based on profile
+            # Profile-aware: classify as required / optional / not_applicable.
+            # not_applicable services are still reported but don't gate
+            # overall_status — meshtasticd under MESHCORE is the canonical case.
             if name in required_services:
                 health.optional = False
+                health.not_applicable = False
             elif name in optional_services:
                 health.optional = True
+                health.not_applicable = False
             else:
-                # Not in profile's services — mark as informational (optional)
                 health.optional = True
+                health.not_applicable = True
         summary.services.append(health)
 
     # Detect hardware
@@ -389,13 +406,10 @@ def run_health_check(profile=None) -> HealthSummary:
     if meshtasticd_running:
         summary.network.nodes_visible = get_node_count()
 
-    # Determine overall status
-    critical_ok = all(
-        s.running for s in summary.services if not s.optional
-    )
-    optional_ok = all(
-        s.running for s in summary.services if s.optional
-    )
+    # Determine overall status — ignore not_applicable services.
+    relevant = [s for s in summary.services if not s.not_applicable]
+    critical_ok = all(s.running for s in relevant if not s.optional)
+    optional_ok = all(s.running for s in relevant if s.optional)
 
     if critical_ok and optional_ok:
         summary.overall_status = "ready"
@@ -443,7 +457,11 @@ def print_health_summary(summary: HealthSummary, use_color: bool = True) -> str:
         if svc.running:
             icon = f"{GREEN}✓{RESET}"
             port_info = f" (port {svc.port})" if svc.port else ""
-            lines.append(f"  {icon} {svc.name}: running{port_info}")
+            tag = " (n/a for profile)" if svc.not_applicable else ""
+            lines.append(f"  {icon} {svc.name}: running{port_info}{tag}")
+        elif svc.not_applicable:
+            # Render dim — the service isn't relevant for this profile.
+            lines.append(f"  ○ {svc.name}: not configured (n/a for profile)")
         elif svc.optional:
             icon = f"{YELLOW}⚠{RESET}"
             lines.append(f"  {icon} {svc.name}: not running (optional)")
@@ -488,6 +506,7 @@ def get_health_dict(summary: HealthSummary) -> Dict[str, Any]:
     """Convert health summary to dictionary for JSON/API use."""
     return {
         'version': summary.version,
+        'profile_name': summary.profile_name,
         'overall_status': summary.overall_status,
         'is_ready': summary.is_ready,
         'services': [
@@ -496,7 +515,9 @@ def get_health_dict(summary: HealthSummary) -> Dict[str, Any]:
                 'running': s.running,
                 'port': s.port,
                 'status': s.status_text,
-                'optional': s.optional
+                'optional': s.optional,
+                'not_applicable': s.not_applicable,
+                'fix_hint': s.fix_hint,
             }
             for s in summary.services
         ],
@@ -556,8 +577,10 @@ def get_compact_status(summary: HealthSummary, use_color: bool = True) -> str:
     for svc in summary.services:
         if svc.running:
             parts.append(f"{GREEN}●{RESET}{svc.name}")
-        elif svc.optional:
+        elif svc.not_applicable:
             parts.append(f"{DIM}○{svc.name}{RESET}")
+        elif svc.optional:
+            parts.append(f"{YELLOW}○{svc.name}{RESET}")
         else:
             parts.append(f"{RED}●{RESET}{svc.name}")
 
