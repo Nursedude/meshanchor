@@ -345,6 +345,44 @@ class MeshAnchorPaths:
                 pass  # Non-critical: dirs still usable by root
 
 
+class MeshChatXPaths:
+    """Paths related to MeshChatX (third-party LXMF web client).
+
+    MeshChatX is a long-lived HTTP daemon owned by the user, with its
+    identity + storage under ``~/.local/share/meshchatx``. The wrapper
+    + systemd-user unit live alongside MeshAnchor's other user
+    artifacts in ``~/.config/meshanchor``.
+
+    Ported from MeshForge's MeshChatXPaths (Phase 8.2). The split with
+    NomadNet is by-design: each LXMF client owns a separate identity
+    so peers can reach both side-by-side.
+    """
+
+    @classmethod
+    def get_storage_dir(cls) -> Path:
+        """Identity + persistent state for MeshChatX (HTTP daemon)."""
+        return get_real_user_home() / ".local" / "share" / "meshchatx"
+
+    @classmethod
+    def get_wrapper_path(cls) -> Path:
+        """Canonical wrapper location (mirrors install_meshchatx.sh)."""
+        return (
+            get_real_user_home() / ".config" / "meshanchor" / "meshchatx_wrapper.sh"
+        )
+
+    @classmethod
+    def get_unit_path(cls) -> Path:
+        """User-mode systemd unit location."""
+        return (
+            get_real_user_home() / ".config" / "systemd" / "user" / "meshchatx.service"
+        )
+
+    @classmethod
+    def get_binary_path(cls) -> Path:
+        """Default pipx-installed binary location."""
+        return get_real_user_home() / ".local" / "bin" / "meshchatx"
+
+
 class SystemPaths:
     """System-level paths"""
 

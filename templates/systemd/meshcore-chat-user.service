@@ -1,0 +1,65 @@
+# MeshAnchor — MeshCore Chat Pane User Service (tmux-detached)
+# =============================================================
+#
+# A persistent operator chat console for the MeshCore radio. The unit
+# wraps utils/chat_client.py inside a detached tmux session named
+# `meshcore-chat`, so the TUI keeps running without a terminal
+# attached. The operator reads + types by attaching:
+#
+#   tmux attach -t meshcore-chat       # type to send, Ctrl-b d to detach
+#   ChatPaneHandler > Attach           # equivalent path from the TUI
+#
+# Install (MeshAnchor TUI — recommended):
+#   MeshCore > Chat (tmux) > Service Control > Install user unit
+#
+# The installer substitutes the ExecStart placeholder below with the
+# absolute path to the wrapper for this box, so the unit works
+# regardless of whether MeshAnchor is in /opt or a developer checkout.
+# Do NOT hand-edit ~/.config/systemd/user/meshcore-chat.service —
+# re-run Service Control > Install to refresh it.
+#
+# The chat client talks to the gateway daemon's HTTP chat API on
+# 127.0.0.1:8081 (chat ring buffer + send endpoint). It does NOT
+# touch the radio's serial port — the gateway daemon owns that —
+# so this service can run alongside meshanchor-daemon without
+# any contention.
+#
+# StartLimitBurst caps the restart-loop: if the wrapper exits 87
+# (chat API unreachable, see chat_client_wrapper.sh) repeatedly,
+# systemd parks the unit in failed state after 5 attempts inside
+# StartLimitIntervalSec. The operator sees one clear failure in the
+# journal instead of 392 silent restarts.
+
+[Unit]
+Description=MeshAnchor MeshCore Chat Pane (tmux-detached)
+After=default.target network-online.target meshanchor-daemon.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=forking
+Environment=HOME=%h
+Environment=TERM=xterm-256color
+Environment=PYTHONUNBUFFERED=1
+
+# Clean slate: kill any prior tmux session before starting fresh.
+ExecStartPre=-/usr/bin/tmux kill-session -t meshcore-chat
+
+# Launch the chat client wrapped in a detached tmux session. The
+# placeholder below is substituted at install time by
+# handlers/_chat_pane_service_ops.py::_install_user_unit. It will
+# resolve to the wrapper at ~/.config/meshanchor/chat_client_wrapper.sh.
+ExecStart=/usr/bin/tmux new-session -d -s meshcore-chat '__CHAT_PANE_EXEC__'
+
+ExecStop=/usr/bin/tmux kill-session -t meshcore-chat
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshcore-chat
+
+[Install]
+WantedBy=default.target

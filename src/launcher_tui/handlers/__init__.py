@@ -198,4 +198,13 @@ def get_all_handlers() -> List[Type]:
     from handlers.meshforge_maps import MeshforgeMapsHandler
     handlers.append(MeshforgeMapsHandler)
 
+    # Batch 17 — Phase 8.2: persistent MeshCore chat pane (tmux-wrapped)
+    # + MeshChatX LXMF web client (ported from MeshForge).
+    from handlers.chat_pane import ChatPaneHandler
+    from handlers.meshchatx import MeshChatXHandler
+    handlers.extend([
+        ChatPaneHandler,
+        MeshChatXHandler,
+    ])
+
     return handlers
