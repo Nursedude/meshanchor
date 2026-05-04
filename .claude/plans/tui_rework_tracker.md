@@ -18,8 +18,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | merged ✅ | [PR #16](https://github.com/Nursedude/meshanchor/pull/16) |
 | 3 | Handler feature-flag audit (opt-in flagging, 12 handlers / 17 rows) | merged ✅ | [PR #18](https://github.com/Nursedude/meshanchor/pull/18) |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | merged ✅ | 4a [PR #20](https://github.com/Nursedude/meshanchor/pull/20); 4b [PR #21](https://github.com/Nursedude/meshanchor/pull/21) (merge `fa41c5ce`) |
-| 5 | Startup health flip (meshtasticd → optional) | in flight | `claude/mc-phase5-health-flip` |
-| 6 | meshforge-maps :8808 plugin scaffold | not started | — |
+| 5 | Startup health flip (meshtasticd → optional) | merged ✅ | [PR #22](https://github.com/Nursedude/meshanchor/pull/22) (merge `55acf1f3`) |
+| 6 | meshforge-maps :8808 plugin scaffold | in flight | `claude/mc-phase6-maps-plugin` |
 | 7 | Profile defaults + docs | not started | — |
 
 ---
@@ -225,6 +225,58 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 6 — Meshforge-Maps :8808 Plugin Scaffold
+
+**Goal**: MeshAnchor can *discover, surface, and link* the sister project [meshforge-maps](https://github.com/Nursedude/meshforge-maps) which runs its own HTTP server on :8808 (Leaflet UI + REST API). MeshAnchor does NOT take ownership of meshforge-maps' lifecycle — meshforge-maps owns its own systemd unit. Phase 6 is the minimum scaffold: a discovery client, a TUI menu entry, browser-launch. Deeper integration (data ingestion, embedded panels, lifecycle control) is left for follow-up phases.
+
+**Key contract findings (2026-05-04)**:
+
+- **meshforge-maps service surface**: HTTP on :8808 (configurable via `http_port` in its own `settings.json`). Endpoints we care about for discovery: `/api/status` (version + uptime), `/api/health` (composite 0–100 score), `/api/sources` (enabled data sources), `/api/config`. Companion WebSocket on :8809 for real-time push (out of scope for the scaffold).
+- **No existing :8808 references in MeshAnchor**: `grep -rn ":8808\|8808" src/` is empty. Phase 6 introduces the convention. Ports already in use: `:5000` (MeshAnchor's own NOC map via `map_data_service.py`), `:9443` (meshtasticd web), `:8081` (config + chat + radio + health daemon API). `:8808` for meshforge-maps slots in cleanly.
+- **Existing maps_viz section**: TUI handlers `ai_tools.py` and `topology.py` already register `menu_section = "maps_viz"`. The whole section is gated by the `maps` feature flag at the top-level menu (in `_run_main_menu()`), so per-row flags inside `maps_viz` aren't needed — adding the new handler with `menu_section="maps_viz"` and `feature_flag=None` per row matches the existing convention.
+- **Plugin loader vs handler dispatch**: `src/utils/plugins.py` defines `BasePlugin` / `IntegrationPlugin` etc. for protocol-level integrations (see `meshing_around.py`). But TUI menus go through the *handler registry* (`src/launcher_tui/handler_registry.py`), NOT the plugin manager. The scaffold doesn't need a `BasePlugin` subclass — a TUI handler is sufficient for "show status, open browser." A `BasePlugin` would be appropriate later if we add lifecycle (start/stop/restart) or message hooks.
+- **File-size cliff (defer)**: `src/utils/map_data_collector.py` is at **1529 lines**, just above the 1500 cap (was 1529 since well before Phase 6). Phase 6 doesn't touch it — the new code is a separate module — so a split is *not* a Phase 6 prerequisite. Flag for a future cleanup phase.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase6-maps-plugin` off main (post PR #22).
+2. **Tracker prep (this commit)**: flip Phase 5 row to `merged ✅`, add this Phase 6 section.
+3. **`utils/meshforge_maps_client.py`** (new, 178 lines): `MeshforgeMapsClient(host=localhost, port=8808, timeout=3.0)` with a single `probe() -> MapsServiceStatus` method. Hits `/api/status` first; if that fails, returns `available=False` with a populated `error` string. Layers in `/api/health` and `/api/sources` best-effort. Never raises — connection refused, timeout, 404, malformed JSON all collapse into the structured result. Includes `_extract_source_names` helper tolerant of two payload shapes the upstream API has used (list of strings vs list of dicts with `enabled` flag).
+4. **`launcher_tui/handlers/meshforge_maps.py`** (new, 137 lines): `MeshforgeMapsHandler` registered in `maps_viz` section. Two menu items: `mf_status` (probe + render `_format_status` block) and `mf_open` (`webbrowser.open(client.web_url)`). `_format_status` is a pure function — easy to unit-test. Available case shows URL / version / health / sources / uptime; unavailable case shows the error and a fix hint pointing at the install URL + `systemctl start meshforge-maps`.
+5. **Registration**: append `MeshforgeMapsHandler` to `get_all_handlers()` in `handlers/__init__.py` (Batch 16).
+6. **Tests** (`tests/test_phase6_meshforge_maps.py`, 34 tests across 5 classes):
+   - `TestMeshforgeMapsClient` (12) — URL builder, defaults, probe-on-URLError / TimeoutError / OSError, full payload, partial endpoints, non-200, non-JSON, configured-timeout threading, uptime coercion (string → float), unparseable uptime → None.
+   - `TestExtractSourceNames` (7) — list-of-strings, list-of-dicts (enabled true/false/missing), missing key, non-list, mixed shapes.
+   - `TestMeshforgeMapsHandler` (6) — handler metadata, menu_items shape, dispatch for both actions, unknown-action no-op, `webbrowser.open` called with correct URL.
+   - `TestFormatStatus` (4) — unavailable + install hint, unavailable with no error string, available with full data, available with partial data (no `None` strings).
+   - `TestFormatUptime` (4) — seconds / minutes / hours / days.
+   - `TestHandlerRegistration` (1) — `MeshforgeMapsHandler` is in `get_all_handlers()`.
+
+**Critical files (cross-reference)**:
+
+- `src/utils/meshforge_maps_client.py` — new, discovery client
+- `src/launcher_tui/handlers/meshforge_maps.py` — new, TUI handler
+- `src/launcher_tui/handlers/__init__.py:189-192` — Batch 16 registration
+- `tests/test_phase6_meshforge_maps.py` — new, 34 tests
+
+**Definition of Done**:
+- [x] Branch `claude/mc-phase6-maps-plugin` created
+- [x] Discovery client never raises on offline / timeout / non-JSON
+- [x] TUI handler renders both available + unavailable cases cleanly
+- [x] Handler registered in `get_all_handlers()`
+- [x] 34 Phase 6 tests pass
+- [x] Full suite pass (3034 passed; the 2 pre-existing dev-box flakes that also fail on main aren't Phase 6 regressions)
+- [x] Lint clean
+- [ ] PR opened to main
+
+**Deferred to follow-up phases** (Phase 6 scaffold intentionally minimal):
+- **Phase 6.1 — bidirectional handshake**: meshforge-maps can read MeshAnchor's `/api/nodes/geojson`; consider whether MeshAnchor should return the favor for cross-source data fusion.
+- **Phase 6.2 — lifecycle control**: convert the handler into an `IntegrationPlugin` so MeshAnchor can `start` / `stop` / `restart` meshforge-maps' systemd unit (with the explicit-action guardrails from Issue #31 — no silent persistent system changes).
+- **Phase 6.3 — config schema**: read `host` / `port` from MeshAnchor's settings rather than hardcoding `localhost:8808`. Useful when meshforge-maps runs on a different host on the LAN.
+- **map_data_collector split**: 1529 → under 1500 by extracting per-source collectors. Independent of Phase 6 work.
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -335,6 +387,19 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Deferred to Phase 5.5** (legitimate when those features are active under GATEWAY/FULL): `health_score.py:719` hardcoded critical=meshtasticd/rnsd; `active_health_probe.py:582-596` doesn't consult profile; `service_menu.py:168-171` bridge preflight requires meshtasticd. None of these fire under MESHCORE today, so deferring doesn't reintroduce the user-visible bug.
 - **Next session resume point**: review/merge the Phase 5 PR. Once merged, **Phase 6** (meshforge-maps :8808 plugin scaffold) starts. Phase 6's prep PR flips this Phase 5 row to `merged ✅` per the no-standalone-bumps lifecycle. Branch convention: `claude/mc-phase6-maps-plugin`. Phase 5.5 cleanup (health_score / active_health_probe / service_menu deferrals) is independently mergeable and can slot in either before or after Phase 6 — they aren't gating each other.
 
+**2026-05-04 (Phase 5 MERGED + Phase 6 implementation — PR pending)**:
+- PR #22 merged into main as merge commit `55acf1f3` at 2026-05-04T06:05Z. Phase 5 shipped the `not_applicable` ServiceHealth state, `is_ready` derives from `overall_status`, profile-aware `run_health_check`, and the new `GET /health` endpoint. CI surfaced one regression mid-PR (legacy `test_is_ready_when_meshtasticd_running` in `tests/test_startup_health.py:38`); fixed in commit `f577dfdf` by adding a legacy fallback in `is_ready` for hand-built HealthSummaries with `overall_status='unknown'`. Lesson saved to memory: run the module's own canonical test file before pushing, not just adjacent suites.
+- **Branch**: `claude/mc-phase6-maps-plugin` off main. Phase 5 row flipped to `merged ✅` per the no-standalone-bumps lifecycle.
+- **Audit findings**: meshforge-maps owns its own HTTP server on :8808 with `/api/status`, `/api/health`, `/api/sources`, `/api/config`. No existing :8808 references in MeshAnchor — Phase 6 introduces the convention. The `maps_viz` section is already gated by the `maps` feature flag at the top-level menu, so the new handler inherits that gating without per-row `feature_flag=` values. Plugin loader (`src/utils/plugins.py` `BasePlugin`) is for protocol-level integrations; TUI menus go through the handler registry, so a `BasePlugin` subclass is NOT needed for the scaffold (just a `BaseHandler`). `map_data_collector.py` is at 1529 lines (over the 1500 cap from before Phase 6 — flag for a future cleanup phase, not a Phase 6 prerequisite since the new code lives in separate modules).
+- **Files changed** (4):
+  - `src/utils/meshforge_maps_client.py` (NEW, 178): `MeshforgeMapsClient` + `MapsServiceStatus` dataclass + `_extract_source_names` helper. Single-shot `probe()` that never raises — URLError / TimeoutError / OSError / non-200 / non-JSON all collapse into `available=False` with a populated `error` string. `/api/health` and `/api/sources` are best-effort (partial responses still produce a usable status). Coercion helpers tolerate string-or-int field types from upstream.
+  - `src/launcher_tui/handlers/meshforge_maps.py` (NEW, 137): `MeshforgeMapsHandler` registered in `maps_viz`. Two menu rows: "Meshforge Maps Status" (probe + render) and "Open Maps Browser" (webbrowser.open). Pure-function `_format_status` and `_format_uptime` for easy unit testing. Unavailable case shows the install URL + `systemctl start meshforge-maps` hint.
+  - `src/launcher_tui/handlers/__init__.py` (+3): Batch 16 registration of `MeshforgeMapsHandler`.
+  - `tests/test_phase6_meshforge_maps.py` (NEW, 34 tests across 5 classes — see Phase 6 section above for the full breakdown).
+- **Gates green**: `python3 scripts/lint.py --all` exit 0; full suite `pytest tests/ --ignore=tests/test_bridge_integration.py` = 3034 passed (was 2998 pre-Phase-6, +34 Phase 6 + 2 collection delta). Two failures on this dev box (test_gateway_integration, test_status_bar) are pre-existing flakes that also fail on main without Phase 6 — confirmed via `git stash` + re-run. CI runs in a clean env and won't see them.
+- **File-size watch**: nothing new approaches the 1500 cap. `map_data_collector.py` at 1529 stays as a flagged-but-not-touched file — a future cleanup phase will split it. Phase 6's two new files are 178 + 137 lines, comfortable.
+- **Next session resume point**: review/merge the Phase 6 PR. Once merged, options for the next phase: (a) Phase 6.1 — bidirectional handshake / data fusion with meshforge-maps; (b) Phase 6.2 — lifecycle control (start/stop/restart of meshforge-maps' systemd unit, observing Issue #31 no-silent-changes rule); (c) Phase 6.3 — config schema for non-localhost meshforge-maps deployments; (d) Phase 5.5 — the deferred health code cleanup (health_score / active_health_probe / service_menu); (e) `map_data_collector` split. Pick whichever the user prioritizes.
+
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-05-03 | Meshtastic handlers gated behind feature flag, not deleted | Preserves `gateway`/`full` profile capability. Reversible. |
@@ -353,6 +418,10 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-04 | Phase 5 keeps backward compat for `run_health_check(profile=None)` | Legacy callers (anything that hasn't migrated to passing a profile) still see the old "meshtasticd is required" semantics. Avoids forcing a flag day across the codebase — callers can migrate one at a time. Verified by `test_no_profile_falls_back_to_legacy_behaviour`. |
 | 2026-05-04 | Phase 5 defers `health_score.py` / `active_health_probe.py` / `service_menu.py` to a Phase 5.5 follow-up | Those three call sites only fire under GATEWAY/FULL profiles where the relevant services *are* required, so they don't reintroduce the user-visible MESHCORE-red bug. Keeping the PR scoped to the user-facing startup banner + the new `/health` endpoint means smaller diff, easier review, and the deferred cleanup can land independently. |
 | 2026-05-04 | `/health` route handler lives in a separate `utils/health_api.py` module | Mirrors the `radio_api.py` pattern from PR #21's prep split. Keeps `config_api.py` under the 1500-line cap and isolates the deployment-profile-aware logic from the generic config-store API surface. Same routing-before-api-null-check pattern means `/health` works during daemon startup before `ConfigurationAPI` is wired up. |
+| 2026-05-04 | Phase 6 scaffold uses a `BaseHandler`, not a `BasePlugin` subclass | TUI menus dispatch through the handler registry (`launcher_tui/handler_registry.py`), not the plugin manager (`utils/plugins.py`). `BasePlugin` is the right shape when a plugin needs lifecycle hooks (start/stop, message hooks). For "show status, open browser," a handler is sufficient and matches the existing `maps_viz` peers (`ai_tools.py`, `topology.py`). Promote to `IntegrationPlugin` later if Phase 6.2 (lifecycle control) lands. |
+| 2026-05-04 | Phase 6 client never raises; failures collapse into `MapsServiceStatus(available=False, error=...)` | Cleaner than try/except gymnastics at every call site. The TUI handler renders the `error` string as a fix hint without needing to know which underlying exception fired. Mirrors the pattern from `service_check.py` where reachability is encoded in the return value, not the control flow. |
+| 2026-05-04 | Phase 6 handler doesn't take a per-row `feature_flag=` value | The whole `maps_viz` section is gated by the `maps` feature flag at the top level (`_run_main_menu()`). Per-row gating inside that section would be redundant. Matches the convention used by `ai_tools.py` and `topology.py`. If a profile ever needs MeshAnchor maps but NOT meshforge-maps, introduce a finer-grained `meshforge_maps` flag — but until then, section-level gating is the right scope. |
+| 2026-05-04 | Phase 6 doesn't split `map_data_collector.py` (1529 lines, over cap) | The file's been over the 1500 cap since well before Phase 6 — this is not a Phase 6 regression and Phase 6's new code lives in separate modules, so no mechanical reason to bundle the split into this PR. A future cleanup phase will extract per-source collectors. Keeping Phase 6 scoped tight makes review easier and lets the split land independently when it's the right priority. |
 
 ---
 
