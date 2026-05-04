@@ -23,7 +23,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 6.3 | meshforge-maps endpoint config (host/port/timeout) | merged ✅ | [PR #24](https://github.com/Nursedude/meshanchor/pull/24) (merge `35c265ff`) |
 | 5.5 | Profile-aware health code (Phase 5 deferrals) | merged ✅ | [PR #25](https://github.com/Nursedude/meshanchor/pull/25) (merge `737a1cc1`) |
 | split | map_data_collector split (1529 → 1054, Meshtastic mixin extraction) | merged ✅ | [PR #26](https://github.com/Nursedude/meshanchor/pull/26) (merge `e0d47dba`) |
-| 6.1 | meshforge-maps bidirectional handshake (data fusion) | in flight | `claude/mc-phase6.1-handshake` |
+| 6.1 | meshforge-maps bidirectional handshake (data fusion) | merged ✅ | [PR #27](https://github.com/Nursedude/meshanchor/pull/27) (merge `a06dbf51`) |
+| 6.2 | meshforge-maps lifecycle control (start/stop/restart) | in flight | `claude/mc-phase6.2-lifecycle` |
 | 7 | Profile defaults + docs | not started | — |
 
 ---
@@ -453,6 +454,63 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 6.2 — Meshforge-Maps Lifecycle Control
+
+**Goal**: Phase 6 / 6.1 / 6.3 made meshforge-maps *visible* (probe + browser + data fusion + endpoint config). Phase 6.2 makes it *controllable* — `start` / `stop` / `restart` of the local `meshforge-maps.service` systemd unit, plus a read-only "show systemd status" view, all surfaced through an explicit user action in the TUI. Closes the last lifecycle gap of the meshforge-maps integration.
+
+**Key contract findings (2026-05-04)**:
+
+- **Issue #31 boundary is explicit-action vs silent-startup, not "no systemctl from MeshAnchor"**: the rule prohibits making persistent system changes *silently on startup*. It explicitly lists `service_menu lock/unlock` as an acceptable explicit-action pattern. Lifecycle dialogs that the user navigates into and double-confirms fall on the same side of the line as service_menu's existing start/stop helpers. The Phase 6.2 design therefore mirrors `service_menu`'s confirm pattern (`dialog.yesno(default_no=True)`), not the prohibited auto-startup pattern.
+- **`utils.service_check` already provides every primitive**: `start_service(name)` / `stop_service(name)` / `restart_service(name)` each return `(success: bool, message: str)`, use `_sudo_cmd()` for privilege escalation, have `timeout=30` defaults, and never raise. Phase 6.2 is a thin policy layer on top — there is zero parallel implementation of systemd invocation. (12 existing handlers already import these helpers; we're extending the same pattern, not introducing a new one.)
+- **Localhost-only is load-bearing**: `sudo systemctl start <unit>` only meaningfully targets the local host. If Phase 6.3 has the endpoint pointed at `192.168.1.50` or `noc.example.org`, a local lifecycle action is wrong (we'd be operating on the wrong machine). `is_localhost()` does literal-match against `LOCALHOST_ALIASES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}` — no DNS resolution because that opens a slow network call on every menu render and the user *just typed* this string, so we know what they meant. `0.0.0.0` is included because meshforge-maps' systemd unit binds it by default and a user who pasted that into the host field still expects local control.
+- **Unit-existence pre-check**: `systemctl list-unit-files <unit>.service` mirrors the existing pattern in `service_check.py:341`. We refuse with an install-hint message rather than letting systemctl emit a generic `Unit not found` line.
+- **`UnitStatus` is a separate dataclass from `MapsServiceStatus`**: they answer different questions. `MapsServiceStatus` is "can I reach :8808 over HTTP" (Phase 6 probe); `UnitStatus` is "what does systemctl think about meshforge-maps.service" (Phase 6.2 lifecycle). A daemon could be `active (running)` per systemctl but unreachable on :8808 if it just crashed mid-startup, and vice versa for an early window of a slow start. Showing both is the right UX — they're complementary signals.
+- **No new file-size cliff**: `meshforge_maps_lifecycle.py` is the new ~295-line module; `meshforge_maps.py` grows 220 → 373 (still well under 1500); `test_phase6_2_lifecycle.py` is the new 658-line test. `map_data_collector.py` still at 1054 — Phase 6.2 doesn't touch it.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase6.2-lifecycle` off main (post PR #27).
+2. **Tracker prep (this commit)**: flip Phase 6.1 row to `merged ✅`, add this Phase 6.2 section.
+3. **`utils/meshforge_maps_lifecycle.py`** (NEW, ~295 lines): `LifecycleResult` + `UnitStatus` frozen dataclasses; `is_localhost()` + `is_unit_installed()` + `get_unit_status()` detection helpers; `start()` / `stop()` / `restart()` thin wrappers around `service_check` with the localhost + unit-existence guards layered on top; `format_unit_status()` pure-function renderer.
+4. **`launcher_tui/handlers/meshforge_maps.py`** (220 → 373): new `mf_lifecycle` menu row + `_lifecycle_menu()` sub-submenu (Start / Stop / Restart / Show systemd status / Back). Each mutating action confirms via `dialog.yesno(default_no=True)`, invokes the lifecycle helper, then re-probes with `get_unit_status()` and renders the new state in the result msgbox so the user sees the outcome without re-entering the menu. Refusal paths: remote endpoint shows a remote-host msgbox, missing unit shows the install hint, undetectable systemctl shows an explanatory msgbox — all three exit the menu without rendering the action list.
+5. **No registration change**: Batch 16 in `handlers/__init__.py` already imports `MeshforgeMapsHandler`. Adding a row to `menu_items()` doesn't require a re-register.
+6. **Tests** (`tests/test_phase6_2_lifecycle.py`, 50 tests across 9 classes):
+   - `TestIsLocalhost` (9) — localhost / 127.0.0.1 / ::1 / 0.0.0.0 accepted; remote hostname / LAN IP / empty rejected; case + whitespace tolerance.
+   - `TestIsUnitInstalled` (5) — unit present in listing / unit absent / systemctl missing / timeout / OSError.
+   - `TestGetUnitStatus` (4) — short-circuit when not installed / install-error propagated / active+enabled inferred from returncodes / subprocess error collapses to None.
+   - `TestLifecycleStart` (5) — remote refusal short-circuits; missing unit short-circuits with install hint; install-check error surfaces; happy path invokes `start_service` with the unit name; systemctl failure propagated intact.
+   - `TestLifecycleStop` (2), `TestLifecycleRestart` (3) — symmetric with start; restart additionally exercises the timeout kwarg.
+   - `TestFormatUnitStatus` (5) — install-hint path, unknown-when-error path, active+enabled rendering with SubState, inactive rendering without SubState, both-unknown.
+   - `TestMenuItemsIncludeLifecycleRow` (4) — lifecycle row present, prior keys preserved, row unflagged, `execute("mf_lifecycle")` dispatches to `_lifecycle_menu`.
+   - `TestLifecycleMenuRefusals` (3) — remote endpoint refusal calls `dialog.msgbox` once and never reaches the unit check or the lifecycle helper; missing unit refusal includes the install hint; install-detection error renders the helpful message.
+   - `TestLifecycleActionFlow` (7) — confirm + start invokes the helper + re-probes + renders Succeeded; confirm-NO aborts silently; stop / restart symmetric; helper failure renders Failed msgbox; status-only path never confirms; back exits without action.
+   - `TestModuleConstants` (3) — guards the unit name + alias set + install URL pointer.
+7. **`tests/test_phase6_meshforge_maps.py`** (1-line comment update): Phase 6 menu test's comment now mentions Phase 6.2 added `mf_lifecycle`. The assertions themselves still hold — `keys[:2]` is unchanged, `mf_endpoint` is still in `keys`, and per-row `flag is None` still holds for all four rows.
+
+**Critical files (cross-reference)**:
+
+- `src/utils/meshforge_maps_lifecycle.py` — new, 295-line lifecycle wrapper + dataclasses
+- `src/launcher_tui/handlers/meshforge_maps.py:53-73` — Phase 6.2 menu row + dispatch
+- `src/launcher_tui/handlers/meshforge_maps.py:194-310` — `_lifecycle_menu` + `_lifecycle_action` + `_show_unit_status`
+- `tests/test_phase6_2_lifecycle.py` — new, 50 tests
+- `tests/test_phase6_meshforge_maps.py:284-294` — Phase 6 menu test comment updated
+
+**Definition of Done**:
+- [x] Branch `claude/mc-phase6.2-lifecycle` created
+- [x] `meshforge_maps_lifecycle` module shipped with localhost gate + unit-existence guard + start/stop/restart wrappers + UnitStatus rendering
+- [x] Handler `_lifecycle_menu` shipped with refusal paths + double-confirm + post-action re-probe
+- [x] 50 Phase 6.2 tests pass
+- [x] Existing Phase 6 + 6.1 + 6.3 + handler-registry + all-handlers + regression-guards = 538 passed combined
+- [x] Full suite passes (3182 passed, +50; same two pre-existing dev-box flakes from Phase 5/6/6.1 entries)
+- [x] Lint clean
+- [ ] PR opened to main
+
+**Deferred to follow-up phases** (still on the menu after 6.2):
+- **Phase 7** — profile defaults + docs (the natural next "main-line" phase).
+- **Loop-detection token** if/when meshforge-maps starts sourcing MeshAnchor.
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -633,6 +691,20 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Gates green**: lint exit 0; canonical adjacent suites (Phase 6 + 6.1 + 6.3 + map_data_collector + regression_guards) = 133 passed combined; full suite = **3132 passed** (+25 vs split baseline of 3107). Same two pre-existing dev-box flakes — not Phase 6.1 regressions.
 - **Production behaviour**: existing `MapDataCollector()` instantiations elsewhere (e.g. `map_data_service.py`) get the new source for free since `meshforge_maps_enabled=True` is the default. If meshforge-maps isn't running, `fetch_nodes()` returns None and the source contributes zero features — no error, no log spam beyond a single DEBUG line. Safe rollout.
 - **Next session resume point**: review/merge this Phase 6.1 PR. Remaining follow-ups: (a) Phase 6.2 — lifecycle control (large, needs Issue #31 guardrails); (b) Phase 7 — profile defaults + docs.
+
+**2026-05-04 (Phase 6.1 MERGED + Phase 6.2 implementation — PR pending)**:
+- PR #27 merged into main as merge commit `a06dbf51`. Phase 6.1 shipped the `fetch_nodes()` shape-validating client + the `_collect_meshforge_maps()` low-priority dedup tier (`source_origin: external_maps`).
+- **Branch**: `claude/mc-phase6.2-lifecycle` off main. User continued down the smallest→largest list; Phase 6.2 is the last meshforge-maps follow-up before Phase 7.
+- **Audit findings**: `service_check.start_service` / `stop_service` / `restart_service` already provide every primitive — they wrap `_sudo_cmd` + bounded timeout + non-raising semantics. 12 existing handlers (rns_diagnostics, ai_tools, service_menu, etc.) already use this pattern, so Phase 6.2 is "extend the pattern", not "introduce systemctl-from-MeshAnchor". Issue #31's prohibition is on *silent startup* mutations — `service_menu lock/unlock` is explicitly listed as an acceptable explicit-action pattern, and the lifecycle dialogs follow the same pattern. The only material new thing Phase 6.2 introduces vs the existing handler ecosystem is the **localhost gate**: lifecycle on a remote host doesn't even make sense (`sudo` doesn't cross machines), so the menu refuses early when Phase 6.3's endpoint config has the host pointed elsewhere.
+- **Files changed** (4):
+  - `src/utils/meshforge_maps_lifecycle.py` (NEW, 295 lines): `LifecycleResult` + `UnitStatus` frozen dataclasses; `is_localhost()` (literal-match against `LOCALHOST_ALIASES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}` — 0.0.0.0 included because meshforge-maps' default systemd unit binds it); `is_unit_installed()` via `systemctl list-unit-files <unit>.service` (mirrors the existing pattern in `service_check.py:341`); `get_unit_status()` aggregates is-active + is-enabled + SubState (best-effort, never raises — None means "couldn't tell" and the renderer prints "unknown"); `start()` / `stop()` / `restart()` thin wrappers with localhost + unit-existence guards layered on top of the `service_check` primitives; `format_unit_status()` pure-function renderer.
+  - `src/launcher_tui/handlers/meshforge_maps.py` (220 → 373): new `mf_lifecycle` menu row + `_lifecycle_menu()` sub-submenu (Start / Stop / Restart / Show systemd status / Back). Each mutating action confirms via `dialog.yesno(default_no=True)`, invokes the lifecycle helper, then re-probes with `get_unit_status()` and renders the new state in the result msgbox so the user sees the outcome without re-entering the menu. Three early-exit refusal paths: remote endpoint, missing unit (with install hint), undetectable systemctl.
+  - `tests/test_phase6_2_lifecycle.py` (NEW, 658 lines, 50 tests across 9 classes — see Phase 6.2 section above for the full breakdown).
+  - `tests/test_phase6_meshforge_maps.py` (1-line comment update): the existing `test_menu_items` assertions still hold since the lifecycle row was *appended*, not inserted. Comment updated so future readers know Phase 6.2 added `mf_lifecycle`.
+- **Gates green**: `python3 scripts/lint.py --all` exit 0; canonical adjacent suites (Phase 6 + 6.1 + 6.3 + handler-registry + all-handlers + regression-guards) = **538 passed** combined; full suite `pytest tests/ --ignore=tests/test_bridge_integration.py` = **3182 passed** (was 3132 pre-Phase-6.2, +50 new). Same two pre-existing dev-box flakes (`test_gateway_integration::test_bridge_starts_in_degraded_mode`, `test_status_bar::test_no_node_count_by_default`) — documented in Phase 5/6/6.1 entries, not Phase 6.2 regressions.
+- **File-size watch**: nothing in this PR approaches the 1500-line cap. New `meshforge_maps_lifecycle.py` 295; `meshforge_maps.py` 220 → 373; `test_phase6_2_lifecycle.py` 658. `map_data_collector.py` still at 1054 — Phase 6.2 doesn't touch it.
+- **Issue #31 check**: every lifecycle action requires (a) a deliberate user navigation into `mf_lifecycle` from the maps menu, (b) selection of Start/Stop/Restart from the sub-submenu, and (c) explicit YES on a `default_no=True` confirm dialog. No daemon loop, no auto-recovery, no startup-time call site. Mirrors `service_menu` lock/unlock which Issue #31 explicitly lists as acceptable.
+- **Next session resume point**: review/merge this Phase 6.2 PR. Remaining follow-up: Phase 7 (profile defaults + docs) is the natural next "main-line" phase. The Phase 6 / 6.1 / 6.2 / 6.3 quartet is now complete — meshforge-maps is fully *visible* (Phase 6 probe + open browser), *configurable* (6.3 endpoint config), *integrated* (6.1 data fusion), and *controllable* (6.2 lifecycle). No further meshforge-maps follow-ups on the menu.
 
 | Date | Decision | Rationale |
 |---|---|---|
