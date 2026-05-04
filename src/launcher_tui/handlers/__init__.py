@@ -109,12 +109,13 @@ def get_all_handlers() -> List[Type]:
         TacticalOpsHandler,
     ])
 
-    # Batch 6 — RNS handlers (5 sub-handlers + thin dispatcher)
+    # Batch 6 — RNS handlers (6 sub-handlers + thin dispatcher)
     from handlers.rns_config import RNSConfigHandler
     from handlers.rns_diagnostics import RNSDiagnosticsHandler
     from handlers.rns_interfaces import RNSInterfacesHandler
     from handlers.rns_monitor import RNSMonitorHandler
     from handlers.rns_sniffer import RNSSnifferHandler
+    from handlers.rns_tools import RNSToolsHandler
     from handlers.rns_menu import RNSMenuHandler
     handlers.extend([
         RNSConfigHandler,
@@ -122,6 +123,7 @@ def get_all_handlers() -> List[Type]:
         RNSInterfacesHandler,
         RNSMonitorHandler,
         RNSSnifferHandler,
+        RNSToolsHandler,
         RNSMenuHandler,
     ])
 
