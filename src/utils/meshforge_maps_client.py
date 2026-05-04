@@ -142,6 +142,33 @@ class MeshforgeMapsClient:
             error=None,
         )
 
+    def fetch_nodes(self) -> Optional[dict]:
+        """Fetch the aggregated GeoJSON FeatureCollection from `/api/nodes/geojson`.
+
+        Phase 6.1 (bidirectional handshake): meshforge-maps already aggregates
+        nodes from its own collectors (Meshtastic / MeshCore / RNS / MQTT /
+        AREDN / HamClock); this lets MeshAnchor pull that aggregate into its
+        own NOC view as a low-priority *external_maps* source.
+
+        Returns the parsed FeatureCollection on success, or None on any
+        failure (unreachable, non-200, non-JSON, malformed shape). Callers
+        treat None as "no nodes from meshforge-maps this collect cycle" —
+        same shape contract as the rest of the collector pipeline.
+        """
+        payload = self._fetch_json("/api/nodes/geojson")
+        if payload is None:
+            return None
+        # Validate the minimum shape — type=FeatureCollection + features list.
+        # An aggregator that's still warming up returns properties.collecting=True
+        # with an empty features list; we accept that as "valid but empty".
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("type") != "FeatureCollection":
+            return None
+        if not isinstance(payload.get("features"), list):
+            return None
+        return payload
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Coercion helpers — meshforge-maps' API surface may evolve, so be lenient

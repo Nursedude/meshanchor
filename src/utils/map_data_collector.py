@@ -74,11 +74,17 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
     DEFAULT_MESHTASTICD_PORT = 4403
 
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True,
-                 meshtastic_enabled: bool = True):
+                 meshtastic_enabled: bool = True, meshforge_maps_enabled: bool = True):
         # Phase 1 of MeshCore-primary TUI rework: when the active deployment
         # profile disables Meshtastic, skip meshtasticd polling entirely.
         # MeshCore is treated as a first-class source via _collect_meshcore().
         self._meshtastic_enabled = meshtastic_enabled
+        # Phase 6.1: optional pull from meshforge-maps' aggregated /api/nodes/geojson.
+        # Defaults to True so localhost-meshforge-maps installs benefit without
+        # explicit opt-in; safe even when meshforge-maps isn't running because
+        # MeshforgeMapsClient.fetch_nodes() returns None on any failure and the
+        # collector treats None as "no contribution this cycle".
+        self._meshforge_maps_enabled = meshforge_maps_enabled
 
         if cache_dir:
             self._cache_dir = cache_dir
@@ -423,7 +429,22 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             if fid and fid not in features:
                 features[fid] = f
 
-        # Source 6: Last-known cache (fill gaps). node_tracker tier — the
+        # Source 6: meshforge-maps aggregated GeoJSON (Phase 6.1).
+        # Lowest-priority external bulk source — only fills gaps. Local
+        # collectors take precedence so meshforge-maps can't shadow data
+        # we already have first-hand.
+        if self._meshforge_maps_enabled:
+            meshforge_maps_features = self._tag_source_origin(
+                self._collect_meshforge_maps(), "external_maps"
+            )
+            for f in meshforge_maps_features:
+                fid = f["properties"].get("id", "")
+                if fid and fid not in features:
+                    features[fid] = f
+        else:
+            meshforge_maps_features = []
+
+        # Source 7: Last-known cache (fill gaps). node_tracker tier — the
         # cache is whatever this box has previously seen locally.
         if not features:
             cache_features = self._tag_source_origin(self._load_cache(), "node_tracker")
@@ -435,7 +456,7 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
         sources = self._get_source_summary(
             tcp_features, mqtt_features, tracker_features, aredn_features,
             direct_radio_features, rns_direct_features, tracker_unified_features,
-            meshcore_features
+            meshcore_features, meshforge_maps_features,
         )
         geojson = {
             "type": "FeatureCollection",
@@ -1000,6 +1021,41 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
                 if existing_val is None or existing_val == "" or existing_val == "unknown":
                     ex_props[key] = value
 
+    def _collect_meshforge_maps(self) -> List[Dict]:
+        """Pull aggregated GeoJSON from meshforge-maps' :8808 service.
+
+        Phase 6.1 — bidirectional handshake. meshforge-maps already
+        aggregates nodes from its own collectors (Meshtastic, MeshCore,
+        RNS, MQTT, AREDN, HamClock). MeshAnchor pulls that aggregate as
+        a low-priority external_maps tier so anything meshforge-maps
+        sees but MeshAnchor's local collectors haven't, fills the gap.
+        Local collectors take precedence — the dedup in _collect_locked
+        skips IDs already present, so meshforge-maps can't shadow our
+        first-hand data.
+
+        Endpoint config (host / port / timeout) comes from Phase 6.3's
+        meshforge_maps SettingsManager so a non-localhost deployment
+        works without code changes. Fully best-effort — any failure
+        (unreachable, non-JSON, malformed shape) returns an empty list
+        rather than raising, matching the rest of the collector pipeline.
+        """
+        try:
+            from utils.meshforge_maps_config import load_maps_config
+            client = load_maps_config().build_client()
+            payload = client.fetch_nodes()
+            if payload is None:
+                return []
+            features = payload.get("features", [])
+            if not isinstance(features, list):
+                return []
+            # Trust the shape — meshforge-maps emits the same FeatureCollection
+            # contract MapDataCollector itself produces, so no normalization
+            # is needed beyond the Source 6 dedup-by-id in _collect_locked.
+            return [f for f in features if isinstance(f, dict)]
+        except Exception as e:
+            logger.debug(f"meshforge-maps collection error: {e}")
+            return []
+
     def _load_cache(self) -> List[Dict]:
         """Load last-known node state from disk cache."""
         if self._cache_file.exists():
@@ -1030,7 +1086,8 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
     def _get_source_summary(
         self, tcp: List, mqtt: List, tracker: List, aredn: List = None,
         direct_radio: List = None, rns_direct: List = None,
-        unified_tracker: List = None, meshcore: List = None
+        unified_tracker: List = None, meshcore: List = None,
+        meshforge_maps: List = None,
     ) -> Dict:
         """Summarize which sources contributed data."""
         summary = {
@@ -1042,10 +1099,12 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             "node_tracker": len(tracker),
             "aredn": len(aredn) if aredn else 0,
             "rns_direct": len(rns_direct) if rns_direct else 0,
+            "meshforge_maps": len(meshforge_maps) if meshforge_maps else 0,
         }
         # Surface meshtastic-disabled state so the map UI / API can
         # display "Meshtastic gateway disabled by profile" if needed.
         summary["meshtastic_enabled"] = self._meshtastic_enabled
+        summary["meshforge_maps_enabled"] = self._meshforge_maps_enabled
         # Flag if HTTP was used (source tag on features)
         if tcp and any(f.get("properties", {}).get("source") == "meshtasticd_http" for f in tcp):
             summary["meshtasticd_via"] = "http"

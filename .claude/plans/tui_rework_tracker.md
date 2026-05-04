@@ -22,7 +22,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 6 | meshforge-maps :8808 plugin scaffold | merged ✅ | [PR #23](https://github.com/Nursedude/meshanchor/pull/23) (merge `b10074b6`) |
 | 6.3 | meshforge-maps endpoint config (host/port/timeout) | merged ✅ | [PR #24](https://github.com/Nursedude/meshanchor/pull/24) (merge `35c265ff`) |
 | 5.5 | Profile-aware health code (Phase 5 deferrals) | merged ✅ | [PR #25](https://github.com/Nursedude/meshanchor/pull/25) (merge `737a1cc1`) |
-| split | map_data_collector split (1529 → 1054, Meshtastic mixin extraction) | in flight | `claude/mc-collector-split` |
+| split | map_data_collector split (1529 → 1054, Meshtastic mixin extraction) | merged ✅ | [PR #26](https://github.com/Nursedude/meshanchor/pull/26) (merge `e0d47dba`) |
+| 6.1 | meshforge-maps bidirectional handshake (data fusion) | in flight | `claude/mc-phase6.1-handshake` |
 | 7 | Profile defaults + docs | not started | — |
 
 ---
@@ -402,6 +403,56 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 6.1 — Meshforge-Maps Bidirectional Handshake (Data Fusion)
+
+**Goal**: meshforge-maps already aggregates nodes from its own collectors (Meshtastic / MeshCore / RNS / MQTT / AREDN / HamClock). Phase 6.1 lets MeshAnchor pull that aggregate into its NOC view as a low-priority *external_maps* tier — anything meshforge-maps sees but MeshAnchor's local collectors haven't, fills the gap. Local data always wins on dedup so meshforge-maps can't shadow first-hand observations.
+
+**Key contract findings (2026-05-04)**:
+
+- **Drop-in shape compatibility**: meshforge-maps' `/api/nodes/geojson` returns a standard FeatureCollection with `type`, `features`, `properties.sources`, `properties.total_nodes` — same shape MeshAnchor's `MapDataCollector` itself emits. No normalization layer needed beyond shape validation.
+- **No loop**: meshforge-maps' aggregator (`/opt/meshforge-maps/src/collectors/aggregator.py`) does NOT source MeshAnchor today (`grep -rln meshanchor /opt/meshforge-maps/src/collectors/` is empty). The Phase 6 framing of "bidirectional handshake — meshforge-maps can read MeshAnchor" was forward-looking design talk; in 2026-05-04 it's a one-way pull from meshforge-maps to MeshAnchor only. If a future phase makes meshforge-maps source MeshAnchor, we'll need a loop-detection token in the FeatureCollection's properties (TBD).
+- **Endpoint config reuse from Phase 6.3**: `MeshforgeMapsClient` already accepts `host`/`port`/`timeout` constructor args; `load_maps_config().build_client()` from Phase 6.3 produces a fully-configured client. Phase 6.1's collector reads `load_maps_config()` per call (matches the no-cache pattern from Phase 6.3 — settings changes mid-session reflect immediately).
+- **Defensive shape validation in `fetch_nodes`**: don't trust upstream blindly. Reject non-dict payloads, wrong `type` field, missing or non-list `features`. An aggregator-still-warming-up response (`features: []`, `properties.collecting: True`) is treated as valid-but-empty.
+- **`source_origin: external_maps` is a new tier**: existing tiers were `local_radio` (MeshCore, Meshtastic, direct USB), `mqtt_local`, `node_tracker`, `aredn_local`, `rns_path_table`. `external_maps` is the first *external bulk aggregator* tier — semantically distinct because the source itself is multi-radio. If a future external bulk source lands, reuse the tier name.
+- **Backward-compat default**: `meshforge_maps_enabled=True` by default. Localhost installs of meshforge-maps benefit immediately; deployments without meshforge-maps see `fetch_nodes() → None → empty features` — zero error path, single DEBUG log line per cycle. Safe to roll out without explicit per-host opt-in.
+- **Test isolation lesson reinforced**: the existing `tests/test_map_data_collector.py` (8 tests) all called `collector.collect()` without patching every source. With the new default-enabled meshforge_maps source, those tests started hitting the live :8808 server on this dev box and pulled in ~55,800 nodes once. Fix: pass `meshforge_maps_enabled=False` in every test in that file. Same lesson as Phase 5/5.5 — when default behaviour expands the action surface, audit every test that exercises it. Saved to memory under feedback_test_coverage_when_modifying_module.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase6.1-handshake` off main (post PR #26).
+2. **Tracker prep (this commit)**: flip collector-split row to `merged ✅`, add this Phase 6.1 section.
+3. **`utils/meshforge_maps_client.py`** (+27 lines): new `fetch_nodes() -> Optional[dict]`. Reuses `_fetch_json`. Layers shape validation (type/features) on top of the swallow-everything failure semantics.
+4. **`utils/map_data_collector.py`** (+59 lines): new `_collect_meshforge_maps()`. New `meshforge_maps_enabled=True` constructor flag. Source 6 wiring in `_collect_locked` + `_get_source_summary` extension.
+5. **`tests/test_phase6_1_handshake.py`** (NEW, 25 tests across 5 classes — see breakdown in the "Where We Left Off" entry).
+6. **`tests/test_map_data_collector.py`**: 8-line update. Every existing `MapDataCollector(...)` call gets `meshforge_maps_enabled=False` so the test-isolation invariant holds.
+
+**Critical files (cross-reference)**:
+
+- `src/utils/meshforge_maps_client.py:108-148` — `fetch_nodes()` + shape validation
+- `src/utils/map_data_collector.py:97-103` — new constructor flag
+- `src/utils/map_data_collector.py:419-433` — Source 6 wiring in `_collect_locked`
+- `src/utils/map_data_collector.py:1024-1060` — `_collect_meshforge_maps()` method
+- `src/utils/map_data_collector.py:1053-1071` — `_get_source_summary` extension
+- `tests/test_phase6_1_handshake.py` — new, 25 tests
+
+**Definition of Done**:
+- [x] Branch `claude/mc-phase6.1-handshake` created
+- [x] `fetch_nodes()` shipped with shape validation
+- [x] `_collect_meshforge_maps()` shipped, gated on flag, respects Phase 6.3 endpoint config
+- [x] Source 6 wired into `_collect_locked` with proper dedup priority (local wins)
+- [x] 25 Phase 6.1 tests pass
+- [x] Existing `test_map_data_collector.py` (8 tests) still pass
+- [x] Full suite passes (3132 passed, +25)
+- [x] Lint clean
+- [ ] PR opened to main
+
+**Deferred to follow-up phases** (still on the menu after 6.1):
+- **Phase 6.2 — lifecycle control** (Issue #31 guardrails).
+- **Phase 7** — profile defaults + docs.
+- **Loop-detection token** if/when meshforge-maps starts sourcing MeshAnchor (not on the menu today).
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -563,6 +614,26 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **File-size watch**: `map_data_collector.py` 1054 (under cap with ~450 lines of headroom); `_map_collector_meshtastic.py` 515; `_map_collector_rns.py` 328 (unchanged); total split-related code 1054 + 515 + 328 = 1897 (vs prior 1529 + 328 = 1857 — the +40 delta is module docstring + import preamble for the new file, expected and acceptable).
 - **Next session resume point**: review/merge this PR. Remaining follow-ups: (a) Phase 6.1 — bidirectional handshake / data fusion (medium); (b) Phase 6.2 — lifecycle control (large, needs Issue #31 guardrails); (c) Phase 7 — profile defaults + docs (the natural next "main-line" phase). User direction: continue down the list smallest → largest, stopping when context fills.
 
+**2026-05-04 (collector split MERGED + Phase 6.1 implementation — PR pending)**:
+- PR #26 merged into main as merge commit `e0d47dba`. The Meshtastic mixin extraction took map_data_collector.py from 1529 to 1054 lines (under cap, ~450 headroom). Pure refactor, zero test delta.
+- **Branch**: `claude/mc-phase6.1-handshake` off main. User continued down the smallest→largest list.
+- **Audit findings**: meshforge-maps' `/api/nodes/geojson` returns a standard GeoJSON FeatureCollection — same shape MeshAnchor's MapDataCollector itself produces. Drop-in compatible. meshforge-maps' aggregator (`src/collectors/aggregator.py`) does NOT source MeshAnchor today (no MeshAnchor reference in `src/collectors/`), so the loop concern from the original Phase 6 framing is moot — Phase 6.1 is a one-way pull.
+- **Files changed** (3):
+  - `src/utils/meshforge_maps_client.py` (196 → 223): new `fetch_nodes() -> Optional[dict]` method. Calls `/api/nodes/geojson`, validates the minimum shape (`type=FeatureCollection` + `features` is a list — accepts empty features as valid since the aggregator may be warming up), returns parsed payload or None on any failure. Reuses the existing `_fetch_json` swallow-everything semantics.
+  - `src/utils/map_data_collector.py` (1054 → 1113): new `_collect_meshforge_maps()` method (40 lines) that builds a client from `load_maps_config().build_client()` (Phase 6.3 config reuse), pulls the FeatureCollection, filters non-dict features, returns the list. New `meshforge_maps_enabled=True` constructor flag. Wired into `_collect_locked` as Source 6, low-priority (only fills gaps via `if fid and fid not in features` dedup) tagged `source_origin: external_maps`. `_get_source_summary` extended with `meshforge_maps` count + `meshforge_maps_enabled` flag.
+  - `tests/test_phase6_1_handshake.py` (NEW, 25 tests across 5 classes — see breakdown below).
+  - `tests/test_map_data_collector.py` (8 lines): added `meshforge_maps_enabled=False` to all 8 `MapDataCollector(...)` constructions in the file. The new collector source defaults to enabled, so existing tests that called `collector.collect()` without patching every source were inadvertently hitting the live :8808 server on the dev box (pulled in 55,800 nodes once). Same lesson: when a default behaviour expands the action surface, audit every test that exercises it. Patched local-data isolation explicitly.
+- **Test breakdown** (`test_phase6_1_handshake.py`, 25 tests):
+  - `TestFetchNodesHappyPath` (3) — full FeatureCollection, empty features valid, configured endpoint honored.
+  - `TestFetchNodesFailureModes` (5) — URLError / TimeoutError / OSError / non-200 / non-JSON all collapse to None.
+  - `TestFetchNodesShapeValidation` (4) — non-dict / wrong type / missing features key / features-not-a-list all reject.
+  - `TestCollectMeshforgeMaps` (5) — happy path, unreachable empty, malformed empty, non-dict feature filter, Phase 6.3 endpoint config respected.
+  - `TestMeshforgeMapsEnabledFlag` (4) — default True, can disable, disabled skips call, enabled calls.
+  - `TestCollectLockedIntegration` (4) — features tagged `external_maps`, local MeshCore wins on shared ID, summary includes count, summary reports disabled state.
+- **Gates green**: lint exit 0; canonical adjacent suites (Phase 6 + 6.1 + 6.3 + map_data_collector + regression_guards) = 133 passed combined; full suite = **3132 passed** (+25 vs split baseline of 3107). Same two pre-existing dev-box flakes — not Phase 6.1 regressions.
+- **Production behaviour**: existing `MapDataCollector()` instantiations elsewhere (e.g. `map_data_service.py`) get the new source for free since `meshforge_maps_enabled=True` is the default. If meshforge-maps isn't running, `fetch_nodes()` returns None and the source contributes zero features — no error, no log spam beyond a single DEBUG line. Safe rollout.
+- **Next session resume point**: review/merge this Phase 6.1 PR. Remaining follow-ups: (a) Phase 6.2 — lifecycle control (large, needs Issue #31 guardrails); (b) Phase 7 — profile defaults + docs.
+
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-05-03 | Meshtastic handlers gated behind feature flag, not deleted | Preserves `gateway`/`full` profile capability. Reversible. |
@@ -599,6 +670,10 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-04 | Phase 5.5 service_menu fix is a feature-flag guard, not a profile_services call | `_bridge_preflight` is a TUI handler and already has `self.ctx.feature_enabled('meshtastic')` available. Calling `is_managed("meshtasticd")` would resolve the profile from disk via `load_or_detect_profile` when the feature flag is already in the launcher's hot-loaded `feature_flags` dict. Use what's already there. |
 | 2026-05-04 | Collector split extracts Meshtastic only (not all five sources) | Goal of the split was to get `map_data_collector.py` under the 1500-line cap with minimum-risk surgery, not refactor for refactor's sake. Meshtastic is the largest block by far (475 lines vs 33-146 for the others); extracting it alone takes the file from 1529 → 1054. Further per-source extractions are independently mergeable as future cleanup if/when they're justified. Doing them all in one PR would balloon review surface for a file that no longer cries out for surgery. |
 | 2026-05-04 | Collector split keeps the meshtastic try/except ImportError block in the mixin module, not the host | The block is *only* used by methods that moved to the mixin — keeping it in the host would leave a stranded import block in `map_data_collector.py` with no remaining call sites. Moving it with the methods is cleaner and preserves the `_HAS_MESHTASTIC_CONN` flag semantics the original code carried. The host module's import section now reads cleaner and shows at a glance that direct meshtasticd calls happen via the mixin. |
+| 2026-05-04 | Phase 6.1 default `meshforge_maps_enabled=True`, not False | A False default would force every localhost-meshforge-maps deployment (the common case for users who run both) to opt in by hand — friction without benefit. True default with a None/empty-features fallback when the service isn't running is zero-cost for non-meshforge-maps users (single DEBUG log per collect cycle) and zero-friction for the common case. If a profile ever wants to globally disable cross-source pull, the constructor flag exists for surgical opt-out. |
+| 2026-05-04 | Phase 6.1 `fetch_nodes()` validates shape, not just JSON-ness | A 200-OK + JSON payload that's an error envelope (e.g. `{"error": "auth required"}`) would otherwise propagate to `_collect_meshforge_maps` and crash the dedup loop on `.get('properties')` for non-dict features. Layering shape validation (`type=FeatureCollection` + `features` is a list) at the client makes the contract explicit and the collector code a one-liner. Same defensive pattern as `MapsServiceStatus` in Phase 6 — encode reachability *and* shape correctness in the return value, not the control flow. |
+| 2026-05-04 | Phase 6.1 introduces `external_maps` as a new tier | Existing tiers (`local_radio`, `mqtt_local`, `node_tracker`, `aredn_local`, `rns_path_table`) all describe single-source observations. meshforge-maps is the first source that's itself an aggregator of multiple upstream radios — semantically a different beast. `external_bulk` was considered but felt too generic; `external_maps` is specific enough that a future second external aggregator gets its own tier rather than overloading this one. |
+| 2026-05-04 | Phase 6.1 patches existing `test_map_data_collector.py` to disable meshforge_maps | The file's 8 tests called `.collect()` without patching every source. With the new default-enabled meshforge_maps source, they'd hit the live :8808 server (55,800 nodes pulled in once on dev box). Three options: (a) patch every test individually with `_collect_meshforge_maps` mock; (b) patch the constructor at file level; (c) add `meshforge_maps_enabled=False` per call. Picked (c) — explicit at the construction site, no hidden conftest magic, mirrors the existing `meshtastic_enabled=False` pattern those tests already use. |
 
 ---
 

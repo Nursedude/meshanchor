@@ -44,7 +44,7 @@ class TestMeshCoreSource:
 
     def test_position_less_meshcore_node_surfaces_in_side_panel(self):
         """MeshCore advertisements without GPS land in nodes_without_position."""
-        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = [
             _make_meshcore_node("meshcore:abc123", "RS1"),
@@ -65,7 +65,7 @@ class TestMeshCoreSource:
 
     def test_position_less_entry_carries_meshcore_metadata(self):
         """Side-panel entries include MeshCore-specific fields (pubkey, role, hops)."""
-        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = [
             _make_meshcore_node(
@@ -89,7 +89,7 @@ class TestMeshCoreSource:
 
     def test_positioned_meshcore_node_becomes_geojson_feature(self):
         """When a MeshCore node has GPS, it appears as a real map feature."""
-        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         position = Position(latitude=21.3069, longitude=-157.8583)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = [
@@ -110,7 +110,7 @@ class TestMeshCoreSource:
 
     def test_meshcore_count_in_source_summary(self):
         """The sources summary reports meshcore count distinct from other sources."""
-        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         position = Position(latitude=21.3, longitude=-157.8)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = [
@@ -132,7 +132,7 @@ class TestMeshtasticFeatureFlag:
 
     def test_disabled_flag_skips_meshtasticd(self):
         """meshtasticd HTTP/TCP polls do not run when meshtastic_enabled=False."""
-        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = []
         mock_tracker.to_geojson.return_value = {"type": "FeatureCollection", "features": []}
@@ -148,7 +148,8 @@ class TestMeshtasticFeatureFlag:
 
     def test_enabled_flag_calls_meshtasticd(self):
         """meshtasticd HTTP/TCP polls DO run when meshtastic_enabled=True (default)."""
-        collector = MapDataCollector(meshtastic_enabled=True, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=True, enable_history=False,
+                                     meshforge_maps_enabled=False)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = []
         mock_tracker.to_geojson.return_value = {"type": "FeatureCollection", "features": []}
@@ -171,7 +172,7 @@ class TestPositionLessExtension:
 
     def test_position_less_resets_between_collects(self):
         """A fresh collect() empties stale position-less entries from prior cycles."""
-        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False)
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         mock_tracker = MagicMock()
         mock_tracker.get_meshcore_nodes.return_value = [
             _make_meshcore_node("meshcore:cycle1", "Node1"),
