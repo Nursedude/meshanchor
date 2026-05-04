@@ -285,7 +285,9 @@ class TestMeshforgeMapsHandler:
         h = MeshforgeMapsHandler()
         items = h.menu_items()
         keys = [item[0] for item in items]
-        # Phase 6 shipped mf_status + mf_open; Phase 6.3 added mf_endpoint.
+        # Phase 6 shipped mf_status + mf_open; Phase 6.3 added mf_endpoint;
+        # Phase 6.2 added mf_lifecycle. Lifecycle is asserted by Phase 6.2's
+        # own test file — this test guards the prior contract only.
         assert keys[:2] == ["mf_status", "mf_open"]
         assert "mf_endpoint" in keys
         # Section-level "maps" gating handles flagging — per-row stays None.
