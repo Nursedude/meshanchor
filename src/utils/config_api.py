@@ -1215,102 +1215,16 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
         self._send_error_json(404, f"Unknown chat path: {self.path}")
 
-    # ─────────────────────────────────────────────────────────────────
-    # Radio endpoint — Phase 4a (read-only). GET /radio returns the
-    # cached snapshot. ?refresh=1 forces a fresh read from the device
-    # (one round-trip; bounded by an internal 8s timeout in the handler).
-    # ─────────────────────────────────────────────────────────────────
+    # Radio endpoints (GET /radio + PUT /radio/*) live in `utils.radio_api`
+    # to keep this file under the 1500-line cap. These methods delegate.
 
     def _handle_radio_get(self) -> None:
-        try:
-            from gateway.meshcore_handler import get_active_handler
-        except ImportError:
-            self._send_error_json(503, "MeshCore module not loaded")
-            return
-
-        handler = get_active_handler()
-        if handler is None:
-            self._send_error_json(503, "MeshCore handler not active")
-            return
-
-        refresh = False
-        if "?" in self.path:
-            query = self.path.split("?", 1)[1]
-            for param in query.split("&"):
-                if param == "refresh=1" or param == "refresh=true":
-                    refresh = True
-                    break
-
-        try:
-            state = handler.get_radio_state(refresh=refresh)
-        except Exception as e:
-            self._send_error_json(500, f"Radio state read failed: {e}")
-            return
-
-        self._send_json({"radio": state})
-
-    # ─────────────────────────────────────────────────────────────────
-    # Radio writes — Phase 4b. Three routes, all localhost-only:
-    #   PUT /radio/lora           body {freq, bw, sf, cr}
-    #   PUT /radio/tx_power       body {value}
-    #   PUT /radio/channel/<idx>  body {name, secret?}
-    # Each setter validates → calls meshcore_py → refreshes the cache so the
-    # response carries the post-write snapshot. RadioWriteError → 400; any
-    # other exception → 500.
-    # ─────────────────────────────────────────────────────────────────
+        from utils.radio_api import handle_get
+        handle_get(self)
 
     def _handle_radio_put(self) -> None:
-        try:
-            from gateway.meshcore_handler import get_active_handler
-            from gateway.meshcore_radio_config import RadioWriteError
-        except ImportError:
-            self._send_error_json(503, "MeshCore module not loaded")
-            return
-
-        handler = get_active_handler()
-        if handler is None:
-            self._send_error_json(503, "MeshCore handler not active")
-            return
-
-        body = self._read_body()
-        if body is None or not isinstance(body, dict):
-            self._send_error_json(400, "PUT requires a JSON object body")
-            return
-
-        path = self.path.split("?", 1)[0]
-        try:
-            if path == "/radio/lora":
-                state = handler.set_radio_lora(
-                    freq_mhz=body.get("freq"),
-                    bw_khz=body.get("bw"),
-                    sf=body.get("sf"),
-                    cr=body.get("cr"),
-                )
-            elif path == "/radio/tx_power":
-                state = handler.set_radio_tx_power(dbm=body.get("value"))
-            elif path.startswith("/radio/channel/"):
-                idx_str = path[len("/radio/channel/"):]
-                try:
-                    idx = int(idx_str)
-                except ValueError:
-                    self._send_error_json(400, f"Invalid channel idx: {idx_str!r}")
-                    return
-                state = handler.set_radio_channel(
-                    idx=idx,
-                    name=body.get("name", ""),
-                    secret_hex=body.get("secret"),
-                )
-            else:
-                self._send_error_json(404, f"Unknown radio path: {self.path}")
-                return
-        except RadioWriteError as e:
-            self._send_error_json(400, str(e))
-            return
-        except Exception as e:
-            self._send_error_json(500, f"Radio write failed: {e}")
-            return
-
-        self._send_json({"radio": state})
+        from utils.radio_api import handle_put
+        handle_put(self)
 
     def _handle_chat_send(self) -> None:
         try:
