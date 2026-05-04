@@ -84,7 +84,13 @@ class MapDataCollector(RNSDataCollectorMixin):
     DEFAULT_MESHTASTICD_HOST = "localhost"
     DEFAULT_MESHTASTICD_PORT = 4403
 
-    def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True):
+    def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True,
+                 meshtastic_enabled: bool = True):
+        # Phase 1 of MeshCore-primary TUI rework: when the active deployment
+        # profile disables Meshtastic, skip meshtasticd polling entirely.
+        # MeshCore is treated as a first-class source via _collect_meshcore().
+        self._meshtastic_enabled = meshtastic_enabled
+
         if cache_dir:
             self._cache_dir = cache_dir
         else:
@@ -350,32 +356,51 @@ class MapDataCollector(RNSDataCollectorMixin):
         """Actual collection body. Caller MUST hold self._collect_lock."""
         features: Dict[str, Dict] = {}  # id -> feature (dedup by id)
 
-        # Source 0: UnifiedNodeTracker (richest data — includes RNS + Meshtastic)
+        # Reset per-cycle tallies — each collect starts fresh and every
+        # source that surfaces position-less nodes EXTENDS the list.
+        self._nodes_without_position = []
+        self._total_nodes_seen = 0
+
+        # Source 0a: MeshCore — primary radio in MeshAnchor.
+        # MeshCore advertisements don't carry GPS today, so positioned
+        # MeshCore nodes are rare. Position-less nodes go to the side panel.
+        meshcore_features = self._tag_source_origin(self._collect_meshcore(), "local_radio")
+        for f in meshcore_features:
+            fid = f["properties"].get("id", "")
+            if fid:
+                features[fid] = f
+
+        # Source 0b: UnifiedNodeTracker (richest data — includes RNS + Meshtastic)
         # This is the same data source the topology view uses (378 nodes).
         # It includes nodes from RNS path table, meshtasticd, and gateway bridge.
         # Tagging is per-feature inside _collect_unified_tracker (mixed RNS + Meshtastic).
         tracker_unified_features = self._collect_unified_tracker()
         for f in tracker_unified_features:
             fid = f["properties"].get("id", "")
-            if fid:
+            if fid and fid not in features:
                 features[fid] = f
 
-        # Source 1: meshtasticd TCP
-        tcp_features = self._tag_source_origin(self._collect_meshtasticd(), "local_radio")
-        for f in tcp_features:
-            fid = f["properties"].get("id", "")
-            if fid:
-                features[fid] = f
-
-        # Source 1.5: Direct USB radio (when meshtasticd not running)
-        # Only try this if TCP returned nothing (avoids double-connection)
-        direct_radio_features = []
-        if not tcp_features:
-            direct_radio_features = self._tag_source_origin(self._collect_direct_radio(), "local_radio")
-            for f in direct_radio_features:
+        # Source 1: meshtasticd TCP — only when Meshtastic is enabled in the profile
+        if self._meshtastic_enabled:
+            tcp_features = self._tag_source_origin(self._collect_meshtasticd(), "local_radio")
+            for f in tcp_features:
                 fid = f["properties"].get("id", "")
                 if fid:
                     features[fid] = f
+
+            # Source 1.5: Direct USB radio (when meshtasticd not running)
+            # Only try this if TCP returned nothing (avoids double-connection)
+            direct_radio_features = []
+            if not tcp_features:
+                direct_radio_features = self._tag_source_origin(self._collect_direct_radio(), "local_radio")
+                for f in direct_radio_features:
+                    fid = f["properties"].get("id", "")
+                    if fid:
+                        features[fid] = f
+        else:
+            # Meshtastic disabled by deployment profile — skip TCP + direct USB polls
+            tcp_features = []
+            direct_radio_features = []
 
         # Source 2: MQTT subscriber (if running). Local subscriber → mqtt_local
         # tier; external/global firehoses (when added) should tag mqtt_global.
@@ -420,7 +445,8 @@ class MapDataCollector(RNSDataCollectorMixin):
 
         sources = self._get_source_summary(
             tcp_features, mqtt_features, tracker_features, aredn_features,
-            direct_radio_features, rns_direct_features, tracker_unified_features
+            direct_radio_features, rns_direct_features, tracker_unified_features,
+            meshcore_features
         )
         geojson = {
             "type": "FeatureCollection",
@@ -440,7 +466,8 @@ class MapDataCollector(RNSDataCollectorMixin):
         # Log collection summary for debugging
         logger.debug(
             f"MapDataCollector: {len(features)} nodes "
-            f"(unified:{sources.get('unified_tracker', 0)} "
+            f"(meshcore:{sources.get('meshcore', 0)} "
+            f"unified:{sources.get('unified_tracker', 0)} "
             f"meshtasticd:{sources.get('meshtasticd', 0)} "
             f"direct_radio:{sources.get('direct_radio', 0)} "
             f"mqtt:{sources.get('mqtt', 0)} "
@@ -549,6 +576,84 @@ class MapDataCollector(RNSDataCollectorMixin):
             logger.debug(f"UnifiedNodeTracker collection error: {e}")
             return []
 
+    def _collect_meshcore(self) -> List[Dict]:
+        """Collect nodes from MeshCore — primary radio in MeshAnchor.
+
+        Pulls MeshCore nodes from the UnifiedNodeTracker (populated by the
+        gateway bridge's meshcore_handler). Today MeshCore advertisements
+        don't carry GPS, so almost all MeshCore nodes land in the
+        position-less side panel served via /api/nodes/geojson properties.
+
+        Positioned MeshCore nodes (e.g. when meshcore_py grows telemetry-
+        with-position support) are returned as features and dedup'd against
+        the unified-tracker source by id in _collect_locked.
+        """
+        try:
+            tracker = get_node_tracker()
+            mc_nodes = tracker.get_meshcore_nodes()
+        except Exception as e:
+            logger.debug(f"MeshCore tracker access error: {e}")
+            return []
+
+        if not mc_nodes:
+            logger.debug("MeshCore: no nodes in tracker")
+            return []
+
+        features: List[Dict] = []
+        position_less: List[Dict] = []
+
+        for node in mc_nodes:
+            position = getattr(node, 'position', None)
+            has_position = (
+                position is not None
+                and self._is_valid_coordinate(
+                    getattr(position, 'latitude', None),
+                    getattr(position, 'longitude', None),
+                )
+            )
+
+            if has_position:
+                features.append(self._make_feature(
+                    node_id=node.id,
+                    name=node.name,
+                    lat=position.latitude,
+                    lon=position.longitude,
+                    network="meshcore",
+                    is_online=node.is_online,
+                    snr=node.snr,
+                    rssi=node.rssi,
+                    role=getattr(node, 'meshcore_role', '') or '',
+                    last_seen=node.get_age_string() if hasattr(node, 'get_age_string') else '',
+                ))
+            else:
+                last_seen = (
+                    node.get_age_string()
+                    if hasattr(node, 'get_age_string')
+                    else 'unknown'
+                )
+                position_less.append({
+                    "id": node.id,
+                    "name": node.name or node.id,
+                    "network": "meshcore",
+                    "is_online": node.is_online,
+                    "last_seen": last_seen,
+                    "role": getattr(node, 'meshcore_role', '') or '',
+                    "snr": node.snr,
+                    "rssi": node.rssi,
+                    "hops_away": getattr(node, 'meshcore_hops', None),
+                    "pubkey": getattr(node, 'meshcore_pubkey', '') or '',
+                })
+
+        # Surface position-less MeshCore nodes via the side-panel pipeline.
+        self._nodes_without_position.extend(position_less)
+        self._total_nodes_seen += len(mc_nodes)
+
+        logger.debug(
+            f"MeshCore: {len(features)} with GPS, "
+            f"{len(position_less)} without GPS (total: {len(mc_nodes)})"
+        )
+        return features
+
     def _collect_meshtasticd(self) -> List[Dict]:
         """Collect nodes from meshtasticd.
 
@@ -651,8 +756,10 @@ class MapDataCollector(RNSDataCollectorMixin):
                         "last_heard": node.last_heard,
                     })
 
-            self._nodes_without_position = no_position_nodes
-            self._total_nodes_seen = len(nodes)
+            # Extend (don't replace) — _collect_locked clears once at the
+            # top so every per-source collector contributes additively.
+            self._nodes_without_position.extend(no_position_nodes)
+            self._total_nodes_seen += len(nodes)
 
             logger.debug(
                 f"meshtasticd (HTTP): {len(features)} with GPS, "
@@ -704,9 +811,9 @@ class MapDataCollector(RNSDataCollectorMixin):
                             if no_pos_info:
                                 no_position_nodes.append(no_pos_info)
 
-                    # Update the tracking lists
-                    self._nodes_without_position = no_position_nodes
-                    self._total_nodes_seen = total_nodes
+                    # Extend (don't replace) — _collect_locked clears once at top.
+                    self._nodes_without_position.extend(no_position_nodes)
+                    self._total_nodes_seen += total_nodes
 
                     logger.debug(
                         f"meshtasticd (TCP): {len(features)} with GPS, "
@@ -774,10 +881,9 @@ class MapDataCollector(RNSDataCollectorMixin):
                             if no_pos_info:
                                 no_position_nodes.append(no_pos_info)
 
-                    # Update the tracking lists (if meshtasticd didn't already)
-                    if not self._total_nodes_seen:
-                        self._nodes_without_position = no_position_nodes
-                        self._total_nodes_seen = total_nodes
+                    # Extend (don't replace) — _collect_locked clears once at top.
+                    self._nodes_without_position.extend(no_position_nodes)
+                    self._total_nodes_seen += total_nodes
 
                     logger.debug(
                         f"Direct radio (USB): {len(features)} with GPS, "
@@ -1399,10 +1505,11 @@ class MapDataCollector(RNSDataCollectorMixin):
     def _get_source_summary(
         self, tcp: List, mqtt: List, tracker: List, aredn: List = None,
         direct_radio: List = None, rns_direct: List = None,
-        unified_tracker: List = None
+        unified_tracker: List = None, meshcore: List = None
     ) -> Dict:
         """Summarize which sources contributed data."""
         summary = {
+            "meshcore": len(meshcore) if meshcore else 0,
             "unified_tracker": len(unified_tracker) if unified_tracker else 0,
             "meshtasticd": len(tcp),
             "direct_radio": len(direct_radio) if direct_radio else 0,
@@ -1411,6 +1518,9 @@ class MapDataCollector(RNSDataCollectorMixin):
             "aredn": len(aredn) if aredn else 0,
             "rns_direct": len(rns_direct) if rns_direct else 0,
         }
+        # Surface meshtastic-disabled state so the map UI / API can
+        # display "Meshtastic gateway disabled by profile" if needed.
+        summary["meshtastic_enabled"] = self._meshtastic_enabled
         # Flag if HTTP was used (source tag on features)
         if tcp and any(f.get("properties", {}).get("source") == "meshtasticd_http" for f in tcp):
             summary["meshtasticd_via"] = "http"

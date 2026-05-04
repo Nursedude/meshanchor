@@ -179,7 +179,27 @@ class MapServer:
         self.enable_websocket = enable_websocket
         self.websocket_port = websocket_port
         self.meshtasticd_port = meshtasticd_port
-        self.collector = MapDataCollector()
+
+        # Phase 1 of MeshCore-primary TUI rework: read the active deployment
+        # profile so the collector can skip meshtasticd polling when the
+        # profile disables Meshtastic (MESHCORE / RADIO_MAPS / MONITOR).
+        meshtastic_enabled = True
+        try:
+            from utils.deployment_profiles import load_or_detect_profile
+            profile = load_or_detect_profile()
+            meshtastic_enabled = bool(profile.feature_flags.get("meshtastic", True))
+            logger.info(
+                "MapServer profile=%s meshtastic_enabled=%s",
+                profile.name.value, meshtastic_enabled,
+            )
+        except Exception as e:
+            # Defensive: never block map startup on profile detection.
+            logger.warning(
+                "Could not read deployment profile (%s) — defaulting "
+                "meshtastic_enabled=True for backward compatibility", e,
+            )
+
+        self.collector = MapDataCollector(meshtastic_enabled=meshtastic_enabled)
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._message_listener_started = False
