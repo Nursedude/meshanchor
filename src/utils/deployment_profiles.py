@@ -322,6 +322,13 @@ def save_profile(profile: ProfileDefinition) -> bool:
         with open(_PROFILE_PATH, 'w') as f:
             json.dump(data, f, indent=2)
         logger.info("Saved deployment profile: %s", profile.display_name)
+        # Drop any cached profile in profile_services so subsequent
+        # is_critical / is_managed calls reflect the new selection.
+        try:
+            from utils.profile_services import invalidate_cache
+            invalidate_cache()
+        except Exception as e:
+            logger.debug("profile_services cache invalidation failed: %s", e)
         return True
     except (IOError, OSError) as e:
         logger.warning("Failed to save deployment profile: %s", e)

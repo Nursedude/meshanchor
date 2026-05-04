@@ -165,10 +165,14 @@ class ServiceMenuHandler(BaseHandler):
         except Exception as e:
             logger.debug("Gateway config validation failed: %s", e)
 
-        # 5. Check meshtasticd is reachable
-        mt_status = check_service('meshtasticd')
-        if not mt_status.available:
-            issues.append("meshtasticd is not running (required for Meshtastic connectivity)")
+        # 5. Check meshtasticd is reachable — only when the active profile
+        # actually exposes Meshtastic. Under MESHCORE-only the bridge isn't
+        # really applicable, but if the user reaches this preflight via the
+        # Optional Gateways submenu, this check would otherwise be noise.
+        if self.ctx.feature_enabled('meshtastic'):
+            mt_status = check_service('meshtasticd')
+            if not mt_status.available:
+                issues.append("meshtasticd is not running (required for Meshtastic connectivity)")
 
         if not issues:
             return True

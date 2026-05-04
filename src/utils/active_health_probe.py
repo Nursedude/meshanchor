@@ -573,23 +573,31 @@ def create_gateway_health_probe(
     """
     probe = ActiveHealthProbe(interval=interval, fails=fails, passes=passes)
 
-    # Honor noc.yaml's `services.<name>.managed: false` so MeshCore-only
-    # boxes (e.g. meshanchor-server, --skip-meshtasticd installs) don't
-    # generate UNHEALTHY noise for services they intentionally don't run.
-    # Mirrors the orchestrator's _apply_managed_overrides pattern.
+    # Two filters layered:
+    #   1. noc.yaml's `services.<name>.managed: false` — explicit per-host
+    #      opt-out (mirrors the orchestrator's _apply_managed_overrides).
+    #   2. Active deployment profile — services not in the profile's
+    #      required+optional sets are skipped so MESHCORE-only boxes don't
+    #      flag UNHEALTHY for meshtasticd/rnsd they intentionally don't run.
+    # Either filter is sufficient to skip a probe.
+    from utils.profile_services import is_managed
+
     unmanaged = _unmanaged_services()
 
-    if "meshtasticd" not in unmanaged:
+    def _should_probe(name: str) -> bool:
+        return name not in unmanaged and is_managed(name)
+
+    if _should_probe("meshtasticd"):
         probe.register_check(
             "meshtasticd",
             lambda: probe.check_tcp_port(4403),
         )
-    if "rnsd" not in unmanaged:
+    if _should_probe("rnsd"):
         probe.register_check(
             "rnsd",
             lambda: probe.check_rns_port(37428),
         )
-    if "mosquitto" not in unmanaged:
+    if _should_probe("mosquitto"):
         probe.register_check(
             "mosquitto",
             lambda: probe.check_tcp_port(1883),
