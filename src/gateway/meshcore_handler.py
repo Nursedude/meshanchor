@@ -1158,6 +1158,38 @@ class MeshCoreHandler(BaseMessageHandler):
     def get_radio_state(self, refresh: bool = False) -> Dict[str, Any]:
         return self._radio.get_state(refresh=refresh)
 
+    # Synchronous setters — schedule the async write on the daemon's event
+    # loop and wait for completion. Raise RadioWriteError on validation /
+    # NAK so the HTTP layer can map cleanly to 4xx/5xx.
+    def set_radio_lora(
+        self, freq_mhz: float, bw_khz: float, sf: int, cr: int
+    ) -> Dict[str, Any]:
+        return self._run_radio_write(
+            self._radio.set_lora(freq_mhz, bw_khz, sf, cr)
+        )
+
+    def set_radio_tx_power(self, dbm: int) -> Dict[str, Any]:
+        return self._run_radio_write(self._radio.set_tx_power(dbm))
+
+    def set_radio_channel(
+        self, idx: int, name: str, secret_hex: Optional[str] = None
+    ) -> Dict[str, Any]:
+        return self._run_radio_write(
+            self._radio.set_channel(idx, name, secret_hex)
+        )
+
+    def _run_radio_write(self, coro) -> Dict[str, Any]:
+        """Bridge sync HTTP/TUI callers to the daemon's asyncio loop.
+
+        If no loop is running (tests, sim, or pre-connect), runs inline so
+        validation paths still work without booting the daemon. Otherwise
+        schedules on ``self._loop`` and blocks for up to 10s.
+        """
+        if self._loop is None or not self._loop.is_running():
+            return asyncio.run(coro)
+        fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return fut.result(timeout=10.0)
+
 
     async def _async_disconnect(self) -> None:
         """Async disconnect cleanup."""
