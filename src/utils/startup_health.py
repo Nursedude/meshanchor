@@ -87,14 +87,28 @@ class HealthSummary:
     def is_ready(self) -> bool:
         """Check if system is ready for operation.
 
-        Profile-aware: derives readiness from `overall_status` (set by
-        `run_health_check` based on the active profile's required/optional
-        service lists). "ready" or "degraded" both count as ready —
-        degraded just means some optional service is down. A MESHCORE-only
-        deployment with meshtasticd absent is `ready` because meshtasticd
-        is not_applicable for that profile.
+        Profile-aware: derives readiness from `overall_status` when it
+        has been set by `run_health_check` (based on the active profile's
+        required/optional service lists). "ready" or "degraded" both
+        count as ready — degraded just means some optional service is
+        down. A MESHCORE-only deployment with meshtasticd absent is
+        `ready` because meshtasticd is not_applicable for that profile.
+
+        Legacy fallback: when `overall_status` is still the default
+        `"unknown"` (i.e. the summary was constructed directly without
+        going through `run_health_check`), fall back to the original
+        "is meshtasticd running?" check. Preserves backward compat for
+        callers that build HealthSummary instances by hand.
         """
-        return self.overall_status in ("ready", "degraded")
+        if self.overall_status in ("ready", "degraded"):
+            return True
+        if self.overall_status == "error":
+            return False
+        # overall_status == "unknown": no health check has been run.
+        for svc in self.services:
+            if svc.name == "meshtasticd" and svc.running:
+                return True
+        return False
 
 
 def check_meshtasticd() -> ServiceHealth:
