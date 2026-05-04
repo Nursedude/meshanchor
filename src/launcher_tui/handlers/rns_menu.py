@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 # Desired menu order for the RNS submenu.
 # Sub-handler items are merged from the "rns" section; own items are inline.
+# RNS clients (nomadnet, meshchatx) sit at the top so operators can launch
+# their preferred LXMF UI in one click without scrolling past diagnostics.
 _RNS_ORDERING = [
+    "nomadnet", "meshchatx",
     "status", "monitor", "paths", "sniffer",
     "probe", "identity", "nodes", "positions",
     "diag", "repair", "drift",
@@ -61,8 +64,13 @@ class RNSMenuHandler(BaseHandler):
                 for tag, desc in self.ctx.registry.get_menu_items("rns"):
                     registry_items[tag] = desc
 
-            # Own items (not from sub-handlers)
+            # Own items (not from sub-handlers).
+            # The "nomadnet" entry launches the NomadNet handler via
+            # cross-section dispatch — its handler lives under
+            # mesh_networks but the user-facing "Launch RNS Client"
+            # affordance belongs in the RNS submenu next to MeshChatX.
             own_items = {
+                "nomadnet": "Launch NomadNet         LXMF TUI client",
                 "status": "RNS Status (rnstatus)",
                 "paths": "RNS Path Table (rnpath)",
                 "probe": "Probe Destination (rnprobe)",
@@ -102,6 +110,11 @@ class RNSMenuHandler(BaseHandler):
             # Try sub-handler dispatch first (rns section)
             if self.ctx.registry and self.ctx.registry.dispatch("rns", choice):
                 continue
+
+            # Cross-section: NomadNet handler lives under mesh_networks.
+            if choice == "nomadnet" and self.ctx.registry:
+                if self.ctx.registry.dispatch("mesh_networks", "nomadnet"):
+                    continue
 
             # Own inline dispatches
             own_dispatch = {
