@@ -13,7 +13,7 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | # | Phase | Status | Branch / PR | Last touched |
 |---|---|---|---|---|
 | 1 | Map data flip — MeshCore as source | **MERGED** ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) (merge 0b91289c) | 2026-05-03 |
-| 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | **implementation — PR pending** | `claude/mc-phase2-menu-restructure` | 2026-05-03 |
+| 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | **MERGED** ✅ | [PR #16](https://github.com/Nursedude/meshanchor/pull/16) (merge e0d4d326) | 2026-05-03 |
 | 3 | Handler feature-flag audit (~40 Meshtastic handlers) | not started | — | — |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | not started | — | — |
 | 5 | Startup health flip (meshtasticd → optional) | not started | — | — |
@@ -153,6 +153,12 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Gates green**: `python3 scripts/lint.py --all` exit 0; combined run of `test_phase2_menu_restructure.py + test_handler_registry.py + test_meshcore_handler.py + test_all_handlers_protocol.py + test_regression_guards.py` = **481 passed**, 0 failed.
 - **Internal section name kept as `mesh_networks`**: chose not to rename the section key on disk because every existing `mesh_networks` handler would have to flip too, and the user-visible label is what actually matters. Documented in the new `_optional_gateways_menu` docstring.
 - **Next session resume point**: PR open against `main`. Once it merges, mark Phase 2 ✅, then start Phase 3 (handler feature-flag audit — there are ~40 Meshtastic-leaning handlers in `mesh_networks`/`rns` whose menu_items currently surface unconditionally even when the relevant feature is disabled). Branch convention: `claude/mc-phase3-handler-flag-audit`. First step there is to enumerate every Meshtastic-leaning handler and decide which `feature_flag=` value should gate each `menu_items()` row.
+
+**2026-05-03 (Phase 2 MERGED)**:
+- PR #16 merged into main as merge commit `e0d4d326`. Single feature commit landed: `edd76042` (the implementation + tracker entry + smoke tests).
+- Branch `claude/mc-phase2-menu-restructure` deleted both locally and on origin; main is clean and up to date.
+- **Phase 3 readiness check** (relevant for the next session): no clearance needed. The handler-flag audit only reads `menu_items()` rows on the handlers and writes back `feature_flag=` values — no schema or section migrations are pending, no other branch is in flight against the same files, and the existing feature-flag plumbing (`_feature_enabled` + `feature_flags` dict on TUIContext + per-row `flag` argument in `BaseHandler.menu_items()`) is already wired end-to-end. The only open design question for Phase 3 is policy, not infrastructure: **opt-in or opt-out** when a handler row has no obvious flag (default to safe — keep visible — and only gate rows that genuinely require Meshtastic / RNS / Gateway).
+- **Next session resume point**: branch `claude/mc-phase3-handler-flag-audit`. Step 1 = enumerate all `mesh_networks` + `rns` section handlers' `menu_items()` rows and tag each with the appropriate flag (`meshtastic`, `rns`, `gateway`, or `None` = always-visible). Step 2 = write the changes per-handler in one PR, paired with smoke tests asserting that under a MESHCORE-only profile the Optional Gateways submenu has zero `mesh_networks`-tagged Meshtastic items. Step 3 = run lint + the existing test suites.
 
 ---
 
