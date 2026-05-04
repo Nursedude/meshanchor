@@ -1013,6 +1013,15 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._handle_chat_get()
             return
 
+        # Radio config — read-only snapshot of MeshCore LoRa parameters,
+        # channel slots, and TX power. LAN-accessible like /chat (no
+        # secrets are exposed; channel hashes only, not channel keys).
+        if self.path.startswith("/radio") and (
+            self.path == "/radio" or self.path.startswith("/radio?")
+        ):
+            self._handle_radio_get()
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1197,6 +1206,40 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             return
 
         self._send_error_json(404, f"Unknown chat path: {self.path}")
+
+    # ─────────────────────────────────────────────────────────────────
+    # Radio endpoint — Phase 4a (read-only). GET /radio returns the
+    # cached snapshot. ?refresh=1 forces a fresh read from the device
+    # (one round-trip; bounded by an internal 8s timeout in the handler).
+    # ─────────────────────────────────────────────────────────────────
+
+    def _handle_radio_get(self) -> None:
+        try:
+            from gateway.meshcore_handler import get_active_handler
+        except ImportError:
+            self._send_error_json(503, "MeshCore module not loaded")
+            return
+
+        handler = get_active_handler()
+        if handler is None:
+            self._send_error_json(503, "MeshCore handler not active")
+            return
+
+        refresh = False
+        if "?" in self.path:
+            query = self.path.split("?", 1)[1]
+            for param in query.split("&"):
+                if param == "refresh=1" or param == "refresh=true":
+                    refresh = True
+                    break
+
+        try:
+            state = handler.get_radio_state(refresh=refresh)
+        except Exception as e:
+            self._send_error_json(500, f"Radio state read failed: {e}")
+            return
+
+        self._send_json({"radio": state})
 
     def _handle_chat_send(self) -> None:
         try:
