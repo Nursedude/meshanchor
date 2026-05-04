@@ -20,7 +20,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 4 | MeshCore radio config gap (presets/channels/TX power) | merged ✅ | 4a [PR #20](https://github.com/Nursedude/meshanchor/pull/20); 4b [PR #21](https://github.com/Nursedude/meshanchor/pull/21) (merge `fa41c5ce`) |
 | 5 | Startup health flip (meshtasticd → optional) | merged ✅ | [PR #22](https://github.com/Nursedude/meshanchor/pull/22) (merge `55acf1f3`) |
 | 6 | meshforge-maps :8808 plugin scaffold | merged ✅ | [PR #23](https://github.com/Nursedude/meshanchor/pull/23) (merge `b10074b6`) |
-| 6.3 | meshforge-maps endpoint config (host/port/timeout) | in flight | `claude/mc-phase6.3-maps-config` |
+| 6.3 | meshforge-maps endpoint config (host/port/timeout) | merged ✅ | [PR #24](https://github.com/Nursedude/meshanchor/pull/24) (merge `35c265ff`) |
+| 5.5 | Profile-aware health code (Phase 5 deferrals) | in flight | `claude/mc-phase5.5-health-deferrals` |
 | 7 | Profile defaults + docs | not started | — |
 
 ---
@@ -339,6 +340,67 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 5.5 — Profile-Aware Health Code (Phase 5 Deferrals)
+
+**Goal**: Hoist the profile-aware health classification that Phase 5 wired into `run_health_check` + the `/health` endpoint into a reusable helper, then thread it through the three call sites Phase 5 deliberately deferred. Each of those sites was hardcoded to treat meshtasticd / rnsd as critical-or-managed regardless of the active deployment profile, which was acceptable in Phase 5 because they only fire under GATEWAY/FULL where the services *are* required — but the code was duplicating Phase 5's classification rule and would silently drift if the rule changed. Phase 5.5 collapses that duplication.
+
+**Key contract findings (2026-05-04)**:
+
+- **The classification rule lives in `run_health_check` (`startup_health.py:381-410`)**: required = `profile.required_services`, optional = `profile.optional_services`, everything else = `not_applicable`. That's the rule we hoist. No new policy gets invented here — the helper module is just a thinner-than-`run_health_check` slice of the same logic.
+- **Three callers, two needs**: `health_score._on_service_event` cares about *critical-only* (does this service-down event hurt the health score?); `active_health_probe.create_gateway_health_probe` cares about *managed* (should we even probe this service?); `service_menu._bridge_preflight` cares about *feature-flag* (`meshtastic`) which is already on `TUIContext` — it doesn't need profile_services at all, just the existing `feature_enabled` accessor.
+- **The probe factory is `create_gateway_health_probe` (line 550) — not `create_default_probe`**: tracker entry from Phase 5 mis-attributed the function name. Caught when initial test wave came back `AttributeError: module 'utils.active_health_probe' has no attribute 'create_default_probe'`.
+- **Phase 5.5 layers a second filter, doesn't replace the first**: `active_health_probe` already filters by noc.yaml's `services.<name>.managed: false` (per-host opt-out, predates Phase 5). Profile-awareness is *additive* — either filter is sufficient to skip a probe. Tests assert both layers independently so a future regression in one doesn't go unnoticed under the other.
+- **Process-lifetime cache for the active profile**: `_on_service_event` runs from EventBus background threads on every service status change, possibly multiple times per second. Resolving the profile via `load_or_detect_profile` (which reads `~/.config/meshanchor/deployment.json`) per-event is needless overhead. The cache is invalidated whenever `save_profile()` is called so a profile switch via the Settings TUI takes effect on the next tick. Failure-to-resolve also caches (as `None`) so we don't retry on every event after a transient I/O hiccup; the legacy fallback path (`meshtasticd` + `rnsd` critical) covers that case.
+- **Service menu fix is a 4-line guard, not a refactor**: the meshtasticd-not-running issue is wrapped in `if self.ctx.feature_enabled('meshtastic')`. That's it. The rest of `_bridge_preflight` (rnsd, identity, gateway config, NomadNet conflict) is unchanged because those are genuinely required *for the bridge* regardless of which gateway you're bridging to. If a user reaches preflight via Optional Gateways under MESHCORE, only the spurious meshtasticd noise disappears.
+- **No new file-size cliff**: `utils/profile_services.py` is the new ~115-line module; `health_score.py` net +1 line; `active_health_probe.py` net +6 lines; `service_menu.py` net +2 lines; `deployment_profiles.py` net +6 lines (cache invalidation hook). Largest file in the diff is the new test at ~360 lines.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase5.5-health-deferrals` off main (post PR #24).
+2. **Tracker prep (this commit)**: flip Phase 6.3 row to `merged ✅`, add this Phase 5.5 section.
+3. **`utils/profile_services.py`** (new, ~115 lines): `service_role(name, profile=None)` returns `"required"` / `"optional"` / `"not_applicable"`; `is_critical(name)` / `is_managed(name)` are convenience wrappers. Process-lifetime cache for the resolved profile + `invalidate_cache()` hook. Legacy fallback (meshtasticd + rnsd critical, mosquitto optional) when profile resolution fails so a daemon never crashes over a profile lookup error.
+4. **`utils/health_score.py:719`**: `critical=(service_name in ('meshtasticd', 'rnsd'))` → `critical=is_critical(service_name)`.
+5. **`utils/active_health_probe.py:582-596`**: layer the `is_managed(name)` filter on top of the existing `_unmanaged_services()` filter via a small `_should_probe(name)` closure. Either filter still suffices.
+6. **`launcher_tui/handlers/service_menu.py:168-171`**: wrap the meshtasticd issue in `if self.ctx.feature_enabled('meshtastic')`.
+7. **`utils/deployment_profiles.py:save_profile`**: call `profile_services.invalidate_cache()` after a successful save so the next `is_critical` / `is_managed` call sees the new selection.
+8. **Tests** (`tests/test_phase5_5_health_deferrals.py`, 24 tests across 7 classes):
+   - `TestServiceRole` (5) — MESHCORE / GATEWAY / FULL classification + unknown service + legacy fallback.
+   - `TestIsCritical` (2) — only required services are critical; MESHCORE has no critical services.
+   - `TestIsManaged` (3) — MESHCORE skips all three; GATEWAY manages all three; FULL manages required + optional.
+   - `TestActiveProfileCache` (3) — resolved-once-then-cached; invalidate drops cache; resolution failure also caches.
+   - `TestHealthScoreCritical` (4) — MESHCORE meshtasticd event not critical; FULL rnsd event critical; FULL meshtasticd event NOT critical (it's optional); event dropped when scorer unset.
+   - `TestActiveHealthProbe` (4) — MESHCORE registers no legacy three; GATEWAY registers all three; noc.yaml unmanaged filter still wins under GATEWAY; FULL registers required + optional.
+   - `TestBridgePreflightProfileGate` (2) — MESHCORE skips meshtasticd issue; GATEWAY keeps it.
+   - `TestSaveProfileInvalidatesCache` (1) — save_profile drops the cached profile so subsequent calls see the new selection.
+
+**Critical files (cross-reference)**:
+
+- `src/utils/profile_services.py` — new, 115-line helper
+- `src/utils/health_score.py:708-722` — `_on_service_event` profile-aware
+- `src/utils/active_health_probe.py:580-602` — profile-aware probe registration
+- `src/launcher_tui/handlers/service_menu.py:168-175` — feature-flag-gated meshtasticd issue
+- `src/utils/deployment_profiles.py:save_profile` — cache invalidation hook
+- `tests/test_phase5_5_health_deferrals.py` — new, 24 tests
+
+**Definition of Done**:
+- [x] Branch `claude/mc-phase5.5-health-deferrals` created
+- [x] `utils/profile_services` shipped with cache + legacy fallback
+- [x] Three call sites wired through (health_score, active_health_probe, service_menu)
+- [x] save_profile invalidates the cache
+- [x] 24 Phase 5.5 tests pass
+- [x] Phase 5.5 + Phase 5 + adjacent suites = 116 passed combined
+- [x] Full suite passes (3107 passed; same two pre-existing dev-box flakes)
+- [x] Lint clean
+- [ ] PR opened to main
+
+**Deferred to follow-up phases** (still on the menu after 5.5):
+- **Phase 6.1 — bidirectional handshake** (data fusion).
+- **Phase 6.2 — lifecycle control** (Issue #31 guardrails).
+- **map_data_collector split** (1529 → under 1500).
+- **Phase 7** — profile defaults + docs (the natural next "main-line" phase).
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -474,6 +536,21 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **File-size watch**: nothing in this PR approaches the 1500-line cap. New `meshforge_maps_config.py` is 211; `meshforge_maps.py` grew 137 → 220; `test_phase6_3_maps_config.py` is 484. `map_data_collector.py` still at 1529 — Phase 6.3 doesn't touch it.
 - **Next session resume point**: review/merge this Phase 6.3 PR. Once merged, the remaining follow-ups are (a) Phase 6.1 — bidirectional handshake / data fusion; (b) Phase 6.2 — lifecycle control (start/stop/restart of meshforge-maps' systemd unit, with Issue #31 guardrails); (c) Phase 5.5 — health code cleanup (health_score / active_health_probe / service_menu deferrals); (d) `map_data_collector` split (1529 → under 1500). Phase 7 (profile defaults + docs) is the natural next "main-line" phase if no follow-up is prioritized.
 
+**2026-05-04 (Phase 6.3 MERGED + Phase 5.5 implementation — PR pending)**:
+- PR #24 merged into main as merge commit `35c265ff`. Phase 6.3 shipped the meshforge-maps endpoint config (host/port/timeout) backed by SettingsManager. User chose to continue down the follow-up list in order of smallest → largest scope, so Phase 5.5 (health code cleanup) is next.
+- **Branch**: `claude/mc-phase5.5-health-deferrals` off main.
+- **Files changed** (5):
+  - `src/utils/profile_services.py` (NEW, 115 lines): `service_role()` / `is_critical()` / `is_managed()` + process-lifetime cache + `invalidate_cache()` hook. Legacy fallback preserves the old hardcoded behaviour (meshtasticd + rnsd critical, mosquitto optional) when profile resolution fails so a daemon never crashes over a profile lookup error.
+  - `src/utils/health_score.py` (+5/-1): `_on_service_event` uses `is_critical(service_name)` instead of hardcoded `service_name in ('meshtasticd', 'rnsd')`.
+  - `src/utils/active_health_probe.py` (+11/-5): `_should_probe(name)` closure layers `is_managed()` on top of the existing `_unmanaged_services()` filter — both filters still independently sufficient to skip a probe.
+  - `src/launcher_tui/handlers/service_menu.py` (+5/-3): `_bridge_preflight`'s meshtasticd-not-running issue gated on `self.ctx.feature_enabled('meshtastic')`.
+  - `src/utils/deployment_profiles.py` (+8): `save_profile` calls `profile_services.invalidate_cache()` after a successful write.
+  - `tests/test_phase5_5_health_deferrals.py` (NEW, 24 tests across 7 classes — see Phase 5.5 section above for the full breakdown).
+- **Mid-implementation correction**: tracker entry from Phase 5 mis-attributed the probe factory as `create_default_probe`; actual name is `create_gateway_health_probe` (line 550). Caught immediately by the test wave (`AttributeError`) and corrected. Worth noting for future Phase 5.5-adjacent work.
+- **Gates green**: `python3 scripts/lint.py --all` exit 0; combined Phase 5.5 + startup_health + Phase 5 + active_health_probe + service_menu handler + regression guards = **116 passed**; full suite `pytest tests/ --ignore=tests/test_bridge_integration.py` = **3107 passed** (+24 vs Phase 6.3 baseline of 3083). Same two pre-existing dev-box flakes (`test_gateway_integration::test_bridge_starts_in_degraded_mode`, `test_status_bar::test_no_node_count_by_default`) — documented in Phase 5/6 entries, not Phase 5.5 regressions.
+- **File-size watch**: nothing in this PR approaches the 1500-line cap. New `profile_services.py` is 115; `active_health_probe.py` 624 → 635; everything else net <10. `map_data_collector.py` still at 1529 — Phase 5.5 doesn't touch it.
+- **Next session resume point**: review/merge this Phase 5.5 PR. Once merged, the remaining follow-ups (in order of "smallest user-visible win") are (a) `map_data_collector` split (1529 → under 1500, pure refactor); (b) Phase 6.1 — bidirectional handshake / data fusion (medium, defines a new contract); (c) Phase 6.2 — lifecycle control (large, needs Issue #31 guardrails); (d) Phase 7 — profile defaults + docs (the natural next "main-line" phase). User has indicated they want to continue down the list smallest → largest.
+
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-05-03 | Meshtastic handlers gated behind feature flag, not deleted | Preserves `gateway`/`full` profile capability. Reversible. |
@@ -503,6 +580,11 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-04 | Phase 6.3 `MapsConfig` is frozen | Handler holds the config briefly across the `_configure_endpoint` loop. Frozen avoids accidental in-place mutation; rebuild is cheap. Matches Phase 4b's `RegionBand` namedtuple. |
 | 2026-05-04 | Phase 6.3 `_client()` rebuilds on every call (no caching) | Settings can change mid-session via the new "Configure Endpoint" menu. A cached client would render stale URLs in `_show_status` after a save. The rebuild is a single SettingsManager load — cheap. |
 | 2026-05-04 | Phase 6.3 updates the Phase 6 menu-items test rather than working around it | `test_phase6_meshforge_maps.py::test_menu_items` was the canonical test for the module and asserted exactly two rows. Phase 6.3 adds a third — the right answer is to update the canonical test, not to add the row in a way that hides from it. Per the saved feedback memory: pre-push, run the module's own test file. |
+| 2026-05-04 | Phase 5.5 hoists classification into `utils/profile_services` rather than reusing `run_health_check` | `run_health_check` is a one-shot health snapshot — it returns a fully-populated `HealthSummary` with hardware detection, per-service state, overall_status. Asking it "is meshtasticd critical?" would mean instantiating that whole pipeline per EventBus tick (potentially many times per second). The slim helper exposes the same classification rule (required / optional / not_applicable) without the snapshot machinery. Same source of truth (`profile.required_services` + `optional_services`), narrower API. |
+| 2026-05-04 | Phase 5.5 caches the resolved profile process-lifetime, invalidated on `save_profile` | EventBus service callbacks fire frequently; reading `~/.config/meshanchor/deployment.json` on every tick would be wasteful. Cache invalidation hooks into `save_profile` so a Settings TUI profile switch propagates on the next event without a daemon restart. Failure-to-resolve also caches (as `None`) to avoid retry storms after a transient I/O hiccup; legacy fallback covers correctness in that case. |
+| 2026-05-04 | Phase 5.5 layers profile filter on top of noc.yaml `managed: false` (additive, not replacement) | The noc.yaml override is the per-host explicit opt-out — predates Phase 5 and is the documented escape hatch. Profile-awareness is a *default* for "what's relevant under MESHCORE" without forcing every user to maintain noc.yaml. Either filter sufficient to skip a probe; tests assert both layers independently. |
+| 2026-05-04 | Phase 5.5 falls back to legacy hardcoded set on profile resolution failure | A daemon must not crash because of a profile lookup error. Legacy behaviour (meshtasticd + rnsd critical, mosquitto optional) is what shipped pre-Phase-5 and is correct for GATEWAY/FULL deployments — i.e. the worst case if the lookup fails is "we behave as we did 6 weeks ago", which is better than killing health monitoring. |
+| 2026-05-04 | Phase 5.5 service_menu fix is a feature-flag guard, not a profile_services call | `_bridge_preflight` is a TUI handler and already has `self.ctx.feature_enabled('meshtastic')` available. Calling `is_managed("meshtasticd")` would resolve the profile from disk via `load_or_detect_profile` when the feature flag is already in the launcher's hot-loaded `feature_flags` dict. Use what's already there. |
 
 ---
 

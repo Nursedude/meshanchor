@@ -707,6 +707,8 @@ def get_health_scorer() -> HealthScorer:
 
 def _on_service_event(event) -> None:
     """Feed EventBus ServiceEvents into the HealthScorer."""
+    from utils.profile_services import is_critical
+
     scorer = _health_scorer
     if scorer is None:
         return
@@ -716,7 +718,7 @@ def _on_service_event(event) -> None:
         scorer.report_service_status(
             name=service_name,
             running=available,
-            critical=(service_name in ('meshtasticd', 'rnsd')),
+            critical=is_critical(service_name),
         )
 
 
