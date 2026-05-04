@@ -1,12 +1,13 @@
 """Meshforge Maps Handler — discovery + browser-launch for the :8808 service.
 
-Phase 6 scaffold. meshforge-maps is a sister project that runs its own HTTP
-server on :8808 with `/api/status`, `/api/health`, `/api/sources`. MeshAnchor
-discovers it (via `utils.meshforge_maps_client.MeshforgeMapsClient`) and
-surfaces two affordances:
+Phase 6 scaffold + Phase 6.3 endpoint config. meshforge-maps is a sister
+project that runs its own HTTP server on :8808 with `/api/status`,
+`/api/health`, `/api/sources`. MeshAnchor discovers it (via
+:class:`utils.meshforge_maps_client.MeshforgeMapsClient`) and surfaces:
 
     Status            — probe :8808 and render version, health, sources
     Open in Browser   — webbrowser.open the Leaflet UI
+    Configure Endpoint — edit host / port / timeout (Phase 6.3)
 
 The handler does NOT manage lifecycle (start/stop) — meshforge-maps owns its
 own systemd unit. If the service is unreachable, Status renders a fix hint
@@ -25,8 +26,16 @@ from handler_protocol import BaseHandler
 from utils.meshforge_maps_client import (
     DEFAULT_HOST,
     DEFAULT_PORT,
+    DEFAULT_TIMEOUT,
     MeshforgeMapsClient,
     MapsServiceStatus,
+)
+from utils.meshforge_maps_config import (
+    MapsConfig,
+    MapsConfigError,
+    load_maps_config,
+    reset_maps_config,
+    save_maps_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,26 +51,31 @@ class MeshforgeMapsHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("mf_status", "Meshforge Maps      Service status (:8808)", None),
-            ("mf_open",   "Open Maps Browser   Launch :8808 in browser", None),
+            ("mf_status",   "Meshforge Maps      Service status",          None),
+            ("mf_open",     "Open Maps Browser   Launch UI in browser",    None),
+            ("mf_endpoint", "Maps Endpoint       Configure host/port",     None),
         ]
 
     def execute(self, action):
         dispatch = {
-            "mf_status": ("Meshforge Maps Status", self._show_status),
-            "mf_open": ("Open Meshforge Maps", self._open_browser),
+            "mf_status":   ("Meshforge Maps Status",   self._show_status),
+            "mf_open":     ("Open Meshforge Maps",     self._open_browser),
+            "mf_endpoint": ("Configure Maps Endpoint", self._configure_endpoint),
         }
         entry = dispatch.get(action)
         if entry:
             self.ctx.safe_call(*entry)
 
     def _client(self) -> MeshforgeMapsClient:
-        """Construct a client. Hardcodes localhost:8808 today; if/when
-        meshforge-maps grows a remote-host config, plumb it here."""
-        return MeshforgeMapsClient(host=DEFAULT_HOST, port=DEFAULT_PORT)
+        """Build a probe client from the persisted endpoint config.
+
+        Falls back transparently to the Phase 6 defaults
+        (``localhost:8808`` / ``timeout=3.0``) if no settings file exists.
+        """
+        return load_maps_config().build_client()
 
     def _show_status(self):
-        """Probe :8808 and render the snapshot."""
+        """Probe the configured endpoint and render the snapshot."""
         from backend import clear_screen
 
         clear_screen()
@@ -78,7 +92,7 @@ class MeshforgeMapsHandler(BaseHandler):
             print()
 
     def _open_browser(self):
-        """webbrowser.open the :8808 Leaflet UI."""
+        """webbrowser.open the configured endpoint."""
         from backend import clear_screen
 
         clear_screen()
@@ -96,6 +110,84 @@ class MeshforgeMapsHandler(BaseHandler):
             self.ctx.wait_for_enter("\nPress Enter to return to menu...")
         except KeyboardInterrupt:
             print()
+
+    def _configure_endpoint(self):
+        """Prompt for host / port / timeout and persist via SettingsManager."""
+        cfg = load_maps_config()
+        dialog = self.ctx.dialog
+
+        while True:
+            choice = dialog.menu(
+                "Meshforge Maps Endpoint",
+                f"Currently: http://{cfg.host}:{cfg.port}  (timeout {cfg.timeout}s)\n\n"
+                "Pick a field to edit, or Reset to restore defaults.",
+                [
+                    ("host",    f"Host       [{cfg.host}]"),
+                    ("port",    f"Port       [{cfg.port}]"),
+                    ("timeout", f"Timeout    [{cfg.timeout}s]"),
+                    ("reset",   f"Reset      Restore localhost:{DEFAULT_PORT}"),
+                    ("back",    "Back       Return to maps menu"),
+                ],
+            )
+            if not choice or choice == "back":
+                return
+
+            if choice == "host":
+                cfg = self._prompt_host(cfg) or cfg
+            elif choice == "port":
+                cfg = self._prompt_port(cfg) or cfg
+            elif choice == "timeout":
+                cfg = self._prompt_timeout(cfg) or cfg
+            elif choice == "reset":
+                if dialog.yesno(
+                    "Reset Maps Endpoint",
+                    f"Reset to {DEFAULT_HOST}:{DEFAULT_PORT} "
+                    f"(timeout {DEFAULT_TIMEOUT}s)?",
+                ):
+                    cfg = reset_maps_config()
+                    dialog.msgbox("Reset", "Endpoint restored to defaults.")
+
+    def _prompt_host(self, cfg: MapsConfig):
+        new_host = self.ctx.dialog.inputbox(
+            "Maps Host",
+            "Enter hostname or IP for meshforge-maps:",
+            cfg.host,
+        )
+        if not new_host:
+            return None
+        try:
+            return save_maps_config(host=new_host.strip())
+        except MapsConfigError as e:
+            self.ctx.dialog.msgbox("Invalid Host", str(e))
+            return None
+
+    def _prompt_port(self, cfg: MapsConfig):
+        new_port = self.ctx.dialog.inputbox(
+            "Maps Port",
+            "Enter HTTP port for meshforge-maps (1-65535):",
+            str(cfg.port),
+        )
+        if not new_port:
+            return None
+        try:
+            return save_maps_config(port=int(new_port.strip()))
+        except (ValueError, MapsConfigError) as e:
+            self.ctx.dialog.msgbox("Invalid Port", str(e))
+            return None
+
+    def _prompt_timeout(self, cfg: MapsConfig):
+        new_timeout = self.ctx.dialog.inputbox(
+            "Maps Probe Timeout",
+            "Enter probe timeout in seconds (e.g. 3.0):",
+            str(cfg.timeout),
+        )
+        if not new_timeout:
+            return None
+        try:
+            return save_maps_config(timeout=float(new_timeout.strip()))
+        except (ValueError, MapsConfigError) as e:
+            self.ctx.dialog.msgbox("Invalid Timeout", str(e))
+            return None
 
 
 def _format_status(status: MapsServiceStatus) -> str:
