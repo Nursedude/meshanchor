@@ -26,7 +26,7 @@ class RNSSnifferHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("sniffer", "RNS Traffic Sniffer (Wireshark-grade)", None),
+            ("sniffer", "RNS Traffic Sniffer (Wireshark-grade)", "rns"),
         ]
 
     def execute(self, action):

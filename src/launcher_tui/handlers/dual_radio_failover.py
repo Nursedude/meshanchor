@@ -68,7 +68,7 @@ class DualRadioFailoverHandler(BaseHandler):
         return [
             ("dual_failover",
              "Dual-Radio Failover    Configure, test, deploy failover",
-             None),
+             "gateway"),
         ]
 
     def execute(self, action):

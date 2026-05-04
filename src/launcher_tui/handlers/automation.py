@@ -36,7 +36,7 @@ class AutomationHandler(BaseHandler):
 
     def menu_items(self) -> List[Tuple[str, str, Optional[str]]]:
         return [
-            ("automation", "Automation       Auto-ping, traceroute, welcome", None),
+            ("automation", "Automation       Auto-ping, traceroute, welcome", "meshtastic"),
         ]
 
     def execute(self, action: str) -> None:

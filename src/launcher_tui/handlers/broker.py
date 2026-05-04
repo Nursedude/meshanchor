@@ -45,7 +45,7 @@ class BrokerHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("broker-menu", "Broker Manager      MQTT broker setup", None),
+            ("broker-menu", "Broker Manager      MQTT broker setup", "mqtt"),
         ]
 
     def execute(self, action):

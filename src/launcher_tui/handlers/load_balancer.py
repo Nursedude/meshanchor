@@ -28,7 +28,7 @@ class LoadBalancerHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("load_balancer", "TX Load Balancer    Dual-radio TX distribution", None),
+            ("load_balancer", "TX Load Balancer    Dual-radio TX distribution", "gateway"),
         ]
 
     def execute(self, action):
