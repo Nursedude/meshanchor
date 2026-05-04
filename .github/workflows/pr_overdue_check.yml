@@ -39,8 +39,13 @@ jobs:
           set -u
           BASE_REF="${{ github.event.pull_request.base.ref }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          git fetch --no-tags --prune origin "$BASE_REF":"refs/remotes/origin/$BASE_REF"
-          BASE_TIP="$(git rev-parse "origin/$BASE_REF")"
+          # Fetch base branch tip and use FETCH_HEAD. The previous form
+          # used `--prune` with an explicit refspec; on actions/checkout's
+          # narrow `remote.origin.fetch` config that combination DELETED
+          # `origin/main` instead of updating it, breaking `git rev-parse
+          # origin/$BASE_REF` (see PR #13 CI run 25297110388).
+          git fetch --no-tags origin "$BASE_REF"
+          BASE_TIP="$(git rev-parse FETCH_HEAD)"
 
           BEHIND=$(git rev-list --count "$HEAD_SHA..$BASE_TIP")
           AHEAD=$(git rev-list --count "$BASE_TIP..$HEAD_SHA" || echo "?")
