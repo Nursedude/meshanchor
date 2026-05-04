@@ -25,7 +25,7 @@ class ClassifierHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("traffic", "Traffic Classifier  Routing & notification stats", None),
+            ("traffic", "Traffic Classifier  Routing & notification stats", "meshtastic"),
         ]
 
     def execute(self, action):

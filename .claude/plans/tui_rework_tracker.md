@@ -14,7 +14,7 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 |---|---|---|---|---|
 | 1 | Map data flip — MeshCore as source | **MERGED** ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) (merge 0b91289c) | 2026-05-03 |
 | 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | **MERGED** ✅ | [PR #16](https://github.com/Nursedude/meshanchor/pull/16) (merge e0d4d326) | 2026-05-03 |
-| 3 | Handler feature-flag audit (~40 Meshtastic handlers) | not started | — | — |
+| 3 | Handler feature-flag audit (~40 Meshtastic handlers) | **implementation — PR pending** | `claude/mc-phase3-handler-flag-audit` | 2026-05-03 |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | not started | — | — |
 | 5 | Startup health flip (meshtasticd → optional) | not started | — | — |
 | 6 | meshforge-maps :8808 plugin scaffold | not started | — | — |
@@ -160,6 +160,21 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Phase 3 readiness check** (relevant for the next session): no clearance needed. The handler-flag audit only reads `menu_items()` rows on the handlers and writes back `feature_flag=` values — no schema or section migrations are pending, no other branch is in flight against the same files, and the existing feature-flag plumbing (`_feature_enabled` + `feature_flags` dict on TUIContext + per-row `flag` argument in `BaseHandler.menu_items()`) is already wired end-to-end. The only open design question for Phase 3 is policy, not infrastructure: **opt-in or opt-out** when a handler row has no obvious flag (default to safe — keep visible — and only gate rows that genuinely require Meshtastic / RNS / Gateway).
 - **Next session resume point**: branch `claude/mc-phase3-handler-flag-audit`. Step 1 = enumerate all `mesh_networks` + `rns` section handlers' `menu_items()` rows and tag each with the appropriate flag (`meshtastic`, `rns`, `gateway`, or `None` = always-visible). Step 2 = write the changes per-handler in one PR, paired with smoke tests asserting that under a MESHCORE-only profile the Optional Gateways submenu has zero `mesh_networks`-tagged Meshtastic items. Step 3 = run lint + the existing test suites.
 
+**2026-05-03 (Phase 3 implementation — PR pending)**:
+- User picked policy **(a) opt-in flagging only**: gate clear meshtastic / rns / gateway / mqtt rows; leave cross-radio rows (HAM, AREDN, Favorites, Service Menu) always-visible.
+- **Handler audit matrix applied** — 12 handlers, 17 rows newly flagged:
+  - `meshtastic`: `automation`, `classifier` (`traffic` tag).
+  - `mqtt`: `broker` (`broker-menu` tag).
+  - `gateway`: `dual_radio_failover`, `load_balancer`, `mesh_alerts`, `messaging` (semantically only routes Meshtastic + RNS today, so the `gateway` flag is the right gate even though the row is named "messaging").
+  - `rns`: every row in `rns_config` (4) + `rns_diagnostics` (3) + `rns_interfaces` + `rns_monitor` + `rns_sniffer` (10 rows total in the rns section).
+  - Already-correct handlers untouched: `radio_menu` (meshtastic), `mqtt`, `nomadnet` (rns), `rns_menu` (rns), `gateway` (gateway).
+  - Always-visible (unflagged) confirmed: `amateur_radio` (`ham`), `aredn`, `favorites`, `service_menu` (`services`).
+- **Files changed** (13): 12 handlers + new `tests/test_phase3_handler_flag_audit.py` (30 tests). Each handler change was a single-line `None` → flag-string flip on the third tuple slot.
+- **Smoke-test design**: parametrized matrix asserts each `(tag, expected_flag)` pair within sections `mesh_networks`+`rns` (scoped to avoid the legitimate `traffic` tag collision with `traffic_inspector` in `maps_viz`); profile-level integration test builds a full HandlerRegistry under MESHCORE flags and asserts (1) zero leaked gated tags, (2) all four cross-radio tags still visible, (3) the entire `rns` section collapses to empty under MESHCORE, (4) FULL profile shows everything again.
+- **Gates green**: `lint --all` exit 0; combined run of `test_phase3_handler_flag_audit.py + test_phase2_menu_restructure.py + test_handler_registry.py + test_meshcore_handler.py + test_all_handlers_protocol.py + test_regression_guards.py + test_handlers_dual_radio_failover.py + test_handlers_service_menu.py + test_handlers_gateway.py + test_nomadnet_handler.py` = **648 passed**.
+- **Branched off main pre-PR-#17**, so the local tracker file may show a small Phase 2 row delta vs. what's on origin/main once #17 merges. Trivial conflict (this Phase 3 entry is appended below the Phase 2 entries, which is exactly where #17 added its own Phase 2 MERGED entry — so it's the same insertion site, easy resolve at merge time).
+- **Next session resume point**: wait for the Phase 3 PR to merge, then **start Phase 4** (MeshCore radio config gap — presets/channels/TX power UI for MeshCore). Begin by adding a Phase 4 "Key contract findings" + "Implementation outline" section. Branch convention: `claude/mc-phase4-meshcore-config`. The Phase 4 work is a feature-add to the `meshcore.py` handler's submenu, not another menu restructure.
+
 ---
 
 ## Decisions Log (cross-phase, durable)
@@ -174,6 +189,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-03 | Phase 2 picked Option 2-full (MeshCore primary at slot #2; Optional Gateways nested) | Charter explicitly calls for "Optional Gateways submenu". 2-light was a stepping stone; 2-full delivers the demoted/promoted structure the charter wants. |
 | 2026-05-03 | Phase 2 keeps internal section key `mesh_networks` (only label changes to "Optional Gateways") | Avoids touching ~15 handlers' `menu_section` attribute when only one (`meshcore`) actually needed to move. Reversible. |
 | 2026-05-03 | Phase 2 stays at 6 primary slots (no menu growth) | Slot #2 repurposed in place; no item added or dropped from the top-level menu. Keeps within the soft UX cap. |
+| 2026-05-03 | Phase 3 chose opt-in flagging (Option a) | User explicit choice. Lower risk + lower line count than opt-out. The user-visible win (MESHCORE profile drops Meshtastic/RNS/Gateway rows) comes from gating the obvious 17 rows; chasing every cross-cutting one would over-gate handlers like Favorites and Service Menu that are useful regardless of profile. |
+| 2026-05-03 | Phase 3 gates `messaging` behind `gateway` flag despite no exact-fit flag | The current `messaging` menu only offers Meshtastic and RNS as transports. Under MESHCORE all three of those are False, so the menu is half-broken there. `gateway` is the only flag whose truth value matches "is there a non-MeshCore radio to route through". Reversible if a finer-grained flag is added later. |
 
 ---
 

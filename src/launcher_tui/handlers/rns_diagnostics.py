@@ -51,9 +51,9 @@ class RNSDiagnosticsHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("diag", "RNS Diagnostics", None),
-            ("repair", "Repair RNS", None),
-            ("drift", "Config Drift Check", None),
+            ("diag", "RNS Diagnostics", "rns"),
+            ("repair", "Repair RNS", "rns"),
+            ("drift", "Config Drift Check", "rns"),
         ]
 
     def execute(self, action):

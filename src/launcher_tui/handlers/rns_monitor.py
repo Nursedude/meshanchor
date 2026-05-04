@@ -67,7 +67,7 @@ class RNSMonitorHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("monitor", "Live RNS Monitor (auto-refresh)", None),
+            ("monitor", "Live RNS Monitor (auto-refresh)", "rns"),
         ]
 
     def execute(self, action):

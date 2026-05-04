@@ -35,7 +35,7 @@ class MeshAlertsHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("mesh_alerts", "Mesh Alerts     Battery, emergency, disconnect", None),
+            ("mesh_alerts", "Mesh Alerts     Battery, emergency, disconnect", "gateway"),
         ]
 
     def execute(self, action):

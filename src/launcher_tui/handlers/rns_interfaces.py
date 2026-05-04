@@ -27,7 +27,7 @@ class RNSInterfacesHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("ifaces", "Manage Interfaces", None),
+            ("ifaces", "Manage Interfaces", "rns"),
         ]
 
     def execute(self, action):

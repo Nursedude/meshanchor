@@ -30,10 +30,10 @@ class RNSConfigHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("config", "View Reticulum Config", None),
-            ("edit", "Edit Reticulum Config", None),
-            ("logging", "Configure RNS Logging", None),
-            ("check", "Check RNS Setup", None),
+            ("config", "View Reticulum Config", "rns"),
+            ("edit", "Edit Reticulum Config", "rns"),
+            ("logging", "Configure RNS Logging", "rns"),
+            ("check", "Check RNS Setup", "rns"),
         ]
 
     def execute(self, action):

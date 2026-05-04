@@ -32,7 +32,7 @@ class MessagingHandler(BaseHandler):
 
     def menu_items(self):
         return [
-            ("messaging", "Messaging           Send/receive messages", None),
+            ("messaging", "Messaging           Send/receive messages", "gateway"),
         ]
 
     def execute(self, action):
