@@ -17,8 +17,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 1 | Map data flip — MeshCore as source | merged ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) |
 | 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | merged ✅ | [PR #16](https://github.com/Nursedude/meshanchor/pull/16) |
 | 3 | Handler feature-flag audit (opt-in flagging, 12 handlers / 17 rows) | merged ✅ | [PR #18](https://github.com/Nursedude/meshanchor/pull/18) |
-| 4 | MeshCore radio config gap (presets/channels/TX power) | in flight | 4a [PR #20](https://github.com/Nursedude/meshanchor/pull/20) merged ✅; 4b `claude/mc-phase4b-radio-writes` |
-| 5 | Startup health flip (meshtasticd → optional) | not started | — |
+| 4 | MeshCore radio config gap (presets/channels/TX power) | merged ✅ | 4a [PR #20](https://github.com/Nursedude/meshanchor/pull/20); 4b [PR #21](https://github.com/Nursedude/meshanchor/pull/21) (merge `fa41c5ce`) |
+| 5 | Startup health flip (meshtasticd → optional) | in flight | `claude/mc-phase5-health-flip` |
 | 6 | meshforge-maps :8808 plugin scaffold | not started | — |
 | 7 | Profile defaults + docs | not started | — |
 
@@ -169,6 +169,62 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 5 — Startup Health Flip (meshtasticd → optional)
+
+**Goal**: A MESHCORE-only deployment shouldn't light up red just because `meshtasticd`/`rnsd` aren't running — they're Optional Gateways under that profile, not required core services. Make the startup banner profile-aware so MeshAnchor reports "Ready" when the components the active profile actually needs are healthy.
+
+**Key contract findings (2026-05-04 audit)**:
+
+- **`startup_health.py` already accepts `profile=None`** at line 343 — and `launcher.py:165` already calls it with the active profile. The plumbing is in place. Two bugs prevent it from working:
+  1. Line 78-84: `is_ready` hardcodes "meshtasticd must be running" — independent of profile. So even when `overall_status='ready'`, `is_ready` still returns False under MESHCORE.
+  2. Lines 369-378: services NOT in the profile's required/optional list are marked `optional=True` — but `optional_ok = all(s.running for s in optional services)` then DEMOTES status to "degraded" when those services aren't running. There's no way to say "this service is irrelevant for this profile, ignore it for the overall_status calculation."
+- **`MESHCORE` profile has empty service lists**: `required_services=[]`, `optional_services=[]` (line 102-119 of `deployment_profiles.py`). MeshCore daemon runs in-process; there's no systemd service to check. So under MESHCORE, all three audited services (meshtasticd, rnsd, mosquitto) fall into the "not in either list" bucket — which is exactly the bug above.
+- **Auto-detection works**: `load_or_detect_profile()` at line 349 returns the saved profile or auto-detects via running-services heuristic, defaulting to MESHCORE.
+- **No `/health` HTTP endpoint exists on the daemon**. Prometheus exporter has one at a different port. Phase 5 adds `GET /health` to the `:8081` daemon, mirroring the `/radio` and `/chat/*` pattern from Phase 4.
+- **Defer-list (legitimate gateway-side requirements when those features are active)**: `health_score.py:719` hardcodes meshtasticd/rnsd as critical for the alert engine; `active_health_probe.py:582-596` registers gateway probes without consulting profile; `service_menu.py:168-171` bridge preflight requires meshtasticd. All three only run under GATEWAY/FULL profiles where those services *are* required, so they don't fire under MESHCORE today. Document in the PR; defer to a follow-up.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase5-health-flip`. **Done.**
+2. **Pre-Phase-5 cleanup (opening commit)**: extract `_handle_radio_get` + `_handle_radio_put` into `src/utils/radio_api.py`. `config_api.py` was 1526 (over the 1500 cap); becomes 1440 + new `radio_api.py` (121 lines). Class methods on `ConfigAPIHandler` are thin delegators so test fixtures that drive `h._handle_radio_*` directly stay untouched. **Done in commit `8e44cb3a`.**
+3. **Phase 5 implementation (feature commit)**:
+   - **`startup_health.py`** — add `not_applicable: bool = False` to `ServiceHealth`. `run_health_check(profile)` now classifies each service as required / optional / not_applicable. `overall_status` is computed from `relevant = [s for s in summary.services if not s.not_applicable]`. `is_ready` becomes `overall_status in ("ready", "degraded")`. `print_health_summary` and `get_compact_status` render not_applicable services dim. `get_health_dict` exposes `profile_name`, per-service `not_applicable` + `fix_hint`.
+   - **`utils/health_api.py`** (new, 57 lines) — `handle_get(handler)` resolves the active profile via `load_or_detect_profile()` (best-effort; falls back to `profile=None` on error) and returns `{"health": <dict>}`. 503 on import failure, 500 on `run_health_check` exception. Service degradation is encoded in the body, not the HTTP status.
+   - **`config_api.py`** — wire `/health` route into `do_GET` next to `/chat/*` and `/radio`. New thin delegator `_handle_health_get`. Routed BEFORE the api null-check so `/health` works before `ConfigurationAPI` is initialized.
+4. **Tests** (`tests/test_phase5_startup_health.py`, 18 tests across 4 classes):
+   - `TestProfileAwareClassification` (6) — MESHCORE no services → ready; MESHCORE w/ stray meshtasticd running still ready (n/a flag preserved); FULL missing required rnsd → error; FULL missing optional meshtasticd → degraded; GATEWAY all-optional → degraded but is_ready=True; no profile → legacy behaviour (meshtasticd hardcoded required).
+   - `TestIsReadyProperty` (4) — ready/degraded → True; error/unknown → False.
+   - `TestHealthDictShape` (2) — dict carries `profile_name` and per-service `not_applicable` + `fix_hint`.
+   - `TestHealthEndpoint` (5) — 200 envelope; 500 on run_health_check exception; profile-resolution failure falls back to `profile=None` (still serves a snapshot); `do_GET` dispatches `/health` and `/health?...`.
+   - `TestHealthRoutingIsolation` (1) — `/health` works when `self.api is None` (the config-store API isn't initialized yet).
+
+**Critical files (cross-reference)**:
+
+- `src/utils/startup_health.py:78-84` — `is_ready` flip (was hardcoded meshtasticd)
+- `src/utils/startup_health.py:343-407` — `run_health_check` not_applicable classification
+- `src/utils/startup_health.py:487-512` — `get_health_dict` shape
+- `src/utils/health_api.py` — new module, mirrors `radio_api.py` pattern
+- `src/utils/config_api.py:1006-1030` — `do_GET` route registration
+- `src/utils/deployment_profiles.py:100-195` — profile definitions (read but not touched)
+
+**Definition of Done**:
+- [x] `config_api.py` under 1500-line cap (currently 1451)
+- [x] MESHCORE profile + no services running → `overall_status='ready'`, `is_ready=True`
+- [x] FULL profile + missing required rnsd → `overall_status='error'`
+- [x] No-profile path preserves legacy "meshtasticd is required" behaviour
+- [x] `GET /health` returns `{"health": {...}}` with `profile_name`, services list, `is_ready`
+- [x] `/health` works when `ConfigurationAPI` isn't initialized
+- [x] Lint clean
+- [x] All Phase 4a/4b/chat/regression suites still pass
+- [ ] PR opened to main
+
+**Deferred to a Phase 5.5 follow-up**:
+- `health_score.py:719` hardcoded `critical=(name in ('meshtasticd','rnsd'))` — alert-engine refactor needed
+- `active_health_probe.py:582-596` — `create_gateway_health_probe()` should consult the active profile, not just `noc.yaml`
+- `service_menu.py:168-171` — bridge preflight should soften meshtasticd check when profile doesn't require it (rnsd remains required for bridge)
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -265,6 +321,20 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Files changed in this prep PR** (1): `.claude/plans/tui_rework_tracker.md` only.
 - **Next session resume point**: review/merge this prep PR, then start Phase 4a implementation. Step 1 of Phase 4a = answer Q1 (install meshcore_py, inspect `commands.*` for radio-config methods). Steps 2-5 are written out in the Phase 4 section above. If Q1's answer is "no", revise the Phase 4a outline before coding — the daemon-side wire-protocol path is materially more work than the meshcore_py-shim path.
 
+**2026-05-04 (Phase 4b MERGED + Phase 5 implementation — PR pending)**:
+- PR #21 merged into main as merge commit `fa41c5ce` at 2026-05-04T05:03Z. Phase 4b shipped radio writes (LoRa / TX power / channels) + region-aware validation. Phase Status table now shows Phase 4 as `merged ✅` per the no-standalone-bumps lifecycle.
+- **Branch**: `claude/mc-phase5-health-flip` off main.
+- **Commit 1 — radio_api split** (`8e44cb3a`, no behaviour change): `config_api.py` was at 1526 (over the 1500 cap from PR #21). Extract `_handle_radio_get` + `_handle_radio_put` into new `src/utils/radio_api.py` (121 lines). `ConfigAPIHandler._handle_radio_*` methods become thin delegators so `tests/test_phase4{a,b}_radio_*.py`'s direct method-driving fixtures stay untouched. config_api.py: 1526 → 1440. 98 radio + chat tests + 17 regression guards green.
+- **Commit 2 — health flip** (`c1ae4498`): three-layer change.
+  1. `startup_health.py` (580 → 614): `ServiceHealth.not_applicable` field added; `run_health_check(profile)` classifies each service required/optional/not_applicable; `overall_status` ignores not_applicable services; `is_ready` flips from "is meshtasticd running?" to `overall_status in ("ready", "degraded")`. `print_health_summary` and `get_compact_status` render N/A services dim. `get_health_dict` exposes `profile_name` + per-service `not_applicable` + `fix_hint`.
+  2. `utils/health_api.py` (new, 57 lines): `handle_get(handler)` — auto-resolves the active profile via `load_or_detect_profile()` (best-effort; falls back to `profile=None` on error) and returns `{"health": <dict>}`. 503 on import failure, 500 on `run_health_check` exception.
+  3. `config_api.py` (1440 → 1451): wire `GET /health` route into `do_GET`, route ABOVE the api null-check so it works before `ConfigurationAPI` is initialized. New thin delegator `_handle_health_get`.
+- **Tests**: `tests/test_phase5_startup_health.py` (NEW, 18 tests across 4 classes — see Phase 5 section above for the full breakdown). 647 tests passed across phase4a/4b/chat/regression/phases 1-3/all-handlers/meshcore_handler suites.
+- **File-size watch**: `config_api.py` 1451 (under cap, +11 from health route + delegator), `startup_health.py` 614, new `health_api.py` 57, `radio_api.py` 121.
+- **Backward compat preserved**: passing `profile=None` to `run_health_check` keeps the legacy "meshtasticd treated as required" behaviour. Confirmed by `test_no_profile_falls_back_to_legacy_behaviour`. Existing callers that haven't migrated to passing a profile still see the old semantics.
+- **Deferred to Phase 5.5** (legitimate when those features are active under GATEWAY/FULL): `health_score.py:719` hardcoded critical=meshtasticd/rnsd; `active_health_probe.py:582-596` doesn't consult profile; `service_menu.py:168-171` bridge preflight requires meshtasticd. None of these fire under MESHCORE today, so deferring doesn't reintroduce the user-visible bug.
+- **Next session resume point**: review/merge the Phase 5 PR. Once merged, **Phase 6** (meshforge-maps :8808 plugin scaffold) starts. Phase 6's prep PR flips this Phase 5 row to `merged ✅` per the no-standalone-bumps lifecycle. Branch convention: `claude/mc-phase6-maps-plugin`. Phase 5.5 cleanup (health_score / active_health_probe / service_menu deferrals) is independently mergeable and can slot in either before or after Phase 6 — they aren't gating each other.
+
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-05-03 | Meshtastic handlers gated behind feature flag, not deleted | Preserves `gateway`/`full` profile capability. Reversible. |
@@ -279,6 +349,10 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-03 | Phase 3 gates `messaging` behind `gateway` flag despite no exact-fit flag | The current `messaging` menu only offers Meshtastic and RNS as transports. Under MESHCORE all three of those are False, so the menu is half-broken there. `gateway` is the only flag whose truth value matches "is there a non-MeshCore radio to route through". Reversible if a finer-grained flag is added later. |
 | 2026-05-03 | Phase Status table simplified; no more standalone tracker-bump PRs | User explicit feedback: per-phase post-merge bumps (PR #14, PR #17) created admin overhead and tracker conflicts (PR #18 hit `CONFLICTING / DIRTY` because of this). Root cause was duplicate state on disk (`implementation — PR pending`) that needed a separate PR to flip post-merge. New rule: status states are `merged ✅` / `in flight` / `not started` only, and the next phase's prep PR flips the prior row. `git log` / `gh pr view` is authoritative for "did this merge". |
 | 2026-05-03 | Phase 4 split into 4a (read-only) and 4b (writes) | Lower regression surface. Phase 4a discovers the meshcore_py command surface for radio config (open question Q1) before committing to a write path. Misconfigured radio writes can brick a radio for a region — Phase 4b will need explicit confirmations and validation that 4a doesn't, so they're naturally separate PRs. |
+| 2026-05-04 | Phase 5 introduces a `not_applicable` ServiceHealth state instead of overloading `optional` | The original `run_health_check(profile)` already had two states (`optional=True/False`) but a service that's irrelevant for the active profile is fundamentally different from one that's relevant-but-optional. Conflating them caused MESHCORE-only deployments to render "degraded" because mosquitto/meshtasticd/rnsd weren't in MESHCORE's required or optional lists, but were still gating `optional_ok=all(running)`. A third state cleanly separates "report it but don't gate health" from "report it and warn if missing". |
+| 2026-05-04 | Phase 5 keeps backward compat for `run_health_check(profile=None)` | Legacy callers (anything that hasn't migrated to passing a profile) still see the old "meshtasticd is required" semantics. Avoids forcing a flag day across the codebase — callers can migrate one at a time. Verified by `test_no_profile_falls_back_to_legacy_behaviour`. |
+| 2026-05-04 | Phase 5 defers `health_score.py` / `active_health_probe.py` / `service_menu.py` to a Phase 5.5 follow-up | Those three call sites only fire under GATEWAY/FULL profiles where the relevant services *are* required, so they don't reintroduce the user-visible MESHCORE-red bug. Keeping the PR scoped to the user-facing startup banner + the new `/health` endpoint means smaller diff, easier review, and the deferred cleanup can land independently. |
+| 2026-05-04 | `/health` route handler lives in a separate `utils/health_api.py` module | Mirrors the `radio_api.py` pattern from PR #21's prep split. Keeps `config_api.py` under the 1500-line cap and isolates the deployment-profile-aware logic from the generic config-store API surface. Same routing-before-api-null-check pattern means `/health` works during daemon startup before `ConfigurationAPI` is wired up. |
 
 ---
 
