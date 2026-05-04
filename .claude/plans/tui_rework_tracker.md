@@ -10,15 +10,17 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ## Phase Status
 
-| # | Phase | Status | Branch / PR | Last touched |
-|---|---|---|---|---|
-| 1 | Map data flip — MeshCore as source | **MERGED** ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) (merge 0b91289c) | 2026-05-03 |
-| 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | **MERGED** ✅ | [PR #16](https://github.com/Nursedude/meshanchor/pull/16) (merge e0d4d326) | 2026-05-03 |
-| 3 | Handler feature-flag audit (~40 Meshtastic handlers) | **implementation — PR pending** | `claude/mc-phase3-handler-flag-audit` | 2026-05-03 |
-| 4 | MeshCore radio config gap (presets/channels/TX power) | not started | — | — |
-| 5 | Startup health flip (meshtasticd → optional) | not started | — | — |
-| 6 | meshforge-maps :8808 plugin scaffold | not started | — | — |
-| 7 | Profile defaults + docs | not started | — | — |
+> **Lifecycle**: a phase has three states only — `merged ✅`, `in flight`, `not started`. When a phase merges, the **next phase's prep PR** flips its row to `merged ✅` (one-line edit, no standalone bump PR). The `implementation — PR pending` intermediate state is gone — it caused mid-PR tracker conflicts and forced a separate roundtrip per phase. Source of truth for "did this merge" is `git log` / `gh pr view`; this table just gives a scannable index.
+
+| # | Phase | Status | Pointer |
+|---|---|---|---|
+| 1 | Map data flip — MeshCore as source | merged ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) |
+| 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | merged ✅ | [PR #16](https://github.com/Nursedude/meshanchor/pull/16) |
+| 3 | Handler feature-flag audit (opt-in flagging, 12 handlers / 17 rows) | merged ✅ | [PR #18](https://github.com/Nursedude/meshanchor/pull/18) |
+| 4 | MeshCore radio config gap (presets/channels/TX power) | in flight | `claude/mc-phase4-meshcore-config` |
+| 5 | Startup health flip (meshtasticd → optional) | not started | — |
+| 6 | meshforge-maps :8808 plugin scaffold | not started | — |
+| 7 | Profile defaults + docs | not started | — |
 
 ---
 
@@ -117,6 +119,56 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 4 — MeshCore Radio Config Gap
+
+**Goal**: Surface MeshCore's LoRa radio parameters (preset, channel slots, TX power, frequency band) inside the existing MeshCore TUI submenu so MeshCore-primary users can configure the radio without leaving MeshAnchor for the external `meshcore_set_channel.py` script or the Node-Connect web UI.
+
+**Key contract findings (from 2026-05-03 prep exploration)**:
+
+- **Today's MeshCore submenu** (`src/launcher_tui/handlers/meshcore.py:44`, `_meshcore_menu`) exposes 8 items: `status`, `detect`, `config`, `enable`, `nodes`, `stats`, `chat`, `daemon`. **Zero are radio parameters.**
+- **The `config` item is connection-only** (`_meshcore_configure`): serial path, baud rate, TCP host/port, plus the bridge-channels / bridge-DMs toggles. Not LoRa preset, not channel slot, not TX power, not frequency.
+- **Where MeshCore radio config goes today**: external `meshcore_set_channel.py` script + Node-Connect web UI. Confirmed by the comment at `src/gateway/meshcore_handler.py:869` ("slots set up via meshcore_set_channel.py / Node-Connect"). MeshAnchor users currently leave the TUI to configure the radio.
+- **meshcore_py command surface used by MeshAnchor today** (greppable in `src/gateway/meshcore_handler.py`): `commands.get_contacts`, `commands.send_msg`, `commands.send_chan_msg`, `commands.get_channel_messages`, `commands.get_messages`, plus lifecycle (`subscribe`, `start`, `start_auto_message_fetching`, `stop`/`disconnect`/`close`). **No radio-config commands are used today** — this is the API surface gap.
+- **Daemon HTTP API surface** (`src/utils/config_api.py`): `/chat/send`, `/chat/messages?since=<id>`, `/chat/channels`, plus generic `/config/*` (key/value config server, validators in place). **No `/radio` or `/preset` endpoint exists.** Whatever Phase 4 adds will be greenfield routes on the daemon.
+- **Serial-port locking constraint**: per memory + `meshcore_handler.py`, the MeshCore daemon owns p4's serial port. The TUI runs in a separate process and cannot open the port directly — any radio-config write has to flow through the daemon (HTTP API or shared-state IPC), not via a parallel meshcore_py connection from the TUI.
+- **File size headroom**: `meshcore.py` (TUI handler) is 840 lines, `meshcore_handler.py` (daemon) is 1230 lines. Both under the 1500-line cap, but if Phase 4 adds three new TUI methods (preset / channel / TX power) plus matching daemon endpoints, the daemon side will likely cross 1400 — schedule a split if it does (per `persistent_issues.md` Issue #6).
+
+**Open questions (must resolve before coding)**:
+
+1. **Does meshcore_py expose radio-config commands?** Need to install meshcore_py locally (or read the upstream source) and inspect `commands.*` for any of: `set_channel`, `set_preset`, `set_tx_power`, `set_freq`, `set_lora_params`. If yes → simpler implementation (TUI → daemon HTTP shim → meshcore_py). If no → need to figure out what `meshcore_set_channel.py` actually does at the wire level and reimplement that protocol inside the daemon. Punt the answer to step 1 of the implementation PR.
+2. **Where do the new daemon endpoints live?** Two options: (a) add `/radio/*` routes to the existing `ConfigAPIHandler` in `src/utils/config_api.py` (alongside `/chat/*`), keeping a single HTTP surface on :8081; (b) add a new `/radio/*` handler module imported by the daemon, separate file. Option (a) keeps the API surface coherent but pushes config_api.py larger; option (b) is cleaner separation. Lean (a) for the first cut; refactor to (b) only if config_api.py crosses 1500.
+3. **Read-only vs write?** Cleanest first PR is **read-only** — show current preset / channel / TX power. Writes (which mutate radio state and could brick a misconfigured radio if the user picks a wrong region) are a separate PR with explicit confirmations and a "back-out" path. Recommend: Phase 4a = read-only display; Phase 4b = writes with confirmations. Lower regression surface, easier review.
+4. **Is "frequency" exposed as a separate config or rolled into preset?** Need to verify against meshcore_py's data model. MeshCore presets typically bundle (BW, SF, CR, freq), so exposing frequency separately may be redundant. Defer to step 1.
+
+**Implementation outline** (assumes Q1 = "yes, meshcore_py exposes the commands", Q3 = "Phase 4a is read-only first"):
+
+1. **Branch**: `claude/mc-phase4-meshcore-config` (this branch — currently in prep mode).
+2. **Prep PR (this PR)**: tracker updates only — Phase Status table simplified + Phase 4 section written (this section). No code.
+3. **Implementation PR (Phase 4a — read-only)**:
+   - `src/utils/config_api.py` — add `GET /radio/preset`, `GET /radio/channels`, `GET /radio/tx_power`. Each endpoint reads from a shared MeshCore daemon state object (same one chat reads from) and returns JSON.
+   - `src/gateway/meshcore_handler.py` — extend the existing daemon to query meshcore_py for radio params on connect + on a periodic refresh, store in a `RadioState` dataclass, expose to the HTTP layer.
+   - `src/launcher_tui/handlers/meshcore.py` — add a single new menu item `radio` ("Radio Config        Preset, channels, TX power (read-only)") between `config` and `enable`. New method `_meshcore_radio_status()` calls the three GET endpoints and prints a status block.
+   - Tests: `tests/test_phase4a_radio_readonly.py` — fixture mocks the three GET endpoints, asserts the TUI handler prints the expected fields when daemon responds, and shows "MeshCore daemon not running" when the connection fails.
+4. **Implementation PR (Phase 4b — writes, separate PR after 4a merges)**:
+   - Add `PUT /radio/preset`, `PUT /radio/channels/<slot>`, `PUT /radio/tx_power` with input validation (preset enum, slot 0-31, TX power per region cap).
+   - Three new TUI methods: `_meshcore_set_preset`, `_meshcore_set_channel_slot`, `_meshcore_set_tx_power`. Each shows current value, new value preview, double-confirm dialog, then PUT.
+   - Tests assert input validation rejects out-of-range / wrong-region values.
+5. **Verification (post-4a)**: launch TUI under MESHCORE profile, navigate MeshCore → Radio Config, confirm display matches what `meshcore_set_channel.py --show` reports against the same radio.
+
+**Critical files (cross-reference)**:
+
+- `src/launcher_tui/handlers/meshcore.py:44` — `_meshcore_menu` (insertion point for the new "radio" entry)
+- `src/launcher_tui/handlers/meshcore.py:84` — `_meshcore_status_line` (status hint may want a preset summary added in 4a)
+- `src/gateway/meshcore_handler.py:869` — comment confirming current external-tool config path (worth removing in 4b once writes work)
+- `src/utils/config_api.py:1012` — chat endpoint dispatch (model for /radio dispatch)
+- `src/utils/config_api.py:147` — `ConfigValidator` (reusable for /radio PUT input validation in 4b)
+
+**Blockers / open questions**:
+
+- Q1, Q2, Q3, Q4 above. Q1 is the load-bearing one — answer it first, then proceed. Q3 is the scope-control lever — strong recommendation is read-only first.
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -175,9 +227,16 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Branched off main pre-PR-#17**, so the local tracker file may show a small Phase 2 row delta vs. what's on origin/main once #17 merges. Trivial conflict (this Phase 3 entry is appended below the Phase 2 entries, which is exactly where #17 added its own Phase 2 MERGED entry — so it's the same insertion site, easy resolve at merge time).
 - **Next session resume point**: wait for the Phase 3 PR to merge, then **start Phase 4** (MeshCore radio config gap — presets/channels/TX power UI for MeshCore). Begin by adding a Phase 4 "Key contract findings" + "Implementation outline" section. Branch convention: `claude/mc-phase4-meshcore-config`. The Phase 4 work is a feature-add to the `meshcore.py` handler's submenu, not another menu restructure.
 
----
-
-## Decisions Log (cross-phase, durable)
+**2026-05-03 (Phase 3 MERGED + Phase 4 prep — PR pending)**:
+- PR #18 merged into main as merge commit `09b97cfa` after force-push rebase resolved the trivial tracker conflict from PR #17 landing first. Branch `claude/mc-phase3-handler-flag-audit` deleted both locally and on origin.
+- **Bottleneck addressed**: user explicitly flagged that the per-phase post-merge tracker bumps (PR #14, PR #17) were creating administrative overhead and PR collisions. This prep PR fixes the root cause:
+  - **Phase Status table simplified**: dropped the "Last touched" column; collapsed status states to three only (`merged ✅` / `in flight` / `not started`); added a lifecycle note above the table explaining that the next phase's prep PR flips the prior row to `merged`. The `implementation — PR pending` intermediate state is gone — it was the duplicate-state-on-disk pattern that caused mid-PR tracker conflicts.
+  - **No more standalone tracker-bump PRs.** Each phase = one implementation PR. The status flip happens organically during the next phase's prep.
+- **Phase 4 prep section added** with Goal + Key contract findings + four open questions + a Phase-4a-then-Phase-4b implementation outline. Critical finding: **MeshCore's radio config UI does not exist in MeshAnchor today** — the existing MeshCore submenu has 8 items, all connection / lifecycle / messaging, zero LoRa parameters. Users currently leave the TUI for `meshcore_set_channel.py` or Node-Connect web UI.
+- **Load-bearing open question for Phase 4**: does meshcore_py expose `commands.set_channel` / `set_preset` / `set_tx_power`? Need to install meshcore_py locally (or read upstream source) before writing the Phase 4a implementation PR. If yes → simple TUI → daemon HTTP shim → meshcore_py path. If no → daemon needs to reimplement the wire-level config protocol.
+- **Strong recommendation for Phase 4 scope**: split into Phase 4a (read-only display of current preset / channels / TX power) and Phase 4b (writes with input validation + double-confirm). Lower regression surface, easier review, lets us discover the meshcore_py API gap before committing to a write path.
+- **Files changed in this prep PR** (1): `.claude/plans/tui_rework_tracker.md` only.
+- **Next session resume point**: review/merge this prep PR, then start Phase 4a implementation. Step 1 of Phase 4a = answer Q1 (install meshcore_py, inspect `commands.*` for radio-config methods). Steps 2-5 are written out in the Phase 4 section above. If Q1's answer is "no", revise the Phase 4a outline before coding — the daemon-side wire-protocol path is materially more work than the meshcore_py-shim path.
 
 | Date | Decision | Rationale |
 |---|---|---|
@@ -191,6 +250,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-03 | Phase 2 stays at 6 primary slots (no menu growth) | Slot #2 repurposed in place; no item added or dropped from the top-level menu. Keeps within the soft UX cap. |
 | 2026-05-03 | Phase 3 chose opt-in flagging (Option a) | User explicit choice. Lower risk + lower line count than opt-out. The user-visible win (MESHCORE profile drops Meshtastic/RNS/Gateway rows) comes from gating the obvious 17 rows; chasing every cross-cutting one would over-gate handlers like Favorites and Service Menu that are useful regardless of profile. |
 | 2026-05-03 | Phase 3 gates `messaging` behind `gateway` flag despite no exact-fit flag | The current `messaging` menu only offers Meshtastic and RNS as transports. Under MESHCORE all three of those are False, so the menu is half-broken there. `gateway` is the only flag whose truth value matches "is there a non-MeshCore radio to route through". Reversible if a finer-grained flag is added later. |
+| 2026-05-03 | Phase Status table simplified; no more standalone tracker-bump PRs | User explicit feedback: per-phase post-merge bumps (PR #14, PR #17) created admin overhead and tracker conflicts (PR #18 hit `CONFLICTING / DIRTY` because of this). Root cause was duplicate state on disk (`implementation — PR pending`) that needed a separate PR to flip post-merge. New rule: status states are `merged ✅` / `in flight` / `not started` only, and the next phase's prep PR flips the prior row. `git log` / `gh pr view` is authoritative for "did this merge". |
+| 2026-05-03 | Phase 4 split into 4a (read-only) and 4b (writes) | Lower regression surface. Phase 4a discovers the meshcore_py command surface for radio config (open question Q1) before committing to a write path. Misconfigured radio writes can brick a radio for a region — Phase 4b will need explicit confirmations and validation that 4a doesn't, so they're naturally separate PRs. |
 
 ---
 
