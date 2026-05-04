@@ -46,6 +46,7 @@ MESHTASTICD_WEB_PORT = ports.MESHTASTICD_WEB_PORT
 RNS_SHARED_INSTANCE_PORT = ports.RNS_SHARED_INSTANCE_PORT
 RNS_TCP_SERVER_PORT = ports.RNS_TCP_SERVER_PORT
 MQTT_PORT = ports.MQTT_PORT
+CONFIG_API_PORT = ports.CONFIG_API_PORT  # MeshAnchor daemon HTTP API (chat, config)
 
 # Sudo-safe home directory — first-party, always available (MF001)
 from utils.paths import get_real_user_home
@@ -193,14 +194,21 @@ class EnvironmentState:
 class StartupChecker:
     """Performs environment checks at MeshAnchor startup."""
 
-    # Services to check with their expected ports
+    # Services to check with their expected ports.
+    #
+    # Order matters: dashboard renders these in declaration order, so
+    # the MeshCore-primary daemon (meshanchor-daemon, owns the attached
+    # radio + chat API on :8081) appears FIRST. Optional gateways
+    # (meshtasticd, rnsd) follow.
     SERVICES_TO_CHECK = {
+        'meshanchor-daemon': {'port': CONFIG_API_PORT, 'port_type': 'tcp', 'systemd': True},
         'meshtasticd': {'port': MESHTASTICD_PORT, 'port_type': 'tcp', 'systemd': True},
         'rnsd': {'port': RNS_SHARED_INSTANCE_PORT, 'port_type': 'unix_socket', 'systemd': True},
     }
 
     # Ports that MeshAnchor needs
     REQUIRED_PORTS = {
+        CONFIG_API_PORT: 'meshanchor-daemon',
         MESHTASTICD_PORT: 'meshtasticd',
         RNS_SHARED_INSTANCE_PORT: 'rnsd',
     }
