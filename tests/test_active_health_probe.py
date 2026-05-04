@@ -79,11 +79,29 @@ class TestUnmanagedServices:
 
 
 class TestCreateGatewayHealthProbe:
-    """create_gateway_health_probe skips checks for unmanaged services."""
+    """create_gateway_health_probe skips checks for unmanaged services.
+
+    Phase 5.5 added a second filter (profile-aware ``is_managed``) on top
+    of the noc.yaml ``managed: false`` filter. These tests pin a profile
+    where all three services are managed (FULL) so they continue to
+    exercise the noc.yaml filter in isolation — without the patch they'd
+    pick up whatever the CI runner auto-detects (typically MESHCORE on a
+    clean image, where nothing is managed).
+    """
+
+    def _full_profile(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            required_services=["rnsd", "mosquitto"],
+            optional_services=["meshtasticd"],
+            feature_flags={},
+        )
 
     def test_unmanaged_service_not_registered(self):
         from utils import active_health_probe as ahp
-        with patch.object(ahp, '_unmanaged_services', return_value={"meshtasticd"}):
+        with patch.object(ahp, '_unmanaged_services', return_value={"meshtasticd"}), \
+             patch("utils.profile_services._active_profile",
+                   return_value=self._full_profile()):
             probe = ahp.create_gateway_health_probe()
         registered = set(probe._checks.keys())
         assert "meshtasticd" not in registered, (
@@ -95,7 +113,9 @@ class TestCreateGatewayHealthProbe:
 
     def test_all_managed_registers_all(self):
         from utils import active_health_probe as ahp
-        with patch.object(ahp, '_unmanaged_services', return_value=set()):
+        with patch.object(ahp, '_unmanaged_services', return_value=set()), \
+             patch("utils.profile_services._active_profile",
+                   return_value=self._full_profile()):
             probe = ahp.create_gateway_health_probe()
         registered = set(probe._checks.keys())
         assert {"meshtasticd", "rnsd", "mosquitto"}.issubset(registered)
