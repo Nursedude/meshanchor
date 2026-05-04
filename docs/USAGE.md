@@ -88,6 +88,34 @@ The tool can detect:
 - Raspberry Pi model
 - Available serial ports
 
+### Deployment Profiles
+
+MeshAnchor ships with five deployment profiles that gate which TUI sections are visible based on what you're actually running. Auto-detection picks for you on first launch; pass `--profile NAME` to override.
+
+```bash
+# Auto-detect from running services + installed packages (default)
+python3 src/launcher.py
+
+# Pick a profile explicitly:
+python3 src/launcher.py --profile meshcore     # default; MeshCore radio only
+python3 src/launcher.py --profile radio_maps   # MeshCore + coverage maps
+python3 src/launcher.py --profile monitor      # MQTT analysis, no radio
+python3 src/launcher.py --profile gateway      # MeshCore <> Meshtastic/RNS bridge
+python3 src/launcher.py --profile full         # all features enabled
+
+# Selection is persisted to ~/.config/meshanchor/deployment.json
+```
+
+Quick guide to picking one:
+
+- **`meshcore`** — you have a MeshCore radio and want a clean, focused TUI.
+- **`radio_maps`** — MeshCore + you want coverage maps and topology view (the common Pi NOC deployment).
+- **`monitor`** — observing the mesh via MQTT without operating any radio yourself.
+- **`gateway`** — bridging MeshCore traffic to Meshtastic and/or RNS via this host.
+- **`full`** — every feature enabled; you're running RNS + MQTT (and optionally Meshtastic) and want the full menu hierarchy.
+
+For the full feature-flag matrix, per-profile install commands, and the rationale behind each default, see `.claude/foundations/deployment_profiles.md`.
+
 ## Troubleshooting
 
 ### Permission Issues

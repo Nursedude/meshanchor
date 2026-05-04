@@ -24,8 +24,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 5.5 | Profile-aware health code (Phase 5 deferrals) | merged ✅ | [PR #25](https://github.com/Nursedude/meshanchor/pull/25) (merge `737a1cc1`) |
 | split | map_data_collector split (1529 → 1054, Meshtastic mixin extraction) | merged ✅ | [PR #26](https://github.com/Nursedude/meshanchor/pull/26) (merge `e0d47dba`) |
 | 6.1 | meshforge-maps bidirectional handshake (data fusion) | merged ✅ | [PR #27](https://github.com/Nursedude/meshanchor/pull/27) (merge `a06dbf51`) |
-| 6.2 | meshforge-maps lifecycle control (start/stop/restart) | in flight | `claude/mc-phase6.2-lifecycle` |
-| 7 | Profile defaults + docs | not started | — |
+| 6.2 | meshforge-maps lifecycle control (start/stop/restart) | merged ✅ | [PR #28](https://github.com/Nursedude/meshanchor/pull/28) (merge `0cef4580`) |
+| 7 | Profile defaults + docs | in flight | `claude/mc-phase7-profile-defaults` |
 
 ---
 
@@ -511,6 +511,69 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 7 — Profile Defaults + Docs
+
+**Goal**: Lock in the deployment profile matrix as a code+docs invariant. Phases 1–6.x repeatedly relied on `feature_flags` to decide what surfaces in the TUI under each profile, but the matrix was only documented inside the `PROFILES` dict — there was no user-facing guide to "which profile should I pick" or "what does Monitor turn off". CLAUDE.md even referenced a foundation doc (`.claude/foundations/deployment_profiles.md`) that **doesn't exist** on disk, so the doc link was broken. Phase 7 closes the docs gap, fixes two latent defects in the defaults matrix, and pins the matrix down with a regression test so future phases can't silently drift it.
+
+**Key contract findings (2026-05-04)**:
+
+- **Active feature flags consumed in code**: `meshtastic`, `meshcore`, `rns`, `gateway`, `mqtt`, `maps`, `tactical` — verified via `grep "feature_enabled\|feature_flags\.get" src/`. The cross-cutting handlers (HAM, AREDN, Favorites, Service Menu) are always-visible by Phase 3's deliberate policy decision; their menu rows have `flag=None` and they don't appear in the `feature_flags` dict at all. Phase 7 intentionally does NOT add new flags — that would expand the surface area without a paying user case.
+- **Two latent defects in the current defaults**:
+  1. `GATEWAY.feature_flags["tactical"] = True`. Tactical Ops (SITREP, zones, QR, ATAK) is a UX surfacing concern, not a bridging concern. A user picking "Gateway Bridge" because they want to wire MeshCore↔RNS shouldn't get military-coded menus by default. They can flip it on via Settings if they want it. Phase 7 corrects this to `False`.
+  2. `list_profiles()` returns `[RADIO_MAPS, MONITOR, MESHCORE, GATEWAY, FULL]` — but the charter says MeshCore is *primary*. The Settings TUI uses `list_profiles()` order verbatim for the picker, so the user sees RADIO_MAPS at the top instead of the recommended MESHCORE/RADIO_MAPS pair. Phase 7 reorders to `[MESHCORE, RADIO_MAPS, MONITOR, GATEWAY, FULL]` — MeshCore-only first (the most-conservative MeshCore-primary default), then MeshCore+Maps (the default for the common "Pi NOC" deployment), then the Meshtastic-leaning options.
+- **Things that look wrong but are intentional, and Phase 7 documents the why** (so the next session doesn't "fix" them):
+  - `MONITOR.feature_flags["meshcore"] = False`: the whole point of MONITOR is "MQTT packet analysis, no radio required". A user who has MeshCore hardware should pick MESHCORE or RADIO_MAPS, not MONITOR. The doc explains this so a future audit doesn't flip it on.
+  - `FULL.required_services = ["rnsd", "mosquitto"]` with `meshtasticd` only in `optional_services`: Phase 5 deliberately classifies meshtasticd as optional even under FULL because users may run a FULL deployment with only RNS+MQTT (no Meshtastic radio attached). Changing this would re-introduce the original Phase 5 user-visible bug.
+  - `GATEWAY.required_services = []` (all three in optional): the bridge can be MeshCore↔Meshtastic OR MeshCore↔RNS — neither service is singularly required, so neither is "required" at the profile level. Health detection still warns when none are running.
+- **Documentation gaps to close**:
+  - `.claude/foundations/deployment_profiles.md` — referenced from CLAUDE.md line 168 but doesn't exist on disk. Phase 7 creates it with the full matrix, install commands per profile, and a "when to pick which" decision tree.
+  - `docs/USAGE.md` — currently has zero profile coverage despite `--profile NAME` being a real CLI flag in `launcher.py:468`. Phase 7 adds a Profiles section that points at the foundation doc.
+- **`detect_profile()` priority is correct as-is**: `mosquitto+rnsd → FULL`, `meshtasticd|rnsd → GATEWAY`, `folium → RADIO_MAPS`, `paho && !meshcore → MONITOR`, default → MESHCORE. This was already MeshCore-primary post-Phase-5; Phase 7 does NOT touch detection. (Previous attempt to "improve" detection in Phase 5.5 audit was rejected — current order correctly avoids upgrading a MeshCore user to GATEWAY just because rnsd happens to be installed.)
+- **No file-size cliff**: `deployment_profiles.py` 380 → 388 (small, two-field surgery + one ordering swap); new foundation doc ~250 lines; `USAGE.md` +30 lines; new test file ~340 lines.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase7-profile-defaults` off main (post PR #28).
+2. **Tracker prep (this commit)**: flip Phase 6.2 row to `merged ✅`, add this Phase 7 section.
+3. **`utils/deployment_profiles.py`** (380 → 388): two surgical changes — `GATEWAY.feature_flags["tactical"] = False` (was True), `list_profiles()` returns `[MESHCORE, RADIO_MAPS, MONITOR, GATEWAY, FULL]` (was `[RADIO_MAPS, MONITOR, MESHCORE, GATEWAY, FULL]`). Module docstring + `detect_profile()` docstring updated to match the new ordering. No new flags, no new fields, no API breakage.
+4. **`.claude/foundations/deployment_profiles.md`** (NEW, ~250 lines): full matrix table (5 profiles × 7 flags + required_services + optional_services + required_packages); per-profile install commands; "Which profile should I pick?" decision tree starting from "Do you have a MeshCore radio?"; explicit notes documenting the three intentional-but-counterintuitive choices above; pointer back to CLAUDE.md and `tui_rework_tracker.md`.
+5. **`docs/USAGE.md`** (+~30 lines): new `## Deployment Profiles` section with the `--profile NAME` CLI usage, a one-line description of each profile, and a link to the foundation doc for the full matrix. Sits between the existing top-level sections (placement TBD by reading the current structure).
+6. **`tests/test_phase7_profile_defaults.py`** (NEW, ~340 lines, 28 tests across 6 classes):
+   - `TestProfileMatrix` (10) — every (profile, flag) → expected value, parametrized: 5 profiles × 7 flags = 35 assertions baked into 10 grouping tests.
+   - `TestRequiredServicesAndPackages` (5) — required + optional service lists per profile.
+   - `TestListProfilesOrdering` (3) — MESHCORE first, full sequence, no profile dropped.
+   - `TestDetectProfilePriority` (5) — preserves Phase 5 priority (FULL > GATEWAY > RADIO_MAPS > MONITOR > MESHCORE) under various env permutations.
+   - `TestProfileSerialization` (3) — `to_dict()`, save/load round-trip, get_profile_by_name.
+   - `TestDocReferenceIntegrity` (2) — CLAUDE.md still references foundation doc + foundation doc exists on disk (regression guard against future docs-link rot).
+7. **No registration / handler changes**: this is a defaults + docs PR, not a TUI shape PR. Handler menu rows already gate on `feature_flags`; Phase 7 just changes which flags are True under GATEWAY, which immediately propagates through the existing `feature_enabled` plumbing.
+
+**Critical files (cross-reference)**:
+
+- `src/utils/deployment_profiles.py:171` — GATEWAY tactical flag flip
+- `src/utils/deployment_profiles.py:372-380` — `list_profiles()` reorder
+- `.claude/foundations/deployment_profiles.md` — new foundation doc (closes CLAUDE.md broken link)
+- `docs/USAGE.md` — new Profiles section
+- `tests/test_phase7_profile_defaults.py` — new, 28 tests pinning the matrix
+
+**Definition of Done**:
+- [ ] Branch `claude/mc-phase7-profile-defaults` created
+- [ ] GATEWAY `tactical` flipped to False
+- [ ] `list_profiles()` reordered MESHCORE-first
+- [ ] Foundation doc created with full matrix + decision tree + install commands
+- [ ] USAGE.md gains a Profiles section
+- [ ] 28 Phase 7 tests pass
+- [ ] Existing deployment_profiles + profile_services + Phase 3 flag audit + all-handlers + regression-guards suites pass
+- [ ] Full suite passes (3182 + Phase 7 delta)
+- [ ] Lint clean
+- [ ] PR opened to main
+
+**Deferred (intentional non-goals for Phase 7)**:
+- **No new feature flags**: Phase 3 made the deliberate call that HAM/AREDN/Favorites/Service Menu are always-visible cross-cutting features. Phase 7 doesn't re-litigate that.
+- **No detect_profile() change**: current detection order is correct for MeshCore-primary deployments.
+- **No new ProfileDefinition fields** (e.g. `recommended_for: str`): description field already serves the docs UX; adding a new field forces every test that builds a ProfileDefinition to update.
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -705,6 +768,21 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **File-size watch**: nothing in this PR approaches the 1500-line cap. New `meshforge_maps_lifecycle.py` 295; `meshforge_maps.py` 220 → 373; `test_phase6_2_lifecycle.py` 658. `map_data_collector.py` still at 1054 — Phase 6.2 doesn't touch it.
 - **Issue #31 check**: every lifecycle action requires (a) a deliberate user navigation into `mf_lifecycle` from the maps menu, (b) selection of Start/Stop/Restart from the sub-submenu, and (c) explicit YES on a `default_no=True` confirm dialog. No daemon loop, no auto-recovery, no startup-time call site. Mirrors `service_menu` lock/unlock which Issue #31 explicitly lists as acceptable.
 - **Next session resume point**: review/merge this Phase 6.2 PR. Remaining follow-up: Phase 7 (profile defaults + docs) is the natural next "main-line" phase. The Phase 6 / 6.1 / 6.2 / 6.3 quartet is now complete — meshforge-maps is fully *visible* (Phase 6 probe + open browser), *configurable* (6.3 endpoint config), *integrated* (6.1 data fusion), and *controllable* (6.2 lifecycle). No further meshforge-maps follow-ups on the menu.
+
+**2026-05-04 (Phase 6.2 MERGED + Phase 7 implementation — PR pending)**:
+- PR #28 merged into main as merge commit `0cef4580` at 2026-05-04T09:03Z. Phase 6.2 shipped meshforge-maps lifecycle control (start/stop/restart with localhost gate + double-confirm + Issue #31 compliance). The Phase 6 quartet (6, 6.1, 6.2, 6.3) is complete.
+- **Branch**: `claude/mc-phase7-profile-defaults` off main. Phase 6.2 row flipped to `merged ✅` per the no-standalone-bumps lifecycle.
+- **Audit findings**: feature flags consumed in code are exactly seven (`meshtastic`, `meshcore`, `rns`, `gateway`, `mqtt`, `maps`, `tactical`) per `grep "feature_enabled\|feature_flags\.get" src/`. Cross-cutting handlers (HAM/AREDN/Favorites/Service Menu) are always-visible by Phase 3 policy and have `flag=None` on every row — they don't appear in the `feature_flags` dict at all. Phase 7 deliberately does NOT add new flags. Two latent defects in the current matrix to fix: (1) `GATEWAY.tactical=True` is wrong — Tactical (SITREP/zones/QR/ATAK) is unrelated to bridging; corrected to False. (2) `list_profiles()` returns RADIO_MAPS first; charter says MeshCore is primary so reordered to MESHCORE-first. Plus a documentation defect: `.claude/foundations/deployment_profiles.md` is referenced from CLAUDE.md line 168 but doesn't exist on disk — broken link that Phase 7 closes.
+- **Files changed** (5):
+  - `src/utils/deployment_profiles.py` (380 → 390): two surgical changes — `GATEWAY.feature_flags["tactical"]` flipped True → False (with a comment pointing at the foundation doc); `list_profiles()` reordered to `[MESHCORE, RADIO_MAPS, MONITOR, GATEWAY, FULL]` (was `[RADIO_MAPS, MONITOR, MESHCORE, GATEWAY, FULL]`). Docstring updated. No new flags, no new fields, no API breakage.
+  - `.claude/foundations/deployment_profiles.md` (NEW, 219 lines): closes the broken CLAUDE.md link. Full feature-flag matrix table, required/optional services per profile, per-profile install commands, decision tree starting from "Do you have a MeshCore radio?", and explicit notes documenting four intentional-but-counterintuitive defaults (MONITOR meshcore=False, FULL meshtasticd=optional, GATEWAY required_services=[], GATEWAY tactical=False post-Phase-7). Pointer back to CLAUDE.md, USAGE.md, persistent_issues.md, this tracker.
+  - `docs/USAGE.md` (180 → 213): new Deployment Profiles section under Configuration, with `--profile NAME` CLI examples for all five profiles, a one-line "pick this when" guide, and a link to the foundation doc.
+  - `tests/test_phase7_profile_defaults.py` (NEW, 355 lines, 45 tests across 6 classes — see Phase 7 section above for the full breakdown).
+- **Test breakdown** — parametrize expanded to 45 (estimate was 28): `TestProfileMatrix` (5+5+5+7=22 with parametrize × 5 profiles), `TestRequiredServicesAndPackages` (5), `TestListProfilesOrdering` (3), `TestDetectProfilePriority` (6), `TestProfileSerialization` (5+1+1=7 with parametrize × 5 profiles), `TestDocReferenceIntegrity` (2). The doc reference integrity tests are the most useful new addition — they pin both directions of the CLAUDE.md ↔ foundation doc link so neither side can rot independently.
+- **Gates green**: `python3 scripts/lint.py --all` exit 0; canonical adjacent suites (Phase 7 + Phase 3 flag audit + Phase 5 startup_health + Phase 5.5 health deferrals + handler-registry + all-handlers + regression-guards) = **547 passed** combined; full suite TBD post-run.
+- **File-size watch**: nothing approaches the 1500-line cap. `deployment_profiles.py` 380 → 390 (negligible); foundation doc 219; test 355; USAGE.md 180 → 213.
+- **Intentional non-goals for Phase 7** (don't re-litigate next session): no new feature flags (Phase 3 made the deliberate call about always-visible cross-cutting handlers); no `detect_profile()` change (current order is correctly MeshCore-primary); no new ProfileDefinition fields (description already serves the docs UX, adding a field forces every test that builds a ProfileDefinition to update).
+- **Next session resume point**: review/merge this Phase 7 PR. With Phase 7 merged, the original TUI rework charter is **fully shipped** — phases 1, 2, 3, 4, 5, 5.5, 6, 6.1, 6.2, 6.3, 7 + collector split. No main-line follow-ups remain on the tracker. New work would either be: (a) loop-detection token if/when meshforge-maps starts sourcing MeshAnchor (not on the menu today, verified 2026-05-04 by `grep -rln meshanchor /opt/meshforge-maps/src/collectors/`); (b) something genuinely new outside this charter.
 
 | Date | Decision | Rationale |
 |---|---|---|
