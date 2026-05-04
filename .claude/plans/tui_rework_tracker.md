@@ -12,7 +12,7 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 | # | Phase | Status | Branch / PR | Last touched |
 |---|---|---|---|---|
-| 1 | Map data flip — MeshCore as source | **in flight** | `claude/mc-phase1-map-data` | 2026-05-03 |
+| 1 | Map data flip — MeshCore as source | **PR open, awaiting review** | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) | 2026-05-03 |
 | 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | not started | — | — |
 | 3 | Handler feature-flag audit (~40 Meshtastic handlers) | not started | — | — |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | not started | — | — |
@@ -59,6 +59,13 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
+
+**2026-05-03 (Phase 1 implementation complete, PR open)**:
+- Branch `claude/mc-phase1-map-data` pushed; PR #13 open against `main`.
+- 4 files changed (+434/-29): `map_data_collector.py`, `map_data_service.py`, new `tests/test_map_data_collector.py` (8 tests), this tracker.
+- All gates green: lint clean, 17 regression guards passing, 85 node_tracker tests passing, 8 new tests passing, related meshcore/tactical_map tests passing.
+- Decided MeshCore positions are deferred to Phase 1.5 — `_on_advertisement()` line 610 in `meshcore_handler.py` doesn't extract GPS because meshcore_py advertisements don't expose it. Position-less side panel covers MeshCore nodes for now.
+- **Next session resume point**: wait for PR #13 review/merge, then start Phase 2 (TUI menu restructure — MeshCore primary, Optional Gateways submenu). Add Phase 2 "Key contract findings" + "Implementation outline" sections mirroring Phase 1's structure before coding.
 
 ---
 
