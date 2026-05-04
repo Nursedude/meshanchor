@@ -538,7 +538,7 @@ class MeshAnchorLauncher:
             choices = [
                 # Primary Operations (numbered for quick access)
                 ("1", "Dashboard           Status, health, alerts"),
-                ("2", "Mesh Networks       Meshtastic, RNS, AREDN"),
+                ("2", "MeshCore            Primary radio + Optional Gateways"),
                 ("3", "RF & SDR            Calculators, SDR monitoring"),
             ]
             if self._feature_enabled("maps"):
@@ -618,7 +618,7 @@ class MeshAnchorLauncher:
 
         dispatch = {
             "1": ("Dashboard", self._dashboard_menu),
-            "2": ("Mesh Networks", self._mesh_networks_menu),
+            "2": ("MeshCore", self._meshcore_primary_menu),
             "3": ("RF & SDR Tools", self._rf_sdr_menu),
             "4": ("Maps & Visualization", self._maps_viz_menu),
             "5": ("Configuration", self._configuration_menu),
@@ -662,20 +662,51 @@ class MeshAnchorLauncher:
             if choice == "network":
                 self._registry.dispatch("system", "network")
 
-    # --- Submenu: Mesh Networks (2) ---
+    # --- Submenu: MeshCore (2) — primary radio ---
 
-    def _mesh_networks_menu(self):
-        """Mesh Networks - Meshtastic, RNS, AREDN."""
-        _ORDERING = ["meshtastic", "meshcore", "rns", "gateway", "aredn",
+    def _meshcore_primary_menu(self):
+        """MeshCore primary submenu — MeshCore tools + Optional Gateways."""
+        _ORDERING = ["meshcore", "optional_gateways"]
+        while True:
+            legacy = [
+                ("optional_gateways",
+                 "Optional Gateways → Meshtastic, RNS, MQTT, NomadNet, AREDN"),
+            ]
+            choices = self._build_section_menu("meshcore", legacy, _ORDERING)
+
+            choice = self.dialog.menu(
+                "MeshCore (primary radio)",
+                "MeshCore companion radio tools. Optional gateways nested below:",
+                choices,
+            )
+
+            if choice is None or choice == "back":
+                break
+
+            if choice == "optional_gateways":
+                self._optional_gateways_menu()
+                continue
+
+            # MeshCore handler items dispatched via registry
+            if self._registry.dispatch("meshcore", choice):
+                continue
+
+    # --- Sub-Submenu: Optional Gateways (under MeshCore) ---
+
+    def _optional_gateways_menu(self):
+        """Optional Gateways — Meshtastic, RNS, MQTT, AREDN, cross-cutting tools.
+
+        Formerly the top-level "Mesh Networks" submenu. Demoted under MeshCore
+        as part of the MeshCore-primary rework. Internal section key remains
+        ``mesh_networks`` for compatibility with existing handlers.
+        """
+        _ORDERING = ["meshtastic", "rns", "gateway", "aredn",
                       "messaging", "traffic", "mqtt", "favorites", "ham", "services",
                       "nomadnet"]
         while True:
-            # Legacy items — feature-gated items built conditionally
             legacy = []
             if self._feature_enabled("meshtastic"):
                 legacy.append(("meshtastic", "Meshtastic          Radio, channels, CLI"))
-            if self._feature_enabled("meshcore"):
-                legacy.append(("meshcore", "MeshCore            Companion radio, config"))
             if self._feature_enabled("rns"):
                 legacy.append(("rns", "RNS / Reticulum     Status, gateway, messaging"))
             if self._feature_enabled("gateway"):
@@ -686,19 +717,16 @@ class MeshAnchorLauncher:
             choices = self._build_section_menu("mesh_networks", legacy, _ORDERING)
 
             choice = self.dialog.menu(
-                "Mesh Networks",
-                "Manage mesh network connections:",
+                "Optional Gateways",
+                "Optional bridges to other mesh stacks (Meshtastic, RNS, AREDN):",
                 choices
             )
 
             if choice is None or choice == "back":
                 break
 
-            # Try registry-based dispatch first (converted handlers)
             if self._registry.dispatch("mesh_networks", choice):
                 continue
-
-            # All mesh_networks items handled by registry (Batch 3-9)
 
     # --- NEW Submenu: RF & SDR (3) ---
 

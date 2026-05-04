@@ -30,7 +30,7 @@ class MeshCoreHandler(BaseHandler):
     """TUI handler for MeshCore companion radio management."""
 
     handler_id = "meshcore"
-    menu_section = "mesh_networks"
+    menu_section = "meshcore"
 
     def menu_items(self):
         return [
