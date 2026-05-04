@@ -194,6 +194,82 @@ def _chunk_message(content: str, max_length: int = MAX_MESSAGE_LENGTH) -> List[s
 
 
 # ============================================================================
+# MeshCore chat API helpers (Phase 8.3)
+#
+# The gateway daemon (meshanchor-daemon.service) owns the MeshCore
+# radio and exposes an HTTP chat API on 127.0.0.1:8081/chat/*.  We
+# talk to it via urllib so this module stays dependency-free.
+# ============================================================================
+
+_MESHCORE_CHAT_API = "http://127.0.0.1:8081"
+_MESHCORE_CHAT_TIMEOUT_S = 5.0
+
+
+def _meshcore_chat_api_reachable() -> bool:
+    """Probe the gateway daemon's chat API. Used by auto-routing."""
+    from urllib import error as urllib_error
+    from urllib import request as urllib_request
+    try:
+        with urllib_request.urlopen(
+            f"{_MESHCORE_CHAT_API}/chat/messages?since=0",
+            timeout=2,
+        ) as resp:
+            return resp.status < 500
+    except (urllib_error.URLError, urllib_error.HTTPError, OSError):
+        return False
+
+
+def _send_via_meshcore(
+    chunks: List[str],
+    destination: Optional[str],
+    channel: int,
+) -> tuple:
+    """POST each chunk to the gateway daemon's :8081/chat/send endpoint.
+
+    Returns (ok: bool, err: Optional[str]).
+    """
+    import json as _json
+    from urllib import error as urllib_error
+    from urllib import request as urllib_request
+
+    payload_base: Dict[str, Any] = {}
+    if destination:
+        payload_base["destination"] = destination.lstrip("!")
+    else:
+        payload_base["channel"] = int(channel)
+
+    for chunk in chunks:
+        payload = dict(payload_base)
+        payload["text"] = chunk
+        data = _json.dumps(payload).encode("utf-8")
+        req = urllib_request.Request(
+            f"{_MESHCORE_CHAT_API}/chat/send",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib_request.urlopen(
+                req, timeout=_MESHCORE_CHAT_TIMEOUT_S,
+            ) as resp:
+                if resp.status >= 400:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    return False, f"chat/send HTTP {resp.status}: {body[:200]}"
+        except urllib_error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            return False, f"chat/send HTTP {e.code}: {body[:200] or e.reason}"
+        except urllib_error.URLError as e:
+            return False, f"chat/send unreachable: {e.reason}"
+        except OSError as e:
+            return False, f"chat/send error: {e}"
+
+    return True, None
+
+
+# ============================================================================
 # PUBLIC API
 # ============================================================================
 
@@ -210,7 +286,7 @@ def send_message(
     Args:
         content: Message text
         destination: Node ID (!abcd1234) or RNS hash, None for broadcast
-        network: "meshtastic", "rns", or "auto"
+        network: "meshcore", "meshtastic", "rns", or "auto"
         channel: Channel number (0 = DM, 1+ = public channels)
         high_reliability: Use max hops (7) for difficult paths or emergency
 
@@ -222,6 +298,14 @@ def send_message(
           subsequent messages use shortest discovered path
         - Broadcasts are flooded to the entire mesh
         - high_reliability=True forces max hops for difficult paths
+
+    Auto-routing rules (Phase 8.3 — MeshCore-primary):
+        - destination prefixed with "!" (8 hex)  → meshtastic node id
+        - destination is exactly 32 hex chars    → RNS LXMF dest
+        - everything else, including broadcast,  → meshcore (primary)
+        - meshcore goes through the gateway daemon's HTTP chat API
+          on 127.0.0.1:8081, never the radio directly. If the daemon
+          isn't reachable we fall back to meshtastic.
     """
     if not content:
         return CommandResult.fail("Message content cannot be empty")
@@ -229,14 +313,24 @@ def send_message(
     if not content.strip():
         return CommandResult.fail("Message cannot be only whitespace")
 
-    # Determine network if auto
+    # Determine network if auto. MeshCore is primary, so broadcast +
+    # other-shaped destinations route there first; explicit Meshtastic
+    # / RNS destination shapes still route to their native stacks.
     if network == "auto":
         if destination and destination.startswith('!'):
             network = "meshtastic"
-        elif destination and len(destination) == 32:
+        elif destination and len(destination) == 32 and all(
+            c in '0123456789abcdefABCDEF' for c in destination
+        ):
             network = "rns"
         else:
-            network = "meshtastic"  # Default to Meshtastic for broadcast
+            # Broadcast or unrecognised shape — try MeshCore first
+            # (gateway daemon owns the primary radio). If the daemon
+            # isn't running, fall back to meshtastic.
+            if _meshcore_chat_api_reachable():
+                network = "meshcore"
+            else:
+                network = "meshtastic"
 
     # Chunk message if needed
     chunks = _chunk_message(content)
@@ -264,7 +358,12 @@ def send_message(
         send_success = False
         send_error = None
 
-        if network == "meshtastic":
+        if network == "meshcore":
+            send_success, send_error = _send_via_meshcore(
+                chunks, destination, channel,
+            )
+
+        elif network == "meshtastic":
             # Try gateway first, then fall back to direct CLI
             gateway_available = False
             try:

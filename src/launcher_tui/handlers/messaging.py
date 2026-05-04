@@ -137,8 +137,13 @@ class MessagingHandler(BaseHandler):
         if not text:
             return
 
+        # MeshCore-primary ordering: gateway daemon owns the attached
+        # radio, so it's the default for broadcast + unrecognised
+        # destinations. Meshtastic + RNS remain available for stack-
+        # specific addressing.
         net_choices = [
             ("auto", "Auto-detect         Choose best path"),
+            ("meshcore", "MeshCore            Primary radio (gateway daemon)"),
             ("meshtastic", "Meshtastic          Direct LoRa radio"),
             ("rns", "RNS / Reticulum     Via RNS transport"),
         ]
