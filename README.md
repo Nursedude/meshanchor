@@ -9,7 +9,7 @@
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-2884%20passing-blue.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-3226%20passing-blue.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the arch
 
 > **ALPHA SOFTWARE — Field validation has begun. We need your help testing.**
 >
-> MeshAnchor has **2,884 tests passing** against mocks. As of 2026-05-02 the
+> MeshAnchor has **3,226 tests passing** against mocks. As of 2026-05-02 the
 > first field deployment (Pi 4B + RAK Heltec V3 in Serial Companion mode) is
 > running an end-to-end MeshCore stack: bidirectional channel messaging on
 > Public + private channels via the daemon's chat API, daemon-managed gateway,
@@ -41,11 +41,12 @@ Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the arch
 
 Plug in a MeshCore companion radio, run the installer, and you get:
 
-- **MeshCore integration** — direct companion radio management via meshcore_py, pre-flight device validation, persistent udev naming
+- **MeshCore integration** — direct companion radio management via meshcore_py, pre-flight device validation, persistent udev naming, in-TUI radio config (LoRa params, channels, TX power) with region-aware validation
 - **Gateway bridge** — bidirectional MeshCore to Meshtastic/RNS message routing via CanonicalMessage
 - **RF engineering tools** — link budget, Fresnel zone, FSPL, coverage maps, space weather (NOAA)
-- **TUI interface** — 65 handler commands, raspi-config style (whiptail/dialog), SSH-friendly
+- **TUI interface** — 60 handler files, MeshCore-primary menu with Optional Gateways submenu, raspi-config style (whiptail/dialog), SSH-friendly
 - **Live NOC maps** — Leaflet.js browser view with WebSocket updates
+- **meshforge-maps integration** — discovery, browser launch, configurable endpoint, bidirectional data fusion, and double-confirmed lifecycle control for the sister-project mapping service on `:8808`
 - **MQTT monitoring** — nodeless mesh observation, protobuf decode, traffic inspector
 - **AI diagnostics** — offline knowledge base + optional Claude PRO mode
 - **Prometheus/Grafana** — 50+ metrics, 5 pre-built dashboards
@@ -114,15 +115,16 @@ sudo bash scripts/install_noc.sh --force-python        # Force USB mode (Python 
 
 ### Deployment Profiles
 
-MeshAnchor supports 5 deployment profiles. Install only the dependencies you need:
+MeshAnchor supports 5 deployment profiles. Install only the dependencies you need.
+Order below matches the in-TUI picker (MeshCore-first per the v0.1.0-alpha charter).
 
-| Profile | Primary Use | MeshCore | Meshtastic | RNS | MQTT |
-|---------|------------|----------|------------|-----|------|
-| `meshcore` (default) | MeshCore companion radio | Yes | -- | -- | -- |
-| `radio_maps` | MeshCore + coverage mapping | Yes | -- | -- | -- |
-| `monitor` | MQTT packet analysis | -- | -- | -- | Yes |
-| `gateway` | MeshCore + Meshtastic/RNS bridge | Yes | Yes | Yes | Yes |
-| `full` | Everything | Yes | Yes | Yes | Yes |
+| Profile | Primary Use | MeshCore | Meshtastic | RNS | MQTT | Maps | Tactical |
+|---------|------------|:--------:|:----------:|:---:|:----:|:----:|:--------:|
+| `meshcore` (default) | MeshCore companion radio | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `radio_maps` | MeshCore + coverage mapping | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| `monitor` | MQTT packet analysis (no radio) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| `gateway` | MeshCore + Meshtastic/RNS bridge | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `full` | Everything | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ```bash
 # Select profile at launch
@@ -133,6 +135,10 @@ python3 src/launcher.py
 
 # Profile is saved to ~/.config/meshanchor/deployment.json
 ```
+
+For the full feature-flag matrix, per-profile install commands, decision tree, and
+the rationale behind each default, see
+[`.claude/foundations/deployment_profiles.md`](.claude/foundations/deployment_profiles.md).
 
 ### Already Have meshtasticd?
 
@@ -157,15 +163,18 @@ headless operation. Navigation is keyboard-driven with max 10 items per menu lev
 ```
 Main Menu (MeshAnchor NOC)
 ├── 1. Dashboard             Service status, health, alerts, data path check
-├── 2. Mesh Networks         MeshCore, Meshtastic, RNS, AREDN, MQTT, Gateway
-│       └── MeshCore submenu Status, detect, config, nodes, stats, chat, daemon
-│       └── RNS submenu      NomadNet Client (install/manage)
+├── 2. MeshCore              Primary radio + Optional Gateways
+│       ├── MeshCore submenu Status, detect, config, radio (LoRa/TX/channels),
+│       │                    nodes, stats, chat, daemon control
+│       └── Optional Gateways → Meshtastic, RNS, AREDN, MQTT, Gateway Bridge
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
-├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector
+├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector,
+│                            meshforge-maps :8808 integration
 ├── 5. Configuration         Radio, channels, RNS config, services, backup
 ├── 6. System                Hardware detect, logs, network tools, shell, reboot
 ├── q. Quick Actions         Common shortcuts (2-tap access)
 ├── e. Emergency Mode        Field ops, weather/EAS alerts, SOS beacon
+├── t. Tactical Ops          SITREP, zones, QR, ATAK (visible under FULL profile)
 ├── a. About                 Version, web client, help
 └── x. Exit
 ```
@@ -280,10 +289,10 @@ sudo python3 src/launcher_tui/main.py
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| Handler registry | 70 | 65 handler files, Protocol + BaseHandler pattern |
+| Handler registry | 70 | 60 handler files, Protocol + BaseHandler pattern |
 | whiptail/dialog backend | -- | raspi-config style, SSH-friendly |
-| Deployment profile selector | 31 | 5 profiles with auto-detection |
-| Startup health checks | 20 | Service verification, conflict resolution |
+| Deployment profile selector | 76 | 5 profiles, MeshCore-first ordering, auto-detect, full matrix pinned |
+| Startup health checks | 38 | Profile-aware classification (required / optional / not_applicable) |
 
 ### Monitoring & Telemetry (Inherited)
 
@@ -297,7 +306,7 @@ sudo python3 src/launcher_tui/main.py
 
 ### Testing Reality Check
 
-MeshAnchor has **2,884 automated tests** across 76 test files. However, automated tests
+MeshAnchor has **3,226 automated tests** across 95 test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.
@@ -416,7 +425,7 @@ sequenceDiagram
 | meshtasticd required? | No (optional gateway) | Yes (primary) |
 | meshcore package | Primary dependency | Optional |
 | Python version | 3.10+ | 3.9+ |
-| Field-tested | No (alpha) | Yes (beta) |
+| Field-tested | First field deployment 2026-05-02 (MeshCore-only path) | Yes (beta) |
 
 ### Design Principles
 
@@ -593,7 +602,7 @@ src/
 │   ├── backend.py           # whiptail/dialog abstraction
 │   ├── startup_checks.py   # Environment checks + conflict resolution
 │   ├── status_bar.py       # Service status bar
-│   └── handlers/            # 65 registered command handlers
+│   └── handlers/            # 60 registered command handlers
 ├── gateway/               # Multi-protocol bridge engine
 │   ├── meshcore_handler.py   # MeshCore companion radio (meshcore_py) — PRIMARY
 │   ├── rns_bridge.py        # RNS/LXMF gateway (optional)
@@ -626,7 +635,7 @@ scripts/
 ├── install_noc.sh         # Full NOC stack installer
 ├── update.sh              # In-place code update
 ├── reinstall.sh           # Clean reinstall (preserves config)
-├── lint.py                # Security linter (11 rules: MF001-MF011)
+├── lint.py                # Security linter (15 rules: MF001-MF013, MF016)
 ├── meshanchor-launcher.sh # Shell wrapper
 └── verify_post_install.sh # Post-install health check
 
@@ -639,7 +648,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # 81 test files, 2,729 tests
+tests/                     # 95 test files, 3,226 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
@@ -693,7 +702,7 @@ Gateway-specific templates in `config_templates/`:
 
 ### Test Coverage
 
-**2,729 tests** across 75 test files:
+**3,226 tests** across 95 test files. Top suites by depth:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
@@ -708,7 +717,11 @@ Gateway-specific templates in `config_templates/`:
 | `test_status_bar.py` | 70 | TUI status bar rendering |
 | `test_node_tracker.py` | 68 | Unified node tracking |
 | `test_mqtt_robustness.py` | 66 | MQTT reconnection, broker failover |
+| `test_phase4b_radio_writes.py` | 63 | MeshCore radio writes, region-aware validation |
 | `test_commands.py` | 61 | CLI command handlers |
+| `test_phase6_2_lifecycle.py` | 50 | meshforge-maps systemd lifecycle control |
+| `test_phase6_3_maps_config.py` | 49 | meshforge-maps endpoint config persistence |
+| `test_phase7_profile_defaults.py` | 45 | Profile defaults matrix + doc-link integrity |
 
 *All tests use mocked external services. Field validation with real hardware is a separate track — and the one that needs your help.*
 
@@ -720,7 +733,7 @@ python3 -m pytest tests/test_meshcore_handler.py -v  # MeshCore tests only
 
 ### Auto-Review & Lint
 
-Security linter (`scripts/lint.py`) enforces 11 rules:
+Security linter (`scripts/lint.py`) enforces 15 rules:
 
 | Rule | Description |
 |------|-------------|
@@ -734,6 +747,9 @@ Security linter (`scripts/lint.py`) enforces 11 rules:
 | MF009 | `RNS.Reticulum()` must include `configdir=` parameter |
 | MF010 | No `time.sleep()` in daemon loops — use `_stop_event.wait()` |
 | MF011 | RNS repair logic must live in `_rns_repair.py` / diagnostics |
+| MF012 | Context-loaded docs (e.g. `persistent_issues.md`) must stay under 40k chars |
+| MF013 | Bare `sqlite3.connect()` outside `db_helpers.py` — use `connect_tuned()` |
+| MF016 | `@patch('src.utils.paths.…')` in tests no-ops — production imports via `utils.paths` |
 
 ```bash
 python3 scripts/lint.py --all          # Run all lint rules
@@ -781,7 +797,7 @@ git config core.hooksPath .githooks   # Enable pre-commit hooks
 
 **Code rules:** No `shell=True`, no bare `except:`, use `get_real_user_home()` not
 `Path.home()`, use `_stop_event.wait()` not `time.sleep()` in daemon loops,
-split files over 1,500 lines.
+use `connect_tuned()` not bare `sqlite3.connect()`, split files over 1,500 lines.
 
 **Commit style:** `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `security:`
 
