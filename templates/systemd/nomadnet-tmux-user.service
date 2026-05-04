@@ -1,0 +1,83 @@
+# MeshAnchor — NomadNet User Service (consolidated, tmux-detached)
+# ==================================================================
+#
+# Single NomadNet per box, wrapped in a detached tmux session so the
+# TUI keeps running without an operator attached. Ported from
+# MeshForge's nomadnet-user.service (Issue #38 consolidation pattern).
+#
+# Sister file: templates/systemd/nomadnet-user.service is the older
+# simple-Type=simple unit used by install_noc.sh's fresh-install path.
+# This *-tmux* variant is what NomadNet > Service Control > Install
+# user unit deploys, and supersedes the simple unit on any box where
+# the operator opts into tmux-wrapped persistence.
+#
+# The operator reads by attaching the tmux session:
+#
+#   tmux attach -t nomadnet      # view / reply
+#   Ctrl-b d                     # detach (process keeps running)
+#
+# Install (recommended — TUI):
+#   NomadNet > Service Control > Install user unit
+#   (substitutes the ExecStart placeholder with the wrapper path
+#    computed for THIS box; works whether nomadnet came from pipx,
+#    pip --user, or apt.)
+#
+# Status / control:
+#   systemctl --user status nomadnet
+#   systemctl --user restart nomadnet
+#   tmux ls                            # verify session exists
+#
+# rnsd on this fleet is a SYSTEM service running as root (not a user
+# service). We don't Require= a user rnsd.service — the wrapper
+# script tolerates transient rnsd unavailability and refuses-loud on
+# rpc_key mismatch (exit 87).
+#
+# StartLimitBurst caps the restart-loop: if the wrapper exits 87
+# repeatedly, systemd parks the unit in failed state after 5 attempts
+# inside StartLimitIntervalSec. The operator then sees a single clear
+# failure in the journal + TUI, rather than 392 silent restarts.
+
+[Unit]
+Description=NomadNet LXMF Client (tmux-detached, MeshAnchor-managed)
+After=default.target network-online.target rnsd.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=forking
+Environment=HOME=%h
+Environment=TERM=xterm-256color
+
+# Clean slate: if a prior tmux session is lingering (from a crash or
+# a previous ExecStart), kill it before starting a fresh one. The
+# leading `-` tells systemd to ignore failure when no session exists.
+ExecStartPre=-/usr/bin/tmux kill-session -t nomadnet
+
+# Launch the real TUI wrapped in a detached tmux session. The
+# ExecStart line below contains a placeholder that the MeshAnchor TUI
+# substitutes at install time — see
+# handlers/_nomadnet_tmux_service_ops.py::_install_user_unit.
+# The substituted value is the absolute path to the wrapper +
+# arguments, e.g.:
+#   <pipx-venv>/bin/python3 ~/.config/meshanchor/nomadnet_wrapper.py --rnsconfig /etc/reticulum
+ExecStart=/usr/bin/tmux new-session -d -s nomadnet '__NOMADNET_EXEC__'
+
+ExecStop=/usr/bin/tmux kill-session -t nomadnet
+
+# Restart on transient failures (rnsd briefly unreachable, etc.).
+# The wrapper's exit-87 path (rpc_key mismatch) trips StartLimitBurst
+# above and the unit enters failed state — that's the desired refuse-
+# loud behaviour. Use Restart=always so we also recover from the case
+# where nomadnet exits 0 due to an unhandled internal condition.
+Restart=always
+RestartSec=5
+
+# Logging — tmux itself goes silent after daemonising, but ExecStart*
+# return codes land in the journal.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nomadnet
+
+[Install]
+WantedBy=default.target

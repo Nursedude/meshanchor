@@ -20,6 +20,7 @@ Authority chain:
 """
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -30,11 +31,13 @@ from handler_protocol import BaseHandler
 
 from handlers._chat_pane_service_ops import (
     ChatPaneServiceOpsMixin,
+    _ENV_TEMPLATE,
     _TMUX_SESSION,
+    _env_dest,
     _unit_dest,
     _wrapper_dest,
 )
-from utils.paths import get_real_user_home
+from utils.paths import get_real_user_home, get_real_username
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +188,9 @@ class ChatPaneHandler(ChatPaneServiceOpsMixin, BaseHandler):
                     choices.append(("disable", "Disable at login (keeps running)"))
                 else:
                     choices.append(("enable", "Enable at login"))
+                choices.append(("edit_config", "Edit config             chat_pane.env (API, channel, poll)"))
+                choices.append(("reset_config", "Reset config to defaults"))
+                choices.append(("linger", "Enable linger           survive logout"))
                 choices.append(("reinstall", "Reinstall user unit (refresh templates)"))
                 choices.append(("uninstall", "Uninstall user unit"))
             choices.append(("back", "Back"))
@@ -220,6 +226,9 @@ class ChatPaneHandler(ChatPaneServiceOpsMixin, BaseHandler):
                     "Disable service",
                     lambda: self._run_systemctl_and_report("disable"),
                 ),
+                "edit_config": ("Edit chat_pane.env", self._edit_env_config),
+                "reset_config": ("Reset chat_pane.env", self._reset_env_config),
+                "linger": ("Enable linger", self._enable_linger_action),
                 "uninstall": ("Uninstall user unit", self._do_uninstall),
             }
             entry = dispatch.get(choice)
@@ -282,6 +291,132 @@ class ChatPaneHandler(ChatPaneServiceOpsMixin, BaseHandler):
             _, active = self._user_systemctl_text(["is-active", "meshcore-chat"])
             body += f"\n\nis-active: {active or '(empty)'}"
         self.ctx.dialog.msgbox(title, body)
+
+    # ------------------------------------------------------------------
+    # Configurability — env file edit / reset / linger
+    # ------------------------------------------------------------------
+
+    def _edit_env_config(self) -> None:
+        """Open chat_pane.env in $EDITOR, then offer to restart the service.
+
+        Mirrors NomadNet's edit-config pattern. The wrapper sources this
+        file on every service start so changes take effect after a
+        restart, not a daemon-reload.
+        """
+        env_path = _env_dest()
+        if not env_path.exists():
+            if not self.ctx.dialog.yesno(
+                "Seed config?",
+                f"{env_path} does not exist yet.\n\n"
+                "Seed it from the template (chat_pane.env) and open it "
+                "for editing?",
+            ):
+                return
+            env_path.parent.mkdir(parents=True, exist_ok=True)
+            env_path.write_text(_ENV_TEMPLATE.read_text())
+            self._chown_to_real_user(env_path)
+            self._chown_to_real_user(env_path.parent)
+
+        editor = next(
+            (e for e in ("nano", "vim", "vi") if shutil.which(e)),
+            None,
+        )
+        if not editor:
+            self.ctx.dialog.msgbox(
+                "No editor",
+                "No text editor found (nano, vim, vi).\n\n"
+                f"Edit directly: {env_path}",
+            )
+            return
+
+        # Drop dialog state so the editor owns the terminal cleanly.
+        clear_screen()
+        print(f"=== Editing {env_path} ===")
+        print("Save and exit to return to MeshAnchor.\n")
+        try:
+            subprocess.run([editor, str(env_path)], timeout=None)
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"\nEditor failed: {e}")
+            self.ctx.wait_for_enter()
+            return
+        except KeyboardInterrupt:
+            pass
+        clear_screen()
+
+        # Offer to restart so the wrapper re-sources the env file.
+        state = self._chat_pane_state()
+        if state["active"] and self.ctx.dialog.yesno(
+            "Restart service?",
+            "The chat client is running. Restart it now so the new\n"
+            "config takes effect?\n\n"
+            "(Without restart, the running client keeps the old values\n"
+            "until the next start.)",
+        ):
+            self._run_systemctl_and_report("restart")
+
+    def _reset_env_config(self) -> None:
+        """Overwrite chat_pane.env with the template (after confirmation)."""
+        env_path = _env_dest()
+        if not self.ctx.dialog.yesno(
+            "Reset chat_pane.env?",
+            f"This will overwrite:\n  {env_path}\n\n"
+            f"...with the template default values:\n"
+            f"  MESHANCHOR_CHAT_API=http://127.0.0.1:8081\n"
+            f"  MESHANCHOR_CHAT_CHANNEL=0\n"
+            f"  MESHANCHOR_CHAT_POLL=2.0\n\n"
+            "Any operator edits will be lost. Proceed?",
+        ):
+            return
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_text(_ENV_TEMPLATE.read_text())
+        os.chmod(env_path, 0o644)
+        self._chown_to_real_user(env_path)
+
+        body = f"Reset:\n  {env_path}\n\n"
+        state = self._chat_pane_state()
+        if state["active"]:
+            body += "Run Restart from this menu so the new values take effect."
+        else:
+            body += "Service is inactive — start it to apply."
+        self.ctx.dialog.msgbox("Config reset", body)
+
+    def _enable_linger_action(self) -> None:
+        """Operator-facing wrapper around loginctl enable-linger.
+
+        Service install already does this best-effort, but operators
+        sometimes disable linger manually and want it back without
+        reinstalling the unit.
+        """
+        username = (
+            os.environ.get("SUDO_USER")
+            or get_real_username()
+            or os.environ.get("USER")
+            or ""
+        )
+        if not username or username == "root":
+            self.ctx.dialog.msgbox(
+                "Linger not applicable",
+                "Linger only applies to non-root users. Run MeshAnchor\n"
+                "via 'sudo' from your normal account.",
+            )
+            return
+        argv = (
+            ["loginctl", "enable-linger", username]
+            if os.geteuid() == 0
+            else ["sudo", "loginctl", "enable-linger", username]
+        )
+        try:
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, timeout=10,
+            )
+            ok = proc.returncode == 0
+            self.ctx.dialog.msgbox(
+                "Linger: " + ("OK" if ok else "FAILED"),
+                (proc.stdout + proc.stderr).strip()
+                or f"loginctl enable-linger {username} completed.",
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            self.ctx.dialog.msgbox("Linger FAILED", str(e))
 
     # ------------------------------------------------------------------
     # Logs

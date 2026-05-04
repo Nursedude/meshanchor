@@ -136,17 +136,28 @@ def test_chat_pane_menu_items_tag():
 # 3. _chat_pane_service_ops SSOT
 # ---------------------------------------------------------------------------
 
-def test_chat_pane_state_no_unit(tmp_path, monkeypatch):
-    """When the unit + wrapper aren't installed, state reflects that."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("SUDO_USER", raising=False)
+def test_chat_pane_state_no_unit(tmp_path):
+    """When the unit + wrapper aren't installed, state reflects that.
+
+    Patches `_unit_dest` / `_wrapper_dest` directly because dev boxes
+    may have a real install at ``~/.config/systemd/user/meshcore-chat.service``
+    — `get_real_user_home()` consults LOGNAME so HOME monkeypatching
+    isn't sufficient to isolate.
+    """
     from handlers.chat_pane import ChatPaneHandler
+    from handlers import _chat_pane_service_ops as ops_mod
+
+    fake_unit = tmp_path / "systemd" / "user" / "meshcore-chat.service"
+    fake_wrapper = tmp_path / "config" / "meshanchor" / "chat_client_wrapper.sh"
+
     h = ChatPaneHandler()
     h.set_context(make_handler_context())
 
     # Fake systemctl --user returning -1 (unavailable) so we don't
     # depend on a live user manager during the test sweep.
-    with patch.object(h, "_user_systemctl_text", return_value=(-1, "")):
+    with patch.object(ops_mod, "_unit_dest", return_value=fake_unit), \
+            patch.object(ops_mod, "_wrapper_dest", return_value=fake_wrapper), \
+            patch.object(h, "_user_systemctl_text", return_value=(-1, "")):
         s = h._chat_pane_state()
     assert s["unit_installed"] is False
     assert s["wrapper_installed"] is False

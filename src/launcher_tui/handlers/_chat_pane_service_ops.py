@@ -29,9 +29,11 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_ROOT = Path(__file__).resolve().parents[3] / "templates"
 _UNIT_TEMPLATE = _TEMPLATES_ROOT / "systemd" / "meshcore-chat-user.service"
 _WRAPPER_TEMPLATE = _TEMPLATES_ROOT / "python" / "chat_client_wrapper.sh"
+_ENV_TEMPLATE = _TEMPLATES_ROOT / "python" / "chat_pane.env"
 
 _UNIT_FILENAME = "meshcore-chat.service"
 _WRAPPER_FILENAME = "chat_client_wrapper.sh"
+_ENV_FILENAME = "chat_pane.env"
 _TMUX_SESSION = "meshcore-chat"
 _UNIT_PLACEHOLDER = "__CHAT_PANE_EXEC__"
 
@@ -42,6 +44,10 @@ def _config_dir() -> Path:
 
 def _wrapper_dest() -> Path:
     return _config_dir() / _WRAPPER_FILENAME
+
+
+def _env_dest() -> Path:
+    return _config_dir() / _ENV_FILENAME
 
 
 def _unit_dest() -> Path:
@@ -147,6 +153,7 @@ class ChatPaneServiceOpsMixin:
         state = {
             "unit_installed": _unit_dest().exists(),
             "wrapper_installed": _wrapper_dest().exists(),
+            "env_installed": _env_dest().exists(),
             "tmux_present": shutil.which("tmux") is not None,
             "tmux_session": False,
             "active": False,
@@ -256,20 +263,24 @@ class ChatPaneServiceOpsMixin:
     # ------------------------------------------------------------------
 
     def _install_user_unit(self, force: bool = False) -> Tuple[bool, str]:
-        """Render the unit + wrapper for THIS box and activate them.
+        """Render the unit + wrapper + env for THIS box and activate them.
 
         Steps:
           1. Verify tmux is available (offer to apt-install via yesno).
           2. Verify utils/chat_client.py exists in the source tree.
           3. Copy the wrapper template into ~/.config/meshanchor/.
-          4. Render the unit template (substitute the wrapper path into
+          4. Seed the env file (chat_pane.env) on first install only —
+             never overwrite the operator's edits on subsequent installs.
+          5. Render the unit template (substitute the wrapper path into
              __CHAT_PANE_EXEC__) and write to ~/.config/systemd/user/.
-          5. daemon-reload + enable + start, with best-effort linger.
+          6. daemon-reload + enable + start, with best-effort linger.
         """
         if not _UNIT_TEMPLATE.is_file():
             return False, f"Unit template missing: {_UNIT_TEMPLATE}"
         if not _WRAPPER_TEMPLATE.is_file():
             return False, f"Wrapper template missing: {_WRAPPER_TEMPLATE}"
+        if not _ENV_TEMPLATE.is_file():
+            return False, f"Env template missing: {_ENV_TEMPLATE}"
 
         if not shutil.which("tmux"):
             return False, "tmux not installed (sudo apt-get install -y tmux)"
@@ -280,10 +291,12 @@ class ChatPaneServiceOpsMixin:
             return False, f"chat_client.py missing: {client_py}"
 
         wrapper_dest = _wrapper_dest()
+        env_dest = _env_dest()
         unit_dest = _unit_dest()
         username = get_real_username() or os.environ.get("USER") or ""
+        env_was_seeded = False
 
-        # 1. Wrapper
+        # 1. Wrapper (always overwrite — template is the SSOT)
         wrapper_dest.parent.mkdir(parents=True, exist_ok=True)
         wrapper_text = _WRAPPER_TEMPLATE.read_text()
         wrapper_dest.write_text(wrapper_text)
@@ -291,7 +304,14 @@ class ChatPaneServiceOpsMixin:
         self._chown_to_real_user(wrapper_dest)
         self._chown_to_real_user(wrapper_dest.parent)
 
-        # 2. Unit
+        # 2. Env file (seed only — preserve operator edits across refresh)
+        if not env_dest.exists():
+            env_dest.write_text(_ENV_TEMPLATE.read_text())
+            os.chmod(env_dest, 0o644)
+            self._chown_to_real_user(env_dest)
+            env_was_seeded = True
+
+        # 3. Unit
         unit_dest.parent.mkdir(parents=True, exist_ok=True)
         unit_text = _UNIT_TEMPLATE.read_text()
         if _UNIT_PLACEHOLDER not in unit_text:
@@ -304,7 +324,7 @@ class ChatPaneServiceOpsMixin:
         self._chown_to_real_user(unit_dest)
         self._chown_to_real_user(unit_dest.parent)
 
-        # 3. Activate
+        # 4. Activate
         ok_reload, _ = self._systemctl_user("daemon-reload")
         if not ok_reload:
             return False, "systemctl --user daemon-reload failed"
@@ -316,8 +336,13 @@ class ChatPaneServiceOpsMixin:
 
         if not ok_start:
             return False, f"start failed: {out_start}"
+        env_note = (
+            f"  {env_dest}  (seeded — edit via Service Control)"
+            if env_was_seeded else
+            f"  {env_dest}  (preserved)"
+        )
         return True, (
-            f"Installed:\n  {unit_dest}\n  {wrapper_dest}\n\n"
+            f"Installed:\n  {unit_dest}\n  {wrapper_dest}\n{env_note}\n\n"
             f"Service state: started"
             + (", enabled" if ok_enable else "")
         )
