@@ -40,8 +40,31 @@ from urllib import request as urllib_request
 
 
 CHAT_API_DEFAULT = "http://127.0.0.1:8081"
-POLL_INTERVAL_S = 2.0
+POLL_INTERVAL_S_DEFAULT = 2.0
+POLL_INTERVAL_S_MIN = 0.5
 HTTP_TIMEOUT_S = 5.0
+
+
+def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
+    """Parse an env-var float with a floor; fall back on garbage input."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    return max(v, minimum)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _color(code: str, text: str) -> str:
@@ -92,11 +115,17 @@ class ChatClient:
     ``self._send`` / slash commands.
     """
 
-    def __init__(self, base_url: str = CHAT_API_DEFAULT) -> None:
+    def __init__(
+        self,
+        base_url: str = CHAT_API_DEFAULT,
+        channel: int = 0,
+        poll_interval: float = POLL_INTERVAL_S_DEFAULT,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self._last_id = 0
         self._stop = threading.Event()
-        self._channel = 0
+        self._channel = channel
+        self._poll_interval = max(poll_interval, POLL_INTERVAL_S_MIN)
         self._poll_thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
@@ -164,7 +193,7 @@ class ChatClient:
                     self._render(_format_entry(msg))
             except Exception as e:  # defensive: never let the loop die
                 self._render(_color("31", f"[poll error] {type(e).__name__}: {e}"))
-            self._stop.wait(POLL_INTERVAL_S)
+            self._stop.wait(self._poll_interval)
 
     @staticmethod
     def _render(line: str) -> None:
@@ -288,11 +317,26 @@ class ChatClient:
 
 def main(argv: Optional[List[str]] = None) -> int:
     base = os.environ.get("MESHANCHOR_CHAT_API", CHAT_API_DEFAULT)
+    channel = _env_int("MESHANCHOR_CHAT_CHANNEL", 0)
+    poll = _env_float(
+        "MESHANCHOR_CHAT_POLL", POLL_INTERVAL_S_DEFAULT,
+        minimum=POLL_INTERVAL_S_MIN,
+    )
     if argv:
         for a in argv:
             if a.startswith("--api="):
                 base = a.split("=", 1)[1]
-    client = ChatClient(base_url=base)
+            elif a.startswith("--channel="):
+                try:
+                    channel = int(a.split("=", 1)[1])
+                except ValueError:
+                    pass
+            elif a.startswith("--poll="):
+                try:
+                    poll = max(float(a.split("=", 1)[1]), POLL_INTERVAL_S_MIN)
+                except ValueError:
+                    pass
+    client = ChatClient(base_url=base, channel=channel, poll_interval=poll)
     return client.run()
 
 

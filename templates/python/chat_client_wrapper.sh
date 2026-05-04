@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MeshAnchor — MeshCore chat client wrapper (tmux-detached)
 #
-# Version: 1
+# Version: 2
 #
 # Pairs with templates/systemd/meshcore-chat-user.service. The unit
 # launches this wrapper inside a detached tmux session named
@@ -12,14 +12,16 @@
 #
 # This wrapper is intentionally minimal — the chat client itself
 # (utils/chat_client.py) is the long-lived process. The wrapper:
-#   1. Resolves a Python interpreter that can import utils.chat_client
+#   1. Sources ~/.config/meshanchor/chat_pane.env (operator-tunable
+#      env file with CHAT_API / default channel / poll interval).
+#   2. Resolves a Python interpreter that can import utils.chat_client
 #      (prefers the MeshAnchor venv if installed, falls back to the
 #      system python3 + PYTHONPATH=/opt/meshanchor/src).
-#   2. Probes the local gateway HTTP API on :8081 — refuses-loud with
+#   3. Probes the local gateway HTTP API on :8081 — refuses-loud with
 #      exit 87 if it's not reachable (mirrors the MeshChatX wrapper's
 #      refuses-loud pattern; systemd's StartLimitBurst then parks the
 #      unit instead of restart-looping forever).
-#   3. exec's the client.
+#   4. exec's the client.
 #
 # Both ``scripts/install_chat_pane.sh`` (if/when added) and the
 # ChatPaneHandler's _install_user_unit copy this file verbatim into
@@ -27,6 +29,19 @@
 # ``Version:`` line above forces both sides to refresh.
 
 set -eu
+
+# --------------------------------------------------------------------
+# 1. Source the operator-tunable env file (edit via the TUI).
+#    File is created on first install from templates/python/chat_pane.env;
+#    we never overwrite the user's edits on subsequent installs.
+# --------------------------------------------------------------------
+ENV_FILE="${HOME}/.config/meshanchor/chat_pane.env"
+if [[ -r "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090  # path is computed at runtime
+    . "${ENV_FILE}"
+    set +a
+fi
 
 EXIT_API_UNREACHABLE=87
 CHAT_API="${MESHANCHOR_CHAT_API:-http://127.0.0.1:8081}"

@@ -57,8 +57,17 @@ from handlers._nomadnet_rns_checks import NomadNetRNSChecksMixin
 # Install/upgrade utilities extracted for file size compliance (CLAUDE.md #6)
 from handlers._nomadnet_install_utils import NomadNetInstallUtilsMixin
 
+# tmux/systemd-user persistent-session ops (Phase 8.4 — opt-in, additive
+# to the existing direct-launch flow).
+from handlers._nomadnet_tmux_service_ops import NomadNetTmuxServiceOpsMixin
 
-class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHandler):
+
+class NomadNetHandler(
+    NomadNetInstallUtilsMixin,
+    NomadNetRNSChecksMixin,
+    NomadNetTmuxServiceOpsMixin,
+    BaseHandler,
+):
     """TUI handler for NomadNet client management."""
 
     handler_id = "nomadnet"
@@ -350,6 +359,10 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                 else:
                     choices.append(("textui", "Launch Text UI (interactive)"))
                     choices.append(("daemon", "Start as Daemon (background)"))
+                # Phase 8.4: persistent tmux/systemd-user session — additive
+                # alternative to the direct-launch options above. Opt-in;
+                # operators who never touch this menu keep the legacy flow.
+                choices.append(("tmux_service", "Service (tmux)          Persistent tmux/systemd-user pane"))
                 choices.append(("logs", "View NomadNet Logs"))
                 choices.append(("config", "View NomadNet Config"))
                 choices.append(("edit", "Edit NomadNet Config"))
@@ -379,6 +392,10 @@ class NomadNetHandler(NomadNetInstallUtilsMixin, NomadNetRNSChecksMixin, BaseHan
                 "textui": ("Launch NomadNet TUI", self._launch_nomadnet_textui),
                 "daemon": ("Start NomadNet Daemon", self._launch_nomadnet_daemon),
                 "stop": ("Stop NomadNet", self._stop_nomadnet),
+                "tmux_service": (
+                    "NomadNet Service (tmux)",
+                    self._nomadnet_tmux_service_menu,
+                ),
                 "logs": ("View NomadNet Logs", self._view_nomadnet_logs),
                 "config": ("View NomadNet Config", self._view_nomadnet_config),
                 "edit": ("Edit NomadNet Config", self._edit_nomadnet_config),
