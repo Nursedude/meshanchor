@@ -1069,6 +1069,14 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
         if not self._check_localhost():
             self._send_error_json(403, "Forbidden — localhost only")
             return
+
+        # Phase 4b — PUT /radio/* writes to the MeshCore radio. Routed
+        # before the api null-check because the radio path doesn't depend
+        # on the config-store API surface.
+        if self.path.startswith("/radio/"):
+            self._handle_radio_put()
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1237,6 +1245,69 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             state = handler.get_radio_state(refresh=refresh)
         except Exception as e:
             self._send_error_json(500, f"Radio state read failed: {e}")
+            return
+
+        self._send_json({"radio": state})
+
+    # ─────────────────────────────────────────────────────────────────
+    # Radio writes — Phase 4b. Three routes, all localhost-only:
+    #   PUT /radio/lora           body {freq, bw, sf, cr}
+    #   PUT /radio/tx_power       body {value}
+    #   PUT /radio/channel/<idx>  body {name, secret?}
+    # Each setter validates → calls meshcore_py → refreshes the cache so the
+    # response carries the post-write snapshot. RadioWriteError → 400; any
+    # other exception → 500.
+    # ─────────────────────────────────────────────────────────────────
+
+    def _handle_radio_put(self) -> None:
+        try:
+            from gateway.meshcore_handler import get_active_handler
+            from gateway.meshcore_radio_config import RadioWriteError
+        except ImportError:
+            self._send_error_json(503, "MeshCore module not loaded")
+            return
+
+        handler = get_active_handler()
+        if handler is None:
+            self._send_error_json(503, "MeshCore handler not active")
+            return
+
+        body = self._read_body()
+        if body is None or not isinstance(body, dict):
+            self._send_error_json(400, "PUT requires a JSON object body")
+            return
+
+        path = self.path.split("?", 1)[0]
+        try:
+            if path == "/radio/lora":
+                state = handler.set_radio_lora(
+                    freq_mhz=body.get("freq"),
+                    bw_khz=body.get("bw"),
+                    sf=body.get("sf"),
+                    cr=body.get("cr"),
+                )
+            elif path == "/radio/tx_power":
+                state = handler.set_radio_tx_power(dbm=body.get("value"))
+            elif path.startswith("/radio/channel/"):
+                idx_str = path[len("/radio/channel/"):]
+                try:
+                    idx = int(idx_str)
+                except ValueError:
+                    self._send_error_json(400, f"Invalid channel idx: {idx_str!r}")
+                    return
+                state = handler.set_radio_channel(
+                    idx=idx,
+                    name=body.get("name", ""),
+                    secret_hex=body.get("secret"),
+                )
+            else:
+                self._send_error_json(404, f"Unknown radio path: {self.path}")
+                return
+        except RadioWriteError as e:
+            self._send_error_json(400, str(e))
+            return
+        except Exception as e:
+            self._send_error_json(500, f"Radio write failed: {e}")
             return
 
         self._send_json({"radio": state})

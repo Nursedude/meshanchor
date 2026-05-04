@@ -50,7 +50,7 @@ class MeshCoreHandler(BaseHandler):
                 ("status", "Connection Status   MeshCore radio state"),
                 ("detect", "Detect Devices      Scan for serial devices"),
                 ("config", "Configure           Connection settings"),
-                ("radio", "Radio Config        LoRa params, channels, TX (read-only)"),
+                ("radio", "Radio Config        LoRa params, channels, TX power"),
                 ("enable", "Enable/Disable      Toggle MeshCore in gateway"),
                 ("nodes", "View Nodes          MeshCore network nodes"),
                 ("stats", "Statistics          Message & connection stats"),
@@ -72,7 +72,7 @@ class MeshCoreHandler(BaseHandler):
                 "status": ("MeshCore Status", self._meshcore_status),
                 "detect": ("Detect Devices", self._meshcore_detect),
                 "config": ("MeshCore Config", self._meshcore_configure),
-                "radio": ("MeshCore Radio Config", self._meshcore_radio_status),
+                "radio": ("MeshCore Radio Config", self._meshcore_radio_menu),
                 "enable": ("Enable/Disable", self._meshcore_toggle),
                 "nodes": ("MeshCore Nodes", self._meshcore_nodes),
                 "stats": ("MeshCore Stats", self._meshcore_stats),
@@ -485,15 +485,43 @@ class MeshCoreHandler(BaseHandler):
     CHAT_API_BASE = "http://127.0.0.1:8081"
     CHAT_POLL_INTERVAL = 2.0
 
+    def _meshcore_radio_menu(self):
+        """Phase 4b: Radio Config sub-submenu (view + writes)."""
+        while True:
+            choices = [
+                ("view", "View                Current LoRa / channels / TX power"),
+                ("lora", "Set LoRa Params     Frequency / bandwidth / SF / coding rate"),
+                ("txp", "Set TX Power        Region-aware cap enforced"),
+                ("channel", "Set Channel Slot    Name + secret per slot"),
+                ("back", "Back"),
+            ]
+            choice = self.ctx.dialog.menu(
+                "MeshCore Radio Config",
+                "Inspect or change LoRa parameters, channel slots, and TX power. "
+                "Writes are double-confirmed and validated against region caps.",
+                choices,
+            )
+            if choice is None or choice == "back":
+                return
+            dispatch = {
+                "view": ("MeshCore Radio (view)", self._meshcore_radio_status),
+                "lora": ("Set LoRa Parameters", self._meshcore_set_lora),
+                "txp": ("Set TX Power", self._meshcore_set_tx_power),
+                "channel": ("Set Channel Slot", self._meshcore_set_channel),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self.ctx.safe_call(*entry)
+
     def _meshcore_radio_status(self):
-        """Phase 4a: read-only display of MeshCore LoRa radio config.
+        """Read-only display of MeshCore LoRa radio config.
 
         Hits the daemon's GET /radio?refresh=1 endpoint, which re-reads
         SELF_INFO + DEVICE_INFO + CHANNEL_INFO from the device. Falls
         back to the cached snapshot if refresh times out.
         """
         clear_screen()
-        print("=== MeshCore Radio Configuration (read-only) ===\n")
+        print("=== MeshCore Radio Configuration ===\n")
 
         result = self._radio_fetch_state(refresh=True)
         if not result.get("ok"):
@@ -508,7 +536,6 @@ class MeshCoreHandler(BaseHandler):
                 print("  Start the daemon: MeshCore → Daemon Control → Start daemon")
             else:
                 print(f"  Daemon error ({status}): {err}")
-            print("\n  This view is read-only; writes ship in Phase 4b.")
             self.ctx.wait_for_enter()
             return
 
@@ -523,7 +550,6 @@ class MeshCoreHandler(BaseHandler):
             print("  Radio state has not been read yet.")
             print("  The daemon populates this cache on connect; verify the")
             print("  MeshCore device is plugged in and the daemon is running.")
-            print("\n  This view is read-only; writes ship in Phase 4b.")
             self.ctx.wait_for_enter()
             return
 
@@ -579,7 +605,6 @@ class MeshCoreHandler(BaseHandler):
             ago = max(0, int(_time.time() - ts))
             print(f"\n  Last refreshed: {ago}s ago")
 
-        print("\n  This view is read-only; writes ship in Phase 4b.")
         self.ctx.wait_for_enter()
 
     def _radio_fetch_state(self, refresh: bool = False) -> dict:
@@ -610,6 +635,348 @@ class MeshCoreHandler(BaseHandler):
             return {"ok": False, "status": e.code, "error": msg}
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             return {"ok": False, "status": None, "error": str(e)}
+
+    def _radio_put(self, sub_path: str, body: dict) -> dict:
+        """PUT to /radio/<sub_path>. Returns shaped result dict.
+
+        Shape on success: {"ok": True, "radio": {...}}.
+        Shape on failure: {"ok": False, "status": int|None, "error": str}.
+        """
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = f"{self.CHAT_API_BASE}/radio/{sub_path.lstrip('/')}"
+        data = json.dumps(body).encode("utf-8")
+        try:
+            req = urllib.request.Request(
+                url,
+                data=data,
+                method="PUT",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read().decode("utf-8") or "{}")
+                radio = payload.get("radio") if isinstance(payload, dict) else None
+                return {"ok": True, "radio": radio or {}}
+        except urllib.error.HTTPError as e:
+            try:
+                payload = json.loads(e.read().decode("utf-8") or "{}")
+                msg = payload.get("error") or str(e)
+            except Exception:
+                msg = str(e)
+            return {"ok": False, "status": e.code, "error": msg}
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            return {"ok": False, "status": None, "error": str(e)}
+
+    # ── Phase 4b setters ─────────────────────────────────────────────
+    #
+    # Each setter:
+    #   1. Pulls the current snapshot (no refresh — assume View was just used)
+    #   2. Prompts for new value(s), seeded with current
+    #   3. Computes a region cap warning where applicable
+    #   4. Double-confirm dialog
+    #   5. PUT /radio/...; show result via msgbox
+    # No auto-write on Enter — wrong frequency or excessive TX power can
+    # brick a radio for that region or violate licence terms.
+
+    def _meshcore_set_lora(self):
+        snap = self._radio_fetch_state(refresh=False)
+        if not snap.get("ok"):
+            self.ctx.dialog.msgbox(
+                "Daemon Unreachable",
+                f"Couldn't read current radio state: {snap.get('error')}\n\n"
+                "Start the MeshCore daemon and try again.",
+            )
+            return
+        state = snap.get("radio") or {}
+
+        cur_freq = state.get("radio_freq_mhz")
+        cur_bw = state.get("radio_bw_khz")
+        cur_sf = state.get("radio_sf")
+        cur_cr = state.get("radio_cr")
+
+        intro = (
+            f"Current: freq={self._fmt_freq(cur_freq)}  "
+            f"bw={self._fmt_bw(cur_bw)}  sf={cur_sf}  cr={cur_cr}\n\n"
+            "Enter new value (blank = keep current)."
+        )
+
+        new_freq_str = self.ctx.dialog.inputbox(
+            "Frequency (MHz)", intro, init=str(cur_freq) if cur_freq else "",
+        )
+        if new_freq_str is None:
+            return
+        new_bw_str = self.ctx.dialog.inputbox(
+            "Bandwidth (kHz)",
+            "Supported: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500",
+            init=str(cur_bw) if cur_bw else "",
+        )
+        if new_bw_str is None:
+            return
+        new_sf_str = self.ctx.dialog.inputbox(
+            "Spreading Factor",
+            "Range 5..12 (higher SF = longer range, slower).",
+            init=str(cur_sf) if cur_sf else "",
+        )
+        if new_sf_str is None:
+            return
+        new_cr_str = self.ctx.dialog.inputbox(
+            "Coding Rate",
+            "Range 5..8 (4/5..4/8). 5 = highest throughput, 8 = most robust.",
+            init=str(cur_cr) if cur_cr else "",
+        )
+        if new_cr_str is None:
+            return
+
+        try:
+            freq = float(new_freq_str.strip()) if new_freq_str.strip() else cur_freq
+            bw = float(new_bw_str.strip()) if new_bw_str.strip() else cur_bw
+            sf = int(new_sf_str.strip()) if new_sf_str.strip() else cur_sf
+            cr = int(new_cr_str.strip()) if new_cr_str.strip() else cur_cr
+        except (TypeError, ValueError) as e:
+            self.ctx.dialog.msgbox("Bad Input", f"Could not parse value: {e}")
+            return
+
+        if None in (freq, bw, sf, cr):
+            self.ctx.dialog.msgbox(
+                "Incomplete",
+                "All four LoRa parameters must have a value (blank kept current, "
+                "but the radio reported no current value to keep).",
+            )
+            return
+
+        warn = self._region_warning_for_freq(freq)
+        confirm_text = (
+            f"Push these LoRa parameters to the radio?\n\n"
+            f"  Frequency:  {freq} MHz\n"
+            f"  Bandwidth:  {bw} kHz\n"
+            f"  Spreading:  {sf}\n"
+            f"  Coding:     {cr}\n"
+        )
+        if warn:
+            confirm_text += f"\n{warn}\n"
+        confirm_text += (
+            "\nWrong frequency for your region can violate licence terms or "
+            "brick the radio for that region. Continue?"
+        )
+
+        if not self.ctx.dialog.yesno("Confirm LoRa Write", confirm_text, default_no=True):
+            return
+        # Second confirm — explicit double-tap, can't be skipped.
+        if not self.ctx.dialog.yesno(
+            "Really Write?",
+            "Final check — actually PUT these values to the radio?",
+            default_no=True,
+        ):
+            return
+
+        result = self._radio_put(
+            "lora", {"freq": freq, "bw": bw, "sf": sf, "cr": cr},
+        )
+        self._show_write_result("LoRa Parameters", result)
+
+    def _meshcore_set_tx_power(self):
+        snap = self._radio_fetch_state(refresh=False)
+        if not snap.get("ok"):
+            self.ctx.dialog.msgbox(
+                "Daemon Unreachable",
+                f"Couldn't read current radio state: {snap.get('error')}",
+            )
+            return
+        state = snap.get("radio") or {}
+        cur_tx = state.get("tx_power_dbm")
+        max_tx = state.get("max_tx_power_dbm")
+        cur_freq = state.get("radio_freq_mhz")
+
+        intro = (
+            f"Current: {cur_tx if cur_tx is not None else '?'} dBm  "
+            f"(radio max: {max_tx if max_tx is not None else '?'} dBm)\n"
+        )
+        warn = self._region_tx_warning(cur_freq)
+        if warn:
+            intro += f"\n{warn}\n"
+        intro += "\nEnter new TX power in dBm:"
+
+        new_tx_str = self.ctx.dialog.inputbox(
+            "TX Power (dBm)", intro, init=str(cur_tx) if cur_tx is not None else "",
+        )
+        if new_tx_str is None:
+            return
+        try:
+            new_tx = int(new_tx_str.strip())
+        except (TypeError, ValueError):
+            self.ctx.dialog.msgbox("Bad Input", f"TX power must be an integer dBm value.")
+            return
+
+        confirm_text = (
+            f"Push TX power = {new_tx} dBm to the radio?\n\n"
+            f"  Current:        {cur_tx} dBm\n"
+            f"  Radio max:      {max_tx} dBm\n"
+            f"  Current freq:   {self._fmt_freq(cur_freq)}\n"
+        )
+        if warn:
+            confirm_text += f"\n{warn}\n"
+        if not self.ctx.dialog.yesno("Confirm TX Power Write", confirm_text, default_no=True):
+            return
+        if not self.ctx.dialog.yesno(
+            "Really Write?",
+            "Final check — actually PUT this TX power to the radio?",
+            default_no=True,
+        ):
+            return
+
+        result = self._radio_put("tx_power", {"value": new_tx})
+        self._show_write_result("TX Power", result)
+
+    def _meshcore_set_channel(self):
+        snap = self._radio_fetch_state(refresh=False)
+        if not snap.get("ok"):
+            self.ctx.dialog.msgbox(
+                "Daemon Unreachable",
+                f"Couldn't read current radio state: {snap.get('error')}",
+            )
+            return
+        state = snap.get("radio") or {}
+        max_ch = state.get("max_channels")
+        channels = state.get("channels") or []
+
+        # Build slot picker — show occupied slots labelled, free slots numbered.
+        max_label = max_ch if max_ch is not None else 32
+        try:
+            slot_count = int(max_label)
+        except (TypeError, ValueError):
+            slot_count = 32
+        occupied = {int(c.get("idx", -1)): c for c in channels if isinstance(c, dict)}
+        slot_choices = []
+        for i in range(slot_count):
+            ch = occupied.get(i)
+            if ch:
+                desc = f"[{i}] {ch.get('name', '(unnamed)'):<20} hash={ch.get('hash', '??')}"
+            else:
+                desc = f"[{i}] (empty)"
+            slot_choices.append((str(i), desc))
+
+        idx_str = self.ctx.dialog.menu(
+            "Select Channel Slot",
+            f"Slots 0..{slot_count - 1}. Writes overwrite existing slots.",
+            slot_choices,
+        )
+        if idx_str is None:
+            return
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            return
+
+        cur = occupied.get(idx)
+        cur_name = cur.get("name", "") if cur else ""
+
+        new_name = self.ctx.dialog.inputbox(
+            f"Channel Slot [{idx}] Name",
+            "Channel name. Prefix with # to auto-derive the secret as "
+            "sha256(name)[:16] (matches meshcore_py).",
+            init=cur_name,
+        )
+        if new_name is None:
+            return
+        new_name = new_name.strip()
+        if not new_name:
+            self.ctx.dialog.msgbox("Bad Input", "Channel name cannot be empty.")
+            return
+
+        secret_hex = self.ctx.dialog.inputbox(
+            "Channel Secret (hex, optional)",
+            "Leave blank to auto-derive from a #-prefixed name. "
+            "Otherwise provide 32 hex chars (16 bytes).",
+            init="",
+        )
+        if secret_hex is None:
+            return
+        secret_hex = secret_hex.strip() or None
+
+        confirm_text = (
+            f"Push channel slot [{idx}] to the radio?\n\n"
+            f"  Name:    {new_name}\n"
+            f"  Secret:  "
+            + ("(auto: sha256(name)[:16])" if not secret_hex else "(user-provided)")
+            + "\n"
+        )
+        if not secret_hex and not new_name.startswith("#"):
+            confirm_text += (
+                "\nNOTE: name has no '#' prefix — daemon will reject this without "
+                "an explicit secret.\n"
+            )
+        if cur:
+            confirm_text += f"\nThis OVERWRITES the existing slot ({cur.get('name')}).\n"
+
+        if not self.ctx.dialog.yesno("Confirm Channel Write", confirm_text, default_no=True):
+            return
+        if not self.ctx.dialog.yesno(
+            "Really Write?",
+            "Final check — actually PUT this channel to the radio?",
+            default_no=True,
+        ):
+            return
+
+        body = {"name": new_name}
+        if secret_hex:
+            body["secret"] = secret_hex
+        result = self._radio_put(f"channel/{idx}", body)
+        self._show_write_result(f"Channel [{idx}]", result)
+
+    def _show_write_result(self, label: str, result: dict) -> None:
+        if result.get("ok"):
+            radio = result.get("radio") or {}
+            note = radio.get("error")
+            msg = f"{label} write accepted.\n\n"
+            if note:
+                msg += f"Daemon note: {note}\n\n"
+            msg += "Use 'View' to confirm the radio reports the new value."
+            self.ctx.dialog.msgbox(f"{label} — Done", msg)
+        else:
+            err = result.get("error") or "unknown error"
+            status = result.get("status")
+            self.ctx.dialog.msgbox(
+                f"{label} — Failed",
+                f"HTTP {status if status is not None else 'n/a'}: {err}",
+            )
+
+    @staticmethod
+    def _region_warning_for_freq(freq) -> str:
+        """Return a human-readable region note for the chosen freq, or empty."""
+        try:
+            from gateway.meshcore_radio_config import region_for_freq
+        except ImportError:
+            return ""
+        try:
+            band = region_for_freq(float(freq))
+        except (TypeError, ValueError):
+            return ""
+        if band is None:
+            return (
+                f"NOTE: {freq} MHz isn't in any known regional band — verify it "
+                "is legal where you operate."
+            )
+        return f"Region: {band.label} (TX cap = {band.max_tx_dbm} dBm — {band.source})"
+
+    @staticmethod
+    def _region_tx_warning(freq) -> str:
+        """Return the region cap line for a TX-power write context."""
+        try:
+            from gateway.meshcore_radio_config import region_for_freq
+        except ImportError:
+            return ""
+        try:
+            band = region_for_freq(float(freq))
+        except (TypeError, ValueError):
+            return ""
+        if band is None:
+            return f"NOTE: {freq} MHz isn't in any known regional band."
+        return f"Region: {band.label} caps TX at {band.max_tx_dbm} dBm ({band.source})."
 
     @staticmethod
     def _fmt_freq(freq) -> str:
