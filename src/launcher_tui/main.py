@@ -104,6 +104,45 @@ class MeshAnchorLauncher:
             return True
         return self._feature_flags.get(feature, True)
 
+    # Phase 8 visibility fix: feature entries always render in submenus.
+    # When a flag is off, the row is dimmed-prefixed and selecting it shows
+    # the hint below instead of dispatching to the handler. Replaces the
+    # prior "vanish on disable" behavior that hid Meshtastic/RNS/Gateway
+    # entries from operators on minimal profiles.
+    _FEATURE_HINTS = {
+        "meshtastic": (
+            "Meshtastic Gateway",
+            "Meshtastic is disabled in the current deployment profile.\n\n"
+            "To enable, switch to the GATEWAY or FULL profile:\n"
+            "  python3 src/launcher.py --profile gateway\n\n"
+            "Profile is saved to ~/.config/meshanchor/deployment.json",
+        ),
+        "rns": (
+            "RNS / Reticulum",
+            "RNS is disabled in the current deployment profile.\n\n"
+            "To enable, switch to the GATEWAY or FULL profile:\n"
+            "  python3 src/launcher.py --profile gateway",
+        ),
+        "gateway": (
+            "Gateway Bridge",
+            "Gateway bridge is disabled in the current deployment profile.\n\n"
+            "Bridges MeshCore <-> Meshtastic <-> RNS.\n"
+            "To enable, switch to the GATEWAY or FULL profile:\n"
+            "  python3 src/launcher.py --profile gateway",
+        ),
+    }
+
+    def _show_disabled_feature_hint(self, feature: str) -> None:
+        """Show enable hint for a feature disabled by the current profile."""
+        title, body = self._FEATURE_HINTS.get(
+            feature,
+            (feature.title(), f"{feature} is disabled in the current profile."),
+        )
+        profile_name = (
+            getattr(self._profile, "display_name", None) if self._profile else None
+        ) or "Default"
+        self.dialog.msgbox(title, f"Active profile: {profile_name}\n\n{body}")
+
     def _build_section_menu(self, section, legacy_items, ordering=None):
         """Build menu choices by merging registry + legacy items.
 
@@ -703,17 +742,28 @@ class MeshAnchorLauncher:
         _ORDERING = ["meshtastic", "rns", "gateway", "aredn",
                       "messaging", "traffic", "mqtt", "favorites", "ham", "services",
                       "nomadnet"]
+        # Visibility fix: render Meshtastic/RNS/Gateway rows regardless of
+        # feature flag. When a flag is off, row is prefixed [off] and
+        # selection routes to _show_disabled_feature_hint instead of
+        # dispatching the handler.
         while True:
-            legacy = []
-            if self._feature_enabled("meshtastic"):
-                legacy.append(("meshtastic", "Meshtastic          Radio, channels, CLI"))
-            if self._feature_enabled("rns"):
-                legacy.append(("rns", "RNS / Reticulum     Status, gateway, messaging"))
-            if self._feature_enabled("gateway"):
-                legacy.append(("gateway", "Gateway Bridge      RNS-Meshtastic-MeshCore"))
-            legacy.append(("aredn", "AREDN Mesh          AREDN integration"))
-            legacy.append(("messaging", "Messaging           Send/receive messages"))
-            legacy.append(("favorites", "Favorites           Manage favorite nodes"))
+            mt_on = self._feature_enabled("meshtastic")
+            rns_on = self._feature_enabled("rns")
+            gw_on = self._feature_enabled("gateway")
+            legacy = [
+                ("meshtastic",
+                 "Meshtastic          Radio, channels, CLI" if mt_on
+                 else "Meshtastic   [off] Disabled in current profile"),
+                ("rns",
+                 "RNS / Reticulum     Status, gateway, messaging" if rns_on
+                 else "RNS          [off] Disabled in current profile"),
+                ("gateway",
+                 "Gateway Bridge      RNS-Meshtastic-MeshCore" if gw_on
+                 else "Gateway      [off] Disabled in current profile"),
+                ("aredn", "AREDN Mesh          AREDN integration"),
+                ("messaging", "Messaging           Send/receive messages"),
+                ("favorites", "Favorites           Manage favorite nodes"),
+            ]
             choices = self._build_section_menu("mesh_networks", legacy, _ORDERING)
 
             choice = self.dialog.menu(
@@ -724,6 +774,18 @@ class MeshAnchorLauncher:
 
             if choice is None or choice == "back":
                 break
+
+            # Disabled-feature short-circuit — preserve discoverability
+            # without dispatching handlers that would error on missing deps.
+            if choice == "meshtastic" and not mt_on:
+                self._show_disabled_feature_hint("meshtastic")
+                continue
+            if choice == "rns" and not rns_on:
+                self._show_disabled_feature_hint("rns")
+                continue
+            if choice == "gateway" and not gw_on:
+                self._show_disabled_feature_hint("gateway")
+                continue
 
             if self._registry.dispatch("mesh_networks", choice):
                 continue

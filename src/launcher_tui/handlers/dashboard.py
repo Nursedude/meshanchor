@@ -46,11 +46,21 @@ class DashboardHandler(BaseHandler):
     handler_id = "dashboard"
     menu_section = "dashboard"
 
+    # Friendly display names for the systemd unit names tracked in
+    # startup_checks.SERVICES_TO_CHECK. The dashboard shows these in the
+    # order they appear here (MeshCore daemon first), regardless of the
+    # iteration order of env_state.services.
+    _SERVICE_DISPLAY = [
+        ("meshanchor-daemon", "MeshAnchor (MeshCore)"),
+        ("meshtasticd",       "Meshtastic Gateway"),
+        ("rnsd",              "RNS / Reticulum"),
+    ]
+
     def menu_items(self):
         return [
             ("status", "Service Status      All services with health", None),
             ("weather", "Space Weather       SFI, Kp, bands at a glance", None),
-            ("nodes", "Node Count          Meshtastic + RNS nodes", None),
+            ("nodes", "Node Count          MeshCore + Meshtastic + RNS nodes", None),
             ("score", "Health Score        Network health snapshot", None),
             ("datapath", "Data Path Check     Test all data sources", None),
             ("reports", "Reports             Generate status report", None),
@@ -95,32 +105,51 @@ class DashboardHandler(BaseHandler):
             return "Fix: Check Webserver section in /etc/meshtasticd/config.yaml"
 
     def _service_status_display(self):
-        """Show comprehensive service status."""
+        """Show comprehensive service status.
+
+        Display order is fixed by _SERVICE_DISPLAY (MeshCore daemon first,
+        then optional gateways) so the user always sees the primary radio
+        owner at the top regardless of dict insertion order.
+        """
         clear_screen()
         print("=== Service Status ===\n")
 
         if self.ctx.env_state and _HAS_STARTUP_CHECKS:
-            for name, info in self.ctx.env_state.services.items():
-                if info.state == ServiceRunState.RUNNING:
-                    print(f"  \033[0;32m●\033[0m {name:<18} running")
-                elif info.state == ServiceRunState.FAILED:
-                    print(f"  \033[0;31m●\033[0m {name:<18} FAILED")
-                else:
-                    print(f"  \033[2m○\033[0m {name:<18} stopped")
+            services = self.ctx.env_state.services
+            shown = set()
+            for unit, label in self._SERVICE_DISPLAY:
+                info = services.get(unit)
+                if info is None:
+                    continue
+                shown.add(unit)
+                self._print_service_row(label, info)
+            # Anything in env_state not covered by _SERVICE_DISPLAY (future
+            # services) — fall through with raw unit name.
+            for unit, info in services.items():
+                if unit in shown:
+                    continue
+                self._print_service_row(unit, info)
         else:
-            for svc in ['meshtasticd', 'rnsd', 'mosquitto']:
+            # Fallback when env_state is unavailable: probe in display order.
+            fallback_order = [
+                ('meshanchor-daemon', 'MeshAnchor (MeshCore)'),
+                ('meshtasticd', 'Meshtastic Gateway'),
+                ('rnsd', 'RNS / Reticulum'),
+                ('mosquitto', 'MQTT Broker'),
+            ]
+            for unit, label in fallback_order:
                 try:
                     result = subprocess.run(
-                        ['systemctl', 'is-active', svc],
+                        ['systemctl', 'is-active', unit],
                         capture_output=True, text=True, timeout=5
                     )
                     status = result.stdout.strip()
                     if status == 'active':
-                        print(f"  \033[0;32m●\033[0m {svc:<18} running")
+                        print(f"  \033[0;32m●\033[0m {label:<22} running")
                     else:
-                        print(f"  \033[2m○\033[0m {svc:<18} {status}")
+                        print(f"  \033[2m○\033[0m {label:<22} {status}")
                 except Exception:
-                    print(f"  ? {svc:<18} unknown")
+                    print(f"  ? {label:<22} unknown")
 
         # Circuit breaker status — show any open circuits
         try:
@@ -214,6 +243,16 @@ class DashboardHandler(BaseHandler):
         print()
         self.ctx.wait_for_enter()
 
+    @staticmethod
+    def _print_service_row(label: str, info) -> None:
+        """Render a single service status row with colored bullet + state."""
+        if info.state == ServiceRunState.RUNNING:
+            print(f"  \033[0;32m●\033[0m {label:<22} running")
+        elif info.state == ServiceRunState.FAILED:
+            print(f"  \033[0;31m●\033[0m {label:<22} FAILED")
+        else:
+            print(f"  \033[2m○\033[0m {label:<22} stopped")
+
     def _dashboard_space_weather(self):
         """Quick-look space weather for the Dashboard.
 
@@ -260,9 +299,22 @@ class DashboardHandler(BaseHandler):
         self.ctx.dialog.msgbox("Space Weather", "\n".join(lines), width=50, height=22)
 
     def _show_node_counts(self):
-        """Show node counts from all sources."""
+        """Show node counts from all sources.
+
+        MeshCore counts come from the in-process UnifiedNodeTracker (no
+        network round-trip — the gateway daemon publishes advertisements
+        directly into the tracker). Order is MeshCore first since it's
+        the primary radio for this profile.
+        """
         clear_screen()
         print("=== Node Counts ===\n")
+
+        try:
+            from gateway.node_tracker import get_node_tracker
+            mc_nodes = get_node_tracker().get_meshcore_nodes()
+            print(f"  MeshCore nodes:   {len(mc_nodes)}")
+        except Exception as e:
+            print(f"  MeshCore: unavailable ({e})")
 
         if not _HAS_MESHTASTIC_HTTP:
             print("  Meshtastic: meshtastic_http module not available")
