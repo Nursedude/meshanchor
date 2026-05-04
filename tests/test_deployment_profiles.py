@@ -270,9 +270,14 @@ class TestProfileLookup:
         assert len(profiles) == 5
 
     def test_list_profiles_order(self):
-        """list_profiles returns profiles in display order."""
+        """list_profiles returns profiles in display order.
+
+        Phase 7 (2026-05-04) reordered to MeshCore-first per the charter;
+        Settings TUI uses this order verbatim for the picker. Full matrix
+        pinned in tests/test_phase7_profile_defaults.py.
+        """
         profiles = list_profiles()
-        assert profiles[0].name == ProfileName.RADIO_MAPS
+        assert profiles[0].name == ProfileName.MESHCORE
         assert profiles[-1].name == ProfileName.FULL
 
     def test_profile_to_dict(self):

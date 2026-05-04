@@ -168,7 +168,10 @@ PROFILES: Dict[ProfileName, ProfileDefinition] = {
             "gateway": True,
             "mqtt": True,
             "maps": True,
-            "tactical": True,
+            # Phase 7: tactical defaults off under GATEWAY. Bridge users
+            # don't necessarily want SITREP/zones/QR/ATAK menus by default;
+            # flip on via Settings if you want them. See foundation doc.
+            "tactical": False,
         },
     ),
     ProfileName.FULL: ProfileDefinition(
@@ -370,11 +373,18 @@ def get_profile_by_name(name: str) -> Optional[ProfileDefinition]:
 
 
 def list_profiles() -> List[ProfileDefinition]:
-    """Return all available profiles in display order."""
+    """Return all available profiles in display order.
+
+    Order is MeshCore-primary (per the v0.1.0-alpha charter): the most
+    conservative MeshCore default first, then MeshCore + maps (the common
+    Pi NOC deployment), then the Meshtastic-leaning options. The Settings
+    TUI uses this order verbatim for the profile picker, so the user sees
+    the recommended default at the top.
+    """
     return [
+        PROFILES[ProfileName.MESHCORE],
         PROFILES[ProfileName.RADIO_MAPS],
         PROFILES[ProfileName.MONITOR],
-        PROFILES[ProfileName.MESHCORE],
         PROFILES[ProfileName.GATEWAY],
         PROFILES[ProfileName.FULL],
     ]
