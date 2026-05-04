@@ -97,6 +97,7 @@ EXPECTED_FLAGS = [
     ("ifaces", "rns"),                  # rns_interfaces
     ("monitor", "rns"),                 # rns_monitor
     ("sniffer", "rns"),                 # rns_sniffer
+    ("tools", "rns"),                   # rns_tools (MN-3)
     # Gateway-bound (cross-protocol)
     ("gateway", "gateway"),
     ("dual_failover", "gateway"),

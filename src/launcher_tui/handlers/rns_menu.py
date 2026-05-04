@@ -31,6 +31,7 @@ _RNS_ORDERING = [
     "nomadnet", "meshchatx",
     "status", "monitor", "paths", "sniffer",
     "probe", "identity", "nodes", "positions",
+    "tools",
     "diag", "repair", "drift",
     "ifaces", "config", "edit", "logging", "check",
 ]
