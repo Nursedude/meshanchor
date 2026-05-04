@@ -285,7 +285,9 @@ class TestMeshforgeMapsHandler:
         h = MeshforgeMapsHandler()
         items = h.menu_items()
         keys = [item[0] for item in items]
-        assert keys == ["mf_status", "mf_open"]
+        # Phase 6 shipped mf_status + mf_open; Phase 6.3 added mf_endpoint.
+        assert keys[:2] == ["mf_status", "mf_open"]
+        assert "mf_endpoint" in keys
         # Section-level "maps" gating handles flagging — per-row stays None.
         for item in items:
             assert item[2] is None

@@ -19,7 +19,8 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 3 | Handler feature-flag audit (opt-in flagging, 12 handlers / 17 rows) | merged ✅ | [PR #18](https://github.com/Nursedude/meshanchor/pull/18) |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | merged ✅ | 4a [PR #20](https://github.com/Nursedude/meshanchor/pull/20); 4b [PR #21](https://github.com/Nursedude/meshanchor/pull/21) (merge `fa41c5ce`) |
 | 5 | Startup health flip (meshtasticd → optional) | merged ✅ | [PR #22](https://github.com/Nursedude/meshanchor/pull/22) (merge `55acf1f3`) |
-| 6 | meshforge-maps :8808 plugin scaffold | in flight | `claude/mc-phase6-maps-plugin` |
+| 6 | meshforge-maps :8808 plugin scaffold | merged ✅ | [PR #23](https://github.com/Nursedude/meshanchor/pull/23) (merge `b10074b6`) |
+| 6.3 | meshforge-maps endpoint config (host/port/timeout) | in flight | `claude/mc-phase6.3-maps-config` |
 | 7 | Profile defaults + docs | not started | — |
 
 ---
@@ -277,6 +278,67 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 
 ---
 
+## Phase 6.3 — Meshforge-Maps Endpoint Config
+
+**Goal**: Take the Phase 6 hardcoded `localhost:8808` and turn it into a per-deployment config (`host` / `port` / `timeout`) backed by `SettingsManager("meshforge_maps")`. Useful when meshforge-maps runs on a different host on the LAN — common for users who want their NOC TUI on a Pi while the maps server runs on a beefier mini-PC. Defaults match Phase 6 exactly so existing localhost installs keep working without writing a settings file.
+
+**Key contract findings (2026-05-04)**:
+
+- **`SettingsManager` is the existing well-trodden path**: `propagation.py:47`, `mesh_alerts`, `automation`, `gateway`, `logging`, etc. all use `SettingsManager("<name>", defaults={...})` from `utils.common`. Same pattern fits cleanly here — `SettingsManager("meshforge_maps", defaults={"host": "localhost", "port": 8808, "timeout": 3.0})`. Saves to `~/.config/meshanchor/meshforge_maps.json`.
+- **Validation lives in the new module, not `MeshforgeMapsClient`**: Phase 6's client already accepts `host`, `port`, `timeout` constructor args — no changes needed there. Validation belongs in the config layer because the client is *probe-and-collapse-on-error* by design (it'll happily try to reach `bad host!` and just return `available=False`). Catching invalid input at the TUI prompt is the right UX moment to show a fix hint.
+- **Two independent failure modes**: (a) bad on-disk values shouldn't lock the user out of the TUI — the load path falls back to defaults per-field with a logged warning; (b) bad TUI input from the user should *not* persist — the save path raises `MapsConfigError` and the handler shows a msgbox so the user can correct it. Mirrors the same split that `service_check` uses (return-value-encodes-failure on the read path, raise-on-the-write-path).
+- **`TUIContext.validate_hostname` / `validate_port` exist** (`handler_protocol.py:88,97`) but they're booleans-only — they don't carry an error message for the msgbox. The new `MapsConfigError` instances *do* carry a fix hint string, so the dialog flow gets useful "Port must be in range 1-65535" text instead of a generic "Invalid Port" with no context.
+- **Frozen dataclass for `MapsConfig`**: handler code holds the config briefly across an `_configure_endpoint` loop iteration. Frozen avoids accidental in-place mutation; rebuild is cheap (just a `load_maps_config()` round-trip after a save). Matches the pattern used by Phase 4b's `RegionBand` namedtuple.
+- **Phase 6 test that asserted exactly two menu items has to update**: `test_phase6_meshforge_maps.py::test_menu_items` hard-coded `keys == ["mf_status", "mf_open"]`. Phase 6.3 adds `"mf_endpoint"`, so the assertion flips to "first two are unchanged + endpoint is present". Per saved feedback (PR #22 CI canary), running the module's *own* canonical test before pushing is what catches this — adjacent suite coverage misses it.
+- **Test isolation**: every test in `test_phase6_3_maps_config.py` uses an `isolated_config_dir` fixture that monkeypatches `utils.common.CONFIG_DIR` to `tmp_path`. SettingsManager's `__init__` reads CONFIG_DIR at construction time, so the patch propagates without further wiring. Prevents the user's real `~/.config/meshanchor/meshforge_maps.json` from leaking into the test outcome.
+- **No file-size cliff this phase**: `meshforge_maps_config.py` is the new ~210-line module; `meshforge_maps.py` grows from 137 → 220 (still well under 1500); `test_phase6_3_maps_config.py` is the new 480-line test. `map_data_collector.py` still at 1529 — Phase 6.3 doesn't touch it.
+
+**Implementation outline (this PR)**:
+
+1. **Branch**: `claude/mc-phase6.3-maps-config` off main (post PR #23).
+2. **Tracker prep (this commit)**: flip Phase 6 row to `merged ✅`, add this Phase 6.3 section.
+3. **`utils/meshforge_maps_config.py`** (new, ~210 lines): `MapsConfig` frozen dataclass (host, port, timeout) + `MapsConfigError` exception + `load_maps_config()` / `save_maps_config()` / `reset_maps_config()` API. Validation helpers `_validate_host` / `_validate_port` / `_validate_timeout` raise `MapsConfigError` with human-readable hints; `_safe_*` coercion helpers swallow invalid on-disk values back to defaults with a logged warning. `MapsConfig.build_client()` returns a fully-configured `MeshforgeMapsClient`.
+4. **`launcher_tui/handlers/meshforge_maps.py`**: add a third menu row `mf_endpoint` ("Maps Endpoint — Configure host/port"). `_client()` flips from hardcoded constants to `load_maps_config().build_client()`. New `_configure_endpoint()` method opens a sub-menu (Host / Port / Timeout / Reset / Back) and `_prompt_host` / `_prompt_port` / `_prompt_timeout` validators show a msgbox on `MapsConfigError` instead of writing junk.
+5. **No registration change**: Batch 16 in `handlers/__init__.py` already imports `MeshforgeMapsHandler`. Adding rows to `menu_items()` doesn't require a re-register.
+6. **Tests** (`tests/test_phase6_3_maps_config.py`, 49 tests across 7 classes):
+   - `TestDefaults` (2) — module defaults equal Phase 6 hardcoded values; load returns defaults when no settings file.
+   - `TestSaveAndLoad` (5) — full save round-trip, partial update, no-arg noop, on-disk JSON shape, reset.
+   - `TestLoadFromCorruptOrInvalid` (4) — corrupt JSON / bad port / bad host / bad timeout each fall back to defaults per-field.
+   - `TestValidation` (13) — empty/invalid-char/leading-dash/overlong host; zero/negative/oversize/non-int port; zero/negative/oversize timeout; IPv4 + IPv6 acceptance; failed save doesn't corrupt prior good config.
+   - `TestMapsConfig` (4) — dataclass validate(), build_client(), frozenness.
+   - `TestHandlerUsesSettings` (3) — `_client()` defaults / picks up override / rebuilds each call (no caching).
+   - `TestMenuItems` (4) — endpoint row present, no per-row flag, Phase 6 keys preserved, dispatch wires to `_configure_endpoint`.
+   - `TestConfigureEndpointDialog` (11) — back exits cleanly; host/port/timeout each persist; invalid host/port/timeout each show a msgbox and *don't* persist; reset confirm/abort; blank input keeps current; status format renders overridden URL.
+   - `TestPhase6BackwardCompat` (2) — `_open_browser` opens `localhost:8808` by default, opens overridden URL after save.
+
+**Critical files (cross-reference)**:
+
+- `src/utils/meshforge_maps_config.py` — new, persisted endpoint config + validation
+- `src/launcher_tui/handlers/meshforge_maps.py:43-55` — Phase 6.3 menu row + dispatch
+- `src/launcher_tui/handlers/meshforge_maps.py:64-69` — `_client()` reads from settings
+- `src/launcher_tui/handlers/meshforge_maps.py:107-180` — `_configure_endpoint` + `_prompt_*`
+- `tests/test_phase6_3_maps_config.py` — new, 49 tests
+- `tests/test_phase6_meshforge_maps.py:284-292` — Phase 6 menu test relaxed for the third row
+
+**Definition of Done**:
+- [x] Branch `claude/mc-phase6.3-maps-config` created
+- [x] `MapsConfig` + `load_maps_config` / `save_maps_config` / `reset_maps_config` shipped
+- [x] Validation rejects bad input on the write path; falls back to defaults on the read path
+- [x] Handler `_client()` reads from settings; `mf_endpoint` menu row + sub-menu shipped
+- [x] 49 Phase 6.3 tests pass
+- [x] Existing Phase 6 + adjacent suites still pass (513 passed combined)
+- [x] Full suite passes (3083 passed; the 2 dev-box flakes documented in Phase 5/6 entries are pre-existing and not Phase 6.3 regressions)
+- [x] Lint clean
+- [ ] PR opened to main
+
+**Deferred to follow-up phases** (still on the menu after 6.3):
+- **Phase 6.1 — bidirectional handshake** (data fusion).
+- **Phase 6.2 — lifecycle control** (start/stop/restart of meshforge-maps' systemd unit, with Issue #31 guardrails).
+- **Phase 5.5 — health code cleanup** (`health_score` / `active_health_probe` / `service_menu` deferrals).
+- **map_data_collector split** (1529 → under 1500).
+
+---
+
 ## Where We Left Off (update each session)
 
 **2026-05-03 (session start)**: Plan approved, branch created, tracker + memory artifacts being written. Next step: implement `node_tracker.get_meshcore_nodes_for_map()`.
@@ -400,6 +462,18 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **File-size watch**: nothing new approaches the 1500 cap. `map_data_collector.py` at 1529 stays as a flagged-but-not-touched file — a future cleanup phase will split it. Phase 6's two new files are 178 + 137 lines, comfortable.
 - **Next session resume point**: review/merge the Phase 6 PR. Once merged, options for the next phase: (a) Phase 6.1 — bidirectional handshake / data fusion with meshforge-maps; (b) Phase 6.2 — lifecycle control (start/stop/restart of meshforge-maps' systemd unit, observing Issue #31 no-silent-changes rule); (c) Phase 6.3 — config schema for non-localhost meshforge-maps deployments; (d) Phase 5.5 — the deferred health code cleanup (health_score / active_health_probe / service_menu); (e) `map_data_collector` split. Pick whichever the user prioritizes.
 
+**2026-05-04 (Phase 6 MERGED + Phase 6.3 implementation — PR pending)**:
+- PR #23 merged into main as merge commit `b10074b6`. Phase 6 scaffold (discovery client + TUI handler for meshforge-maps :8808) shipped. Phase Status table now shows Phase 6 as `merged ✅` per the no-standalone-bumps lifecycle.
+- **Branch**: `claude/mc-phase6.3-maps-config` off main. User picked Phase 6.3 (endpoint config schema) over the other follow-up options.
+- **Files changed** (4):
+  - `src/utils/meshforge_maps_config.py` (NEW, 211 lines): `MapsConfig` frozen dataclass + `MapsConfigError` + `load_maps_config()` / `save_maps_config()` / `reset_maps_config()`. `_validate_*` raise on the write path; `_safe_*` swallow on the read path back to defaults. `MapsConfig.build_client()` returns a configured `MeshforgeMapsClient`.
+  - `src/launcher_tui/handlers/meshforge_maps.py` (137 → 220): new `mf_endpoint` menu row + `_configure_endpoint` sub-menu with Host / Port / Timeout / Reset / Back. `_prompt_host` / `_prompt_port` / `_prompt_timeout` validate via `save_maps_config` and surface `MapsConfigError` in a msgbox. `_client()` reads from `load_maps_config()` instead of using `DEFAULT_HOST/PORT` constants.
+  - `tests/test_phase6_3_maps_config.py` (NEW, 484 lines, 49 tests across 7 classes — see Phase 6.3 section above for the full breakdown).
+  - `tests/test_phase6_meshforge_maps.py` (1 line): `test_menu_items` relaxed to assert `keys[:2] == ["mf_status", "mf_open"]` + `"mf_endpoint" in keys`. Per the saved feedback from Phase 5: run the module's own canonical test before pushing — full-suite caught it before commit, would have CI'd otherwise.
+- **Gates green**: `python3 scripts/lint.py --all` exit 0; combined Phase 6 + Phase 6.3 + handler registry + all-handlers protocol + regression guards = 513 passed; full suite `pytest tests/ --ignore=tests/test_bridge_integration.py` = **3083 passed** (was 3034 pre-Phase-6.3, +49 new). Same two pre-existing dev-box flakes (`test_gateway_integration::test_bridge_starts_in_degraded_mode`, `test_status_bar::test_no_node_count_by_default`) are documented in the Phase 5/6 entries — confirmed not Phase 6.3 regressions.
+- **File-size watch**: nothing in this PR approaches the 1500-line cap. New `meshforge_maps_config.py` is 211; `meshforge_maps.py` grew 137 → 220; `test_phase6_3_maps_config.py` is 484. `map_data_collector.py` still at 1529 — Phase 6.3 doesn't touch it.
+- **Next session resume point**: review/merge this Phase 6.3 PR. Once merged, the remaining follow-ups are (a) Phase 6.1 — bidirectional handshake / data fusion; (b) Phase 6.2 — lifecycle control (start/stop/restart of meshforge-maps' systemd unit, with Issue #31 guardrails); (c) Phase 5.5 — health code cleanup (health_score / active_health_probe / service_menu deferrals); (d) `map_data_collector` split (1529 → under 1500). Phase 7 (profile defaults + docs) is the natural next "main-line" phase if no follow-up is prioritized.
+
 | Date | Decision | Rationale |
 |---|---|---|
 | 2026-05-03 | Meshtastic handlers gated behind feature flag, not deleted | Preserves `gateway`/`full` profile capability. Reversible. |
@@ -422,6 +496,13 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-04 | Phase 6 client never raises; failures collapse into `MapsServiceStatus(available=False, error=...)` | Cleaner than try/except gymnastics at every call site. The TUI handler renders the `error` string as a fix hint without needing to know which underlying exception fired. Mirrors the pattern from `service_check.py` where reachability is encoded in the return value, not the control flow. |
 | 2026-05-04 | Phase 6 handler doesn't take a per-row `feature_flag=` value | The whole `maps_viz` section is gated by the `maps` feature flag at the top level (`_run_main_menu()`). Per-row gating inside that section would be redundant. Matches the convention used by `ai_tools.py` and `topology.py`. If a profile ever needs MeshAnchor maps but NOT meshforge-maps, introduce a finer-grained `meshforge_maps` flag — but until then, section-level gating is the right scope. |
 | 2026-05-04 | Phase 6 doesn't split `map_data_collector.py` (1529 lines, over cap) | The file's been over the 1500 cap since well before Phase 6 — this is not a Phase 6 regression and Phase 6's new code lives in separate modules, so no mechanical reason to bundle the split into this PR. A future cleanup phase will extract per-source collectors. Keeping Phase 6 scoped tight makes review easier and lets the split land independently when it's the right priority. |
+| 2026-05-04 | Phase 6.3 splits validation across two paths (raise on write, swallow on read) | Two failure modes need different UX. Bad TUI input should surface a fix hint via msgbox so the user can correct it — that's `MapsConfigError`. Bad on-disk values shouldn't lock the user out of the TUI at all — the load path falls back to defaults per-field with a logged warning. Mirrors the `service_check.py` split (return-value-encodes-failure on read; raise-on-write). |
+| 2026-05-04 | Phase 6.3 introduces `MapsConfigError` instead of reusing `TUIContext.validate_hostname` / `validate_port` | The TUIContext validators are booleans-only — they don't carry an error message for the msgbox. `MapsConfigError` instances carry a human-readable hint ("port must be in range 1-65535") that the dialog can render directly. Reusing the booleans would force the handler to re-stringify generic "Invalid X" messages without the actual constraint, which is exactly the "actionable error message" rule from `persistent_issues.md`. |
+| 2026-05-04 | Phase 6.3 defaults match Phase 6 hardcoded values exactly (`localhost:8808`, timeout 3.0) | Non-breaking is the load-bearing guarantee — every existing localhost deployment must keep working without writing a settings file. Tests assert the equality directly so a future drift can't sneak through. |
+| 2026-05-04 | Phase 6.3 hard-caps probe timeout at 60 seconds | A TUI menu blocking on a 60-second probe already feels broken; anything bigger is almost certainly user typo. The cap is configurable via the source if a future use case demands it, but the default validation is opinionated. |
+| 2026-05-04 | Phase 6.3 `MapsConfig` is frozen | Handler holds the config briefly across the `_configure_endpoint` loop. Frozen avoids accidental in-place mutation; rebuild is cheap. Matches Phase 4b's `RegionBand` namedtuple. |
+| 2026-05-04 | Phase 6.3 `_client()` rebuilds on every call (no caching) | Settings can change mid-session via the new "Configure Endpoint" menu. A cached client would render stale URLs in `_show_status` after a save. The rebuild is a single SettingsManager load — cheap. |
+| 2026-05-04 | Phase 6.3 updates the Phase 6 menu-items test rather than working around it | `test_phase6_meshforge_maps.py::test_menu_items` was the canonical test for the module and asserted exactly two rows. Phase 6.3 adds a third — the right answer is to update the canonical test, not to add the row in a way that hides from it. Per the saved feedback memory: pre-push, run the module's own test file. |
 
 ---
 
