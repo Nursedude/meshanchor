@@ -50,6 +50,7 @@ class MeshCoreHandler(BaseHandler):
                 ("status", "Connection Status   MeshCore radio state"),
                 ("detect", "Detect Devices      Scan for serial devices"),
                 ("config", "Configure           Connection settings"),
+                ("radio", "Radio Config        LoRa params, channels, TX (read-only)"),
                 ("enable", "Enable/Disable      Toggle MeshCore in gateway"),
                 ("nodes", "View Nodes          MeshCore network nodes"),
                 ("stats", "Statistics          Message & connection stats"),
@@ -71,6 +72,7 @@ class MeshCoreHandler(BaseHandler):
                 "status": ("MeshCore Status", self._meshcore_status),
                 "detect": ("Detect Devices", self._meshcore_detect),
                 "config": ("MeshCore Config", self._meshcore_configure),
+                "radio": ("MeshCore Radio Config", self._meshcore_radio_status),
                 "enable": ("Enable/Disable", self._meshcore_toggle),
                 "nodes": ("MeshCore Nodes", self._meshcore_nodes),
                 "stats": ("MeshCore Stats", self._meshcore_stats),
@@ -473,15 +475,177 @@ class MeshCoreHandler(BaseHandler):
         self.ctx.wait_for_enter()
 
     # ─────────────────────────────────────────────────────────────────
-    # Chat — talks to daemon's /chat/* HTTP API on :8081
-    #
+    # Daemon HTTP API — chat + radio config both share the :8081 base.
     # The daemon owns p4's serial port; the TUI runs in a separate
     # process and can't open it directly. The daemon's MeshCoreHandler
-    # mirrors RX + TX into a ring buffer that this menu reads/writes.
+    # mirrors RX + TX into a ring buffer (chat) and a RadioState cache
+    # (radio config) that these menus read.
     # ─────────────────────────────────────────────────────────────────
 
     CHAT_API_BASE = "http://127.0.0.1:8081"
     CHAT_POLL_INTERVAL = 2.0
+
+    def _meshcore_radio_status(self):
+        """Phase 4a: read-only display of MeshCore LoRa radio config.
+
+        Hits the daemon's GET /radio?refresh=1 endpoint, which re-reads
+        SELF_INFO + DEVICE_INFO + CHANNEL_INFO from the device. Falls
+        back to the cached snapshot if refresh times out.
+        """
+        clear_screen()
+        print("=== MeshCore Radio Configuration (read-only) ===\n")
+
+        result = self._radio_fetch_state(refresh=True)
+        if not result.get("ok"):
+            err = result.get("error") or "unknown error"
+            status = result.get("status")
+            if status == 503:
+                print(f"  Daemon reports MeshCore not active: {err}")
+                print("  Start it: MeshCore → Daemon Control → Start daemon")
+            elif status is None:
+                print(f"  Daemon's HTTP API on :8081 is not reachable.")
+                print(f"  ({err})")
+                print("  Start the daemon: MeshCore → Daemon Control → Start daemon")
+            else:
+                print(f"  Daemon error ({status}): {err}")
+            print("\n  This view is read-only; writes ship in Phase 4b.")
+            self.ctx.wait_for_enter()
+            return
+
+        state = result.get("radio") or {}
+        if state.get("error"):
+            print(f"  Note from daemon: {state['error']}\n")
+
+        source = state.get("source")
+        if source == "simulator":
+            print("  [SIMULATOR] — daemon is in simulation mode, values are fake.\n")
+        elif source is None and not state.get("last_refresh_ts"):
+            print("  Radio state has not been read yet.")
+            print("  The daemon populates this cache on connect; verify the")
+            print("  MeshCore device is plugged in and the daemon is running.")
+            print("\n  This view is read-only; writes ship in Phase 4b.")
+            self.ctx.wait_for_enter()
+            return
+
+        # Identity
+        node = state.get("node_name") or "(unknown)"
+        model = state.get("model") or "(unknown)"
+        fw = state.get("fw_build") or "(unknown)"
+        fw_ver = state.get("fw_ver")
+        print(f"  Node Name:      {node}")
+        print(f"  Model:          {model}")
+        if fw_ver is not None:
+            print(f"  Firmware:       {fw} (proto v{fw_ver})")
+        else:
+            print(f"  Firmware:       {fw}")
+
+        # LoRa parameters
+        freq = state.get("radio_freq_mhz")
+        bw = state.get("radio_bw_khz")
+        sf = state.get("radio_sf")
+        cr = state.get("radio_cr")
+        print("\n  LoRa Parameters:")
+        print(f"    Frequency:    {self._fmt_freq(freq)}")
+        print(f"    Bandwidth:    {self._fmt_bw(bw)}")
+        print(f"    Spreading:    {sf if sf is not None else '?'}")
+        print(f"    Coding Rate:  {cr if cr is not None else '?'}")
+        preset = self._radio_preset_name(freq, bw, sf, cr)
+        if preset:
+            print(f"    Common name:  ≈ {preset}")
+
+        # TX power
+        tx = state.get("tx_power_dbm")
+        max_tx = state.get("max_tx_power_dbm")
+        print("\n  TX Power:")
+        print(f"    Current:      {tx if tx is not None else '?'} dBm")
+        print(f"    Maximum:      {max_tx if max_tx is not None else '?'} dBm")
+
+        # Channels
+        channels = state.get("channels") or []
+        max_ch = state.get("max_channels")
+        max_label = max_ch if max_ch is not None else "?"
+        print(f"\n  Channels ({len(channels)} configured / max {max_label}):")
+        if not channels:
+            print("    (no channels configured)")
+        for ch in channels:
+            name = ch.get("name") or "(unnamed)"
+            idx = ch.get("idx")
+            h = ch.get("hash") or "??"
+            print(f"    [{idx}] {name:<20} hash={h}")
+
+        ts = state.get("last_refresh_ts")
+        if ts:
+            import time as _time
+            ago = max(0, int(_time.time() - ts))
+            print(f"\n  Last refreshed: {ago}s ago")
+
+        print("\n  This view is read-only; writes ship in Phase 4b.")
+        self.ctx.wait_for_enter()
+
+    def _radio_fetch_state(self, refresh: bool = False) -> dict:
+        """GET /radio[?refresh=1] from the daemon. Returns a result dict.
+
+        Shape on success: {"ok": True, "radio": {...}}.
+        Shape on failure: {"ok": False, "status": int|None, "error": str}.
+        """
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = f"{self.CHAT_API_BASE}/radio"
+        if refresh:
+            url += "?refresh=1"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read().decode("utf-8") or "{}")
+                radio = body.get("radio") if isinstance(body, dict) else None
+                return {"ok": True, "radio": radio or {}}
+        except urllib.error.HTTPError as e:
+            try:
+                payload = json.loads(e.read().decode("utf-8") or "{}")
+                msg = payload.get("error") or str(e)
+            except Exception:
+                msg = str(e)
+            return {"ok": False, "status": e.code, "error": msg}
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            return {"ok": False, "status": None, "error": str(e)}
+
+    @staticmethod
+    def _fmt_freq(freq) -> str:
+        if freq is None:
+            return "? MHz"
+        return f"{float(freq):.3f} MHz"
+
+    @staticmethod
+    def _fmt_bw(bw) -> str:
+        if bw is None:
+            return "? kHz"
+        return f"{float(bw):g} kHz"
+
+    @staticmethod
+    def _radio_preset_name(freq, bw, sf, cr):
+        """Map well-known (freq, bw, sf, cr) tuples to MeshCore preset names.
+
+        Returns None when no match — Phase 4a stays conservative; users can
+        always read the four numbers above. List can grow when the upstream
+        preset table evolves.
+        """
+        if None in (freq, bw, sf, cr):
+            return None
+        try:
+            key = (round(float(freq), 3), round(float(bw), 1), int(sf), int(cr))
+        except (TypeError, ValueError):
+            return None
+        # Names follow common MeshCore convention; tolerant ±0.5 MHz / ±5 kHz
+        # match would help with rounding but exact-match is fine for v1.
+        table = {
+            (869.525, 250.0, 11, 5): "EU 869 MHz (Default LF)",
+            (915.000, 250.0, 11, 5): "US 915 MHz (Default LF)",
+            (915.000, 250.0, 10, 5): "US 915 MHz (MediumFast)",
+            (433.000, 250.0, 11, 5): "433 MHz (Default LF)",
+        }
+        return table.get(key)
 
     def _meshcore_chat(self):
         """Interactive chat menu against the daemon's chat API."""

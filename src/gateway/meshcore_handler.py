@@ -58,6 +58,47 @@ logger = logging.getLogger(__name__)
 _meshcore_mod, _HAS_MESHCORE = safe_import('meshcore')
 
 
+def _coerce_int(value: Any) -> Optional[int]:
+    """Convert SELF_INFO/DEVICE_INFO numeric fields to int, tolerating None."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    """Convert SELF_INFO numeric fields to float, tolerating None."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _empty_radio_state() -> Dict[str, Any]:
+    """Initial shape of the read-only radio-state cache served by /radio."""
+    return {
+        "radio_freq_mhz": None,
+        "radio_bw_khz": None,
+        "radio_sf": None,
+        "radio_cr": None,
+        "tx_power_dbm": None,
+        "max_tx_power_dbm": None,
+        "max_channels": None,
+        "channels": [],          # list[{idx, name, hash}] — secret never exposed
+        "node_name": None,
+        "fw_build": None,
+        "model": None,
+        "fw_ver": None,
+        "last_refresh_ts": None,  # epoch seconds
+        "source": None,           # "radio" | "simulator" | None
+        "error": None,            # str if last refresh failed
+    }
+
+
 def detect_meshcore_devices() -> List[str]:
     """
     Scan for potential MeshCore companion radio serial devices.
@@ -308,6 +349,13 @@ class MeshCoreHandler(BaseMessageHandler):
         self._chat_buffer_lock = threading.Lock()
         self._chat_seq = 0  # Monotonically increasing entry id
 
+        # Cached read-only radio state — populated by _refresh_radio_state()
+        # on connect, exposed via get_radio_state() to config_api's GET
+        # /radio endpoint. Phase 4a is read-only; Phase 4b will mutate via
+        # the same dataclass + invalidate the cache.
+        self._radio_state: Dict[str, Any] = _empty_radio_state()
+        self._radio_state_lock = threading.Lock()
+
         # Register as the active handler for cross-module access (config_api).
         _set_active_handler(self)
 
@@ -459,6 +507,13 @@ class MeshCoreHandler(BaseMessageHandler):
                 await self._meshcore.start_auto_message_fetching()
 
             self._connected = True
+
+            # Best-effort: prime the radio-state cache. Failures are logged
+            # but don't fail the connect — the cache is purely informational.
+            try:
+                await self._refresh_radio_state()
+            except Exception as e:
+                logger.warning(f"Initial radio-state refresh failed: {e}")
 
         except Exception as e:
             logger.error(f"Failed to connect to MeshCore: {e}")
@@ -1107,6 +1162,141 @@ class MeshCoreHandler(BaseMessageHandler):
                     continue
                 seen[ch] = max(seen.get(ch, 0.0), entry["ts"])
         return [{"channel": ch, "last_seen": ts} for ch, ts in sorted(seen.items())]
+
+    # ─────────────────────────────────────────────────────────────────
+    # Radio-state cache (Phase 4a — read-only).
+    #
+    # Populated on connect via meshcore_py's send_appstart() (SELF_INFO)
+    # + send_device_query() (DEVICE_INFO) + get_channel(idx) per slot.
+    # Read by config_api's GET /radio endpoint.
+    # ─────────────────────────────────────────────────────────────────
+
+    async def _refresh_radio_state(self) -> None:
+        """Re-read radio params + channel slots from the MeshCore device.
+
+        Snapshot is stored under self._radio_state_lock. Errors are caught
+        and recorded in state["error"] so the HTTP layer can surface a
+        useful message instead of a generic 500.
+        """
+        if self._meshcore is None:
+            self._set_radio_error("MeshCore not connected")
+            return
+
+        # Simulator path: produce a plausible snapshot so dev/CI sees data.
+        if isinstance(self._meshcore, MeshCoreSimulator):
+            with self._radio_state_lock:
+                self._radio_state = _empty_radio_state()
+                self._radio_state.update({
+                    "radio_freq_mhz": 869.525,
+                    "radio_bw_khz": 250.0,
+                    "radio_sf": 11,
+                    "radio_cr": 5,
+                    "tx_power_dbm": 17,
+                    "max_tx_power_dbm": 22,
+                    "max_channels": 4,
+                    "channels": [
+                        {"idx": 0, "name": "public", "hash": "ab"},
+                        {"idx": 1, "name": "sim-private", "hash": "c7"},
+                    ],
+                    "node_name": "Simulator",
+                    "fw_build": "sim",
+                    "model": "MeshCoreSimulator",
+                    "fw_ver": 0,
+                    "last_refresh_ts": time.time(),
+                    "source": "simulator",
+                    "error": None,
+                })
+            return
+
+        if not _HAS_MESHCORE:
+            self._set_radio_error("meshcore_py not installed")
+            return
+
+        try:
+            EventType = _meshcore_mod.EventType
+            commands = self._meshcore.commands
+
+            # SELF_INFO — radio_freq/bw/sf/cr + tx_power + node_name
+            self_evt = await asyncio.wait_for(commands.send_appstart(), timeout=5.0)
+            if self_evt.type != EventType.SELF_INFO:
+                self._set_radio_error(f"send_appstart returned {self_evt.type}")
+                return
+            self_info = self_evt.payload or {}
+
+            # DEVICE_INFO — fw, max_channels, model
+            dev_evt = await asyncio.wait_for(commands.send_device_query(), timeout=5.0)
+            dev_info = dev_evt.payload if dev_evt.type == EventType.DEVICE_INFO else {}
+
+            # Channel slots — iterate up to max_channels (default 4 if missing)
+            max_channels = int(dev_info.get("max_channels", 4) or 4)
+            channels: List[Dict[str, Any]] = []
+            for idx in range(max_channels):
+                try:
+                    ch_evt = await asyncio.wait_for(
+                        commands.get_channel(idx), timeout=3.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if ch_evt.type != EventType.CHANNEL_INFO:
+                    continue
+                ch = ch_evt.payload or {}
+                name = (ch.get("channel_name") or "").strip()
+                if not name:
+                    continue  # empty slot
+                channels.append({
+                    "idx": int(ch.get("channel_idx", idx)),
+                    "name": name,
+                    "hash": ch.get("channel_hash") or "",
+                })
+
+            with self._radio_state_lock:
+                self._radio_state = _empty_radio_state()
+                self._radio_state.update({
+                    "radio_freq_mhz": _coerce_float(self_info.get("radio_freq")),
+                    "radio_bw_khz": _coerce_float(self_info.get("radio_bw")),
+                    "radio_sf": _coerce_int(self_info.get("radio_sf")),
+                    "radio_cr": _coerce_int(self_info.get("radio_cr")),
+                    "tx_power_dbm": _coerce_int(self_info.get("tx_power")),
+                    "max_tx_power_dbm": _coerce_int(self_info.get("max_tx_power")),
+                    "max_channels": max_channels,
+                    "channels": channels,
+                    "node_name": self_info.get("name"),
+                    "fw_build": dev_info.get("fw_build"),
+                    "model": dev_info.get("model"),
+                    "fw_ver": _coerce_int(dev_info.get("fw ver")),
+                    "last_refresh_ts": time.time(),
+                    "source": "radio",
+                    "error": None,
+                })
+        except asyncio.TimeoutError:
+            self._set_radio_error("Timeout reading radio state")
+        except Exception as e:
+            self._set_radio_error(f"{type(e).__name__}: {e}")
+
+    def _set_radio_error(self, message: str) -> None:
+        """Stamp an error onto the cache without losing the prior snapshot."""
+        with self._radio_state_lock:
+            self._radio_state["error"] = message
+            self._radio_state["last_refresh_ts"] = time.time()
+
+    def get_radio_state(self, refresh: bool = False) -> Dict[str, Any]:
+        """Return a snapshot of the radio-state cache (Phase 4a, read-only).
+
+        If `refresh` is True and the asyncio loop is running, schedules a
+        re-read on that loop and waits up to 8s for it to complete before
+        returning. Otherwise returns whatever is cached (possibly empty
+        if the daemon has never connected).
+        """
+        if refresh and self._loop is not None and self._loop.is_running():
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._refresh_radio_state(), self._loop
+                )
+                fut.result(timeout=8.0)
+            except Exception as e:
+                self._set_radio_error(f"Refresh failed: {e}")
+        with self._radio_state_lock:
+            return dict(self._radio_state)
 
 
     async def _async_disconnect(self) -> None:
