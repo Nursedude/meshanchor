@@ -575,12 +575,12 @@ class DashboardHandler(BaseHandler):
     # Known alert patterns mapped to remediation guidance.
     _REMEDIATION_HINTS = {
         "meshtasticd": "Configuration > meshtasticd > Restart Service",
-        "rnsd": "Mesh Networks > RNS > RNS Diagnostics (auto-repair)",
+        "rnsd": "MeshCore > Optional Gateways > RNS > RNS Diagnostics (auto-repair)",
         "port": "System > Network Tools > Port Listening",
-        "mqtt": "Mesh Networks > MQTT > Broker Profiles",
-        "bridge": "Mesh Networks > Gateway Bridge > Configure",
+        "mqtt": "MeshCore > Optional Gateways > MQTT > Broker Profiles",
+        "bridge": "MeshCore > Optional Gateways > Gateway Bridge > Configure",
         "connection": "Configuration > meshtasticd > Connection Test",
-        "identity": "Mesh Networks > Gateway Bridge > Configure",
+        "identity": "MeshCore > Optional Gateways > Gateway Bridge > Configure",
     }
 
     def _show_alerts(self):

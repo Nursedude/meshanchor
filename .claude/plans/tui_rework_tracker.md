@@ -13,7 +13,7 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | # | Phase | Status | Branch / PR | Last touched |
 |---|---|---|---|---|
 | 1 | Map data flip — MeshCore as source | **MERGED** ✅ | [PR #13](https://github.com/Nursedude/meshanchor/pull/13) (merge 0b91289c) | 2026-05-03 |
-| 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | **prepped — design awaits decision** | (Phase 2 section below) | 2026-05-03 |
+| 2 | TUI menu restructure (MeshCore primary, Optional Gateways submenu) | **implementation — PR pending** | `claude/mc-phase2-menu-restructure` | 2026-05-03 |
 | 3 | Handler feature-flag audit (~40 Meshtastic handlers) | not started | — | — |
 | 4 | MeshCore radio config gap (presets/channels/TX power) | not started | — | — |
 | 5 | Startup health flip (meshtasticd → optional) | not started | — | — |
@@ -140,6 +140,20 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 - **Important contract finding**: `_mesh_networks_menu` (`main.py:667`) already gates radios by `_feature_enabled()` — the foundation is in place. Current `_ORDERING` literally lists `["meshtastic", "meshcore", ...]` putting Meshtastic first.
 - **Next session resume point**: read the Phase 2 section + answer the three open questions (probably as a brief AskUserQuestion at session start), then implement on `claude/mc-phase2-menu-restructure`. Branch is reserved for the implementation PR.
 
+**2026-05-03 (Phase 2 implementation — PR pending)**:
+- Auto-mode session continued the tracker. The three open questions were resolved as:
+  1. **2-full** (charter intent — "Optional Gateways submenu").
+  2. **Cross-cutting handlers stay in `mesh_networks` section** (no per-handler `menu_section` churn). The `mesh_networks` section is internally re-purposed to back the "Optional Gateways" submenu, so failover / load_balancer / mesh_alerts / classifier / automation / service_menu / messaging / mqtt / broker / nomadnet / aredn / favorites / amateur_radio all stay where they are. Only `meshcore.py` migrated.
+  3. **Stay at 6 primary**: top-level slot #2 was repurposed in place — "Mesh Networks" → "MeshCore". The old contents are now a sub-submenu reachable via an "Optional Gateways →" entry inside the new MeshCore primary submenu. Net change to top-level item count: 0.
+- **Files changed** (4):
+  - `src/launcher_tui/handlers/meshcore.py` — `menu_section` flipped from `"mesh_networks"` → `"meshcore"`.
+  - `src/launcher_tui/main.py` — slot #2 label + dispatch flipped to MeshCore; `_mesh_networks_menu()` renamed `_optional_gateways_menu()` (title "Optional Gateways", `meshcore` removed from `_ORDERING`); new `_meshcore_primary_menu()` builds from the `meshcore` section + adds an `optional_gateways` legacy item that calls into the renamed submenu.
+  - `src/launcher_tui/handlers/dashboard.py` — `_REMEDIATION_HINTS` breadcrumbs updated from `"Mesh Networks > ..."` to `"MeshCore > Optional Gateways > ..."` for `rnsd`, `mqtt`, `bridge`, `identity` keys.
+  - `tests/test_phase2_menu_restructure.py` (NEW, 7 tests) — guards: meshcore handler section, slot-2 label/dispatch, both submenu method names, optional_gateways linkage, and that meshcore is no longer auto-added to the Optional Gateways legacy block.
+- **Gates green**: `python3 scripts/lint.py --all` exit 0; combined run of `test_phase2_menu_restructure.py + test_handler_registry.py + test_meshcore_handler.py + test_all_handlers_protocol.py + test_regression_guards.py` = **481 passed**, 0 failed.
+- **Internal section name kept as `mesh_networks`**: chose not to rename the section key on disk because every existing `mesh_networks` handler would have to flip too, and the user-visible label is what actually matters. Documented in the new `_optional_gateways_menu` docstring.
+- **Next session resume point**: PR open against `main`. Once it merges, mark Phase 2 ✅, then start Phase 3 (handler feature-flag audit — there are ~40 Meshtastic-leaning handlers in `mesh_networks`/`rns` whose menu_items currently surface unconditionally even when the relevant feature is disabled). Branch convention: `claude/mc-phase3-handler-flag-audit`. First step there is to enumerate every Meshtastic-leaning handler and decide which `feature_flag=` value should gate each `menu_items()` row.
+
 ---
 
 ## Decisions Log (cross-phase, durable)
@@ -151,6 +165,9 @@ This is the cross-session source of truth for the MeshCore-primary rework. When 
 | 2026-05-03 | Map continues serving on `:5000` — only data source flips | No client-visible URL change; map UI stays compatible. |
 | 2026-05-03 | `:8808` (meshforge-maps) is external — Phase 6 plugin scaffold | Not a MeshAnchor port today. |
 | 2026-05-03 | MeshCore positions deferred to Phase 1.5 | meshcore_py advertisements don't carry GPS today; surface MeshCore via position-less side panel for now. |
+| 2026-05-03 | Phase 2 picked Option 2-full (MeshCore primary at slot #2; Optional Gateways nested) | Charter explicitly calls for "Optional Gateways submenu". 2-light was a stepping stone; 2-full delivers the demoted/promoted structure the charter wants. |
+| 2026-05-03 | Phase 2 keeps internal section key `mesh_networks` (only label changes to "Optional Gateways") | Avoids touching ~15 handlers' `menu_section` attribute when only one (`meshcore`) actually needed to move. Reversible. |
+| 2026-05-03 | Phase 2 stays at 6 primary slots (no menu growth) | Slot #2 repurposed in place; no item added or dropped from the top-level menu. Keeps within the soft UX cap. |
 
 ---
 
