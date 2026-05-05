@@ -117,6 +117,13 @@ class MeshChatXServiceOpsMixin:
     # ------------------------------------------------------------------
 
     def _port_bound_by_pid(self, pid: int, port: int = _DEFAULT_PORT) -> bool:
+        """Return True if ``pid`` (or a child) holds a LISTEN on ``port``.
+
+        We check ``ss -tnlp`` rather than a generic port scan so we can
+        attribute the bind to the meshchatx process and not, e.g., an
+        unrelated dev server. Falls back to a simple ``ss`` parse when
+        the lsof-style ``users:`` field isn't populated.
+        """
         if pid <= 0:
             return False
         ss_bin = shutil.which("ss")
@@ -134,9 +141,14 @@ class MeshChatXServiceOpsMixin:
         text = proc.stdout or ""
         if not text.strip():
             return False
+        # ss output: "users:(("meshchatx",pid=12345,fd=8))"
         marker = f"pid={pid}"
         if marker in text:
             return True
+        # Fall back to "any listener on this port" — a slightly weaker
+        # SSOT but still useful when the unit's MainPID is the parent
+        # and a child holds the actual socket (Python multi-process
+        # patterns).
         return any(line.strip() for line in text.splitlines())
 
     # ------------------------------------------------------------------
@@ -144,7 +156,20 @@ class MeshChatXServiceOpsMixin:
     # ------------------------------------------------------------------
 
     def _meshchatx_service_state(self) -> dict:
-        """Return the authoritative state of the MeshChatX user unit."""
+        """Return the authoritative state of the MeshChatX user unit.
+
+        Keys:
+            unit_installed    — bool: ~/.config/systemd/user/meshchatx.service exists
+            wrapper_installed — bool: ~/.config/meshanchor/meshchatx_wrapper.sh exists
+            active            — bool: systemctl --user is-active
+            enabled           — bool: systemctl --user is-enabled
+            sub_state         — str:  "running" / "exited" / "failed" / ...
+            main_pid          — int:  MainPID
+            n_restarts        — int:  NRestarts
+            port_bound        — bool: 127.0.0.1:8000 LISTEN attributable to the unit
+            port              — int:  the port we expect (default 8000)
+            error             — Optional[str]: transient reason state is UNKNOWN
+        """
         unit_path = (
             get_real_user_home() / ".config" / "systemd" / "user"
             / _UNIT_FILENAME

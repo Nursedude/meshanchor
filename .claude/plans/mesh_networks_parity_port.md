@@ -218,10 +218,10 @@ Each phase = one PR. No long-lived branches. Tracker file (this file) updated at
 | Phase | Status | PR | Merge commit |
 |-------|--------|-----|--------------|
 | MN-1  | not started | — | — |
-| MN-2  | in flight (PR open) | — | — |
+| MN-2  | merged ✅ | #36 | c5150136 |
 | MN-3  | merged ✅ | #35 | 4df6b063 |
 | MN-4  | not started | — | — |
-| MN-5  | not started | — | — |
+| MN-5  | in flight (PR open) | — | — |
 
 ---
 
@@ -231,3 +231,4 @@ Each phase = one PR. No long-lived branches. Tracker file (this file) updated at
 - 2026-05-04: NomadNet 4-mixin refactor MUST preserve Phase 8.4 tmux mixin (`_nomadnet_tmux_service_ops.py`).
 - 2026-05-04: Meshtasticd editors keep `menu_section="configuration"` (matches MeshForge), gated `feature_flag="meshtastic"` so they vanish in MESHCORE profile.
 - 2026-05-04: RNS Tools is additive — inline rns_menu items stay; rns_tools adds a deeper submenu.
+- 2026-05-04 (MN-5): MeshChatX deltas categorized into three buckets: pure-bug-fix (full `_lxmf_utils.py` rewrite — port-37428-LISTEN false-positive replaced with /proc + config-dir matching), pure-doc (handful of clarifying docstring/comment lines), and intentional-divergence (section/flag, paths-helper usage, brand strings, "Repair RNS alignment" submenu). Only the first two were landed; the divergent items stay per prior Phase 8.2 decisions. The "Repair RNS alignment" feature requires `rns_alignment.py` + `ReticulumPaths.get_shared_rpc_key()` — both are part of the still-deferred "Per-box rpc_key guard" backport.
