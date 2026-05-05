@@ -65,9 +65,9 @@ def _real_user_home() -> Path:
 
 
 DEFAULT_UNITS: tuple = (
-    "meshanchor-gateway",
+    "meshanchor",
+    "meshanchor-daemon",
     "meshanchor-map",
-    "meshanchor-collector",
 )
 DEFAULT_WINDOW = "6 hours ago"
 DEFAULT_OUT_DIR = _real_user_home() / ".local" / "share" / "meshanchor" / "soak_reports"
