@@ -11,7 +11,7 @@ import time
 import logging
 from queue import Queue, Empty, Full
 from datetime import datetime
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
 from .config import GatewayConfig
@@ -211,11 +211,11 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         self._meshcore_handler = None
 
         # LXMF broadcast bridge plug-in (instantiated after LXMF connects).
-        # Registers a second LXMF identity on _lxmf_router for fan-out;
-        # _on_lxmf_receive dispatches to secondary handlers so we don't
-        # have to override the router's single delivery callback.
+        # Owns its own LXMRouter — LXMF 0.9.4 caps a router at one
+        # delivery identity, so we can't share the gateway's. The bridge
+        # registers its own delivery callback on its own router; no hook
+        # in _on_lxmf_receive is needed.
         self._lxmf_broadcast = None
-        self._lxmf_secondary_handlers: List[Callable] = []
 
         # Statistics
         self.stats = {
@@ -1150,8 +1150,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         """Start the LXMF broadcast bridge plug-in if configured.
 
         Idempotent — safe to call on every RNS reconnect. The bridge
-        re-registers its delivery identity on the same LXMRouter, which
-        is harmless if it's already known.
+        owns its own LXMRouter (LXMF 0.9.4 caps a router at one
+        delivery identity, so it can't share the gateway's).
         """
         cfg = getattr(self.config, "lxmf_broadcast", None)
         # `is True` (not just truthy) so a MagicMock-attribute on a mocked
@@ -1160,20 +1160,15 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             return
         if self._lxmf_broadcast is not None and self._lxmf_broadcast.is_running:
             return
-        if self._lxmf_router is None:
-            logger.debug("LXMF broadcast: router not ready, deferring")
-            return
         try:
-            from .lxmf_broadcast_bridge import LXMFBroadcastBridge
+            from .lxmf_broadcast_bridge import create_from_gateway_config
             if self._lxmf_broadcast is None:
-                self._lxmf_broadcast = LXMFBroadcastBridge(
-                    broadcast_config=cfg, lxmf_router=self._lxmf_router
-                )
-                # Register MeshCore RX hook + LXMF inbound hook
+                self._lxmf_broadcast = create_from_gateway_config(self.config)
+                if self._lxmf_broadcast is None:
+                    return
+                # MeshCore RX hook only — LXMF RX is handled by the
+                # bridge's own router via its own delivery callback.
                 self.register_message_callback(self._lxmf_broadcast.on_meshcore_message)
-                self._lxmf_secondary_handlers.append(
-                    self._lxmf_broadcast.on_lxmf_message
-                )
             if self._lxmf_broadcast.start():
                 logger.info("LXMF broadcast bridge started (%s)",
                             self._lxmf_broadcast.destination_hash_hex)
@@ -1245,15 +1240,6 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
             # Notify callbacks
             self._notify_message(msg)
-
-            # Dispatch to LXMF plug-in handlers (e.g., broadcast bridge).
-            # Each handler is responsible for filtering on destination_hash
-            # so it doesn't second-guess the gateway's own DM handling.
-            for handler in list(self._lxmf_secondary_handlers):
-                try:
-                    handler(message)
-                except Exception as e:
-                    logger.error(f"LXMF secondary handler error: {e}")
 
         except Exception as e:
             logger.error(f"Error processing LXMF message: {e}")

@@ -1,9 +1,11 @@
 """LXMF Broadcast Bridge — fan out MeshCore channels as LXMF DMs.
 
-A focused plug-in on top of the existing RNS+LXMF runtime. It does NOT
-initialise its own RNS instance; it borrows the gateway's `_lxmf_router`
-and registers a separate delivery identity so NomadNet / other LXMF
-clients have one stable hash to address.
+A focused plug-in on top of the existing RNS runtime. The bridge runs
+its OWN `LXMF.LXMRouter` (sharing the process-wide `RNS.Transport`) so
+it can register a delivery identity distinct from the gateway's. LXMF
+0.9.4's `register_delivery_identity` returns None if one is already
+registered on the router — so a single shared router can't host both
+the gateway's identity and the broadcast identity.
 
 Subscription protocol (over LXMF DM to the broadcast identity):
 
@@ -19,7 +21,7 @@ Message flow:
         → channel allowlist filter
         → format prefix
         → for each subscriber: LXMF.LXMessage(broadcast_identity → sub)
-        → router.handle_outbound
+        → own_router.handle_outbound
 
 This is intentionally RX-only fan-out. No reverse path back into
 MeshCore is implemented yet — keeping loops trivially impossible until
@@ -27,6 +29,7 @@ the propagation rules are designed.
 
 Persistence:
     ~/.config/meshanchor/lxmf_broadcast_identity   (RNS.Identity)
+    ~/.config/meshanchor/lxmf_broadcast_storage/   (LXMF router state)
     ~/.config/meshanchor/lxmf_broadcast_subs.db    (sqlite, tracked in
                                                     utils.db_inventory)
 """
@@ -184,12 +187,14 @@ def format_broadcast_text(
 class LXMFBroadcastBridge:
     """MeshCore→LXMF fan-out bridge.
 
+    Owns its own LXMRouter so it can register a distinct delivery
+    identity — LXMF 0.9.4 caps the gateway router at one identity.
+
     Lifecycle:
-        bridge = LXMFBroadcastBridge(config, lxmf_router=router)
-        bridge.start()           # registers identity, starts announce thread
+        bridge = LXMFBroadcastBridge(config)
+        bridge.start()           # boots own LXMRouter, announces
         ...
         bridge.on_meshcore_message(canonical_msg)   # called from gateway
-        bridge.on_lxmf_message(lxmf_message)        # called from gateway
         ...
         bridge.stop()
     """
@@ -197,16 +202,17 @@ class LXMFBroadcastBridge:
     def __init__(
         self,
         broadcast_config: LXMFBroadcastConfig,
-        lxmf_router: Any,
         rns_module: Any = None,
         lxmf_module: Any = None,
         identity_path: Optional[Path] = None,
         db_path: Optional[Path] = None,
+        storage_path: Optional[Path] = None,
+        propagation_node: str = "",
     ) -> None:
         self._config = broadcast_config
-        self._router = lxmf_router
         self._rns = rns_module if rns_module is not None else _RNS_mod
         self._lxmf = lxmf_module if lxmf_module is not None else _LXMF_mod
+        self._propagation_node = (propagation_node or "").strip()
 
         config_dir = get_real_user_home() / ".config" / "meshanchor"
         self._identity_path = identity_path or (
@@ -219,10 +225,12 @@ class LXMFBroadcastBridge:
             if broadcast_config.db_file
             else config_dir / "lxmf_broadcast_subs.db"
         )
+        self._storage_path = storage_path or (config_dir / "lxmf_broadcast_storage")
         self._subs = SubscriberStore(db)
 
         # Filled in start()
         self._identity = None
+        self._router = None
         self._lxmf_source = None
         self._destination_hash: Optional[bytes] = None
 
@@ -253,29 +261,61 @@ class LXMFBroadcastBridge:
         return self._destination_hash.hex() if self._destination_hash else ""
 
     def start(self) -> bool:
-        """Register identity on the borrowed LXMF router and start announce thread."""
+        """Boot own LXMRouter, register identity, start announce thread."""
         if self._running:
             return True
-        if self._router is None:
-            logger.error("LXMF broadcast bridge: no router supplied")
-            return False
         if self._rns is None or self._lxmf is None:
             logger.error("LXMF broadcast bridge: RNS/LXMF not installed")
             return False
 
         try:
+            self._storage_path.mkdir(parents=True, exist_ok=True)
             self._identity = self._load_or_create_identity()
+
+            # Own LXMRouter — separate from gateway's so register_delivery_identity
+            # doesn't trip LXMF 0.9.4's "one identity per router" cap.
+            self._router = self._lxmf.LXMRouter(storagepath=str(self._storage_path))
+            self._router.register_delivery_callback(self._on_lxmf_delivery)
+
             self._lxmf_source = self._router.register_delivery_identity(
                 self._identity,
                 display_name=self._config.display_name,
             )
-            self._destination_hash = getattr(self._lxmf_source, "hash", None)
-            if self._destination_hash:
-                logger.info(
-                    "LXMF broadcast identity registered: %s (%s)",
-                    self._config.display_name,
-                    self._destination_hash.hex(),
+            if self._lxmf_source is None:
+                logger.error(
+                    "LXMF broadcast bridge: register_delivery_identity returned None "
+                    "(router state corrupt — wipe %s and restart)",
+                    self._storage_path,
                 )
+                return False
+
+            self._destination_hash = getattr(self._lxmf_source, "hash", None)
+            if self._destination_hash is None:
+                logger.error("LXMF broadcast bridge: source has no .hash attribute")
+                return False
+
+            logger.info(
+                "LXMF broadcast identity registered: %s (%s)",
+                self._config.display_name,
+                self._destination_hash.hex(),
+            )
+
+            # Optional: copy gateway's propagation node so subscribers offline
+            # still pick up fan-outs via store-and-forward.
+            if self._propagation_node:
+                try:
+                    self._router.set_outbound_propagation_node(
+                        bytes.fromhex(self._propagation_node)
+                    )
+                    logger.info(
+                        "LXMF broadcast propagation node: %s", self._propagation_node
+                    )
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        "Invalid propagation_node hash %r: %s",
+                        self._propagation_node,
+                        e,
+                    )
 
             # First announce now; thread handles re-announce cadence.
             self._safe_announce()
@@ -304,9 +344,12 @@ class LXMFBroadcastBridge:
         if self._announce_thread and self._announce_thread.is_alive():
             self._announce_thread.join(timeout=3)
         self._announce_thread = None
-        # We do NOT unregister the delivery identity — LXMRouter doesn't
-        # expose a clean way to revoke and re-registering on next start
-        # is harmless.
+        # LXMRouter has no clean shutdown method in 0.9.4; we drop the
+        # reference and let GC clean up. Re-creating on next start is
+        # safe because storagepath persistence handles state.
+        self._router = None
+        self._lxmf_source = None
+        self._destination_hash = None
 
     def _load_or_create_identity(self):
         path = self._identity_path
@@ -375,21 +418,15 @@ class LXMFBroadcastBridge:
         for sub in subscribers:
             self._send_to_subscriber(sub, body, title)
 
-    def on_lxmf_message(self, lxmf_message: Any) -> None:
-        """Gateway LXMF-receive hook.
+    def _on_lxmf_delivery(self, lxmf_message: Any) -> None:
+        """LXMRouter delivery callback.
 
-        Only acts on messages addressed to *this* bridge's destination
-        hash so we don't second-guess the gateway's own DM handler.
+        Our private router only delivers messages addressed to our own
+        identity, so every call here is a subscription command.
         """
         if not self._running:
             return
         try:
-            dest_hash = getattr(lxmf_message, "destination_hash", None)
-            if not dest_hash or self._destination_hash is None:
-                return
-            if dest_hash != self._destination_hash:
-                return
-
             source_hash = getattr(lxmf_message, "source_hash", b"")
             source_hex = source_hash.hex() if isinstance(source_hash, bytes) else str(source_hash)
             content_raw = getattr(lxmf_message, "content", b"") or b""
@@ -518,16 +555,19 @@ class LXMFBroadcastBridge:
 
 
 def create_from_gateway_config(
-    gateway_config: GatewayConfig, lxmf_router: Any
+    gateway_config: GatewayConfig,
 ) -> Optional[LXMFBroadcastBridge]:
     """Convenience factory — returns None if the plug-in is disabled.
 
     Designed to be called from RNSMeshtasticBridge after LXMF setup.
+    The bridge stands up its own LXMRouter (LXMF 0.9.4 caps a router
+    at one delivery identity, so it can't share the gateway's).
     """
     cfg = getattr(gateway_config, "lxmf_broadcast", None)
     if cfg is None or not cfg.enabled:
         return None
-    if lxmf_router is None:
-        logger.warning("LXMF broadcast enabled but no router available")
-        return None
-    return LXMFBroadcastBridge(broadcast_config=cfg, lxmf_router=lxmf_router)
+    propagation = getattr(getattr(gateway_config, "rns", None), "propagation_node", "")
+    return LXMFBroadcastBridge(
+        broadcast_config=cfg,
+        propagation_node=propagation,
+    )

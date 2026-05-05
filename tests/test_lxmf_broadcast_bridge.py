@@ -136,6 +136,31 @@ class TestFormatBroadcastText:
 # ---------------------------------------------------------------------------
 
 
+def _make_fake_lxmf(*, register_returns_source: bool = True,
+                    source_hash_hex: str = "aabbccddeeff0011"):
+    """Build a MagicMock that mimics LXMF 0.9.4's surface.
+
+    `register_returns_source=False` simulates the "router already has a
+    delivery identity, returns None" case from LXMF 0.9.4 — that's the
+    behavior the original implementation tripped over.
+    """
+    lxmf = MagicMock(name="LXMF")
+    lxmf.LXMessage = MagicMock(name="LXMessage")
+
+    # LXMRouter constructor returns a router instance whose
+    # register_delivery_identity returns either a source-with-.hash
+    # or None per the flag.
+    router = MagicMock(name="LXMRouter")
+    if register_returns_source:
+        src = MagicMock()
+        src.hash = bytes.fromhex(source_hash_hex)
+        router.register_delivery_identity.return_value = src
+    else:
+        router.register_delivery_identity.return_value = None
+    lxmf.LXMRouter.return_value = router
+    return lxmf, router
+
+
 @pytest.fixture
 def fake_rns_lxmf():
     """Mock RNS / LXMF modules with the surface the bridge uses."""
@@ -154,25 +179,13 @@ def fake_rns_lxmf():
     rns.Destination.OUT = "OUT"
     rns.Destination.SINGLE = "SINGLE"
 
-    lxmf = MagicMock(name="LXMF")
-    lxmf.LXMessage = MagicMock(name="LXMessage")
-
-    return rns, lxmf
+    lxmf, router = _make_fake_lxmf()
+    return rns, lxmf, router
 
 
-@pytest.fixture
-def fake_router():
-    router = MagicMock(name="LXMRouter")
-    # register_delivery_identity returns an object with a .hash bytes attribute
-    src = MagicMock()
-    src.hash = bytes.fromhex("aabbccddeeff0011")
-    router.register_delivery_identity.return_value = src
-    return router
-
-
-def _make_bridge(tmp_path, fake_router, fake_rns_lxmf, *, enabled=True, channels=None,
+def _make_bridge(tmp_path, fake_rns_lxmf, *, enabled=True, channels=None,
                  autosubscribe=False, prefix=None):
-    rns, lxmf = fake_rns_lxmf
+    rns, lxmf, _router = fake_rns_lxmf
     cfg = LXMFBroadcastConfig(
         enabled=enabled,
         channels=channels if channels is not None else [0, 1],
@@ -183,11 +196,11 @@ def _make_bridge(tmp_path, fake_router, fake_rns_lxmf, *, enabled=True, channels
     )
     return LXMFBroadcastBridge(
         broadcast_config=cfg,
-        lxmf_router=fake_router,
         rns_module=rns,
         lxmf_module=lxmf,
         identity_path=tmp_path / "identity",
         db_path=tmp_path / "subs.db",
+        storage_path=tmp_path / "storage",
     )
 
 
@@ -197,31 +210,41 @@ def _make_bridge(tmp_path, fake_router, fake_rns_lxmf, *, enabled=True, channels
 
 
 class TestBridgeLifecycle:
-    def test_start_registers_identity(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_start_registers_identity(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         assert b.start() is True
-        fake_router.register_delivery_identity.assert_called_once()
+        rns, lxmf, router = fake_rns_lxmf
+        # Bridge built its OWN LXMRouter and registered a delivery identity
+        lxmf.LXMRouter.assert_called_once()
+        router.register_delivery_identity.assert_called_once()
         # First announce fires synchronously on start
-        fake_router.announce.assert_called_once()
+        router.announce.assert_called_once()
         assert b.is_running is True
         assert b.destination_hash_hex == "aabbccddeeff0011"
 
-    def test_start_without_router_fails(self, tmp_path, fake_rns_lxmf):
-        rns, lxmf = fake_rns_lxmf
+    def test_start_fails_when_router_returns_none(self, tmp_path):
+        """Regression guard: LXMF 0.9.4 returns None if a delivery identity
+        is already registered on the router. Make sure start() reports
+        failure instead of silently coming up with no usable hash."""
+        rns = MagicMock()
+        rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
+        rns.Identity.return_value = MagicMock()
+        lxmf, _router = _make_fake_lxmf(register_returns_source=False)
         cfg = LXMFBroadcastConfig(enabled=True, announce_interval_sec=0)
         b = LXMFBroadcastBridge(
             broadcast_config=cfg,
-            lxmf_router=None,
             rns_module=rns,
             lxmf_module=lxmf,
             identity_path=tmp_path / "id",
             db_path=tmp_path / "subs.db",
+            storage_path=tmp_path / "storage",
         )
         assert b.start() is False
         assert b.is_running is False
+        assert b.destination_hash_hex == ""
 
-    def test_stop_is_safe_when_not_running(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_stop_is_safe_when_not_running(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.stop()  # should not raise
 
 
@@ -231,60 +254,54 @@ class TestBridgeLifecycle:
 
 
 class TestMeshCoreFanout:
-    def test_filters_non_meshcore(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_filters_non_meshcore(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
-        # Subscriber present, but message is from RNS
         b._subs.add("deadbeef00112233")
         msg = _make_canonical(source_network=Protocol.RNS.value, text="hi")
         b.on_meshcore_message(msg)
-        # No outbound LXMessage built
-        rns, lxmf = fake_rns_lxmf
+        _rns, lxmf, _router = fake_rns_lxmf
         lxmf.LXMessage.assert_not_called()
         assert b.stats["filtered_non_meshcore"] == 1
 
-    def test_filters_non_broadcast(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_filters_non_broadcast(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
         b._subs.add("deadbeef00112233")
         msg = _make_canonical(is_broadcast=False)
         b.on_meshcore_message(msg)
-        rns, lxmf = fake_rns_lxmf
+        _rns, lxmf, _router = fake_rns_lxmf
         lxmf.LXMessage.assert_not_called()
 
-    def test_filters_disallowed_channel(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf, channels=[0])
+    def test_filters_disallowed_channel(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf, channels=[0])
         b.start()
         b._subs.add("deadbeef00112233")
         msg = _make_canonical(channel=7, text="off-channel")
         b.on_meshcore_message(msg)
-        rns, lxmf = fake_rns_lxmf
+        _rns, lxmf, _router = fake_rns_lxmf
         lxmf.LXMessage.assert_not_called()
         assert b.stats["filtered_channel"] == 1
 
-    def test_skips_empty_content(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_skips_empty_content(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
         b._subs.add("deadbeef00112233")
         msg = _make_canonical(text="")
         b.on_meshcore_message(msg)
-        rns, lxmf = fake_rns_lxmf
+        _rns, lxmf, _router = fake_rns_lxmf
         lxmf.LXMessage.assert_not_called()
 
-    def test_fans_out_to_each_subscriber(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_fans_out_to_each_subscriber(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
         b._subs.add("aaaa000000000001")
         b._subs.add("aaaa000000000002")
         msg = _make_canonical(channel=0, text="ping", sender="alice123")
         b.on_meshcore_message(msg)
-        rns, lxmf = fake_rns_lxmf
-        # Two LXMessages built, one per subscriber
+        _rns, lxmf, router = fake_rns_lxmf
         assert lxmf.LXMessage.call_count == 2
-        # Both queued via router.handle_outbound (initial start announce
-        # already happened — handle_outbound is the fan-out signal)
-        assert fake_router.handle_outbound.call_count == 2
-        # Message body carries the formatted prefix + content
+        assert router.handle_outbound.call_count == 2
         first_call_args = lxmf.LXMessage.call_args_list[0].args
         assert "ping" in first_call_args[2]
         assert "alice123" in first_call_args[2]
@@ -296,9 +313,13 @@ class TestMeshCoreFanout:
 # ---------------------------------------------------------------------------
 
 
-def _fake_lxmf_message(*, dest_hash: bytes, source_hash: bytes, body: str):
+def _fake_lxmf_message(*, source_hash: bytes, body: str):
+    """Mock the LXMessage shape the bridge's delivery callback receives.
+
+    The bridge's own LXMRouter only delivers messages addressed to its
+    identity, so destination_hash isn't filtered any more.
+    """
     msg = MagicMock()
-    msg.destination_hash = dest_hash
     msg.source_hash = source_hash
     msg.content = body.encode("utf-8")
     msg.title = b"test"
@@ -306,67 +327,43 @@ def _fake_lxmf_message(*, dest_hash: bytes, source_hash: bytes, body: str):
 
 
 class TestSubscriptionProtocol:
-    def test_ignores_other_destinations(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
-        b.start()
-        # Address a different identity
-        msg = _fake_lxmf_message(
-            dest_hash=bytes.fromhex("ffffffffffffffff"),
-            source_hash=bytes.fromhex("aaaa000000000003"),
-            body="subscribe",
-        )
-        b.on_lxmf_message(msg)
-        assert b._subs.list_all() == []
-
-    def test_subscribe_adds_subscriber(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_subscribe_adds_subscriber(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
         source = bytes.fromhex("aaaa000000000003")
-        msg = _fake_lxmf_message(
-            dest_hash=b._destination_hash, source_hash=source, body="subscribe please"
-        )
-        b.on_lxmf_message(msg)
+        msg = _fake_lxmf_message(source_hash=source, body="subscribe please")
+        b._on_lxmf_delivery(msg)
         hashes = [s.lxmf_hash for s in b._subs.list_all()]
         assert "aaaa000000000003" in hashes
         assert b.stats["subscribes"] == 1
 
-    def test_unsubscribe_removes_subscriber(self, tmp_path, fake_router, fake_rns_lxmf):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_unsubscribe_removes_subscriber(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
         b._subs.add("aaaa000000000003")
         msg = _fake_lxmf_message(
-            dest_hash=b._destination_hash,
-            source_hash=bytes.fromhex("aaaa000000000003"),
-            body="unsubscribe",
+            source_hash=bytes.fromhex("aaaa000000000003"), body="unsubscribe"
         )
-        b.on_lxmf_message(msg)
+        b._on_lxmf_delivery(msg)
         assert b._subs.list_all() == []
         assert b.stats["unsubscribes"] == 1
 
-    def test_unknown_verb_does_not_subscribe_by_default(
-        self, tmp_path, fake_router, fake_rns_lxmf
-    ):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf)
+    def test_unknown_verb_does_not_subscribe_by_default(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
         msg = _fake_lxmf_message(
-            dest_hash=b._destination_hash,
-            source_hash=bytes.fromhex("aaaa000000000003"),
-            body="hello world",
+            source_hash=bytes.fromhex("aaaa000000000003"), body="hello world"
         )
-        b.on_lxmf_message(msg)
+        b._on_lxmf_delivery(msg)
         assert b._subs.list_all() == []
 
-    def test_autosubscribe_adds_on_unknown_verb(
-        self, tmp_path, fake_router, fake_rns_lxmf
-    ):
-        b = _make_bridge(tmp_path, fake_router, fake_rns_lxmf, autosubscribe=True)
+    def test_autosubscribe_adds_on_unknown_verb(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf, autosubscribe=True)
         b.start()
         msg = _fake_lxmf_message(
-            dest_hash=b._destination_hash,
-            source_hash=bytes.fromhex("aaaa000000000004"),
-            body="hi there",
+            source_hash=bytes.fromhex("aaaa000000000004"), body="hi there"
         )
-        b.on_lxmf_message(msg)
+        b._on_lxmf_delivery(msg)
         hashes = [s.lxmf_hash for s in b._subs.list_all()]
         assert "aaaa000000000004" in hashes
 
@@ -380,22 +377,18 @@ class TestFactory:
     def test_returns_none_when_disabled(self):
         gateway_config = MagicMock()
         gateway_config.lxmf_broadcast = LXMFBroadcastConfig(enabled=False)
-        out = create_from_gateway_config(gateway_config, lxmf_router=MagicMock())
+        out = create_from_gateway_config(gateway_config)
         assert out is None
 
-    def test_returns_none_without_router(self):
-        gateway_config = MagicMock()
-        gateway_config.lxmf_broadcast = LXMFBroadcastConfig(enabled=True)
-        assert create_from_gateway_config(gateway_config, lxmf_router=None) is None
-
     def test_returns_instance_when_enabled(self, tmp_path):
-        # Override identity_file/db_file so we don't create files in the
-        # user's real ~/.config during a unit test.
+        # Override identity_file/db_file so the unit test doesn't pollute
+        # the operator's real ~/.config.
         gateway_config = MagicMock()
         gateway_config.lxmf_broadcast = LXMFBroadcastConfig(
             enabled=True,
             identity_file=str(tmp_path / "id"),
             db_file=str(tmp_path / "subs.db"),
         )
-        bridge = create_from_gateway_config(gateway_config, lxmf_router=MagicMock())
+        gateway_config.rns = MagicMock(propagation_node="")
+        bridge = create_from_gateway_config(gateway_config)
         assert isinstance(bridge, LXMFBroadcastBridge)
