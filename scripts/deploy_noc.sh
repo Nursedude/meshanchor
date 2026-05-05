@@ -122,19 +122,47 @@ if ! sudo -n -U "${OPERATOR}" -l 2>/dev/null | grep -q "MESHANCHOR_SVC_RESTART\|
     log "         run scripts/install_sudoers.sh after this deploy for unattended recovery"
 fi
 
-# Install system packages the daemon needs at runtime. paho-mqtt is the
-# MQTT client library; without it monitoring/mqtt_subscriber.py fails
-# to start and Meshtastic-side observability silently goes dark — the
-# exact silent-failure mode the boundary observability stack is built
-# to surface. apt path because the user's environment denies system
-# pip3 install (and because apt is the right tool for system packages).
-# If apt is not available (non-Debian host), warn and continue —
-# the operator can install paho-mqtt by other means.
+# Install system packages the daemon needs at runtime:
+#   - python3-paho-mqtt: MQTT client library used by mqtt_subscriber.
+#   - mosquitto: local broker the daemon connects to. Without it the
+#     subscriber attempts to connect to a missing :1883 and observability
+#     silently goes dark — the exact silent-failure mode this stack is
+#     built to surface, not absorb.
+# apt path because the user's environment denies system pip3 install
+# (and because apt is the right tool for system packages anyway).
+# If apt is not available (non-Debian host), warn and continue.
 if command -v apt-get >/dev/null 2>&1; then
-    log "installing system packages (python3-paho-mqtt)"
-    run apt-get install -y python3-paho-mqtt
+    log "installing system packages (mosquitto, python3-paho-mqtt)"
+    run apt-get install -y mosquitto python3-paho-mqtt
 else
-    log "warning: apt-get not found; install python3-paho-mqtt manually for MQTT observability"
+    log "warning: apt-get not found; install mosquitto + python3-paho-mqtt manually for MQTT observability"
+fi
+
+# Provision mosquitto's safe-default config: localhost-only listener,
+# anonymous allowed. This is the SAFE-AND-FUNCTIONAL pair — nothing
+# remote can reach the broker, so anonymous is fine. Public exposure
+# (binding 0.0.0.0) must come as a deliberate operator change that
+# bundles the auth/TLS setup in the SAME action; the deploy script
+# does not provide a one-flag "make it public" path because that's
+# how production hosts end up as open relays. See
+# scripts/mosquitto-localhost.conf for the in-repo source of truth.
+mosquitto_conf_src="${REPO_ROOT}/scripts/mosquitto-localhost.conf"
+mosquitto_conf_dst="/etc/mosquitto/conf.d/01-meshanchor.conf"
+if [[ -f "${mosquitto_conf_src}" ]] && command -v mosquitto >/dev/null 2>&1; then
+    log "installing ${mosquitto_conf_dst} (localhost-only, anonymous allowed)"
+    run install -m 0644 -o root -g root "${mosquitto_conf_src}" "${mosquitto_conf_dst}"
+    log "enabling + restarting mosquitto"
+    run systemctl enable mosquitto.service
+    # restart (not reload): mosquitto's SIGHUP reload only picks up
+    # log/persistence/auth changes, NOT listener changes (per the
+    # mosquitto manual). Since our conf.d sets `listener 1883 127.0.0.1`,
+    # a reload would silently leave the old listeners active. Restart
+    # is the only way to make the safe-default listener take effect.
+    # Brief MQTT connection blip on idempotent re-runs is acceptable
+    # vs. shipping a deploy that doesn't actually deploy.
+    run systemctl restart mosquitto.service
+elif [[ ! -f "${mosquitto_conf_src}" ]]; then
+    log "warning: ${mosquitto_conf_src} missing; skipping mosquitto config drop"
 fi
 
 log "installing systemd units"
