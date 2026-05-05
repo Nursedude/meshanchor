@@ -110,6 +110,81 @@ def test_chat_client_poll_once_updates_last_id():
     assert c._last_id == 7  # max id
 
 
+def test_chat_client_channel_label_with_name():
+    """Channel labels include the slot name when /radio is reachable."""
+    from utils.chat_client import _channel_label
+    assert _channel_label(1, {1: "meshanchor"}) == "ch1 (meshanchor)"
+    assert _channel_label(0, {0: "Public"}) == "ch0 (Public)"
+    assert _channel_label(7, {1: "meshanchor"}) == "ch7"  # no name → bare label
+    assert _channel_label(None, {}) == ""
+
+
+def test_chat_client_format_entry_uses_channel_names():
+    """_format_entry renders ``ch1 (meshanchor)`` when a name map is supplied."""
+    from utils.chat_client import _format_entry
+    entry = {
+        "id": 9, "ts": 1714792800, "direction": "rx",
+        "channel": 1, "sender": "KH6XYZ", "text": "hi",
+    }
+    out = _format_entry(entry, {1: "meshanchor"})
+    assert "meshanchor" in out
+    assert "ch1" in out
+
+
+def test_chat_client_refresh_channel_names_from_radio():
+    """/radio channels populate the idx→name cache."""
+    from utils.chat_client import ChatClient
+    c = ChatClient()
+    fake_radio = {
+        "radio": {
+            "channels": [
+                {"idx": 0, "name": "Public", "hash": "11"},
+                {"idx": 1, "name": "meshanchor", "hash": "9f"},
+                # Bad rows must be skipped, not crash.
+                {"idx": "bogus", "name": "x"},
+                {"idx": 3, "name": ""},
+            ],
+        }
+    }
+    with patch.object(c, "_http_get", return_value=fake_radio):
+        names = c._refresh_channel_names()
+    assert names == {0: "Public", 1: "meshanchor"}
+    assert c._channel_names == {0: "Public", 1: "meshanchor"}
+
+
+def test_chat_client_send_channel_renders_tx_echo():
+    """Successful POST /chat/send → operator sees an immediate ``queued`` line."""
+    from utils.chat_client import ChatClient
+    c = ChatClient(channel=1)
+    c._channel_names = {1: "meshanchor"}
+    captured = []
+    with patch.object(c, "_http_post_json", return_value=(True, '{"queued": true}')):
+        with patch.object(c, "_render", side_effect=lambda line: captured.append(line)):
+            c._send_channel("hello")
+    assert any("queued" in line for line in captured)
+    assert any("ch1" in line and "meshanchor" in line for line in captured)
+    assert any("hello" in line for line in captured)
+
+
+def test_chat_client_send_channel_renders_failure():
+    """Failed POST → operator sees a ``send failed`` line, not silence."""
+    from utils.chat_client import ChatClient
+    c = ChatClient(channel=1)
+    captured = []
+    with patch.object(c, "_http_post_json", return_value=(False, "HTTP 503")):
+        with patch.object(c, "_render", side_effect=lambda line: captured.append(line)):
+            c._send_channel("hello")
+    assert any("send failed" in line for line in captured)
+
+
+def test_chat_client_prompt_includes_channel_name():
+    """The prompt shows the active channel's name when known."""
+    from utils.chat_client import ChatClient
+    c = ChatClient(channel=1)
+    c._channel_names = {1: "meshanchor"}
+    assert "[ch1 (meshanchor)]>" in c._prompt()
+
+
 # ---------------------------------------------------------------------------
 # 2. ChatPaneHandler registration + menu shape
 # ---------------------------------------------------------------------------
