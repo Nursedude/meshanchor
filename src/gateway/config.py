@@ -414,6 +414,33 @@ class RNSOverMeshtasticConfig:
 
 
 @dataclass
+class LXMFBroadcastConfig:
+    """LXMF broadcast bridge — fan-out MeshCore channels as LXMF DMs.
+
+    A separate LXMF identity announces over RNS; subscribers DM the
+    identity ("subscribe" / "unsubscribe") and receive every MeshCore
+    channel message on the allowlisted channels as an LXMF DM. Loop
+    prevention: this is RX-only fan-out — no reverse path back into
+    MeshCore yet.
+    """
+    enabled: bool = False
+    # MeshCore channels to fan out (0=Public, 1=meshanchor, ...)
+    channels: List[int] = field(default_factory=lambda: [0, 1])
+    # Display name shown to NomadNet users in announces
+    display_name: str = "MeshAnchor Broadcast"
+    # Re-announce period (seconds). 0 disables periodic announce.
+    announce_interval_sec: int = 600
+    # Outbound message format. Available fields: channel, sender, text.
+    prefix_format: str = "[ch{channel}:{sender}] {text}"
+    # If True, any LXMF source that announces is auto-subscribed.
+    # Default False — subscription is opt-in via "subscribe" DM.
+    autosubscribe: bool = False
+    # Optional override paths. Empty = default under ~/.config/meshanchor/.
+    identity_file: str = ""
+    db_file: str = ""
+
+
+@dataclass
 class RoutingRule:
     """Message routing rule between networks"""
     name: str
@@ -468,6 +495,9 @@ class GatewayConfig:
 
     # MeshCore companion radio (used when bridge_mode="meshcore_bridge" or "tri_bridge")
     meshcore: MeshCoreConfig = field(default_factory=MeshCoreConfig)
+
+    # LXMF broadcast bridge plug-in — opt-in MeshCore→LXMF fan-out
+    lxmf_broadcast: LXMFBroadcastConfig = field(default_factory=LXMFBroadcastConfig)
 
     # Routing (used when bridge_mode="message_bridge")
     routing_rules: List[RoutingRule] = field(default_factory=list)
@@ -587,6 +617,20 @@ class GatewayConfig:
             meshcore_data = data.get('meshcore', {})
             meshcore = MeshCoreConfig(**meshcore_data) if meshcore_data else MeshCoreConfig()
 
+            # Handle LXMFBroadcastConfig (channels list — explicit copy avoids
+            # the default_factory empty-list aliasing trap)
+            lxmf_broadcast_data = data.get('lxmf_broadcast', {}) or {}
+            lxmf_broadcast = LXMFBroadcastConfig(
+                enabled=lxmf_broadcast_data.get('enabled', False),
+                channels=list(lxmf_broadcast_data.get('channels', [0, 1])),
+                display_name=lxmf_broadcast_data.get('display_name', 'MeshAnchor Broadcast'),
+                announce_interval_sec=lxmf_broadcast_data.get('announce_interval_sec', 600),
+                prefix_format=lxmf_broadcast_data.get('prefix_format', '[ch{channel}:{sender}] {text}'),
+                autosubscribe=lxmf_broadcast_data.get('autosubscribe', False),
+                identity_file=lxmf_broadcast_data.get('identity_file', ''),
+                db_file=lxmf_broadcast_data.get('db_file', ''),
+            )
+
             # Reconstruct nested dataclasses
             config = cls(
                 enabled=data.get('enabled', False),
@@ -598,6 +642,7 @@ class GatewayConfig:
                 rns_transport=rns_transport,
                 mesh_bridge=mesh_bridge,
                 meshcore=meshcore,
+                lxmf_broadcast=lxmf_broadcast,
                 routing_rules=[RoutingRule(**r) for r in data.get('routing_rules', [])],
                 default_route=data.get('default_route', 'bidirectional'),
                 telemetry=TelemetryConfig(**data.get('telemetry', {})),
@@ -659,6 +704,7 @@ class GatewayConfig:
                 'rns_transport': rns_transport_data,
                 'mesh_bridge': mesh_bridge_data,
                 'meshcore': asdict(self.meshcore),
+                'lxmf_broadcast': asdict(self.lxmf_broadcast),
                 'routing_rules': [asdict(r) for r in self.routing_rules],
                 'default_route': self.default_route,
                 'telemetry': asdict(self.telemetry),

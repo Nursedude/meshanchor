@@ -11,7 +11,7 @@ import time
 import logging
 from queue import Queue, Empty, Full
 from datetime import datetime
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, List
 from dataclasses import dataclass
 
 from .config import GatewayConfig
@@ -209,6 +209,13 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
         # MeshCore handler (companion radio integration)
         self._meshcore_handler = None
+
+        # LXMF broadcast bridge plug-in (instantiated after LXMF connects).
+        # Registers a second LXMF identity on _lxmf_router for fan-out;
+        # _on_lxmf_receive dispatches to secondary handlers so we don't
+        # have to override the router's single delivery callback.
+        self._lxmf_broadcast = None
+        self._lxmf_secondary_handlers: List[Callable] = []
 
         # Statistics
         self.stats = {
@@ -614,6 +621,14 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         # Stop node tracker
         self.node_tracker.stop()
 
+        # Stop LXMF broadcast bridge plug-in before tearing down RNS so
+        # its announce thread exits while the router is still alive.
+        if self._lxmf_broadcast:
+            try:
+                self._lxmf_broadcast.stop()
+            except Exception as e:
+                logger.debug(f"LXMF broadcast stop error: {e}")
+
         # Close connections
         if self._mesh_handler:
             self._mesh_handler.disconnect()
@@ -968,6 +983,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         self.health.record_connection_event("rns", "connected")
                         self._update_subsystem_state("rns", SubsystemState.HEALTHY)
                         logger.info("RNS connection established")
+                        # Start LXMF broadcast bridge plug-in (idempotent)
+                        self._maybe_start_lxmf_broadcast()
                     else:
                         self._rns_reconnect.record_failure()
                         self._rns_reconnect.wait(self._stop_event)
@@ -1129,6 +1146,40 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
     # _suppress_signal_in_thread, _init_rns_main_thread, _connect_rns,
     # _setup_lxmf, _disconnect_rns
 
+    def _maybe_start_lxmf_broadcast(self) -> None:
+        """Start the LXMF broadcast bridge plug-in if configured.
+
+        Idempotent — safe to call on every RNS reconnect. The bridge
+        re-registers its delivery identity on the same LXMRouter, which
+        is harmless if it's already known.
+        """
+        cfg = getattr(self.config, "lxmf_broadcast", None)
+        # `is True` (not just truthy) so a MagicMock-attribute on a mocked
+        # GatewayConfig in unit tests doesn't accidentally trigger startup.
+        if cfg is None or getattr(cfg, "enabled", False) is not True:
+            return
+        if self._lxmf_broadcast is not None and self._lxmf_broadcast.is_running:
+            return
+        if self._lxmf_router is None:
+            logger.debug("LXMF broadcast: router not ready, deferring")
+            return
+        try:
+            from .lxmf_broadcast_bridge import LXMFBroadcastBridge
+            if self._lxmf_broadcast is None:
+                self._lxmf_broadcast = LXMFBroadcastBridge(
+                    broadcast_config=cfg, lxmf_router=self._lxmf_router
+                )
+                # Register MeshCore RX hook + LXMF inbound hook
+                self.register_message_callback(self._lxmf_broadcast.on_meshcore_message)
+                self._lxmf_secondary_handlers.append(
+                    self._lxmf_broadcast.on_lxmf_message
+                )
+            if self._lxmf_broadcast.start():
+                logger.info("LXMF broadcast bridge started (%s)",
+                            self._lxmf_broadcast.destination_hash_hex)
+        except Exception as e:
+            logger.error("Failed to start LXMF broadcast bridge: %s", e)
+
     def _on_lxmf_receive(self, message):
         """Handle incoming LXMF message"""
         try:
@@ -1194,6 +1245,15 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
             # Notify callbacks
             self._notify_message(msg)
+
+            # Dispatch to LXMF plug-in handlers (e.g., broadcast bridge).
+            # Each handler is responsible for filtering on destination_hash
+            # so it doesn't second-guess the gateway's own DM handling.
+            for handler in list(self._lxmf_secondary_handlers):
+                try:
+                    handler(message)
+                except Exception as e:
+                    logger.error(f"LXMF secondary handler error: {e}")
 
         except Exception as e:
             logger.error(f"Error processing LXMF message: {e}")
