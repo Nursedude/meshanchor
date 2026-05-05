@@ -37,8 +37,10 @@ Persistence:
 from __future__ import annotations
 
 import logging
+import signal as _signal_mod
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +57,35 @@ _RNS_mod, _HAS_RNS = safe_import("RNS")
 _LXMF_mod, _HAS_LXMF = safe_import("LXMF")
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _suppress_signal_in_thread():
+    """Disable signal.signal() registration on non-main threads.
+
+    LXMF.LXMRouter() and RNS.Reticulum() register SIGINT/SIGTERM handlers
+    in their constructors. Python only allows signal handler registration
+    from the main thread, so the bridge — which starts from
+    RNSMeshtasticBridge._rns_loop running in a background thread —
+    blows up at LXMRouter() with "signal only works in main thread".
+
+    Same fix the gateway uses (RNSConnectionMixin._suppress_signal_in_thread):
+    monkey-patch signal.signal to a no-op for the duration of the boot,
+    then restore.
+    """
+    if threading.current_thread() is threading.main_thread():
+        yield
+        return
+    original = _signal_mod.signal
+
+    def _safe_signal(signalnum, handler):
+        return _signal_mod.SIG_DFL
+
+    _signal_mod.signal = _safe_signal
+    try:
+        yield
+    finally:
+        _signal_mod.signal = original
 
 
 # Subscription protocol verbs are case-insensitive and matched on the
@@ -274,7 +305,11 @@ class LXMFBroadcastBridge:
 
             # Own LXMRouter — separate from gateway's so register_delivery_identity
             # doesn't trip LXMF 0.9.4's "one identity per router" cap.
-            self._router = self._lxmf.LXMRouter(storagepath=str(self._storage_path))
+            # LXMRouter() registers signal handlers internally and fails on
+            # non-main threads; the bridge runs on _rns_thread, so we
+            # suppress signal registration during construction.
+            with _suppress_signal_in_thread():
+                self._router = self._lxmf.LXMRouter(storagepath=str(self._storage_path))
             self._router.register_delivery_callback(self._on_lxmf_delivery)
 
             self._lxmf_source = self._router.register_delivery_identity(
