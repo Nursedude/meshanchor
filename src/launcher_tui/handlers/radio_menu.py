@@ -59,7 +59,7 @@ class RadioMenuHandler(BaseHandler):
             # --- Radio Config ---
             choices.append(("_cfg_", "--- Radio Config ---"))
             choices.extend([
-                ("hw-config", "Select Radio Hardware"),
+                ("hw-config", "Hardware HAT Help"),
                 ("presets", "Radio Presets (LoRa)"),
                 ("set-region", "Set Region"),
                 ("set-txpower", "Set TX Power"),
@@ -73,6 +73,7 @@ class RadioMenuHandler(BaseHandler):
                 ("nodes", "Node List"),
                 ("favorites", "Favorites (BaseUI 2.7+)"),
                 ("channels", "Channel Info"),
+                ("webui", "Open Web UI (:9443)"),
             ])
 
             # --- Radio Control ---
@@ -114,17 +115,15 @@ class RadioMenuHandler(BaseHandler):
                 self.ctx.safe_call("Install CLI", self._install_meshtastic_cli)
                 continue
 
-            # Delegate to meshtasticd sub-handlers for hardware/presets
-            if choice in ("hw-config", "presets"):
-                self._delegate_to_meshtasticd(choice)
-                continue
-
             if choice == "favorites":
                 # Delegate to FavoritesHandler
                 self.ctx.safe_call("Favorites", self._favorites_submenu)
                 continue
 
             dispatch = {
+                "presets": ("Radio Presets", self._radio_preset_picker),
+                "hw-config": ("Hardware HAT Help", self._radio_hat_help),
+                "webui": ("Web UI", self._radio_open_webui),
                 "position": ("Position", self._radio_position_menu),
                 "send": ("Send Message", self._radio_send_message),
                 "set-region": ("Set Region", self._radio_set_region),
@@ -157,28 +156,131 @@ class RadioMenuHandler(BaseHandler):
                     f"  sudo systemctl status meshtasticd"
                 )
 
-    def _delegate_to_meshtasticd(self, action: str):
-        """Delegate hardware config / presets to meshtasticd sub-handlers."""
-        tag_map = {
-            "hw-config": ("meshtasticd_radio", "hardware"),
-            "presets": ("meshtasticd_radio", "presets"),
-        }
-        handler_id, handler_action = tag_map.get(action, (None, None))
-        if not handler_id:
+    def _radio_preset_picker(self):
+        """Pick a Meshtastic LoRa modem preset and apply via CLI.
+
+        Replaces the prior MN-1b dead-end that delegated to a
+        ``meshtasticd_radio`` sub-handler that doesn't exist in MeshAnchor
+        (Meshtasticd config editors are not ported per the MN-1b scope
+        decision). Drives ``meshtastic --set lora.modem_preset`` directly
+        with descriptions sourced from ``utils.lora_presets``.
+        """
+        from utils.lora_presets import MESHTASTIC_PRESETS
+
+        choices = []
+        for name, spec in MESHTASTIC_PRESETS.items():
+            tag = "*" if spec.get("recommended") else " "
+            speed = spec.get("estimated_throughput", "")
+            rng = spec.get("estimated_range", "")
+            label = f"{tag} {name:<14} {rng:<8} {speed}"
+            choices.append((name, label))
+        choices.append(("back", "Back"))
+
+        choice = self.ctx.dialog.menu(
+            "LoRa Modem Preset",
+            "Select a Meshtastic preset to apply:\n\n"
+            "* = recommended for general use (MEDIUM_FAST)\n"
+            "Faster preset = shorter range, more bandwidth.\n"
+            "Slower preset = longer range, less bandwidth.",
+            choices,
+        )
+
+        if choice is None or choice == "back":
             return
 
-        # Look up handler via registry
-        if self.ctx.registry:
-            dispatched = self.ctx.registry.dispatch("meshtasticd", handler_action)
-            if dispatched:
-                return
+        spec = MESHTASTIC_PRESETS.get(choice, {})
+        warning = spec.get("warning")
+        body = (
+            f"Apply preset {choice}?\n\n"
+            f"Description: {spec.get('description', '')}\n"
+            f"Range:       {spec.get('estimated_range', 'unknown')}\n"
+            f"Throughput:  {spec.get('estimated_throughput', 'unknown')}\n"
+        )
+        if warning:
+            body += f"\nWARNING: {warning}\n"
+        body += "\nRadio will restart after the change."
 
-        # Fallback: handler not registered
+        if not self.ctx.dialog.yesno(f"Apply {choice}?", body, default_no=True):
+            return
+
+        self._radio_run(
+            [self.ctx.get_meshtastic_cli(), '--host', 'localhost',
+             '--set', 'lora.modem_preset', choice],
+            f"Setting preset: {choice}",
+        )
+
+    def _radio_hat_help(self):
+        """Explain the Meshtasticd HAT-selection process.
+
+        Replaces the prior MN-1b dead-end that delegated to a
+        ``meshtasticd_radio`` sub-handler that doesn't exist in MeshAnchor.
+        MeshAnchor does NOT ship a HAT picker (per Issue #22 — never
+        overwrite ``config.yaml``, never auto-create files in
+        ``available.d/``); this stub points the operator at the canonical
+        process documented by meshtasticd upstream.
+        """
         self.ctx.dialog.msgbox(
-            "Not Available",
-            "This feature requires meshtasticd.\n\n"
-            "Go to: Configuration > meshtasticd\n"
-            "to set up the meshtasticd service first."
+            "Hardware HAT Selection",
+            "MeshAnchor does NOT manage meshtasticd HAT selection — that\n"
+            "lives with the meshtasticd package itself (see Issue #22 for\n"
+            "the rationale: never overwrite /etc/meshtasticd/config.yaml).\n\n"
+            "To select a HAT manually:\n"
+            "  1. ls /etc/meshtasticd/available.d/\n"
+            "  2. sudo cp /etc/meshtasticd/available.d/<your-hat>.yaml \\\n"
+            "       /etc/meshtasticd/config.d/\n"
+            "  3. sudo systemctl restart meshtasticd\n\n"
+            "Or use the meshtasticd web UI at http://localhost:9443 —\n"
+            "it has a HAT picker under Settings > Module > Serial.\n"
+            "(Use 'Open Web UI' from the Radio Info menu.)"
+        )
+
+    def _radio_open_webui(self):
+        """Surface the meshtasticd web UI URL.
+
+        On a graphical session (``$DISPLAY`` set), offer to xdg-open the
+        URL. Headless: print the URL plus an SSH-tunnel hint so the
+        operator on the remote workstation can paste it into a browser.
+        """
+        url = "http://localhost:9443"
+        has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+        if has_display and shutil.which("xdg-open"):
+            if self.ctx.dialog.yesno(
+                "Open Meshtasticd Web UI?",
+                f"Open {url} in the default browser?\n\n"
+                "(For HAT selection, channel admin, MQTT, and most\n"
+                "settings the web UI is the easier path.)",
+                default_no=False,
+            ):
+                try:
+                    subprocess.Popen(
+                        ["xdg-open", url],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL,
+                    )
+                    self.ctx.dialog.msgbox(
+                        "Opening",
+                        f"Launched browser to {url}.\n\n"
+                        "If nothing opens, paste the URL manually."
+                    )
+                except OSError as e:
+                    self.ctx.dialog.msgbox(
+                        "Open Failed",
+                        f"xdg-open failed: {e}\n\nURL: {url}"
+                    )
+            return
+
+        # Headless path
+        self.ctx.dialog.msgbox(
+            "Meshtasticd Web UI",
+            f"Web UI URL:\n  {url}\n\n"
+            "This Pi is headless — paste the URL on a workstation that\n"
+            "can reach it. If the Pi isn't directly reachable, tunnel:\n\n"
+            "  ssh -L 9443:localhost:9443 <pi-host>\n\n"
+            "...then open http://localhost:9443 in the workstation's\n"
+            "browser. The web UI handles HAT selection, channel admin,\n"
+            "MQTT, position, and most other settings."
         )
 
     def _favorites_submenu(self):
