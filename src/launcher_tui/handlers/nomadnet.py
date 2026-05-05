@@ -86,9 +86,41 @@ class NomadNetHandler(
     # LXMF exclusivity — imported from shared utility
     # ------------------------------------------------------------------
 
-    def _ensure_lxmf_exclusive(self, starting_app: str) -> bool:
-        """Ensure no other LXMF app is using port 37428."""
-        return ensure_lxmf_exclusive(self.ctx.dialog, starting_app)
+    def _ensure_lxmf_exclusive(
+        self, starting_app: str, config_dir: Optional[str] = None,
+    ) -> bool:
+        """Ensure no other LXMF client is using the same config_dir.
+
+        Pass None to check the default config dir (~/.nomadnetwork);
+        pass an explicit path when launching NomadNet with --config.
+        Two LXMF clients can coexist if their config dirs differ
+        (per the MN-5 _lxmf_utils rewrite).
+        """
+        return ensure_lxmf_exclusive(
+            self.ctx.dialog, starting_app, config_dir=config_dir,
+        )
+
+    def _show_canonical_installer_msg(self) -> None:
+        """Tell the operator how to repair a non-canonical NomadNet install.
+
+        Surfaced when ``_get_wrapper_command`` returns None because the
+        pipx venv python isn't where the canonical layout expects.
+        Issue #46 wrapper-bypass guard: refusing-loud here beats the
+        previous silent fallback that produced an AuthenticationError
+        crash 30 seconds into NomadNet's lifetime.
+        """
+        self.ctx.dialog.msgbox(
+            "NomadNet not canonically installed",
+            "NomadNet's pipx venv layout is missing or non-canonical, so\n"
+            "MeshAnchor refuses to launch it (Issue #46 wrapper-bypass\n"
+            "guard).\n\n"
+            "Repair via TUI:\n"
+            "  NomadNet > Service Control > Reinstall NomadNet\n"
+            "  (idempotent)\n\n"
+            "Or run the canonical installer manually:\n"
+            "  pipx install --force nomadnet\n"
+            "  pipx ensurepath",
+        )
 
     # ------------------------------------------------------------------
     # Cross-handler helpers (delegate to rns_diagnostics handler)
@@ -860,8 +892,14 @@ class NomadNetHandler(
             if rns_config_path:
                 nn_args = ['--rnsconfig', rns_config_path, '--textui']
 
-            # Build command — use wrapper to patch RPC if possible
+            # Build command — use wrapper to patch RPC if possible.
+            # Issue #46: refuse to launch when the canonical pipx venv
+            # layout is missing rather than silently bypassing the
+            # wrapper.
             cmd = self._get_wrapper_command(nn_path, nn_args)
+            if cmd is None:
+                self._show_canonical_installer_msg()
+                return
 
             if sudo_user and sudo_user != 'root':
                 # Run as real user using 'sudo -u' with explicit PATH
@@ -1137,8 +1175,13 @@ class NomadNetHandler(
         if rns_config_path:
             nn_args = ['--rnsconfig', rns_config_path, '--daemon']
 
-        # Build command — use wrapper to patch RPC if possible
+        # Build command — use wrapper to patch RPC if possible.
+        # Issue #46: refuse to launch when the canonical pipx venv
+        # layout is missing rather than silently bypassing the wrapper.
         base_cmd = self._get_wrapper_command(nn_path, nn_args)
+        if base_cmd is None:
+            self._show_canonical_installer_msg()
+            return
 
         if sudo_user and sudo_user != 'root':
             # Run as real user with -H to set HOME correctly

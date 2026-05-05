@@ -218,10 +218,11 @@ Each phase = one PR. No long-lived branches. Tracker file (this file) updated at
 | Phase | Status | PR | Merge commit |
 |-------|--------|-----|--------------|
 | MN-1a | merged ✅ | #38 | eb305ff2 |
-| MN-1b | in flight (PR open) | — | — |
+| MN-1b | merged ✅ | #39 | 6be4c207 |
 | MN-2  | merged ✅ | #36 | c5150136 |
 | MN-3  | merged ✅ | #35 | 4df6b063 |
-| MN-4  | not started | — | — |
+| MN-4a | in flight (PR open) | — | — |
+| MN-4b | scope revision pending | — | — |
 | MN-5  | merged ✅ | #37 | b37bb330 |
 
 ---
@@ -252,6 +253,7 @@ The infrastructure also tightly couples MeshAnchor to a Meshtastic-primary world
 - 2026-05-04: Plan created at user request after Phase 8.4 charter completion. Scoped to "Mesh Networks parity" only — Config Doctor + composable bridges + extensions remain deferred per prior memory.
 - 2026-05-05 (MN-1a): MN-1 split into MN-1a (channel_config alone, ships now) and MN-1b (full meshtasticd config stack, scope decision pending — see "MN-1 scope revision" section above). Reason: post-audit infrastructure dependency was 2,616 LOC larger than the original plan estimated, plus tight coupling to a Meshtastic-primary worldview that contradicts Phase 7/8 cross-cutting decisions.
 - 2026-05-05 (MN-1b): user agreed with the Path A reframing — ship a small Meshtastic Quick-Look instead of the full 5,095-LOC port. After auditing the existing `RadioMenuHandler` (which already covers `--info` view, region/TX-power/name setters, send/position/reboot, channel info, CLI install), only three changes were actually needed: (1) replace the dead-end `presets` action (delegated to a `meshtasticd_radio` sub-handler that doesn't exist in MeshAnchor) with an inline preset picker driven by `utils.lora_presets.MESHTASTIC_PRESETS`; (2) replace the dead-end `hw-config` action with a help msgbox documenting the manual HAT-selection process and pointing at the meshtasticd web UI; (3) add a `webui` action that offers `xdg-open http://localhost:9443` when `$DISPLAY` is set or prints an SSH-tunnel hint when headless. Net change: ~150 LOC in `radio_menu.py` + 18 tests, no infrastructure adds. Replaces the original Path A's standalone "quicklook" handler with three surgical fixes to existing code — same delivered value, smaller change, fixes pre-existing dead-ends as a side effect.
+- 2026-05-05 (MN-4a): same audit pattern as MN-1b. The original MN-4 scope ("split nomadnet.py into 4 mixins") understated the cost: MeshForge's mixins aren't a pure refactor — they add ~1,800 LOC of new functionality (per-identity interactive launches, Issue #45 legacy hardening, Issue #46 wrapper-bypass guard, inline config toggles, user-match + Meshtastic-iface checks). MeshAnchor's `nomadnet.py` is at 1,511 LOC (just over CLAUDE.md's 1,500 cap) but Phase 8.4 already shipped the tmux-variant mixin with its own user-scope systemctl handling; the legacy `nomadnet-user.service` path that MeshForge's `_nomadnet_service_ops.py` hardens hasn't shown the same symptom on MeshAnchor. The one genuinely fixable bug in MeshAnchor's current code is the silent wrapper-bypass — `_get_wrapper_command` returns a fallback list when the pipx venv is missing, skipping the wrapper's rpc_key precondition and producing a hard-to-diagnose AuthenticationError 30 seconds into NomadNet's lifetime. MN-4a ships the bug fix (`_get_wrapper_command` returns `Optional[list]`, callers show `_show_canonical_installer_msg` and bail) plus a small UX bonus: thread the MN-5 `config_dir` kwarg through `_ensure_lxmf_exclusive` so the new per-config-dir collision check actually fires. The structural split + the rest of MeshForge's new functionality stays deferred as MN-4b pending separate scope decision.
 - 2026-05-04: NomadNet 4-mixin refactor MUST preserve Phase 8.4 tmux mixin (`_nomadnet_tmux_service_ops.py`).
 - 2026-05-04: Meshtasticd editors keep `menu_section="configuration"` (matches MeshForge), gated `feature_flag="meshtastic"` so they vanish in MESHCORE profile.
 - 2026-05-04: RNS Tools is additive — inline rns_menu items stay; rns_tools adds a deeper submenu.
