@@ -1,0 +1,69 @@
+# /etc/sudoers.d/010_meshanchor — drop-in NOPASSWD grants for MeshAnchor
+#
+# Goal: keep the NOC self-healing without padding wh6gxz with full sudo.
+# Cron + the boundary soak machinery need to restart wedged daemons
+# unattended; running them through a password prompt defeats the point.
+#
+# Scope is the minimum that closes Track B item 2 (env continuity):
+#   - systemctl {restart,start,stop,status,reload} on the 3 meshanchor units
+#   - systemctl daemon-reload (needed after unit-file changes)
+#   - launcher.py with args (the meshanchor wrapper invokes this with sudo
+#     internally; cron-driven recovery scripts can too)
+#
+# NOT in scope (deliberate):
+#   - rnsd / meshtasticd / mosquitto restarts. We do not own those daemons;
+#     restarting them while shared with other processes is a foot-gun.
+#   - Arbitrary systemctl. NOPASSWD systemctl * grants daemon-reload + reboot
+#     at minimum, which is too broad.
+#   - journalctl. On Debian/RPi OS the 'adm' group already grants journal
+#     read access for system units; if your distro doesn't, add membership
+#     instead of widening this file.
+#
+# Install (one-time):
+#   sudo bash scripts/install_sudoers.sh
+# Or by hand:
+#   sudo install -m 0440 -o root -g root \
+#       scripts/010_meshanchor.sudoers /etc/sudoers.d/010_meshanchor
+#   sudo visudo -c   # validate
+#
+# Edit USER_NAME below if you deploy under a different operator account.
+
+User_Alias MESHANCHOR_OPS = wh6gxz
+
+Cmnd_Alias MESHANCHOR_SVC_RESTART = \
+    /usr/bin/systemctl restart meshanchor.service, \
+    /usr/bin/systemctl restart meshanchor-daemon.service, \
+    /usr/bin/systemctl restart meshanchor-map.service
+
+Cmnd_Alias MESHANCHOR_SVC_START = \
+    /usr/bin/systemctl start meshanchor.service, \
+    /usr/bin/systemctl start meshanchor-daemon.service, \
+    /usr/bin/systemctl start meshanchor-map.service
+
+Cmnd_Alias MESHANCHOR_SVC_STOP = \
+    /usr/bin/systemctl stop meshanchor.service, \
+    /usr/bin/systemctl stop meshanchor-daemon.service, \
+    /usr/bin/systemctl stop meshanchor-map.service
+
+Cmnd_Alias MESHANCHOR_SVC_STATUS = \
+    /usr/bin/systemctl status meshanchor.service, \
+    /usr/bin/systemctl status meshanchor-daemon.service, \
+    /usr/bin/systemctl status meshanchor-map.service
+
+Cmnd_Alias MESHANCHOR_SVC_RELOAD = \
+    /usr/bin/systemctl reload meshanchor.service, \
+    /usr/bin/systemctl reload meshanchor-daemon.service, \
+    /usr/bin/systemctl reload meshanchor-map.service
+
+Cmnd_Alias MESHANCHOR_SYSTEMD = /usr/bin/systemctl daemon-reload
+
+Cmnd_Alias MESHANCHOR_LAUNCHER = /usr/bin/python3 /opt/meshanchor/src/launcher.py *
+
+MESHANCHOR_OPS ALL=(root) NOPASSWD: \
+    MESHANCHOR_SVC_RESTART, \
+    MESHANCHOR_SVC_START, \
+    MESHANCHOR_SVC_STOP, \
+    MESHANCHOR_SVC_STATUS, \
+    MESHANCHOR_SVC_RELOAD, \
+    MESHANCHOR_SYSTEMD, \
+    MESHANCHOR_LAUNCHER
