@@ -705,9 +705,26 @@ class MeshAnchorLauncher:
 
     def _meshcore_primary_menu(self):
         """MeshCore primary submenu — MeshCore tools + Optional Gateways."""
-        _ORDERING = ["meshcore", "optional_gateways"]
+        # Cross-section shortcuts surface NomadNet (mesh_networks/nomadnet),
+        # MeshChatX (rns/meshchatx), and Channel Config (configuration/channels)
+        # at the MeshCore submenu level. The handlers' canonical sections are
+        # unchanged — the deep paths under Optional Gateways still work.
+        _ORDERING = [
+            "meshcore",
+            "chat_pane",
+            "nomadnet",
+            "meshchatx",
+            "channels",
+            "optional_gateways",
+        ]
         while True:
             legacy = [
+                ("nomadnet",
+                 "NomadNet            RNS messaging client"),
+                ("meshchatx",
+                 "MeshChatX           LXMF web UI on :8000"),
+                ("channels",
+                 "Channel Config      Meshtastic channels"),
                 ("optional_gateways",
                  "Optional Gateways → Meshtastic, RNS, MQTT, NomadNet, AREDN"),
             ]
@@ -724,6 +741,17 @@ class MeshAnchorLauncher:
 
             if choice == "optional_gateways":
                 self._optional_gateways_menu()
+                continue
+
+            # Cross-section shortcuts: dispatch to handlers' canonical sections.
+            if choice == "nomadnet":
+                self._registry.dispatch("mesh_networks", "nomadnet")
+                continue
+            if choice == "meshchatx":
+                self._registry.dispatch("rns", "meshchatx")
+                continue
+            if choice == "channels":
+                self._registry.dispatch("configuration", "channels")
                 continue
 
             # MeshCore handler items dispatched via registry
