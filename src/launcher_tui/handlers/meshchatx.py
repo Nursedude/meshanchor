@@ -158,7 +158,8 @@ class MeshChatXHandler(MeshChatXServiceOpsMixin, BaseHandler):
         On boxes with a graphical session (``$DISPLAY`` set), offer to
         ``xdg-open`` the URL. On headless boxes, print the URL plus an
         SSH-tunnel hint and copy to clipboard if ``xclip``/``wl-copy``
-        is available.
+        is available — the operator on the remote workstation pastes
+        into their browser.
         """
         state = self._meshchatx_service_state()
         port = state.get("port", 8000)
