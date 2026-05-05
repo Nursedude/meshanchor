@@ -739,7 +739,9 @@ class MeshAnchorLauncher:
         as part of the MeshCore-primary rework. Internal section key remains
         ``mesh_networks`` for compatibility with existing handlers.
         """
-        _ORDERING = ["meshtastic", "rns", "gateway", "aredn",
+        _ORDERING = ["meshtastic", "rns", "gateway",
+                      "preflight", "test_gateway_rx", "export",
+                      "aredn",
                       "messaging", "traffic", "mqtt", "favorites", "ham", "services",
                       "nomadnet"]
         # Visibility fix: render Meshtastic/RNS/Gateway rows regardless of

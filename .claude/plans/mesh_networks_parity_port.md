@@ -218,8 +218,8 @@ Each phase = one PR. No long-lived branches. Tracker file (this file) updated at
 | Phase | Status | PR | Merge commit |
 |-------|--------|-----|--------------|
 | MN-1  | not started | — | — |
-| MN-2  | not started | — | — |
-| MN-3  | in flight (PR open) | — | — |
+| MN-2  | in flight (PR open) | — | — |
+| MN-3  | merged ✅ | #35 | 4df6b063 |
 | MN-4  | not started | — | — |
 | MN-5  | not started | — | — |
 
