@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -177,6 +177,51 @@ class TestWriteReports:
         mid_idx = body.index("`mid`")
         fast_idx = body.index("`fast`")
         assert slow_idx < mid_idx < fast_idx
+
+
+class TestCheckLiveness:
+    def _now(self) -> datetime:
+        return datetime(2026, 5, 5, 18, 0, 0, tzinfo=timezone.utc)
+
+    def test_returns_none_when_no_prior(self):
+        # First run ever — no prior to compare against, no warning.
+        assert bs.check_liveness(None, self._now(), max_gap_secs=9 * 3600) is None
+
+    def test_returns_none_when_within_window(self):
+        prior_ts = (self._now() - timedelta(hours=4)).isoformat()
+        assert bs.check_liveness(
+            {"timestamp": prior_ts}, self._now(), max_gap_secs=9 * 3600,
+        ) is None
+
+    def test_flags_when_gap_exceeds_threshold(self):
+        prior_ts = (self._now() - timedelta(hours=12)).isoformat()
+        age = bs.check_liveness(
+            {"timestamp": prior_ts}, self._now(), max_gap_secs=9 * 3600,
+        )
+        assert age is not None
+        assert age == pytest.approx(12 * 3600, rel=1e-3)
+
+    def test_returns_none_when_timestamp_missing(self):
+        # Defensive: malformed prior payload.
+        assert bs.check_liveness(
+            {"window": "6h"}, self._now(), max_gap_secs=9 * 3600,
+        ) is None
+
+    def test_returns_none_when_timestamp_unparseable(self):
+        assert bs.check_liveness(
+            {"timestamp": "not-an-iso-date"}, self._now(),
+            max_gap_secs=9 * 3600,
+        ) is None
+
+    def test_handles_naive_timestamp(self):
+        # If the prior was written without tzinfo (older format), assume UTC
+        # rather than crashing on a TypeError comparing aware vs naive.
+        prior_ts = (self._now() - timedelta(hours=12)).replace(tzinfo=None).isoformat()
+        age = bs.check_liveness(
+            {"timestamp": prior_ts}, self._now(), max_gap_secs=9 * 3600,
+        )
+        assert age is not None
+        assert age == pytest.approx(12 * 3600, rel=1e-3)
 
 
 class TestFindPriorData:

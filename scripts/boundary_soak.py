@@ -72,6 +72,13 @@ DEFAULT_UNITS: tuple = (
 DEFAULT_WINDOW = "6 hours ago"
 DEFAULT_OUT_DIR = _real_user_home() / ".local" / "share" / "meshanchor" / "soak_reports"
 
+# Default liveness threshold: 1.5x the typical 6h cron interval. If the
+# previous run's sidecar is older than this, the cron itself probably
+# stopped firing (or the daemon is so wedged that journalctl hangs and
+# this run is late). Either way it's a silent-failure signal and we want
+# cron mail to land.
+DEFAULT_MAX_GAP_SECS = 9 * 3600
+
 # Two log line shapes the boundary_timing helper emits:
 #   rpc[<label>[<target>]] slow: 4.231s (>=2.0s threshold)
 #   rpc[<label>[<target>]] raised after 0.034s
@@ -125,6 +132,34 @@ def collect_journal(units: List[str], since: str, use_sudo: bool) -> str:
         )
         sys.exit(2)
     return proc.stdout
+
+
+def check_liveness(
+    prior: Optional[Dict], now: datetime, max_gap_secs: int
+) -> Optional[float]:
+    """Return age (seconds) of the prior run if it exceeds the gap threshold.
+
+    Returns None if either there's no prior (first run, fine) or the gap is
+    within bounds. A non-None return is the silent-failure signal: the
+    cron likely stopped firing, or this run was delayed by something that
+    deserves a forensic. Caller surfaces this as a WARN log and a non-zero
+    exit code so cron mail lands.
+    """
+    if prior is None:
+        return None
+    ts_str = prior.get("timestamp")
+    if not ts_str:
+        return None
+    try:
+        prior_ts = datetime.fromisoformat(ts_str)
+    except (TypeError, ValueError):
+        return None
+    if prior_ts.tzinfo is None:
+        prior_ts = prior_ts.replace(tzinfo=timezone.utc)
+    gap_secs = (now - prior_ts).total_seconds()
+    if gap_secs > max_gap_secs:
+        return gap_secs
+    return None
 
 
 def find_prior_data(out_dir: Path) -> Optional[Dict]:
@@ -244,6 +279,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--use-sudo", action="store_true",
         help="Wrap journalctl with sudo (requires NOPASSWD).",
     )
+    parser.add_argument(
+        "--max-gap-secs", type=int, default=DEFAULT_MAX_GAP_SECS,
+        help=(
+            "Liveness threshold in seconds. If the prior run's sidecar is "
+            "older than this, log WARN and exit nonzero so cron mail catches "
+            f"it. Default: {DEFAULT_MAX_GAP_SECS} (9h, = 1.5x default 6h cron)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     units = list(args.unit) if args.unit else list(DEFAULT_UNITS)
@@ -254,21 +297,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     deltas = diff_against_prior(current, prior)
 
     now = datetime.now(timezone.utc)
+
+    # Liveness self-check: did the prior run land on time? If not, the cron
+    # is broken (or the daemon was so wedged the run was delayed). Either
+    # way we want this run to surface WARN + non-zero exit so cron mail
+    # picks it up — the current report still gets written either way.
+    stale_age = check_liveness(prior, now, args.max_gap_secs)
+    if stale_age is not None:
+        msg = (
+            f"liveness: prior run was {stale_age / 3600:.1f}h ago "
+            f"(>{args.max_gap_secs / 3600:.1f}h threshold) — "
+            "cron may have stopped firing or daemon was wedged"
+        )
+        logger.warning(msg)
+        sys.stderr.write(msg + "\n")
+
     md_path = write_reports(args.out_dir, now, args.since, units, current, deltas)
 
     if not current:
         print(f"soak ok: no WARN lines (report {md_path.name})")
-        return 0
+    else:
+        total_slow = sum(r["slow"] for r in current.values())
+        total_raised = sum(r["raised"] for r in current.values())
+        worst_label, worst_rec = max(current.items(), key=lambda x: x[1]["max_s"])
+        new_labels = sum(1 for d in deltas.values() if d["is_new"])
+        print(
+            f"soak: slow={total_slow} raised={total_raised} new_labels={new_labels} "
+            f"worst={worst_label} max={worst_rec['max_s']:.2f}s -> {md_path.name}"
+        )
 
-    total_slow = sum(r["slow"] for r in current.values())
-    total_raised = sum(r["raised"] for r in current.values())
-    worst_label, worst_rec = max(current.items(), key=lambda x: x[1]["max_s"])
-    new_labels = sum(1 for d in deltas.values() if d["is_new"])
-    print(
-        f"soak: slow={total_slow} raised={total_raised} new_labels={new_labels} "
-        f"worst={worst_label} max={worst_rec['max_s']:.2f}s -> {md_path.name}"
-    )
-    return 0
+    return 1 if stale_age is not None else 0
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -23,8 +23,12 @@ def _record(slow: int = 0, raised: int = 0, max_s: float = 0.0) -> dict:
     return {"slow": slow, "raised": raised, "max_s": max_s, "sum_s": max_s}
 
 
-def _host_payload(labels: dict, window: str = "6 hours ago") -> dict:
-    return {"timestamp": "2026-05-05T00:00:00+00:00", "window": window,
+def _host_payload(
+    labels: dict,
+    window: str = "6 hours ago",
+    timestamp: str = "2026-05-05T00:00:00+00:00",
+) -> dict:
+    return {"timestamp": timestamp, "window": window,
             "units": ["meshanchor-gateway"], "labels": labels}
 
 
@@ -77,6 +81,32 @@ class TestAggregate:
 
     def test_all_hosts_unreachable(self):
         assert bsf.aggregate({"h1": None, "h2": None}) == {}
+
+
+class TestReportAgeHours:
+    def _now(self) -> datetime:
+        return datetime(2026, 5, 5, 18, 0, 0, tzinfo=timezone.utc)
+
+    def test_none_for_missing_data(self):
+        assert bsf.report_age_hours(None, self._now()) is None
+
+    def test_none_for_missing_timestamp(self):
+        assert bsf.report_age_hours({"labels": {}}, self._now()) is None
+
+    def test_computes_age_hours(self):
+        ts = (self._now() - timedelta(hours=7)).isoformat()
+        age = bsf.report_age_hours({"timestamp": ts}, self._now())
+        assert age == pytest.approx(7.0, rel=1e-3)
+
+    def test_naive_timestamp_assumes_utc(self):
+        ts = (self._now() - timedelta(hours=7)).replace(tzinfo=None).isoformat()
+        age = bsf.report_age_hours({"timestamp": ts}, self._now())
+        assert age == pytest.approx(7.0, rel=1e-3)
+
+    def test_unparseable_timestamp_returns_none(self):
+        assert bsf.report_age_hours(
+            {"timestamp": "garbage"}, self._now(),
+        ) is None
 
 
 class TestLatestReportForHost:
@@ -135,7 +165,8 @@ class TestWriteFleetReport:
         rollup = bsf.aggregate(per_host)
         path = bsf.write_fleet_report(tmp_path, ts, per_host, rollup)
         body = path.read_text()
-        assert "`pi-down` | – | – | 0" in body
+        # Unreachable host: dashes for OK + window, ? for age + stale.
+        assert "`pi-down` | – | ? | ? | – | 0" in body
 
     def test_no_rollup_when_all_quiet(self, tmp_path):
         ts = datetime.now(timezone.utc)
@@ -178,3 +209,41 @@ class TestWriteFleetReport:
         path = bsf.write_fleet_report(nested, ts, {}, {})
         assert path.exists()
         assert nested.is_dir()
+
+    def test_stale_host_marked_in_table(self, tmp_path):
+        now = datetime(2026, 5, 5, 18, 0, 0, tzinfo=timezone.utc)
+        old_ts = (now - timedelta(hours=40)).isoformat()
+        per_host = {
+            "fresh": _host_payload({}, timestamp=now.isoformat()),
+            "stale-pi": _host_payload({}, timestamp=old_ts),
+        }
+        path = bsf.write_fleet_report(
+            tmp_path, now, per_host, {}, stale_threshold_hours=30.0,
+        )
+        body = path.read_text()
+        assert "**STALE**" in body
+        # The fresh host should have a numeric age but no stale mark in
+        # its row. Find the row and check.
+        for line in body.splitlines():
+            if "`fresh`" in line:
+                assert "**STALE**" not in line
+                break
+        else:
+            raise AssertionError("fresh host row missing")
+
+    def test_unreachable_host_age_is_question_mark(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        per_host = {"pi-down": None}
+        path = bsf.write_fleet_report(tmp_path, now, per_host, {})
+        body = path.read_text()
+        # Unreachable: dashes for OK and window, ? for age and stale
+        assert "`pi-down` | – | ? | ? | – | 0" in body
+
+    def test_stale_threshold_persisted_in_json(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        path = bsf.write_fleet_report(
+            tmp_path, now, {}, {}, stale_threshold_hours=24.0,
+        )
+        json_path = path.with_suffix(".json")
+        data = json.loads(json_path.read_text())
+        assert data["stale_threshold_hours"] == 24.0
