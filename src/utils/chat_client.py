@@ -6,17 +6,30 @@ daemon's local HTTP API on 127.0.0.1:8081 — never to the radio
 directly — so it coexists with the daemon without serial contention.
 
 Endpoints consumed:
-  GET  /chat/messages?since=<id>    — poll loop
-  GET  /chat/channels               — slot enumeration for /channels
-  POST /chat/send                   — outbound message
+  GET  /chat/messages?since=<id>    — poll loop (chat ring buffer)
+  GET  /chat/channels               — slots seen on the wire (last_seen)
+  GET  /radio                       — slot list with names (idx, name, hash)
+  POST /chat/send                   — outbound message → {"queued": true, …}
 
 Slash commands inside the pane:
   /ch <n>            switch channel slot for outbound messages
-  /dm <hex_dest>     send a single direct message
-  /channels          list channels seen on the wire
+  /dm <hex> <text>   send a direct message
+  /channels          show slot list with names + last-seen
+  /help              command cheatsheet
   /quit              exit the client (systemd will restart it)
 
 All other input is sent as a channel message on the active slot.
+
+UX choices:
+  * The prompt always shows the active channel: ``[ch1 meshanchor]>``
+  * Sends print an immediate ``>>> queued on ch1 …`` confirmation; the
+    poll loop then renders the daemon's ring-buffer record a moment
+    later (with the real timestamp + ``→`` arrow). Two lines per send
+    is intentional — the first proves the daemon accepted it, the
+    second proves the daemon recorded it.
+  * Channel names come from ``/radio`` (the same source the TUI's
+    radio menu uses) and are cached at startup; ``/channels`` refreshes
+    the cache.
 
 The client is deliberately single-threaded: a polling loop on a
 background thread renders incoming messages, while the main thread
@@ -81,7 +94,19 @@ def _format_ts(ts: float) -> str:
         return "??:??:??"
 
 
-def _format_entry(entry: Dict[str, Any]) -> str:
+def _channel_label(idx: Optional[int], names: Optional[Dict[int, str]] = None) -> str:
+    """Render a channel slot as ``ch{idx}`` or ``ch{idx} ({name})``."""
+    if idx is None:
+        return ""
+    if names:
+        name = names.get(idx)
+        if name:
+            return f"ch{idx} ({name})"
+    return f"ch{idx}"
+
+
+def _format_entry(entry: Dict[str, Any],
+                  channel_names: Optional[Dict[int, str]] = None) -> str:
     """Render one chat entry as a single line for the operator."""
     ts = _format_ts(entry.get("ts", 0))
     direction = entry.get("direction", "rx")
@@ -99,7 +124,7 @@ def _format_entry(entry: Dict[str, Any]) -> str:
         # DM
         tag = _color("36", f"DM[{destination[:8]}]")
     elif channel is not None:
-        tag = _color("35", f"ch{channel}")
+        tag = _color("35", _channel_label(channel, channel_names))
     else:
         tag = "?"
 
@@ -127,6 +152,9 @@ class ChatClient:
         self._channel = channel
         self._poll_interval = max(poll_interval, POLL_INTERVAL_S_MIN)
         self._poll_thread: Optional[threading.Thread] = None
+        # idx → name map populated from /radio. Used for the prompt,
+        # the render helpers, and /channels.
+        self._channel_names: Dict[int, str] = {}
 
     # ------------------------------------------------------------------
     # HTTP helpers (urllib only)
@@ -186,22 +214,67 @@ class ChatClient:
                 mid = m.get("id")
                 if isinstance(mid, int) and mid > self._last_id:
                     self._last_id = mid
-                self._render(_format_entry(m))
+                self._render(_format_entry(m, self._channel_names))
         while not self._stop.is_set():
             try:
                 for msg in self._poll_once():
-                    self._render(_format_entry(msg))
+                    self._render(_format_entry(msg, self._channel_names))
             except Exception as e:  # defensive: never let the loop die
                 self._render(_color("31", f"[poll error] {type(e).__name__}: {e}"))
             self._stop.wait(self._poll_interval)
 
-    @staticmethod
-    def _render(line: str) -> None:
-        # Print on its own line + reprint a fake prompt for ergonomics.
-        # tmux + a line-buffered terminal handles this without explicit
-        # readline rewrites.
-        sys.stdout.write(f"\r{line}\n> ")
+    # ------------------------------------------------------------------
+    # Channel name cache — populated from /radio (the same source the
+    # TUI's radio menu uses). Falls back to "ch{idx}" if /radio is
+    # unreachable, so a missing or restarting daemon never blocks chat.
+    # ------------------------------------------------------------------
+
+    def _refresh_channel_names(self) -> Dict[int, str]:
+        body = self._http_get("/radio")
+        if not body:
+            return self._channel_names
+        radio = body.get("radio") or {}
+        channels = radio.get("channels") or []
+        names: Dict[int, str] = {}
+        for c in channels:
+            try:
+                idx = int(c.get("idx"))
+            except (TypeError, ValueError):
+                continue
+            name = c.get("name")
+            if isinstance(name, str) and name:
+                names[idx] = name
+        self._channel_names = names
+        return names
+
+    def _prompt(self) -> str:
+        """Channel-aware prompt suffix shown after each render."""
+        return f"[{_channel_label(self._channel, self._channel_names)}]> "
+
+    def _render(self, line: str) -> None:
+        # Print on its own line + reprint the channel-aware prompt for
+        # ergonomics. tmux + a line-buffered terminal handles this
+        # without explicit readline rewrites.
+        sys.stdout.write(f"\r{line}\n{self._prompt()}")
         sys.stdout.flush()
+
+    def _render_tx_echo(self, *, channel: Optional[int],
+                        destination: Optional[str], text: str) -> None:
+        """Confirm the daemon accepted a /chat/send POST.
+
+        Distinct from the polled TX entry the daemon eventually records
+        in its ring buffer. The polled echo arrives later with a real
+        timestamp + ``→`` arrow; this immediate echo proves the POST
+        succeeded so the operator never wonders whether their input
+        landed.
+        """
+        if destination:
+            tag = _color("36", f"DM[{destination[:8]}]")
+        else:
+            tag = _color("35", _channel_label(channel, self._channel_names))
+        prefix = _color("33", ">>>")  # yellow, distinct from polled "→"
+        marker = _color("32", "queued")  # green
+        self._render(f"{prefix} {marker} on {tag}: {text}")
 
     # ------------------------------------------------------------------
     # Outbound
@@ -212,14 +285,22 @@ class ChatClient:
             "/chat/send", {"text": text, "channel": self._channel},
         )
         if not ok:
-            print(_color("31", f"send failed: {body}"))
+            self._render(_color("31", f"send failed: {body}"))
+            return
+        # Body is "queued: true …" JSON on success — confirm to the operator
+        # immediately. The polled TX entry arrives later with a real ts.
+        self._render_tx_echo(
+            channel=self._channel, destination=None, text=text,
+        )
 
     def _send_dm(self, dest: str, text: str) -> None:
         ok, body = self._http_post_json(
             "/chat/send", {"text": text, "destination": dest},
         )
         if not ok:
-            print(_color("31", f"DM send failed: {body}"))
+            self._render(_color("31", f"DM send failed: {body}"))
+            return
+        self._render_tx_echo(channel=None, destination=dest, text=text)
 
     # ------------------------------------------------------------------
     # Command dispatch
@@ -236,53 +317,94 @@ class ChatClient:
 
         if cmd == "/ch":
             if len(parts) < 2:
-                print(f"current channel: {self._channel}")
+                self._render(
+                    f"current channel: {_channel_label(self._channel, self._channel_names)}"
+                )
                 return True
             try:
                 self._channel = int(parts[1])
-                print(f"channel → {self._channel}")
             except ValueError:
-                print("usage: /ch <integer slot>")
+                self._render("usage: /ch <integer slot>")
+                return True
+            self._render(
+                f"channel → {_channel_label(self._channel, self._channel_names)}"
+            )
             return True
 
         if cmd == "/dm":
             if len(parts) < 3:
-                print("usage: /dm <hex_dest> <text>")
+                self._render("usage: /dm <hex_dest> <text>")
                 return True
             self._send_dm(parts[1], parts[2])
             return True
 
         if cmd == "/channels":
-            body = self._http_get("/chat/channels")
-            if not body:
-                print(_color("31", "channels: API unreachable"))
-                return True
-            chans = body.get("channels") or []
-            if not chans:
-                print("(no channels seen yet)")
-            else:
-                for c in chans:
-                    print(f"  ch{c.get('channel')} last_seen={_format_ts(c.get('last_seen', 0))}")
+            self._render_channels_table()
             return True
 
         if cmd in ("/help", "/?"):
-            print("commands:  /ch <n>   /dm <dest> <text>   /channels   /quit")
+            self._render(
+                "commands:  /ch <n>   /dm <dest> <text>   /channels   /quit"
+            )
             return True
 
-        print(f"unknown command: {cmd}  (try /help)")
+        self._render(f"unknown command: {cmd}  (try /help)")
         return True
+
+    def _render_channels_table(self) -> None:
+        """Cross-reference /radio (slot list with names) with /chat/channels
+        (last-seen timestamps from the chat ring buffer)."""
+        # Refresh first so renames / re-flashes show up.
+        self._refresh_channel_names()
+        seen = self._http_get("/chat/channels") or {}
+        last_seen: Dict[int, float] = {}
+        for c in seen.get("channels") or []:
+            try:
+                last_seen[int(c["channel"])] = float(c.get("last_seen", 0.0))
+            except (KeyError, TypeError, ValueError):
+                continue
+        slots = sorted(self._channel_names) or sorted(last_seen)
+        if not slots:
+            self._render("(no channels — /radio empty and no traffic seen)")
+            return
+        lines = ["channels:"]
+        for idx in slots:
+            name = self._channel_names.get(idx, "")
+            ts = last_seen.get(idx)
+            seen_str = _format_ts(ts) if ts else "(never)"
+            active = " ←" if idx == self._channel else ""
+            lines.append(f"  ch{idx:<2} {name:<16} last_seen {seen_str}{active}")
+        self._render("\n".join(lines))
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def run(self) -> int:
+        # Channel names first so the banner can show the active slot's
+        # name. Best-effort: if /radio is unreachable we fall back to
+        # bare ch{n} labels and the banner still works.
+        self._refresh_channel_names()
+
         # Banner
         print(_color("1", "MeshAnchor MeshCore chat"))
         print(f"  api:     {self.base_url}")
-        print(f"  channel: {self._channel}  (use /ch <n> to switch)")
+        print(f"  channel: {_channel_label(self._channel, self._channel_names)}"
+              "  (type to send, /ch <n> to switch)")
+        if self._channel_names:
+            slot_summary = ", ".join(
+                f"{idx}={n}" for idx, n in sorted(self._channel_names.items())
+            )
+            print(f"  slots:   {slot_summary}")
         print(f"  detach:  Ctrl-b d  (tmux session 'meshcore-chat')")
-        print("  /help for commands\n")
+        print("  commands: /ch <n>  /dm <hex> <text>  /channels  /help  /quit\n")
+
+        # Initial prompt so the operator sees where they're typing even
+        # before the first inbound message lands (the poll loop reprints
+        # the prompt after every render, but the first render may be
+        # minutes away on a quiet channel).
+        sys.stdout.write(self._prompt())
+        sys.stdout.flush()
 
         # Background poller
         self._poll_thread = threading.Thread(
