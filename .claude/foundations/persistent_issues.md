@@ -51,6 +51,17 @@ from utils.logging_config import get_logger
 # Service checks
 from utils.service_check import check_service, check_port, ServiceState
 
+# Boundary observability — wrap every cross-process call (rnsd RPC,
+# meshtasticd TCP, MeshCore TCP, MQTT, systemctl). See
+# .claude/plans/boundary_observability_charter.md.
+from utils.boundary_timing import timed_boundary, call_boundary, get_boundary_stats
+with timed_boundary("rnsd.has_path", target=hash_short):
+    has = RNS.Transport.has_path(dest_hash)
+# or:
+result = call_boundary("rnsd.handle_outbound",
+                       router.handle_outbound, lxm,
+                       target=hash_short)
+
 # External deps (safe_import)
 from utils.safe_import import safe_import
 RNS, _HAS_RNS = safe_import('RNS')
