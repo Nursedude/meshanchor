@@ -520,6 +520,28 @@ class LXMFBroadcastBridge:
     # Outbound LXMF
     # ------------------------------------------------------------------
 
+    # Per-RPC timing: any individual rnsd RPC over the shared-instance
+    # socket that takes longer than this is logged at WARNING level so
+    # the next wedge produces a forensic instead of a black box. See
+    # memory project_rnsd_wedging_hypothesis (audit invalidated the
+    # earlier path_request-flood theory).
+    _SLOW_RPC_THRESHOLD_S = 2.0
+
+    def _timed_rpc(self, label: str, fn, *args, **kwargs):
+        t0 = time.monotonic()
+        try:
+            result = fn(*args, **kwargs)
+        except Exception:
+            elapsed = time.monotonic() - t0
+            logger.warning("rpc[%s] raised after %.3fs", label, elapsed)
+            raise
+        elapsed = time.monotonic() - t0
+        if elapsed >= self._SLOW_RPC_THRESHOLD_S:
+            logger.warning("rpc[%s] slow: %.3fs", label, elapsed)
+        else:
+            logger.debug("rpc[%s] ok %.3fs", label, elapsed)
+        return result
+
     def _send_to_subscriber(self, sub: Subscriber, body: str, title: str) -> bool:
         if self._router is None or self._lxmf_source is None:
             return False
@@ -531,9 +553,12 @@ class LXMFBroadcastBridge:
             logger.warning("Invalid subscriber hash %r — skipping", sub.lxmf_hash)
             return False
 
+        hash_short = sub.lxmf_hash[:8]
         try:
-            if not RNS.Transport.has_path(dest_hash):
-                RNS.Transport.request_path(dest_hash)
+            if not self._timed_rpc(f"has_path[{hash_short}]",
+                                   RNS.Transport.has_path, dest_hash):
+                self._timed_rpc(f"request_path[{hash_short}]",
+                                RNS.Transport.request_path, dest_hash)
                 # Brief wait for path; do NOT block the calling thread
                 # for long — the LXMF router will retry via propagation
                 # if we set one in RNSConfig.
@@ -543,7 +568,10 @@ class LXMFBroadcastBridge:
                     if self._stop_event.wait(0.1):
                         return False
 
-            dest_identity = RNS.Identity.recall(dest_hash)
+            dest_identity = self._timed_rpc(
+                f"identity_recall[{hash_short}]",
+                RNS.Identity.recall, dest_hash,
+            )
             if dest_identity is None:
                 logger.debug("No identity recalled for %s — dropping fanout", sub.lxmf_hash)
                 return False
@@ -556,7 +584,8 @@ class LXMFBroadcastBridge:
                 "delivery",
             )
             lxm = LXMF.LXMessage(destination, self._lxmf_source, body, title)
-            self._router.handle_outbound(lxm)
+            self._timed_rpc(f"handle_outbound[{hash_short}]",
+                            self._router.handle_outbound, lxm)
             self._subs.mark_delivered(sub.lxmf_hash)
             with self._stats_lock:
                 self.stats["fanouts"] += 1
