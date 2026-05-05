@@ -33,6 +33,7 @@ Requires: pip install meshcore (Python 3.10+)
 """
 
 import asyncio
+from utils.boundary_timing import timed_boundary
 import logging
 import os
 import threading
@@ -465,14 +466,22 @@ class MeshCoreHandler(BaseMessageHandler):
                                    "did not respond to probe — attempting connection anyway")
 
                 logger.info(f"Connecting to MeshCore via serial: {device_path}")
-                self._meshcore = await MeshCore.create_serial(
-                    device_path, baud_rate
-                )
+                # Cold-start serial connect handshakes the radio firmware,
+                # which can be slow on first power-up. 5s threshold matches
+                # the meshtasticd.tcp_connect override pattern.
+                with timed_boundary("meshcore.connect_serial",
+                                    target=device_path, threshold_s=5.0):
+                    self._meshcore = await MeshCore.create_serial(
+                        device_path, baud_rate
+                    )
             elif conn_type == 'tcp':
                 tcp_host = getattr(meshcore_config, 'tcp_host', 'localhost')
                 tcp_port = getattr(meshcore_config, 'tcp_port', 4000)
                 logger.info(f"Connecting to MeshCore via TCP: {tcp_host}:{tcp_port}")
-                self._meshcore = await MeshCore.create_tcp(tcp_host, tcp_port)
+                with timed_boundary("meshcore.connect_tcp",
+                                    target=f"{tcp_host}:{tcp_port}",
+                                    threshold_s=5.0):
+                    self._meshcore = await MeshCore.create_tcp(tcp_host, tcp_port)
             else:
                 logger.error(f"Unsupported MeshCore connection type: {conn_type}")
                 return
@@ -726,9 +735,11 @@ class MeshCoreHandler(BaseMessageHandler):
             # Retrieve any pending channel messages
             messages = []
             if hasattr(self._meshcore.commands, 'get_channel_messages'):
-                messages = await self._meshcore.commands.get_channel_messages()
+                with timed_boundary("meshcore.get_channel_messages"):
+                    messages = await self._meshcore.commands.get_channel_messages()
             elif hasattr(self._meshcore.commands, 'get_messages'):
-                messages = await self._meshcore.commands.get_messages()
+                with timed_boundary("meshcore.get_messages"):
+                    messages = await self._meshcore.commands.get_messages()
 
             if not messages:
                 # Periodic metric logging
@@ -914,11 +925,14 @@ class MeshCoreHandler(BaseMessageHandler):
                 # contacts; older code iterated the Event itself, which
                 # raised "Event object is not iterable".
                 if hasattr(self._meshcore, 'commands'):
-                    contacts_evt = await self._meshcore.commands.get_contacts()
+                    with timed_boundary("meshcore.get_contacts"):
+                        contacts_evt = await self._meshcore.commands.get_contacts()
                     contacts = self._extract_contacts(contacts_evt)
                     contact = self._find_contact(contacts, destination)
                     if contact:
-                        await self._meshcore.commands.send_msg(contact, text)
+                        with timed_boundary("meshcore.send_msg",
+                                            target=destination):
+                            await self._meshcore.commands.send_msg(contact, text)
                         return True
                     logger.warning(
                         f"MeshCore contact not found for {destination}, "
@@ -926,16 +940,22 @@ class MeshCoreHandler(BaseMessageHandler):
                     )
                 # Fall through to broadcast — meshcore_py method is
                 # send_chan_msg(chan, msg), not send_channel_txt_msg.
-                await self._meshcore.commands.send_chan_msg(channel, text)
+                with timed_boundary("meshcore.send_chan_msg",
+                                    target=str(channel)):
+                    await self._meshcore.commands.send_chan_msg(channel, text)
                 return True
             else:
                 # Channel broadcast
                 if hasattr(self._meshcore, 'commands'):
-                    await self._meshcore.commands.send_chan_msg(channel, text)
+                    with timed_boundary("meshcore.send_chan_msg",
+                                        target=str(channel)):
+                        await self._meshcore.commands.send_chan_msg(channel, text)
                 elif hasattr(self._meshcore, 'send_channel_txt_msg'):
                     # Simulator path — keeps the historical method name
                     # for backwards-compat with MeshCoreSimulator.
-                    await self._meshcore.send_channel_txt_msg(text)
+                    with timed_boundary("meshcore.send_chan_msg",
+                                        target=str(channel)):
+                        await self._meshcore.send_channel_txt_msg(text)
                 else:
                     logger.error("MeshCore instance has no send method")
                     return False
