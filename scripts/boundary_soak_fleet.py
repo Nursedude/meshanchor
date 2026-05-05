@@ -73,6 +73,15 @@ DEFAULT_LOCAL_DIR = _real_user_home() / ".local" / "share" / "meshanchor" / "soa
 DEFAULT_FLEET_DIR = _real_user_home() / ".local" / "share" / "meshanchor" / "fleet_reports"
 DEFAULT_REMOTE_DIR = ".local/share/meshanchor/soak_reports/"
 
+# Default stale threshold for the daily fleet aggregator: 30h. Per-host
+# soak runs every 6h, so anything older than 30h has missed at least 4
+# cycles and the host is almost certainly silent. Catches the dominant
+# silent-failure mode: daemon dead -> no boundary timing emitted -> per-
+# host report never updates -> fleet report still says "OK" even though
+# the host is broken. Without this check, an empty soak report from a
+# wedged daemon is indistinguishable from a healthy one.
+DEFAULT_STALE_THRESHOLD_HOURS = 30.0
+
 logger = logging.getLogger("boundary_soak_fleet")
 
 
@@ -131,6 +140,28 @@ def latest_report_for_host(host_dir: Path) -> Optional[Dict]:
         return None
 
 
+def report_age_hours(data: Optional[Dict], now: datetime) -> Optional[float]:
+    """Compute the age in hours of a per-host report, or None if unknown.
+
+    Returns None when the report is missing entirely (rsync failed) or
+    its timestamp can't be parsed. The caller treats None as "no data" —
+    a separate state from "stale" — so a flapping rsync doesn't get
+    silently bucketed with a wedged daemon.
+    """
+    if not data:
+        return None
+    ts_str = data.get("timestamp")
+    if not ts_str:
+        return None
+    try:
+        ts = datetime.fromisoformat(ts_str)
+    except (TypeError, ValueError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (now - ts).total_seconds() / 3600.0
+
+
 def aggregate(per_host: Dict[str, Optional[Dict]]) -> Dict[str, Dict]:
     """Roll per-host data up into per-label fleet totals.
 
@@ -164,8 +195,15 @@ def write_fleet_report(
     timestamp: datetime,
     per_host: Dict[str, Optional[Dict]],
     rollup: Dict[str, Dict],
+    stale_threshold_hours: float = DEFAULT_STALE_THRESHOLD_HOURS,
 ) -> Path:
-    """Write the fleet markdown + JSON sidecar. Returns the markdown path."""
+    """Write the fleet markdown + JSON sidecar. Returns the markdown path.
+
+    Per-host table now carries an ``age (h)`` column and a ``stale?`` flag
+    so a host whose daemon went silent shows up immediately. ``stale?`` is
+    true when the host's most recent report is older than
+    ``stale_threshold_hours`` (default 30h, = 5x the typical 6h cron).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
     md_path = out_dir / f"fleet-{stamp}.md"
@@ -176,6 +214,7 @@ def write_fleet_report(
         "timestamp": timestamp.isoformat(),
         "per_host": per_host,
         "rollup": rollup,
+        "stale_threshold_hours": stale_threshold_hours,
     }
     with json_path.open("w") as f:
         json.dump(json_data, f, indent=2, sort_keys=True, default=str)
@@ -190,18 +229,28 @@ def write_fleet_report(
 
         f.write(f"**Hosts**: {', '.join(f'`{h}`' for h in hosts)}\n\n")
 
-        # Per-host status — shows reachability + report freshness
+        # Per-host status — reachability + report freshness + staleness
         f.write("## Per-host\n\n")
-        f.write("| host | reports? | window | unique labels |\n")
-        f.write("|---|:---:|---|---:|\n")
+        f.write("| host | reports? | age (h) | stale? | window | unique labels |\n")
+        f.write("|---|:---:|---:|:---:|---|---:|\n")
         for h in hosts:
             d = per_host.get(h)
             if not d:
-                f.write(f"| `{h}` | – | – | 0 |\n")
+                f.write(f"| `{h}` | – | ? | ? | – | 0 |\n")
                 continue
+            age = report_age_hours(d, timestamp)
+            if age is None:
+                age_str = "?"
+                stale_mark = "?"
+            else:
+                age_str = f"{age:.1f}"
+                stale_mark = "**STALE**" if age > stale_threshold_hours else ""
             n_labels = len(d.get("labels", {}))
             window = d.get("window", "?")
-            f.write(f"| `{h}` | OK | {window} | {n_labels} |\n")
+            f.write(
+                f"| `{h}` | OK | {age_str} | {stale_mark} | "
+                f"{window} | {n_labels} |\n"
+            )
 
         if not rollup:
             f.write(
@@ -259,6 +308,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--rsync-timeout", type=int, default=60,
         help="Per-host rsync timeout in seconds. Default: 60.",
     )
+    parser.add_argument(
+        "--stale-threshold-hours", type=float,
+        default=DEFAULT_STALE_THRESHOLD_HOURS,
+        help=(
+            "Flag a host as STALE if its latest soak report is older than "
+            "this. The aggregator exits non-zero when ANY host is stale or "
+            f"unreachable, so cron mail catches silent failure. Default: "
+            f"{DEFAULT_STALE_THRESHOLD_HOURS}h."
+        ),
+    )
     args = parser.parse_args(argv)
 
     args.fleet_dir.mkdir(parents=True, exist_ok=True)
@@ -276,16 +335,39 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     rollup = aggregate(per_host)
     now = datetime.now(timezone.utc)
-    md_path = write_fleet_report(args.fleet_dir, now, per_host, rollup)
-
-    n_hosts_ok = sum(1 for d in per_host.values() if d)
-    n_hosts = len(per_host)
-    n_labels = len(rollup)
-    print(
-        f"fleet-soak: {n_hosts_ok}/{n_hosts} hosts ok, "
-        f"{n_labels} labels in rollup -> {md_path.name}"
+    md_path = write_fleet_report(
+        args.fleet_dir, now, per_host, rollup, args.stale_threshold_hours,
     )
-    return 0
+
+    # Tally health for exit code + punch summary
+    n_hosts = len(per_host)
+    stale_hosts: List[str] = []
+    unreachable_hosts: List[str] = []
+    n_hosts_ok_fresh = 0
+    for h, d in per_host.items():
+        if not d:
+            unreachable_hosts.append(h)
+            continue
+        age = report_age_hours(d, now)
+        if age is None or age > args.stale_threshold_hours:
+            stale_hosts.append(h)
+        else:
+            n_hosts_ok_fresh += 1
+
+    n_labels = len(rollup)
+    health_bits: List[str] = [
+        f"{n_hosts_ok_fresh}/{n_hosts} hosts fresh",
+        f"{n_labels} labels in rollup",
+    ]
+    if stale_hosts:
+        health_bits.append(f"STALE: {','.join(stale_hosts)}")
+    if unreachable_hosts:
+        health_bits.append(f"unreachable: {','.join(unreachable_hosts)}")
+    print(f"fleet-soak: {'; '.join(health_bits)} -> {md_path.name}")
+
+    # Non-zero exit on any host that is stale or unreachable so cron mail
+    # surfaces silent-failure conditions on the NOC operator's terms.
+    return 0 if not (stale_hosts or unreachable_hosts) else 1
 
 
 if __name__ == "__main__":
