@@ -9,6 +9,17 @@ After=meshtasticd.service
 Type=simple
 User=root
 WorkingDirectory=/opt/meshanchor
+# ExecStartPre: pre-create /root XDG paths the daemon writes to.
+# The `+` prefix runs the command with full privileges OUTSIDE the
+# service mount namespace — necessary because ProtectHome=read-only
+# below mounts /root read-only inside the namespace, so a non-prefixed
+# mkdir from inside the namespace would EROFS. The dirs then exist
+# when ReadWritePaths re-mounts them as RW for ExecStart.
+# Without this, the gateway_bridge / NodeHistory / status-file writes
+# all fail with [Errno 30] Read-only file system on a fresh host
+# (validated 2026-05-05 on VolcanoAI; manual mkdir was the workaround
+# until this directive landed in the repo).
+ExecStartPre=+/bin/mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor /root/.cache/meshanchor
 # Use venv if available, fall back to system Python (mirrors meshanchor-map.service)
 ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py start --foreground; else exec python3 /opt/meshanchor/src/daemon.py start --foreground; fi'
 ExecStop=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py stop; else exec python3 /opt/meshanchor/src/daemon.py stop; fi'
