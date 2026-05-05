@@ -1,6 +1,7 @@
 # Mesh Networks Parity Port from MeshForge
 
 > **Created**: 2026-05-04
+> **Closed**: 2026-05-05 — charter complete, all bug-fix-shaped items shipped; structural-refactor and new-feature pickups explicitly deferred (see "Charter close-out" below).
 > **Goal**: Bring Optional Gateways (Meshtastic / RNS / AREDN) and RNS-client lineup to MeshForge parity by **porting existing handlers**, not rewriting.
 > **Branch convention**: `claude/mn-parityN-<topic>` → PR per phase to `main`.
 > **Origin**: User has surfaced this gap multiple times; previous "deferred backports" memory deferred several items, but the user is now explicitly asking. This plan picks them up.
@@ -221,9 +222,54 @@ Each phase = one PR. No long-lived branches. Tracker file (this file) updated at
 | MN-1b | merged ✅ | #39 | 6be4c207 |
 | MN-2  | merged ✅ | #36 | c5150136 |
 | MN-3  | merged ✅ | #35 | 4df6b063 |
-| MN-4a | in flight (PR open) | — | — |
-| MN-4b | scope revision pending | — | — |
+| MN-4a | merged ✅ | #40 | 224f10d2 |
+| MN-4b | **deferred indefinitely** | — | — |
 | MN-5  | merged ✅ | #37 | b37bb330 |
+
+## Charter close-out (2026-05-05)
+
+**Charter is complete.** Every bug-fix-shaped item identified across the audit has shipped (six PRs, #35 → #40). The two remaining "phases" — MN-1b's full meshtasticd config editor stack and MN-4b's NomadNet 4-mixin refactor — are explicitly deferred indefinitely, not pending.
+
+### Why MN-4b is deferred (not "later")
+
+After audit, MN-4b would deliver five items, none of them bug-fix-shaped:
+
+| Item | Cost | Why skip |
+|------|------|----------|
+| Structural split of `nomadnet.py` | refactor | File at 1,511 / cap 1,500 — barely over. Cleanup-for-cleanup's-sake on working code. |
+| Per-identity interactive launches | ~400 LOC | Niche use case (most operators run one NomadNet instance). MN-5's `_lxmf_utils` already handles collisions if they spin up two. |
+| Issue #45 legacy hardening | ~600 LOC | Phase 8.4 shipped tmux variant which `install_noc.sh` now uses. Legacy path symptom hasn't surfaced. The 2026-04-24 deferred-backports memory specifically said "Defer unless the same symptom surfaces on MeshAnchor." |
+| Inline config toggles | ~470 LOC | UX nicety. `_edit_nomadnet_config` already lets users edit the file. |
+| User-match + iface checks | ~236 LOC | Defensive depth, no fix. Existing `_nomadnet_rns_checks.py` covers basics. |
+
+The cherry-pick pattern that worked for the rest of the charter doesn't have an analog here — there's no MN-4b bug fix to extract because Issue #46 (the wrapper-bypass bug) was the only fixable bug in MeshAnchor's nomadnet code, and MN-4a shipped it.
+
+### When to revisit
+
+Reopen MN-4b only if:
+- A specific Issue #45 symptom appears on MeshAnchor (TUI fighting systemd Restart=always on the legacy `nomadnet-user.service`).
+- An operator actually requests per-identity launches.
+- `nomadnet.py` grows materially past 1,500 LOC such that the file becomes hard to navigate (right now it's at 1,511; a few hundred lines more makes the case).
+
+In any of those cases, the right scope is a focused MeshAnchor-flavored extraction (e.g., split `_view_nomadnet_logs` + `_view_nomadnet_config` + `_edit_nomadnet_config` + `_configure_propagation_node` into a sibling file) — NOT a wholesale import of MeshForge's mixin structure, which would conflict with Phase 8.4's tmux-service-ops mixin and lose MeshAnchor-specific behavior.
+
+### Lesson learned (charter-wide)
+
+Across the six phases, the same pattern showed up four times:
+
+1. **MN-1**: original plan said port six handlers (~3,138 LOC). Audit revealed five of them depend on 2,616 LOC of `core/*` infrastructure that doesn't exist in MeshAnchor. Reframed to **MN-1a** (channel_config alone, 629 LOC standalone) + **MN-1b** (Path A: Meshtastic Quick-Look — three surgical fixes to existing `radio_menu.py` instead of importing 5,095 LOC of MeshForge code).
+2. **MN-4**: original plan said split `nomadnet.py` into 4 mixins. Audit revealed MeshForge's mixins aren't a pure refactor — they add ~1,800 LOC of new functionality (per-identity launches, Issue #45 hardening, Issue #46 guard, inline toggles, iface checks). Reframed to **MN-4a** (Issue #46 wrapper-bypass guard alone, ~30 LOC of behavior change) + **MN-4b** (deferred indefinitely).
+
+The pattern: **when porting from a sister project, the original plan that says "drop in N files" frequently understates because it doesn't account for divergence the sister project accumulated since the fork.** The audit-first habit caught this both times. The "defer indefinitely with a specific reopen condition" habit prevents deferred items from drifting back as zombies.
+
+The cherry-pick rule worked everywhere there was a real bug to extract:
+- **MN-3**: extracted RNS Tools (genuinely missing affordance).
+- **MN-2**: extracted gateway preflight + RX test (real GATEWAY-profile validation gap).
+- **MN-5**: extracted the LXMF exclusivity bug fix (port-37428-LISTEN false-positive on every launch).
+- **MN-1b**: extracted the dead-end menu fixes + web-UI shortcut.
+- **MN-4a**: extracted the wrapper-bypass bug fix (silent fall-through on missing pipx venv).
+
+Where there was no bug to extract — just structural refactor or new features — the right answer was to defer, not to ship work for the sake of completing the original plan.
 
 ---
 
