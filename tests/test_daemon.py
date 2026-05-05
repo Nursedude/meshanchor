@@ -423,6 +423,122 @@ class TestServiceWrappers:
         assert hasattr(svc, 'is_alive')
         assert hasattr(svc, 'get_status')
 
+    def test_gateway_service_enables_meshtastic_when_meshtasticd_running(self):
+        """When the dataclass default is enabled=False but meshtasticd is
+        actually running on the host, the daemon's gateway_bridge service
+        should override to enabled=True so the mesh thread starts.
+
+        Regression for drift #5 diagnosed on VolcanoAI 2026-05-05: no
+        gateway.json existed, GatewayConfig.load() returned a default
+        with enabled=False, _meshtastic_loop thread never started, and
+        the bridge silently reported 'Meshtastic: Disconnected' forever
+        despite meshtasticd running on :4403.
+        """
+        from daemon import GatewayBridgeService
+        from gateway.config import GatewayConfig
+
+        captured = {}
+
+        def fake_start_gateway_headless(config=None):
+            captured['config_enabled'] = (
+                config.enabled if config is not None else None
+            )
+            return True
+
+        class FakeStatus:
+            available = True
+            message = "running"
+
+        # Isolate from any operator-local gateway.json: force load() to
+        # return a fresh dataclass-default (enabled=False) config.
+        default_config = GatewayConfig()
+        assert default_config.enabled is False  # sanity-check the default
+
+        svc = GatewayBridgeService()
+        with patch('gateway.gateway_cli.start_gateway_headless',
+                   side_effect=fake_start_gateway_headless), \
+             patch('gateway.config.GatewayConfig.load',
+                   return_value=default_config), \
+             patch('utils.service_check.check_service',
+                   return_value=FakeStatus()):
+            ok = svc.start()
+        assert ok is True
+        assert captured['config_enabled'] is True, \
+            "Expected enabled=True when meshtasticd is running"
+
+    def test_gateway_service_keeps_disabled_when_meshtasticd_absent(self):
+        """MeshCore-only deploys must NOT have Meshtastic bridging force-
+        enabled. If meshtasticd is not running, the dataclass default
+        of enabled=False is preserved (no mesh thread, no wasted
+        connect attempts)."""
+        from daemon import GatewayBridgeService
+        from gateway.config import GatewayConfig
+
+        captured = {}
+
+        def fake_start_gateway_headless(config=None):
+            captured['config_enabled'] = (
+                config.enabled if config is not None else None
+            )
+            return True
+
+        class FakeStatus:
+            available = False
+            message = "inactive"
+
+        # Isolate from any operator-local gateway.json (same reason as above).
+        default_config = GatewayConfig()
+        assert default_config.enabled is False
+
+        svc = GatewayBridgeService()
+        with patch('gateway.gateway_cli.start_gateway_headless',
+                   side_effect=fake_start_gateway_headless), \
+             patch('gateway.config.GatewayConfig.load',
+                   return_value=default_config), \
+             patch('utils.service_check.check_service',
+                   return_value=FakeStatus()):
+            ok = svc.start()
+        assert ok is True
+        assert captured['config_enabled'] is False, \
+            "Expected enabled=False to be preserved when meshtasticd is absent"
+
+    def test_gateway_service_respects_explicit_enabled_true(self):
+        """If GatewayConfig.load() returns enabled=True (because the operator
+        already wrote a gateway.json with enabled: true), the daemon must
+        not run the meshtasticd-detection short-circuit. The operator's
+        explicit choice wins regardless of meshtasticd's runtime state."""
+        from daemon import GatewayBridgeService
+        from gateway.config import GatewayConfig
+
+        captured = {}
+
+        def fake_start_gateway_headless(config=None):
+            captured['config_enabled'] = (
+                config.enabled if config is not None else None
+            )
+            return True
+
+        # Operator-saved config: enabled=True even if meshtasticd is down
+        # (e.g. they want the watchdog-driven self-heal to kick in).
+        operator_config = GatewayConfig()
+        operator_config.enabled = True
+
+        class FakeStatus:
+            available = False  # meshtasticd not running
+
+        svc = GatewayBridgeService()
+        with patch('gateway.gateway_cli.start_gateway_headless',
+                   side_effect=fake_start_gateway_headless), \
+             patch('gateway.config.GatewayConfig.load',
+                   return_value=operator_config), \
+             patch('utils.service_check.check_service',
+                   return_value=FakeStatus()) as mock_check:
+            ok = svc.start()
+        assert ok is True
+        assert captured['config_enabled'] is True
+        # check_service should NOT have been called — operator already opted in
+        mock_check.assert_not_called()
+
     def test_health_probe_service_interface(self):
         """HealthProbeService has required methods."""
         from daemon import HealthProbeService

@@ -98,7 +98,29 @@ class GatewayBridgeService(DaemonService):
     def start(self) -> bool:
         try:
             from gateway.gateway_cli import start_gateway_headless
-            return start_gateway_headless()
+            from gateway.config import GatewayConfig
+            from utils.service_check import check_service
+
+            # GatewayConfig.enabled defaults to False — that's correct
+            # for the TUI flow (operator opts in by saving the config).
+            # For the headless daemon, derive intent from runtime state:
+            # if meshtasticd is actually running on this host, enable
+            # Meshtastic bridging. This preserves MeshCore-only deploys
+            # (no meshtasticd → enabled stays False → no mesh thread)
+            # while fixing the deploy-default-disconnected silent failure
+            # diagnosed on VolcanoAI 2026-05-05 (drift #5: bridge thread
+            # never started because no gateway.json existed and the
+            # dataclass default disabled it).
+            config = GatewayConfig.load()
+            if not config.enabled:
+                meshtasticd_status = check_service('meshtasticd')
+                if meshtasticd_status.available:
+                    logger.info(
+                        "gateway_bridge: meshtasticd detected, enabling "
+                        "Meshtastic bridging (config default was False)"
+                    )
+                    config.enabled = True
+            return start_gateway_headless(config=config)
         except Exception as e:
             logger.error(f"Gateway start failed: {e}")
             return False
