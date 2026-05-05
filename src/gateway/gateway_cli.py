@@ -20,9 +20,16 @@ logger = logging.getLogger(__name__)
 _active_bridge = None
 
 
-def start_gateway_headless() -> bool:
+def start_gateway_headless(config=None) -> bool:
     """
     Start the gateway bridge in headless mode (for CLI use).
+
+    Args:
+        config: Optional GatewayConfig. If None, RNSMeshtasticBridge will
+            load from the default location (TUI/CLI behavior preserved).
+            Daemon callers pass an explicit config so they can derive
+            intent from runtime state (e.g. set enabled=True only when
+            meshtasticd is actually running on this host).
 
     Returns True if started successfully, False otherwise.
     """
@@ -36,7 +43,7 @@ def start_gateway_headless() -> bool:
     try:
         from .rns_bridge import RNSMeshtasticBridge
 
-        _active_bridge = RNSMeshtasticBridge()
+        _active_bridge = RNSMeshtasticBridge(config=config)
         success = _active_bridge.start()
 
         if success:
