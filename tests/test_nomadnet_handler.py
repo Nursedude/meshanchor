@@ -526,3 +526,127 @@ class TestConfigValidation:
                 result = h._validate_nomadnet_config()
         os.unlink(f.name)
         assert result is True
+
+
+# ======================================================================
+# MN-4: Issue #46 wrapper-bypass guard
+# ======================================================================
+#
+# Before MN-4, ``_get_wrapper_command`` silently fell back to launching
+# NomadNet under the bare ``nn_path`` when the pipx venv python was
+# missing or the wrapper file couldn't be created. That bypassed the
+# wrapper's rpc_key precondition check and produced an
+# AuthenticationError crash 30 seconds into NomadNet's lifetime.
+#
+# After MN-4, the function returns None on either failure mode and
+# callers must surface ``_show_canonical_installer_msg`` and bail.
+
+class TestWrapperBypassGuard:
+
+    def test_get_wrapper_command_returns_none_when_venv_missing(self):
+        h = _make_nomadnet()
+        with patch.object(h, '_get_nomadnet_venv_python', return_value=None):
+            result = h._get_wrapper_command('/usr/bin/nomadnet', ['--textui'])
+        assert result is None
+
+    def test_get_wrapper_command_returns_none_when_wrapper_create_fails(self):
+        h = _make_nomadnet()
+        with patch.object(
+            h, '_get_nomadnet_venv_python',
+            return_value='/home/test/.local/share/pipx/venvs/nomadnet/bin/python',
+        ), patch.object(h, '_create_nomadnet_wrapper', return_value=None):
+            result = h._get_wrapper_command('/usr/bin/nomadnet', ['--textui'])
+        assert result is None
+
+    def test_get_wrapper_command_returns_argv_when_canonical(self, tmp_path):
+        h = _make_nomadnet()
+        venv_python = '/home/test/.local/share/pipx/venvs/nomadnet/bin/python'
+        wrapper_file = tmp_path / 'nomadnet_wrapper.py'
+        wrapper_file.write_text('# wrapper')
+        with patch.object(
+            h, '_get_nomadnet_venv_python', return_value=venv_python,
+        ), patch.object(
+            h, '_create_nomadnet_wrapper', return_value=wrapper_file,
+        ):
+            result = h._get_wrapper_command(
+                '/usr/bin/nomadnet', ['--rnsconfig', '/srv/x', '--textui'],
+            )
+        assert result == [
+            venv_python, str(wrapper_file),
+            '--rnsconfig', '/srv/x', '--textui',
+        ]
+
+    def test_show_canonical_installer_msg_displays_msgbox(self):
+        h = _make_nomadnet()
+        h._show_canonical_installer_msg()
+        msgbox_calls = [c for c in h.ctx.dialog.calls if c[0] == 'msgbox']
+        assert len(msgbox_calls) == 1
+        title, body = msgbox_calls[0][1][0], msgbox_calls[0][1][1]
+        assert title == "NomadNet not canonically installed"
+        # Must mention the canonical repair path + the issue
+        assert "Issue #46" in body
+        assert "Reinstall" in body or "pipx install" in body
+
+    def test_launch_textui_bails_when_wrapper_command_none(self):
+        """When _get_wrapper_command returns None, _launch_nomadnet_textui
+        must show the installer-msg dialog and return WITHOUT calling
+        subprocess.run (the bug fix's whole point)."""
+        h = _make_nomadnet()
+        with patch.object(h, '_find_nomadnet_binary', return_value='/usr/bin/nomadnet'), \
+             patch.object(h, '_ensure_lxmf_exclusive', return_value=True), \
+             patch.object(h, '_fix_user_directory_ownership', return_value=True), \
+             patch.object(h, '_validate_nomadnet_config', return_value=True), \
+             patch.object(h, '_check_rns_for_nomadnet', return_value=True), \
+             patch.object(h, '_get_rns_config_for_user', return_value=None), \
+             patch.object(h, '_get_wrapper_command', return_value=None), \
+             patch.object(h, '_show_canonical_installer_msg') as mock_msg, \
+             patch('subprocess.run') as mock_run, \
+             patch('handlers.nomadnet.clear_screen'):
+            os.environ.pop('SUDO_USER', None)
+            h._launch_nomadnet_textui()
+        mock_msg.assert_called_once()
+        mock_run.assert_not_called()
+
+    def test_launch_daemon_bails_when_wrapper_command_none(self):
+        """Same Issue #46 guard for the daemon launch path."""
+        h = _make_nomadnet()
+        h.ctx.dialog._yesno_returns = [True]  # confirm "Start NomadNet Daemon"
+        with patch.object(h, '_find_nomadnet_binary', return_value='/usr/bin/nomadnet'), \
+             patch.object(h, '_is_nomadnet_running', return_value=False), \
+             patch.object(h, '_ensure_lxmf_exclusive', return_value=True), \
+             patch.object(h, '_fix_user_directory_ownership', return_value=True), \
+             patch.object(h, '_check_rns_for_nomadnet', return_value=True), \
+             patch.object(h, '_get_rns_config_for_user', return_value=None), \
+             patch.object(h, '_get_wrapper_command', return_value=None), \
+             patch.object(h, '_show_canonical_installer_msg') as mock_msg, \
+             patch('subprocess.Popen') as mock_popen, \
+             patch('handlers.nomadnet.clear_screen'):
+            os.environ.pop('SUDO_USER', None)
+            h._launch_nomadnet_daemon()
+        mock_msg.assert_called_once()
+        mock_popen.assert_not_called()
+
+
+class TestEnsureLxmfExclusiveConfigDir:
+    """MN-4 threads the MN-5 _lxmf_utils config_dir kwarg through the
+    NomadNetHandler wrapper so per-config-dir collision detection
+    actually fires."""
+
+    def test_default_passes_none_for_default_dir(self):
+        h = _make_nomadnet()
+        with patch(
+            'handlers.nomadnet.ensure_lxmf_exclusive', return_value=True,
+        ) as mock:
+            h._ensure_lxmf_exclusive('nomadnet')
+            mock.assert_called_once()
+            kwargs = mock.call_args.kwargs
+            assert kwargs.get('config_dir') is None
+
+    def test_explicit_config_dir_threads_through(self):
+        h = _make_nomadnet()
+        with patch(
+            'handlers.nomadnet.ensure_lxmf_exclusive', return_value=True,
+        ) as mock:
+            h._ensure_lxmf_exclusive('nomadnet', config_dir='/srv/lxmf-noc')
+            kwargs = mock.call_args.kwargs
+            assert kwargs.get('config_dir') == '/srv/lxmf-noc'

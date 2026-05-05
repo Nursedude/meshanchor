@@ -496,19 +496,37 @@ sys.exit(main())
             logger.warning("Failed to create NomadNet wrapper: %s", e)
             return None
 
-    def _get_wrapper_command(self, nn_path: str, nn_args: list) -> list:
-        """Build launch command using wrapper if possible.
+    def _get_wrapper_command(self, nn_path: str, nn_args: list) -> Optional[list]:
+        """Build the canonical wrapped-launch argv, or None.
 
-        Returns [venv_python, wrapper, ...args] if wrapper is available,
-        otherwise [nn_path, ...args] as fallback.
+        Returns ``[venv_python, wrapper, ...args]`` when the pipx venv is
+        intact and the wrapper file is in place. Returns None when the
+        canonical layout is missing — callers must surface the
+        ``_show_canonical_installer_msg`` dialog and bail.
+
+        Issue #46 closure: the prior implementation silently fell back
+        to ``[nn_path] + nn_args``. That bypassed the wrapper's
+        rpc_key precondition check and launched NomadNet under whatever
+        Python ``nn_path`` happened to resolve to, producing an
+        AuthenticationError crash later that's hard to diagnose. The
+        rule from MeshForge is "fail loud at the launch boundary, not
+        silently 30 seconds into the process lifetime."
         """
         venv_python = self._get_nomadnet_venv_python(nn_path)
         if not venv_python:
-            return [nn_path] + nn_args
+            logger.warning(
+                "Refusing to build launch command without pipx venv: %s",
+                nn_path,
+            )
+            return None
 
         wrapper_path = self._create_nomadnet_wrapper()
         if not wrapper_path:
-            return [nn_path] + nn_args
+            logger.warning(
+                "Refusing to build launch command without wrapper: %s",
+                nn_path,
+            )
+            return None
 
         # sys.argv[0] will be the wrapper path, remaining args are
         # forwarded to NomadNet's main() via sys.argv
