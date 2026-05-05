@@ -2,6 +2,7 @@
 formatting without requiring a running daemon. Real end-to-end
 exercise is via running the daemon + TUI together against the chat API.
 """
+import json
 import os
 import sys
 import urllib.error
@@ -83,7 +84,48 @@ class TestChatApiReachable:
             assert tui_handler._chat_api_reachable() is False
 
 
-class TestChatFetchMessages:
+class TestChatPostSend:
+    def test_post_send_serializes_correctly(self, tui_handler):
+        captured = {}
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"queued": true}'
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["body"] = req.data
+            captured["headers"] = dict(req.headers)
+            return FakeResp()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = tui_handler._chat_post_send("hello", channel=2, destination=None)
+
+        assert result == {"queued": True}
+        assert captured["url"].endswith("/chat/send")
+        body = json.loads(captured["body"])
+        assert body == {"text": "hello", "channel": 2, "destination": None}
+        # Header keys are normalized — tolerate either case.
+        ct = captured["headers"].get("Content-type") or captured["headers"].get("Content-Type")
+        assert ct == "application/json"
+
+    def test_post_send_returns_error_on_http_400(self, tui_handler):
+        from io import BytesIO
+        err = urllib.error.HTTPError(
+            url="...", code=400, msg="Bad",
+            hdrs=None, fp=BytesIO(b'{"error": "missing text"}'),
+        )
+        with patch("urllib.request.urlopen", side_effect=err):
+            result = tui_handler._chat_post_send("", channel=0)
+        assert "error" in result
+        assert "HTTP 400" in result["error"]
+
     def test_fetch_messages_handles_connection_failure(self, tui_handler):
         with patch(
             "urllib.request.urlopen",
