@@ -104,6 +104,9 @@ EXPECTED_FLAGS = [
     ("load_balancer", "gateway"),
     ("mesh_alerts", "gateway"),
     ("messaging", "gateway"),
+    ("preflight", "gateway"),           # gateway_preflight (MN-2)
+    ("export", "gateway"),              # gateway_preflight (MN-2)
+    ("test_gateway_rx", "gateway"),     # test_gateway_rx (MN-2)
     # MQTT-bound
     ("mqtt", "mqtt"),
     ("broker-menu", "mqtt"),

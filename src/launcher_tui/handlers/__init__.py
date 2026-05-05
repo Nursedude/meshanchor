@@ -209,4 +209,13 @@ def get_all_handlers() -> List[Type]:
         MeshChatXHandler,
     ])
 
+    # Batch 18 — MN-2: Gateway field-test handlers ported from MeshForge.
+    # Both gated feature_flag="gateway"; under MESHCORE profile they collapse.
+    from handlers.gateway_preflight import GatewayPreflightHandler
+    from handlers.test_gateway_rx import TestGatewayRxHandler
+    handlers.extend([
+        GatewayPreflightHandler,
+        TestGatewayRxHandler,
+    ])
+
     return handlers
