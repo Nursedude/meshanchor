@@ -171,6 +171,14 @@ INVENTORY: List[DBSpec] = [
         retention_days=None,  # row-cap based, sibling to traffic_capture
         notes="PacketArchive — long-form packet retention with manual cleanup.",
     ),
+    DBSpec(
+        name="lxmf_broadcast_subs",
+        path_factory=lambda: _meshanchor_config_dir() / "lxmf_broadcast_subs.db",
+        creator_module="gateway.lxmf_broadcast_bridge",
+        has_auto_prune=False,
+        retention_days=None,
+        notes="LXMF broadcast bridge subscriber list. Operator-managed via DM.",
+    ),
 ]
 
 
