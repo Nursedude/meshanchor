@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from enum import Enum
 
+from utils.boundary_timing import timed_boundary
 from utils.ports import MESHTASTICD_PORT, MESHTASTICD_ALT_PORT, MQTT_PORT, RNS_SHARED_INSTANCE_PORT
 
 logger = logging.getLogger(__name__)
@@ -203,12 +204,13 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
     if is_systemd:
         try:
             # Single source of truth: systemctl is-active
-            result = subprocess.run(
-                ['systemctl', 'is-active', systemd_name],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            with timed_boundary("systemd.is_active", target=systemd_name):
+                result = subprocess.run(
+                    ['systemctl', 'is-active', systemd_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
             is_active = result.returncode == 0
             status_text = result.stdout.strip()  # "active", "inactive", "failed"
 
@@ -216,12 +218,13 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
             # "active (exited)" means it ran once and exited - NOT a running daemon
             sub_state = ""
             if is_active:
-                state_result = subprocess.run(
-                    ['systemctl', 'show', systemd_name, '--property=SubState'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
+                with timed_boundary("systemd.show", target=systemd_name):
+                    state_result = subprocess.run(
+                        ['systemctl', 'show', systemd_name, '--property=SubState'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
                 # Output is like "SubState=running" or "SubState=exited"
                 if '=' in state_result.stdout:
                     sub_state = state_result.stdout.strip().split('=')[1]
@@ -337,12 +340,13 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
                 )
 
             # Check if service unit exists
-            check_result = subprocess.run(
-                ['systemctl', 'list-unit-files', f'{systemd_name}.service'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            with timed_boundary("systemd.list_unit_files", target=systemd_name):
+                check_result = subprocess.run(
+                    ['systemctl', 'list-unit-files', f'{systemd_name}.service'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
             if systemd_name not in check_result.stdout:
                 return ServiceStatus(
                     name=name,
@@ -489,24 +493,29 @@ def apply_config_and_restart(service_name: str = 'meshtasticd', timeout: int = 3
     """
     try:
         # Step 1: Reload systemd daemon to pick up any service file changes
-        reload_cmd = subprocess.run(
-            _sudo_cmd(['systemctl', 'daemon-reload']),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.daemon_reload", threshold_s=5.0):
+            reload_cmd = subprocess.run(
+                _sudo_cmd(['systemctl', 'daemon-reload']),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if reload_cmd.returncode != 0:
             error_msg = reload_cmd.stderr.strip() or "daemon-reload failed"
             logger.error(f"daemon-reload failed: {error_msg}")
             return False, f"daemon-reload failed: {error_msg}"
 
-        # Step 2: Restart the service
-        restart = subprocess.run(
-            _sudo_cmd(['systemctl', 'restart', service_name]),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        # Step 2: Restart the service. systemd waits for the unit to reach
+        # the target state — 30s threshold matches the 'systemctl restart'
+        # default wait window.
+        with timed_boundary("systemd.restart", target=service_name,
+                            threshold_s=30.0):
+            restart = subprocess.run(
+                _sudo_cmd(['systemctl', 'restart', service_name]),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if restart.returncode != 0:
             error_msg = restart.stderr.strip() or f"restart {service_name} failed"
             logger.error(f"restart {service_name} failed: {error_msg}")
@@ -583,12 +592,13 @@ def daemon_reload(timeout: int = 30) -> Tuple[bool, str]:
             show_error(msg)
     """
     try:
-        result = subprocess.run(
-            _sudo_cmd(['systemctl', 'daemon-reload']),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.daemon_reload", threshold_s=5.0):
+            result = subprocess.run(
+                _sudo_cmd(['systemctl', 'daemon-reload']),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if result.returncode != 0:
             error_msg = result.stderr.strip() or "daemon-reload failed"
             logger.error(f"daemon-reload failed: {error_msg}")
@@ -636,24 +646,27 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
     """
     try:
         # Step 1: Reload systemd daemon to pick up service file changes
-        reload_result = subprocess.run(
-            _sudo_cmd(['systemctl', 'daemon-reload']),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.daemon_reload", threshold_s=5.0):
+            reload_result = subprocess.run(
+                _sudo_cmd(['systemctl', 'daemon-reload']),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if reload_result.returncode != 0:
             error_msg = reload_result.stderr.strip() or "daemon-reload failed"
             logger.error(f"daemon-reload failed: {error_msg}")
             return False, f"daemon-reload failed: {error_msg}"
 
         # Step 2: Enable the service
-        enable_result = subprocess.run(
-            _sudo_cmd(['systemctl', 'enable', service_name]),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.enable", target=service_name,
+                            threshold_s=5.0):
+            enable_result = subprocess.run(
+                _sudo_cmd(['systemctl', 'enable', service_name]),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if enable_result.returncode != 0:
             error_msg = enable_result.stderr.strip() or f"enable {service_name} failed"
             logger.error(f"enable {service_name} failed: {error_msg}")
@@ -661,12 +674,14 @@ def enable_service(service_name: str, start: bool = False, timeout: int = 30) ->
 
         # Step 3: Optionally start the service
         if start:
-            start_result = subprocess.run(
-                _sudo_cmd(['systemctl', 'start', service_name]),
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
+            with timed_boundary("systemd.start", target=service_name,
+                                threshold_s=30.0):
+                start_result = subprocess.run(
+                    _sudo_cmd(['systemctl', 'start', service_name]),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
             if start_result.returncode != 0:
                 error_msg = start_result.stderr.strip() or f"start {service_name} failed"
                 logger.error(f"start {service_name} failed: {error_msg}")
@@ -708,12 +723,14 @@ def disable_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             show_error(msg)
     """
     try:
-        result = subprocess.run(
-            _sudo_cmd(['systemctl', 'disable', service_name]),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.disable", target=service_name,
+                            threshold_s=5.0):
+            result = subprocess.run(
+                _sudo_cmd(['systemctl', 'disable', service_name]),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if result.returncode != 0:
             error_msg = result.stderr.strip() or f"disable {service_name} failed"
             logger.error(f"disable {service_name} failed: {error_msg}")
@@ -752,12 +769,14 @@ def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             show_error(msg)
     """
     try:
-        result = subprocess.run(
-            _sudo_cmd(['systemctl', 'start', service_name]),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.start", target=service_name,
+                            threshold_s=30.0):
+            result = subprocess.run(
+                _sudo_cmd(['systemctl', 'start', service_name]),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if result.returncode != 0:
             error_msg = result.stderr.strip() or f"start {service_name} failed"
             logger.error(f"start {service_name} failed: {error_msg}")
@@ -796,12 +815,14 @@ def stop_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             show_error(msg)
     """
     try:
-        result = subprocess.run(
-            _sudo_cmd(['systemctl', 'stop', service_name]),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.stop", target=service_name,
+                            threshold_s=30.0):
+            result = subprocess.run(
+                _sudo_cmd(['systemctl', 'stop', service_name]),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if result.returncode != 0:
             error_msg = result.stderr.strip() or f"stop {service_name} failed"
             logger.error(f"stop {service_name} failed: {error_msg}")
@@ -844,12 +865,14 @@ def restart_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             show_error(msg)
     """
     try:
-        result = subprocess.run(
-            _sudo_cmd(['systemctl', 'restart', service_name]),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        with timed_boundary("systemd.restart", target=service_name,
+                            threshold_s=30.0):
+            result = subprocess.run(
+                _sudo_cmd(['systemctl', 'restart', service_name]),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
         if result.returncode != 0:
             error_msg = result.stderr.strip() or f"restart {service_name} failed"
             logger.error(f"restart {service_name} failed: {error_msg}")

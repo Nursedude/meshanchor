@@ -33,6 +33,7 @@ from typing import Dict, List, Optional, Callable, Any
 from collections import deque
 
 # Import centralized path utility for sudo compatibility
+from utils.boundary_timing import timed_boundary
 from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
 from utils.timeouts import (
@@ -341,9 +342,17 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
             logger.info(f"Connecting to MQTT broker {broker}:{port}")
 
-            # Use connect_async for non-blocking connection
-            self._client.connect_async(broker, port, keepalive=60)
-            self._client.loop_start()
+            # Use connect_async for non-blocking connection. Wraps measure
+            # paho call overhead — should be <100ms; slow here means paho
+            # itself is wedged. Actual broker round-trip latency surfaces
+            # via the connect_timeout fallback below.
+            with timed_boundary("mosquitto.connect_async",
+                                target=f"{broker}:{port}"):
+                self._client.connect_async(broker, port, keepalive=60)
+            with timed_boundary("mosquitto.loop_start",
+                                target=f"{broker}:{port}",
+                                threshold_s=5.0):
+                self._client.loop_start()
 
             # Register atexit handler for clean shutdown
             import atexit
@@ -398,7 +407,8 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
             try:
                 # Disconnect first (tells broker we're leaving)
                 try:
-                    client.disconnect()
+                    with timed_boundary("mosquitto.disconnect"):
+                        client.disconnect()
                 except Exception as e:
                     logger.debug(f"MQTT disconnect error: {e}")
 
@@ -406,7 +416,9 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
                 def stop_loop():
                     try:
                         # paho-mqtt v2.x removed the force parameter
-                        client.loop_stop()
+                        with timed_boundary("mosquitto.loop_stop",
+                                            threshold_s=5.0):
+                            client.loop_stop()
                     except Exception as e:
                         logger.debug(f"MQTT loop_stop error: {e}")
 
@@ -462,13 +474,15 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
         # Subscribe to JSON-formatted messages (easier to parse)
         # Topic format: msh/{region}/2/json/{channel}/#
         topic = f"{root.rsplit('/', 1)[0]}/json/{channel}/#"
-        self._client.subscribe(topic)
+        with timed_boundary("mosquitto.subscribe", target=topic):
+            self._client.subscribe(topic)
         logger.info(f"Subscribed to: {topic}")
 
         # Also subscribe to encrypted topic for node discovery
         # Topic format: msh/{region}/2/e/{channel}/#
         enc_topic = f"{root}/{channel}/#"
-        self._client.subscribe(enc_topic)
+        with timed_boundary("mosquitto.subscribe", target=enc_topic):
+            self._client.subscribe(enc_topic)
         logger.info(f"Subscribed to: {enc_topic}")
 
     def _on_disconnect(self, client, userdata, rc):
