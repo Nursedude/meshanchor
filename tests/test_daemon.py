@@ -474,6 +474,66 @@ class TestServiceWrappers:
         assert captured['final_broker'] == "example.org"
         assert captured['final_port'] == 8883
 
+    def test_mqtt_service_disables_tls_for_localhost(self):
+        """Localhost broker overlay must also flip use_tls False.
+
+        Regression for the 2026-05-05 VolcanoAI diagnostic: mosquitto on
+        :1883 is plain MQTT, but use_tls defaults to True (right for the
+        public broker on :8883). Without this overlay, the daemon attempts
+        a TLS handshake on :1883, mosquitto logs 'protocol error', paho-
+        mqtt's CONNACK read hangs, and we hit the 10s connect_timeout —
+        a silent loss of MQTT-side observability.
+        """
+        from daemon import MQTTSubscriberService
+
+        captured = {}
+
+        class FakeSub:
+            def __init__(self, config=None):
+                captured['config'] = config
+                # Mirror real defaults: use_tls=True, intended for public broker.
+                self._config = {'broker': 'mqtt.meshtastic.org', 'port': 8883,
+                                'use_tls': True}
+
+            def start(self):
+                captured['final_use_tls'] = self._config.get('use_tls')
+
+            def stop(self):
+                pass
+
+        for broker in ('localhost', '127.0.0.1', '::1'):
+            captured.clear()
+            svc = MQTTSubscriberService(broker=broker, port=1883)
+            with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}):
+                ok = svc.start()
+            assert ok is True, f"start() failed for broker={broker}"
+            assert captured['final_use_tls'] is False, \
+                f"use_tls must be False for localhost-equivalent broker={broker}"
+
+    def test_mqtt_service_keeps_tls_for_remote_broker(self):
+        """Non-localhost brokers retain use_tls=True (the public broker
+        path needs TLS on :8883). Counterpart to the localhost test."""
+        from daemon import MQTTSubscriberService
+
+        captured = {}
+
+        class FakeSub:
+            def __init__(self, config=None):
+                self._config = {'broker': 'public.example.com', 'port': 8883,
+                                'use_tls': True}
+
+            def start(self):
+                captured['final_use_tls'] = self._config.get('use_tls')
+
+            def stop(self):
+                pass
+
+        svc = MQTTSubscriberService(broker="mqtt.meshtastic.org", port=8883)
+        with patch.dict(sys.modules, {'monitoring.mqtt_subscriber': MagicMock(MQTTNodelessSubscriber=FakeSub)}):
+            ok = svc.start()
+        assert ok is True
+        assert captured['final_use_tls'] is True
+
     def test_mqtt_service_is_alive_uses_stop_event(self):
         """is_alive() must check `_stop_event`, not the non-existent
         `_running` attribute. The previous implementation defaulted to

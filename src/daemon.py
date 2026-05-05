@@ -192,6 +192,14 @@ class MQTTSubscriberService(DaemonService):
             self._subscriber = MQTTNodelessSubscriber()
             self._subscriber._config['broker'] = self._broker
             self._subscriber._config['port'] = self._port
+            # Localhost mosquitto is plain MQTT by default; use_tls defaults
+            # to True (correct for the public broker on :8883). Without this
+            # override the daemon attempts a TLS handshake on :1883,
+            # mosquitto logs 'protocol error', paho-mqtt waits for CONNACK
+            # that never comes, and we hit the 10s connect_timeout.
+            # Diagnosed on VolcanoAI 2026-05-05 via strace + mosquitto.log.
+            if self._broker in ('localhost', '127.0.0.1', '::1'):
+                self._subscriber._config['use_tls'] = False
             self._subscriber.start()
             return True
         except Exception as e:
