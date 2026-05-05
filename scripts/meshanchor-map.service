@@ -15,11 +15,16 @@ WorkingDirectory=/opt/meshanchor/src
 RuntimeDirectory=meshanchor
 
 # Use venv if available, fall back to system Python
+#
+# COEXIST PORTS: HTTP=5002, WebSocket=5003 while MeshForge is still owning
+# the canonical :5000 + :5001 on the NOC during the 2-week side-by-side
+# field-test (per the boundary observability road map). On cutover, flip
+# these back to 5000 + 5001 — see the corresponding road map item.
 ExecStart=/bin/bash -c '\
     if [ -x /opt/meshanchor/venv/bin/python ]; then \
-        exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5000; \
+        exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5002 --websocket-port 5003; \
     else \
-        exec python3 -m utils.map_data_service --daemon --port 5000; \
+        exec python3 -m utils.map_data_service --daemon --port 5002 --websocket-port 5003; \
     fi'
 
 # Graceful shutdown
