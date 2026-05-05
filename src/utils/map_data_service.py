@@ -466,7 +466,10 @@ Examples:
         """
     )
     parser.add_argument("-p", "--port", type=int, default=5000,
-                        help="Port (default: 5000)")
+                        help="HTTP port (default: 5000)")
+    parser.add_argument("--websocket-port", type=int, default=5001,
+                        help="WebSocket port (default: 5001). Override when "
+                             "coexisting with another :5001 owner.")
     parser.add_argument("--host", default="0.0.0.0",
                         help="Bind address (default: 0.0.0.0 for all interfaces)")
     parser.add_argument("--collect-only", action="store_true",
@@ -520,6 +523,7 @@ Examples:
     server = MapServer(
         port=args.port,
         host=args.host,
+        websocket_port=args.websocket_port,
     )
 
     # Signal handlers for graceful shutdown
