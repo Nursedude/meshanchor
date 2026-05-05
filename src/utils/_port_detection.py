@@ -266,7 +266,7 @@ def get_udp_port_owner(port: int) -> Optional[Tuple[str, int]]:
     return None
 
 
-def check_rns_shared_instance(instance_name: str = 'default',
+def check_rns_shared_instance(instance_name: Optional[str] = None,
                                port: int = 37428) -> bool:
     """Check if the RNS shared instance is available.
 
@@ -279,7 +279,11 @@ def check_rns_shared_instance(instance_name: str = 'default',
         3. UDP port via ``check_udp_port()`` (legacy)
 
     Args:
-        instance_name: RNS instance name (default: ``'default'``).
+        instance_name: RNS instance name. ``None`` (default) resolves the
+            name from the live RNS config file via
+            ``ReticulumPaths.get_configured_instance_name()`` so this
+            matches whatever rnsd is actually using (e.g. ``volcano`` on
+            the field pi). Pass an explicit string to override.
         port: Shared instance port for TCP/UDP fallback (default: 37428).
 
     Returns:
@@ -313,7 +317,7 @@ def _check_proc_net_unix(socket_name: str) -> bool:
     return False
 
 
-def get_rns_shared_instance_info(instance_name: str = 'default',
+def get_rns_shared_instance_info(instance_name: Optional[str] = None,
                                   port: int = 37428) -> dict:
     """Get detailed shared instance connectivity info for diagnostics.
 
@@ -324,9 +328,20 @@ def get_rns_shared_instance_info(instance_name: str = 'default',
         - ``detail`` (str): Human-readable connection detail.
 
     Args:
-        instance_name: RNS instance name (default: ``'default'``).
+        instance_name: RNS instance name. ``None`` (default) resolves the
+            name from the live RNS config file. The shared-instance
+            socket is namespaced as ``@rns/<instance_name>`` and a
+            mismatch silently looks like "not available" (e.g. probing
+            ``@rns/default`` while rnsd actually serves ``@rns/volcano``).
+            Pass an explicit string to override.
         port: Shared instance port for TCP/UDP fallback (default: 37428).
     """
+    if instance_name is None:
+        # Lazy import to avoid a circular dep — utils.paths imports nothing
+        # from this module, but keeping the import local lets tests stub it.
+        from utils.paths import ReticulumPaths
+        instance_name = ReticulumPaths.get_configured_instance_name()
+
     # 1. Passive check: scan /proc/net/unix for the abstract domain socket.
     # RNS creates @rns/{instance_name} (LocalInterface data transport).
     # This mirrors how check_udp_port() reads /proc/net/udp — no connection
