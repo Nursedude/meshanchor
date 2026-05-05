@@ -217,17 +217,40 @@ Each phase = one PR. No long-lived branches. Tracker file (this file) updated at
 
 | Phase | Status | PR | Merge commit |
 |-------|--------|-----|--------------|
-| MN-1  | not started | — | — |
+| MN-1a | in flight (PR open) | — | — |
+| MN-1b | scope revision pending | — | — |
 | MN-2  | merged ✅ | #36 | c5150136 |
 | MN-3  | merged ✅ | #35 | 4df6b063 |
 | MN-4  | not started | — | — |
-| MN-5  | in flight (PR open) | — | — |
+| MN-5  | merged ✅ | #37 | b37bb330 |
 
 ---
+
+## MN-1 scope revision (2026-05-05)
+
+The original MN-1 plan scoped six MeshForge handler files (~3,138 LOC). On audit before porting, only **one** file (`channel_config.py`, 629 LOC) was self-contained. The other five — `meshtasticd_config.py`, `meshtasticd_lora.py`, `meshtasticd_mqtt.py`, `meshtasticd_nodedb.py`, `meshtasticd_radio.py` — share a `read_overlay`/`write_overlay`/`OVERLAY_PATH` utility set baked into `meshtasticd_config.py`, and that file plus the others import infrastructure modules MeshAnchor does not ship:
+
+| Required module | LOC in MeshForge |
+|-----------------|------------------|
+| `core/meshtasticd_config.py` (`MeshtasticdConfig`, `RADIO_TEMPLATES`, `RadioType`) | 513 |
+| `core/meshtastic_cli.py` (`get_cli()` factory) | 514 |
+| `core/meshtasticd_templates.py` (hardware template DB) | 996 |
+| `utils/meshtastic_http.py` (`get_http_client()`) | 593 |
+| **Infrastructure subtotal** | **2,616** |
+
+Plus the original 5 handler files (~2,479 LOC) for a true MN-1 cost of ~5,095 LOC, not the original ~3,138.
+
+The infrastructure also tightly couples MeshAnchor to a Meshtastic-primary worldview (auto-creates `/etc/meshtasticd/{available.d,config.d}`, manages config templates, wraps the meshtastic CLI as the radio's primary control surface). Phase 7 + Phase 8 cross-cutting decisions ("MeshCore is primary; Meshtastic is the optional gateway") and Issue #31 ("no silent persistent system changes on startup") both push back on this. A full MN-1b port would warrant its own scope discussion.
+
+**Split decision:**
+
+- **MN-1a** ships now: `channel_config.py` only. Pure `commands.meshtastic` API consumer (`ensure_connection`, `set_channel_name`, `set_channel_psk`, `_run_command`, `get_channel_info`) — all of which exist in MeshAnchor today. Section `configuration`, gated `feature_flag="meshtastic"`. Slot already wired in `main.py:_configuration_menu` `_ORDERING` as a legacy placeholder waiting for the handler — registry replaces it automatically.
+- **MN-1b** deferred pending separate scope decision: the meshtasticd config editor stack + its 2,600 LOC of infrastructure. Open question for the user: is the value of MeshAnchor managing `/etc/meshtasticd` config worth the import-time coupling, or should operators continue editing meshtasticd config via its own web UI on `:9443` (Issue #21 / Issue #22) and via direct CLI?
 
 ## Decisions log
 
 - 2026-05-04: Plan created at user request after Phase 8.4 charter completion. Scoped to "Mesh Networks parity" only — Config Doctor + composable bridges + extensions remain deferred per prior memory.
+- 2026-05-05 (MN-1a): MN-1 split into MN-1a (channel_config alone, ships now) and MN-1b (full meshtasticd config stack, scope decision pending — see "MN-1 scope revision" section above). Reason: post-audit infrastructure dependency was 2,616 LOC larger than the original plan estimated, plus tight coupling to a Meshtastic-primary worldview that contradicts Phase 7/8 cross-cutting decisions.
 - 2026-05-04: NomadNet 4-mixin refactor MUST preserve Phase 8.4 tmux mixin (`_nomadnet_tmux_service_ops.py`).
 - 2026-05-04: Meshtasticd editors keep `menu_section="configuration"` (matches MeshForge), gated `feature_flag="meshtastic"` so they vanish in MESHCORE profile.
 - 2026-05-04: RNS Tools is additive — inline rns_menu items stay; rns_tools adds a deeper submenu.

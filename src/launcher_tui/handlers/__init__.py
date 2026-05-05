@@ -218,4 +218,11 @@ def get_all_handlers() -> List[Type]:
         TestGatewayRxHandler,
     ])
 
+    # Batch 19 — MN-1a: Meshtastic channel configuration editor.
+    # The other five meshtasticd_* handlers in MN-1's original scope
+    # remained deferred to MN-1b — they require ~2,600 LOC of core/*
+    # infrastructure that MeshAnchor does not ship.
+    from handlers.channel_config import ChannelConfigHandler
+    handlers.append(ChannelConfigHandler)
+
     return handlers
