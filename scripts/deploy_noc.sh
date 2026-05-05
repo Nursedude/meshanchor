@@ -122,6 +122,21 @@ if ! sudo -n -U "${OPERATOR}" -l 2>/dev/null | grep -q "MESHANCHOR_SVC_RESTART\|
     log "         run scripts/install_sudoers.sh after this deploy for unattended recovery"
 fi
 
+# Install system packages the daemon needs at runtime. paho-mqtt is the
+# MQTT client library; without it monitoring/mqtt_subscriber.py fails
+# to start and Meshtastic-side observability silently goes dark — the
+# exact silent-failure mode the boundary observability stack is built
+# to surface. apt path because the user's environment denies system
+# pip3 install (and because apt is the right tool for system packages).
+# If apt is not available (non-Debian host), warn and continue —
+# the operator can install paho-mqtt by other means.
+if command -v apt-get >/dev/null 2>&1; then
+    log "installing system packages (python3-paho-mqtt)"
+    run apt-get install -y python3-paho-mqtt
+else
+    log "warning: apt-get not found; install python3-paho-mqtt manually for MQTT observability"
+fi
+
 log "installing systemd units"
 for u in "${UNITS[@]}"; do
     src="${REPO_ROOT}/scripts/${u}"
