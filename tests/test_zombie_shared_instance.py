@@ -97,7 +97,10 @@ class TestZombieDetection:
     @patch(f'{_PD}._check_proc_net_unix', return_value=True)
     def test_socket_exists_returns_available(self, mock_unix, mock_tcp, mock_udp):
         """Socket in /proc/net/unix => shared instance available."""
-        info = get_rns_shared_instance_info()
+        # Pass instance_name explicitly — the default (None) auto-resolves
+        # from the live RNS config which leaks the host's real instance
+        # name (e.g. 'volcano') into this assertion.
+        info = get_rns_shared_instance_info(instance_name='default')
         assert info['available'] is True
         assert info['method'] == 'unix_socket'
         assert '@rns/default' in info['detail']
@@ -134,7 +137,7 @@ class TestZombieDetection:
     @patch(f'{_PD}._check_proc_net_unix', return_value=False)
     def test_detail_includes_all_checked_methods(self, mock_unix, mock_tcp, mock_udp):
         """When unavailable, detail should list what was checked."""
-        info = get_rns_shared_instance_info()
+        info = get_rns_shared_instance_info(instance_name='default')
         assert '@rns/default' in info['detail']
         assert 'TCP' in info['detail']
         assert 'UDP' in info['detail']
@@ -153,6 +156,23 @@ class TestZombieDetection:
         info = get_rns_shared_instance_info(instance_name='custom')
         mock_unix.assert_called_with('rns/custom')
         assert '@rns/custom' in info['detail']
+
+    @patch('utils.paths.ReticulumPaths.get_configured_instance_name',
+           return_value='volcano')
+    @patch(f'{_PD}._check_proc_net_unix', return_value=True)
+    def test_instance_name_none_auto_resolves_from_config(
+            self, mock_unix, mock_get_name):
+        """instance_name=None reads the configured name from the RNS config.
+
+        Regression guard: probing @rns/default while rnsd serves @rns/<other>
+        previously caused false-negative health probes (e.g. the
+        active_health_probe firing 'rnsd UNHEALTHY' at T+59s on a healthy
+        rnsd whose instance_name was 'volcano').
+        """
+        info = get_rns_shared_instance_info()  # no instance_name kwarg
+        mock_get_name.assert_called_once()
+        mock_unix.assert_called_with('rns/volcano')
+        assert '@rns/volcano' in info['detail']
 
 
 # =============================================================================
