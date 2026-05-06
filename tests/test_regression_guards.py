@@ -498,3 +498,89 @@ class TestRNSAnnounceHandlerContract:
             f"TypeError on every received announce.\n\n"
             f"Violations:\n" + "\n".join(violations)
         )
+
+
+class TestMeshCoreConnectionContract:
+    """Enforce: MeshCore radio is opened only via meshcore_connection.
+
+    MeshCore has no daemon — the first process to open the device wins
+    exclusive ownership. A direct ``MeshCore.create_serial`` /
+    ``create_tcp`` or raw ``serial.Serial`` outside the connection
+    infrastructure races against the gateway handler and silently breaks
+    the running session. Long-running owners go through
+    ``acquire_for_connect()`` + ``register_persistent()``; short-lived
+    consumers use ``MeshCoreConnection``.
+
+    Allowlisted: ``meshcore_connection.py`` (IS the infrastructure) and
+    ``meshcore_handler.py`` (the persistent owner; lock-aware).
+    """
+
+    ALLOWLISTED = {
+        'meshcore_connection.py',
+        'meshcore_handler.py',
+    }
+
+    def test_no_new_direct_meshcore_create(self):
+        """Only allowlisted files may call MeshCore.create_serial / create_tcp."""
+        matches = _scan_python_files(
+            r'MeshCore\.create_(serial|tcp)\s*\(',
+            exclude_files=list(self.ALLOWLISTED),
+        )
+        violations = []
+        for filepath, lineno, line in matches:
+            basename = os.path.basename(filepath)
+            if 'test_' in basename or '/tests/' in filepath:
+                continue
+            violations.append(f"{filepath}:{lineno}: {line.strip()}")
+        assert len(violations) == 0, (
+            f"Found {len(violations)} direct MeshCore.create_*() call(s) "
+            f"outside the connection infrastructure. Use "
+            f"acquire_for_connect() + register_persistent() from "
+            f"utils.meshcore_connection (MF014).\n\n"
+            f"Violations:\n" + "\n".join(violations)
+        )
+
+    def test_no_raw_serial_on_meshcore_devices(self):
+        """No raw ``serial.Serial(...)`` in MeshCore-related files outside
+        the connection infrastructure."""
+        matches = _scan_python_files(
+            r'\bserial\.Serial\s*\(',
+            exclude_files=list(self.ALLOWLISTED),
+        )
+        violations = []
+        for filepath, lineno, line in matches:
+            basename = os.path.basename(filepath)
+            if 'test_' in basename or '/tests/' in filepath:
+                continue
+            # Only flag files that are MeshCore-adjacent — Meshtastic side
+            # uses pyserial too and has its own contract (Issue #17).
+            if 'meshcore' not in filepath.lower() and 'ttyMeshCore' not in line:
+                continue
+            violations.append(f"{filepath}:{lineno}: {line.strip()}")
+        assert len(violations) == 0, (
+            f"Found {len(violations)} raw serial.Serial(...) call(s) on "
+            f"MeshCore devices outside the connection infrastructure. "
+            f"Use MeshCoreConnection() from utils.meshcore_connection "
+            f"(MF014).\n\n"
+            f"Violations:\n" + "\n".join(violations)
+        )
+
+    def test_handler_acquires_lock_before_connect(self):
+        """The gateway handler must wrap its connect path in
+        ``acquire_for_connect`` and call ``register_persistent`` so that
+        short-lived consumers can observe the owner."""
+        filepath = os.path.join(SRC_DIR, 'gateway', 'meshcore_handler.py')
+        with open(filepath, 'r') as f:
+            content = f.read()
+        assert 'acquire_for_connect(' in content, (
+            "meshcore_handler.py must wrap its connect path in "
+            "acquire_for_connect() (utils.meshcore_connection)"
+        )
+        assert 'register_persistent(' in content, (
+            "meshcore_handler.py must call register_persistent() so "
+            "short-lived consumers can see the radio owner"
+        )
+        assert 'unregister_persistent(' in content, (
+            "meshcore_handler.py must call unregister_persistent() on "
+            "disconnect so future consumers can probe freely"
+        )

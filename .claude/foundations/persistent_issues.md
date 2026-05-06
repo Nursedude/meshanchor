@@ -372,3 +372,58 @@ MeshAnchor status says "rnsd: RUNNING (shared instance available)" when rnsd is 
 - `check_process_running()` now verifies all pgrep hits via `/proc/cmdline`
 - Status display always distinguishes process detection from shared instance availability
 - `find_blocking_interfaces()` runs regardless of rnsd state for pre-startup diagnostics
+
+---
+
+## Issue #33: MeshCore Connection Contract (2026-05-05)
+
+**Rule**: MeshCore radio is opened only via `utils.meshcore_connection`.
+
+MeshCore has no daemon (unlike Meshtastic's meshtasticd) — the first process
+to open `/dev/ttyMeshCore` (or the BLE/TCP equivalent) wins exclusive
+ownership. A second `MeshCore.create_serial(...)` or raw `serial.Serial(...)`
+races the gateway handler and silently breaks the running session.
+
+### The contract
+
+- **Long-running owner** (gateway bridge) wraps its connect bring-up in
+  `acquire_for_connect(owner=...)` (acquires `MESHCORE_CONNECTION_LOCK`,
+  honors any existing persistent owner) and calls
+  `register_persistent(meshcore, loop, ...)` BEFORE the lock context exits.
+- **Short-lived consumers** (TUI probes, CLI helpers) use
+  `MeshCoreConnection()` as a context manager — returns `None` if the
+  persistent owner is active, holds the lock for the duration otherwise.
+- **Sync callers wanting to talk to the live radio** call
+  `get_connection_manager().run_in_radio_loop(coro, timeout=...)` — schedules
+  the coroutine on the persistent owner's asyncio loop and blocks for the
+  result. No second connection ever opened.
+- **Probes** (`validate_meshcore_device`) skip the raw open entirely while a
+  persistent owner is registered — return synthetic OK with an
+  `error="persistent owner '...' active"` note. This stops `Detect Devices`
+  flows from racing the bridge.
+
+### Prevention
+
+- **Lint MF014**: `MeshCore.create_serial`/`create_tcp` and raw
+  `serial.Serial(...)` on MeshCore-class devices outside
+  `meshcore_connection.py` (or `meshcore_handler.py`, the persistent owner)
+  fail the lint.
+- **Regression guard**:
+  `tests/test_regression_guards.py::TestMeshCoreConnectionContract` —
+  ratchets direct opens at 0 and verifies the handler still calls
+  `acquire_for_connect` + `register_persistent` + `unregister_persistent`.
+
+### Why this matters
+
+Sessions 2-4 of the MeshCore integration depend on multiple consumers being
+able to share the link safely:
+
+- **Session 2** (`meshcore-radio` supervisor service): Lifecycle separation
+  between the radio and the bridge daemon. The supervisor is the persistent
+  owner, the bridge becomes a `run_in_radio_loop` consumer.
+- **Session 3** (config-ownership): Region/preset/firmware push needs
+  short-lived exclusive access (`MeshCoreConnection`) without fighting the
+  bridge.
+- **Session 4** (TUI radio control): Status panel reads share via
+  `get_meshcore()`; reset / preset switch / firmware update use
+  `MeshCoreConnection` for exclusive operations.
