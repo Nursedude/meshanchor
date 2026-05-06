@@ -156,6 +156,15 @@ KNOWN_SERVICES = {
         'description': 'Meshtastic daemon (secondary/failover)',
         'fix_hint': 'Start with: sudo systemctl start meshtasticd-alt',
     },
+    'meshcore-radio': {
+        # Unix socket, not TCP/UDP. Set port=None so check_port skips it
+        # and check_service falls through to systemd state.
+        'port': None,
+        'systemd_name': 'meshcore-radio',
+        'is_systemd': True,
+        'description': 'MeshCore radio supervisor (owns /dev/ttyMeshCore)',
+        'fix_hint': 'Start with: sudo systemctl start meshcore-radio',
+    },
 }
 
 

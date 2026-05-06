@@ -1,0 +1,49 @@
+[Unit]
+Description=MeshAnchor MeshCore Radio Supervisor
+Documentation=https://github.com/Nursedude/meshanchor
+# udev creates /dev/ttyMeshCore via 99-meshcore.rules; no rnsd / meshtasticd
+# dependency — the supervisor only owns the MeshCore companion radio.
+After=local-fs.target
+
+[Service]
+Type=simple
+# wh6gxz, not root: /dev/ttyMeshCore is mode 0666 from the udev rule so an
+# unprivileged user can open it. Avoiding root removes the deploy drift #6
+# class entirely for this service — get_real_user_home() resolves correctly
+# without an Environment= override because LOGNAME is set by systemd.
+User=wh6gxz
+Group=wh6gxz
+WorkingDirectory=/opt/meshanchor
+# Belt + suspenders for get_real_user_home() — see deploy drift #6.
+Environment=SUDO_USER=wh6gxz
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/meshanchor/src
+
+# Use venv if available, fall back to system Python (mirrors map / daemon).
+ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python -m supervisor.meshcore_radio --socket /run/meshcore-radio/meshcore-radio.sock; else exec python3 -m supervisor.meshcore_radio --socket /run/meshcore-radio/meshcore-radio.sock; fi'
+Restart=on-failure
+RestartSec=10
+
+# Runtime dir is exclusive to this service to avoid stomping
+# meshanchor-daemon's /run/meshanchor. The socket lives here.
+RuntimeDirectory=meshcore-radio
+RuntimeDirectoryMode=0750
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Read /home/wh6gxz/.config/meshanchor for gateway.json. ProtectHome=read-only
+# blocks writes; that's the intent — the supervisor never writes config.
+ReadWritePaths=/var/log /tmp /run/meshcore-radio
+PrivateTmp=true
+
+# Allow access to the serial device. /dev/ttyMeshCore is the persistent
+# udev symlink; on reboot it points at whichever ttyACM/ttyUSB the radio
+# enumerated as. DeviceAllow handles either case.
+DeviceAllow=/dev/ttyMeshCore rw
+DeviceAllow=char-tty rw
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target

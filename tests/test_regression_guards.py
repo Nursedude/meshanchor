@@ -518,6 +518,7 @@ class TestMeshCoreConnectionContract:
     ALLOWLISTED = {
         'meshcore_connection.py',
         'meshcore_handler.py',
+        'meshcore_radio.py',  # Session 2 supervisor — wraps create_* in acquire_for_connect
     }
 
     def test_no_new_direct_meshcore_create(self):
