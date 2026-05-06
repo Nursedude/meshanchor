@@ -9,17 +9,16 @@ After=meshtasticd.service
 Type=simple
 User=root
 WorkingDirectory=/opt/meshanchor
-# ExecStartPre: pre-create /root XDG paths the daemon writes to.
-# The `+` prefix runs the command with full privileges OUTSIDE the
-# service mount namespace — necessary because ProtectHome=read-only
-# below mounts /root read-only inside the namespace, so a non-prefixed
-# mkdir from inside the namespace would EROFS. The dirs then exist
-# when ReadWritePaths re-mounts them as RW for ExecStart.
-# Without this, the gateway_bridge / NodeHistory / status-file writes
-# all fail with [Errno 30] Read-only file system on a fresh host
-# (validated 2026-05-05 on VolcanoAI; manual mkdir was the workaround
-# until this directive landed in the repo).
+# ExecStartPre: pre-create the daemon's XDG paths under both /root and
+# /home/wh6gxz. The `+` prefix runs the command with full privileges
+# OUTSIDE the service mount namespace — necessary because the namespace
+# is set up read-only and a non-prefixed mkdir would EROFS. The dirs
+# then exist when ReadWritePaths bind-mounts them RW for ExecStart.
+# Both prefixes are kept for cross-host compat: hosts without a
+# SUDO_USER pin (e.g. VolcanoAI) resolve to /root, while hosts with the
+# pin below resolve to /home/wh6gxz/. Both are idempotent.
 ExecStartPre=+/bin/mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor /root/.cache/meshanchor
+ExecStartPre=+/bin/mkdir -p /home/wh6gxz/.config/meshanchor /home/wh6gxz/.local/share/meshanchor /home/wh6gxz/.cache/meshanchor
 # Use venv if available, fall back to system Python (mirrors meshanchor-map.service)
 ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py start --foreground; else exec python3 /opt/meshanchor/src/daemon.py start --foreground; fi'
 ExecStop=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py stop; else exec python3 /opt/meshanchor/src/daemon.py stop; fi'
@@ -36,11 +35,16 @@ RuntimeDirectory=meshanchor
 # Security hardening (mirrors meshanchor.service)
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
-# /root XDG paths needed because User=root: ProtectHome=read-only otherwise blocks
-# the gateway's status file (.config), node-history DB (.local/share), and RNS
-# sniffer pcap rotation (.cache).
-ReadWritePaths=/var/log /tmp /home /run/meshanchor -/root/.config/meshanchor -/root/.local/share/meshanchor -/root/.cache/meshanchor
+# ProtectHome= deliberately UNSET. Combining ProtectHome=read-only with
+# ReadWritePaths=/home is a known systemd no-op: the read-only bind-mount of
+# /home from ProtectHome is not overridden by a wide /home entry in
+# ReadWritePaths (specific subpaths work, the parent doesn't). Without
+# ProtectHome, /home in ReadWritePaths actually takes effect. The daemon
+# already runs as root so ProtectHome buys little real isolation here, and
+# ProtectSystem=strict still keeps everything else read-only.
+# /root XDG subpaths kept (with `-` prefix so they're optional) for hosts
+# where SUDO_USER is unset and get_real_user_home() resolves to /root.
+ReadWritePaths=/var/log /run/meshanchor /home -/root/.config/meshanchor -/root/.local/share/meshanchor -/root/.cache/meshanchor
 PrivateTmp=true
 
 # Environment
