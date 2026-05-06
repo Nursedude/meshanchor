@@ -449,17 +449,40 @@ class MeshtasticConnectionManager:
         """
         Auto-detect USB serial device for Meshtastic radio.
 
+        Skips any device claimed by MeshCore via the persistent
+        ``/dev/ttyMeshCore`` symlink (created by
+        ``scripts/99-meshcore.rules``). Without this filter, on a
+        MeshCore-primary host the AUTO-detect grabs the RAK's
+        ``/dev/ttyACM0``, races the MeshCore handler for the port,
+        and fails every reconnect cycle.
+
         Returns:
-            Device path (e.g., /dev/ttyUSB0) or None if not found
+            Device path (e.g., /dev/ttyUSB0) or None if no Meshtastic
+            candidate is present.
         """
         import glob
+        import os
+
+        excluded: set[str] = set()
+        if os.path.exists('/dev/ttyMeshCore'):
+            try:
+                excluded.add(os.path.realpath('/dev/ttyMeshCore'))
+            except OSError:
+                pass
+
         # Common Meshtastic USB device patterns
         patterns = ['/dev/ttyUSB*', '/dev/ttyACM*']
         for pattern in patterns:
-            devices = glob.glob(pattern)
-            if devices:
-                # Return first available device
-                device = sorted(devices)[0]
+            for device in sorted(glob.glob(pattern)):
+                try:
+                    if os.path.realpath(device) in excluded:
+                        logger.debug(
+                            "Auto-detect: skipping %s (claimed by MeshCore)",
+                            device,
+                        )
+                        continue
+                except OSError:
+                    pass
                 logger.debug(f"Auto-detected USB device: {device}")
                 return device
         return None
