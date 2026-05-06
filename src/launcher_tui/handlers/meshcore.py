@@ -8,6 +8,7 @@ import logging
 
 from backend import clear_screen
 from handler_protocol import BaseHandler
+from handlers._meshcore_radio_ops import MeshCoreRadioOpsMixin
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ _is_gateway_running, _get_gateway_stats, _HAS_GW_CLI = safe_import(
 )
 
 
-class MeshCoreHandler(BaseHandler):
+class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
     """TUI handler for MeshCore companion radio management."""
 
     handler_id = "meshcore"
@@ -486,13 +487,16 @@ class MeshCoreHandler(BaseHandler):
     CHAT_POLL_INTERVAL = 2.0
 
     def _meshcore_radio_menu(self):
-        """Phase 4b: Radio Config sub-submenu (view + writes)."""
+        """Phase 4b + Session 4: Radio Config sub-submenu (view + writes + control)."""
         while True:
             choices = [
                 ("view", "View                Current LoRa / channels / TX power"),
                 ("lora", "Set LoRa Params     Frequency / bandwidth / SF / coding rate"),
                 ("txp", "Set TX Power        Region-aware cap enforced"),
                 ("channel", "Set Channel Slot    Name + secret per slot"),
+                ("preset", "Switch Preset       Pick (region, preset) from the table"),
+                ("firmware", "Firmware Info       Build, model, proto version"),
+                ("reset", "Soft Reset          Reboot the radio via wire protocol"),
                 ("back", "Back"),
             ]
             choice = self.ctx.dialog.menu(
@@ -508,6 +512,9 @@ class MeshCoreHandler(BaseHandler):
                 "lora": ("Set LoRa Parameters", self._meshcore_set_lora),
                 "txp": ("Set TX Power", self._meshcore_set_tx_power),
                 "channel": ("Set Channel Slot", self._meshcore_set_channel),
+                "preset": ("Switch Preset", self._meshcore_switch_preset),
+                "firmware": ("Firmware Info", self._meshcore_firmware_info),
+                "reset": ("Soft Reset", self._meshcore_soft_reset),
             }
             entry = dispatch.get(choice)
             if entry:

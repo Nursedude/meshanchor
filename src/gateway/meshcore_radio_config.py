@@ -500,3 +500,49 @@ class MeshCoreRadioConfig:
             )
         await self.refresh()
         return self.get_state(refresh=False)
+
+    # ── Session 4: soft reset ────────────────────────────────────────
+
+    async def reset_radio(self) -> Dict[str, Any]:
+        """Soft-reset the MeshCore radio via the wire protocol.
+
+        Tries ``commands.send_reboot()`` first, falls back to
+        ``commands.reboot()`` for older meshcore_py builds. The radio
+        link drops after reboot; the bridge daemon's reconnect loop
+        brings it back up. The cache is invalidated so the next
+        ``get_state(refresh=True)`` does a live re-read.
+        """
+        meshcore = self._require_meshcore()
+        if _is_simulator(meshcore):
+            with self._lock:
+                self._state = _empty_radio_state()
+                self._state["error"] = "simulator: reset is a no-op"
+                self._state["source"] = "simulator"
+                self._state["last_refresh_ts"] = time.time()
+            return self.get_state(refresh=False)
+
+        commands = meshcore.commands
+        reboot_fn = (
+            getattr(commands, "send_reboot", None)
+            or getattr(commands, "reboot", None)
+        )
+        if reboot_fn is None:
+            raise RadioWriteError(
+                "meshcore_py does not expose a reboot command on this build"
+            )
+
+        try:
+            await asyncio.wait_for(reboot_fn(), timeout=8.0)
+        except asyncio.TimeoutError as e:
+            # Reboot may not get an OK reply (the radio drops link mid-call).
+            # Treat timeout as expected and let reconnect handle the rest.
+            logger.info("Reboot command timed out — radio likely already restarting")
+        except Exception as e:
+            raise RadioWriteError(f"reset_radio: {type(e).__name__}: {e}") from e
+
+        # Don't try to refresh — radio is restarting. Invalidate the cache so
+        # callers know the snapshot is stale.
+        with self._lock:
+            self._state["error"] = "radio is restarting after reset"
+            self._state["last_refresh_ts"] = time.time()
+        return self.get_state(refresh=False)
