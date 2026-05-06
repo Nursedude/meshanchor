@@ -356,6 +356,7 @@ class MeshAnchorLinter:
             allowlisted_mc = {
                 'meshcore_connection.py',  # IS the connection infrastructure
                 'meshcore_handler.py',     # persistent owner — uses acquire_for_connect()
+                'meshcore_radio.py',       # supervisor — Session 2 persistent owner
             }
             is_string_mc = stripped.startswith('"') or stripped.startswith("'")
             is_comment_mc = stripped.startswith('#')

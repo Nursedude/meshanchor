@@ -427,3 +427,29 @@ able to share the link safely:
 - **Session 4** (TUI radio control): Status panel reads share via
   `get_meshcore()`; reset / preset switch / firmware update use
   `MeshCoreConnection` for exclusive operations.
+
+### Session 2 extension: supervisor IPC contract (2026-05-05)
+
+When the operator enables `meshcore-radio.service`, the supervisor process
+becomes the persistent owner via `register_persistent(owner="meshcore-radio")`.
+Cross-process consumers (bridge daemon, TUI, future CLI) reach the radio via
+the Unix socket protocol in `src/supervisor/protocol.py`:
+
+- **Socket**: `/run/meshcore-radio/meshcore-radio.sock` (separate runtime
+  directory from `meshanchor-daemon`'s `/run/meshanchor` so the two units
+  don't fight for ownership).
+- **Wire format**: NDJSON. Hello frame on accept declares protocol version
+  and current radio state. Methods: `status`, `get_radio_info`,
+  `get_contacts`, `get_channels`, `send_message`, `ping`. Events broadcast
+  to every connected client: `contact_message`, `channel_message`,
+  `advertisement`, `ack`, `connection_state`.
+- **Client SDK**: `utils.meshcore_supervisor_client.MeshCoreSupervisorClient`
+  (sync facade with a background reader thread) and
+  `is_supervisor_running(socket_path)` for liveness probes.
+- **Schema lock**: `tests/test_meshcore_supervisor_protocol.py` ratchets the
+  method and event-kind sets so additions go through code review.
+
+The contract is one-way for now: the bridge handler does NOT yet consume the
+supervisor — that's a follow-up PR. Until then, only one process should hold
+the radio at a time. The lint MF014 + persistent-owner check in
+`acquire_for_connect` prevent accidental dual ownership.

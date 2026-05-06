@@ -44,6 +44,11 @@ ReadWritePaths=/var/log /tmp /home /run/meshanchor -/root/.config/meshanchor -/r
 PrivateTmp=true
 
 # Environment
+# SUDO_USER closes deploy drift #6: User=root + no SUDO_USER caused
+# get_real_user_home() to return /root, hiding the operator's gateway.json
+# at /home/wh6gxz/.config/meshanchor/. With the pin, clean systemd restarts
+# resolve the real user's home without requiring an /etc override file.
+Environment=SUDO_USER=wh6gxz
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/meshanchor/src
 
