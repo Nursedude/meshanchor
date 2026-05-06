@@ -402,8 +402,24 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         # Initialize MeshCore handler if configured and available
         meshcore_config = getattr(self.config, 'meshcore', None)
         if HAS_MESHCORE and meshcore_config and meshcore_config.enabled:
-            logger.info("Initializing MeshCore handler")
-            self._meshcore_handler = MeshCoreHandler(
+            # If meshcore-radio.service is running, the supervisor owns the
+            # serial port — opening it here would deadlock on EBUSY. Probe
+            # the supervisor socket and pick the handler accordingly. The
+            # bridge sees the same surface either way (chat buffer, queue
+            # send, RX message_callback) so nothing else changes.
+            from utils.meshcore_supervisor_client import is_supervisor_running
+            if is_supervisor_running():
+                from .meshcore_supervisor_handler import MeshCoreSupervisorHandler
+                logger.info(
+                    "MeshCore supervisor detected — bridge consumes via Unix socket"
+                )
+                handler_cls: Any = MeshCoreSupervisorHandler
+            else:
+                logger.info(
+                    "MeshCore supervisor not running — bridge holds the radio in-process"
+                )
+                handler_cls = MeshCoreHandler
+            self._meshcore_handler = handler_cls(
                 config=self.config,
                 node_tracker=self.node_tracker,
                 health=self.health,
