@@ -469,6 +469,14 @@ class MeshCoreHandler(BaseMessageHandler):
             except Exception as e:
                 logger.warning(f"Initial radio-state refresh failed: {e}")
 
+            # Session 3: optional desired-state push + drift report. Opt-in
+            # via gateway.json[meshcore].apply_desired_on_connect — never
+            # writes the radio without an explicit operator OK.
+            try:
+                self._apply_desired_and_log_drift()
+            except Exception as e:
+                logger.warning(f"Desired-config apply skipped: {e}")
+
         except Exception as e:
             logger.error(f"Failed to connect to MeshCore: {e}")
             self._connected = False
@@ -1150,6 +1158,56 @@ class MeshCoreHandler(BaseMessageHandler):
     async def _refresh_radio_state(self) -> None:
         await self._radio.refresh()
 
+    def _apply_desired_and_log_drift(self) -> None:
+        """Session 3 hook: push gateway.json[meshcore].desired_* to the radio
+        and log any drift. Opt-in via apply_desired_on_connect.
+
+        The cache write happens regardless — drift detection across daemon
+        restarts depends on having the snapshot on disk.
+        """
+        from utils.meshcore_config import (
+            DesiredConfig, apply_desired_config, cache_radio_state,
+            check_drift, load_cached_radio_state,
+        )
+
+        mc_config = getattr(self.config, "meshcore", None)
+        if mc_config is None:
+            return
+
+        actual = self.get_radio_state(refresh=False)
+        cached = load_cached_radio_state()
+        desired = DesiredConfig.from_gateway_config(mc_config)
+
+        if cached is not None:
+            for d in check_drift(actual, cached=cached):
+                logger.info(
+                    "MeshCore radio drift since last cache: %s was %r, now %r — %s",
+                    d.field, d.expected, d.actual, d.fix_hint,
+                )
+
+        if getattr(mc_config, "apply_desired_on_connect", False) and not desired.is_empty():
+            logger.info("MeshCore: applying desired config from gateway.json")
+            result = apply_desired_config(self, desired)
+            if not result.get("applied"):
+                reason = result.get("reason") or "unknown"
+                logger.warning("MeshCore desired-config apply skipped: %s", reason)
+            for err in result.get("errors") or []:
+                logger.warning("MeshCore desired-config write failed: %s", err)
+            for d in result.get("drift_after") or []:
+                logger.warning(
+                    "MeshCore drift after apply: %s expected %r got %r — %s",
+                    d.field, d.expected, d.actual, d.fix_hint,
+                )
+            actual = result.get("post_state") or self.get_radio_state(refresh=False)
+        elif not desired.is_empty():
+            for d in check_drift(actual, desired=desired):
+                logger.warning(
+                    "MeshCore desired vs actual drift: %s desired=%r actual=%r — %s",
+                    d.field, d.expected, d.actual, d.fix_hint,
+                )
+
+        cache_radio_state(actual)
+
     def _set_radio_error(self, message: str) -> None:
         self._radio.set_error(message)
 
@@ -1175,6 +1233,38 @@ class MeshCoreHandler(BaseMessageHandler):
         return self._run_radio_write(
             self._radio.set_channel(idx, name, secret_hex)
         )
+
+    # ── Session 4 — radio control surfaces ──────────────────────────────
+
+    def reset_radio(self) -> Dict[str, Any]:
+        """Soft-reset the radio. Returns the post-reset (stale) state."""
+        return self._run_radio_write(self._radio.reset_radio())
+
+    def apply_preset(self, region: str, preset: str) -> Dict[str, Any]:
+        """Map ``(region, preset)`` to LoRa params via the PRESETS table,
+        push, verify. Raises RadioWriteError if the pair is unknown."""
+        from .meshcore_radio_config import RadioWriteError
+        from utils.meshcore_config import lookup_preset
+        mapped = lookup_preset(region, preset)
+        if mapped is None:
+            raise RadioWriteError(
+                f"unknown (region, preset) pair: ({region!r}, {preset!r})"
+            )
+        freq, bw, sf, cr = mapped
+        # set_radio_lora already validates + verifies via re-read
+        return self.set_radio_lora(freq_mhz=freq, bw_khz=bw, sf=sf, cr=cr)
+
+    def get_firmware_info(self) -> Dict[str, Any]:
+        """Return a firmware-focused slice of the cached radio state."""
+        state = self.get_radio_state(refresh=False)
+        return {
+            "fw_build": state.get("fw_build"),
+            "fw_ver": state.get("fw_ver"),
+            "model": state.get("model"),
+            "node_name": state.get("node_name"),
+            "last_refresh_ts": state.get("last_refresh_ts"),
+            "source": state.get("source"),
+        }
 
     def _run_radio_write(self, coro) -> Dict[str, Any]:
         """Bridge sync HTTP/TUI callers to the daemon's asyncio loop.

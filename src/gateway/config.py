@@ -342,6 +342,27 @@ class MeshCoreConfig:
     # Polling fallback for CHANNEL_MSG_RECV event bug (meshcore_py #1232)
     channel_poll_interval_sec: int = 5
 
+    # ── Session 3 (config-ownership): operator's desired radio state ──
+    #
+    # ``region`` + ``preset`` is the high-level handle — pick a row in
+    # ``utils.meshcore_config.PRESETS`` and apply_desired_config maps it
+    # to (freq, bw, sf, cr). The desired_* overrides take precedence when
+    # set, so an operator can deviate from a preset without redefining
+    # the table.
+    region: str = ""                  # e.g. "US915", "EU868", "EU433", "KR920"
+    preset: str = ""                  # e.g. "default_lf", "medium_fast"
+    desired_freq_mhz: Optional[float] = None
+    desired_bw_khz: Optional[float] = None
+    desired_sf: Optional[int] = None
+    desired_cr: Optional[int] = None
+    desired_tx_power_dbm: Optional[int] = None
+    # List of {idx, name, secret?} dicts — pushed via set_radio_channel.
+    desired_channels: List[Dict[str, Any]] = field(default_factory=list)
+    # Off by default — operator must opt in before MeshAnchor pushes config
+    # to the radio at connect. Avoids surprising the operator the first time
+    # they upgrade past the addition of these fields.
+    apply_desired_on_connect: bool = False
+
 
 @dataclass
 class RNSConfig:

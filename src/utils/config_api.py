@@ -1014,11 +1014,10 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             return
 
         # Radio config — read-only snapshot of MeshCore LoRa parameters,
-        # channel slots, and TX power. LAN-accessible like /chat (no
-        # secrets are exposed; channel hashes only, not channel keys).
-        if self.path.startswith("/radio") and (
-            self.path == "/radio" or self.path.startswith("/radio?")
-        ):
+        # channel slots, TX power, and firmware info. LAN-accessible like
+        # /chat (no secrets are exposed; channel hashes only).
+        radio_path = self.path.split("?", 1)[0]
+        if radio_path == "/radio" or radio_path == "/radio/firmware":
             self._handle_radio_get()
             return
 
@@ -1156,13 +1155,21 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._send_error_json(400, result.error or "Unknown error")
 
     def do_POST(self):
-        """Handle POST requests (reset, chat send)."""
+        """Handle POST requests (reset, chat send, radio reset)."""
         # Chat send — localhost-only since it actuates the radio.
         if self.path == "/chat/send":
             if not self._check_localhost():
                 self._send_error_json(403, "Forbidden — localhost only")
                 return
             self._handle_chat_send()
+            return
+
+        # Radio reset — localhost-only, actuates the radio (soft reboot).
+        if self.path.split("?", 1)[0] == "/radio/reset":
+            if not self._check_localhost():
+                self._send_error_json(403, "Forbidden — localhost only")
+                return
+            self._handle_radio_post()
             return
 
         if not self._check_localhost():
@@ -1232,6 +1239,10 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
     def _handle_radio_put(self) -> None:
         from utils.radio_api import handle_put
         handle_put(self)
+
+    def _handle_radio_post(self) -> None:
+        from utils.radio_api import handle_post
+        handle_post(self)
 
     def _handle_health_get(self) -> None:
         from utils.health_api import handle_get
