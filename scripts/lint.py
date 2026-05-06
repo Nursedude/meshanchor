@@ -16,6 +16,7 @@ Checks:
 - MF011: Repair logic in _nomadnet_rns_checks.py (must be in _rns_repair.py/diagnostics)
 - MF012: Context-loaded doc size (persistent_issues.md must stay under 40k chars)
 - MF013: Bare sqlite3.connect() outside db_helpers.py (must use connect_tuned)
+- MF014: Direct MeshCore.create_serial / create_tcp / serial.Serial outside meshcore_connection.py
 - MF016: @patch('src.utils.paths.…') in tests — production imports via bare 'utils.paths', divergent class objects
 
 Usage:
@@ -98,8 +99,16 @@ class MeshAnchorLinter:
         # MF001: Path.home() violation
         # Skip the paths.py utility file that defines get_real_user_home()
         if 'Path.home()' in line and 'paths.py' not in filepath:
-            # Skip string literals (changelog entries, documentation)
-            is_string_literal = stripped.startswith('"') or stripped.startswith("'")
+            # Skip string literals (changelog entries, documentation,
+            # error messages — including f-strings and r-strings that the
+            # lint rule formerly missed).
+            is_string_literal = (
+                stripped.startswith('"') or stripped.startswith("'")
+                or stripped.startswith('f"') or stripped.startswith("f'")
+                or stripped.startswith('rf"') or stripped.startswith("rf'")
+                or stripped.startswith('fr"') or stripped.startswith("fr'")
+                or stripped.startswith('r"') or stripped.startswith("r'")
+            )
             # Acceptable fallback patterns:
             # 1. return Path.home() in a fallback function
             # 2. else Path.home() in a ternary after SUDO_USER check
@@ -335,6 +344,44 @@ class MeshAnchorLinter:
                     "Bare sqlite3.connect() — use utils.db_helpers.connect_tuned "
                     "(WAL + sync=NORMAL + 64MB journal cap)"
                 ))
+
+        # MF014: Direct MeshCore.create_serial / create_tcp / serial.Serial.
+        # MeshCore has no daemon — anyone who opens the device wins exclusive
+        # ownership. Direct opens outside meshcore_connection.py race against
+        # the gateway handler. Use acquire_for_connect() + register_persistent()
+        # for long-running owners, or MeshCoreConnection() for short-lived probes.
+        basename_mc = os.path.basename(filepath)
+        in_tests_mc = '/tests/' in filepath or basename_mc.startswith('test_')
+        if not in_tests_mc:
+            allowlisted_mc = {
+                'meshcore_connection.py',  # IS the connection infrastructure
+                'meshcore_handler.py',     # persistent owner — uses acquire_for_connect()
+            }
+            is_string_mc = stripped.startswith('"') or stripped.startswith("'")
+            is_comment_mc = stripped.startswith('#')
+            if not is_string_mc and not is_comment_mc and basename_mc not in allowlisted_mc:
+                if 'MeshCore.create_serial(' in line or 'MeshCore.create_tcp(' in line:
+                    issues.append(LintIssue(
+                        filepath, lineno, Severity.ERROR, "MF014",
+                        "Direct MeshCore.create_serial/create_tcp() — wrap in "
+                        "acquire_for_connect() and call register_persistent() "
+                        "from utils.meshcore_connection"
+                    ))
+                # Raw pyserial Serial() — only legitimate inside the probe helper.
+                if re.search(r'\bserial\.Serial\(', line):
+                    # The Meshtastic side uses pyserial too; allow files that
+                    # don't touch MeshCore-class devices (/dev/ttyMeshCore,
+                    # ttyACM/ttyUSB device-paths derived from MeshCore config).
+                    is_meshcore_file = (
+                        'meshcore' in filepath.lower()
+                        or 'ttyMeshCore' in line
+                    )
+                    if is_meshcore_file:
+                        issues.append(LintIssue(
+                            filepath, lineno, Severity.ERROR, "MF014",
+                            "Raw serial.Serial() on a MeshCore device — use "
+                            "MeshCoreConnection() from utils.meshcore_connection"
+                        ))
 
         # MF016: @patch('src.utils.paths.…') silently no-ops because production
         # code imports via `from utils.paths import …` and conftest puts only

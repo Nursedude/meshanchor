@@ -53,6 +53,13 @@ from .meshcore_radio_config import (
     _empty_radio_state,
 )
 from .reconnect import ReconnectConfig, ReconnectStrategy
+from utils.meshcore_connection import (
+    ConnectionMode as _MCConnectionMode,
+    acquire_for_connect,
+    detect_meshcore_devices,
+    get_connection_manager as _get_meshcore_connection_manager,
+    validate_meshcore_device,
+)
 from utils.safe_import import safe_import
 
 if TYPE_CHECKING:
@@ -78,86 +85,6 @@ __all__ = [
     "detect_meshcore_devices",
     "get_active_handler",
 ]
-
-
-def detect_meshcore_devices() -> List[str]:
-    """
-    Scan for potential MeshCore companion radio serial devices.
-
-    Returns list of device paths including the persistent /dev/ttyMeshCore
-    symlink (if udev rules are installed) and standard ttyUSB/ttyACM devices.
-    """
-    import glob
-    devices = []
-    # Persistent symlink first (from scripts/99-meshcore.rules)
-    if os.path.exists('/dev/ttyMeshCore'):
-        devices.append('/dev/ttyMeshCore')
-    for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*']:
-        for dev in sorted(glob.glob(pattern)):
-            # Skip if it's the same device as ttyMeshCore symlink
-            if '/dev/ttyMeshCore' in devices:
-                try:
-                    if os.path.realpath(dev) == os.path.realpath('/dev/ttyMeshCore'):
-                        continue
-                except OSError:
-                    pass
-            devices.append(dev)
-    return devices
-
-
-def validate_meshcore_device(device_path: str, baud_rate: int = 115200,
-                              timeout: float = 3.0) -> Dict[str, Any]:
-    """
-    Pre-flight validation: probe a serial device to check if it responds.
-
-    Sends a newline and checks for any response within the timeout.
-    Does NOT require meshcore_py — uses raw serial to avoid import issues.
-
-    Returns:
-        dict with keys:
-        - 'exists': bool — device file exists
-        - 'readable': bool — device can be opened
-        - 'responds': bool — device sent data back
-        - 'error': str or None — error message if any
-    """
-    import os
-    result = {
-        'exists': False,
-        'readable': False,
-        'responds': False,
-        'error': None,
-    }
-
-    if not os.path.exists(device_path):
-        result['error'] = f"Device not found: {device_path}"
-        return result
-    result['exists'] = True
-
-    try:
-        import serial
-    except ImportError:
-        # pyserial not installed — can only check existence
-        result['error'] = "pyserial not installed (pip install pyserial)"
-        return result
-
-    try:
-        with serial.Serial(device_path, baud_rate, timeout=timeout) as ser:
-            result['readable'] = True
-            # Send a newline and wait for any response
-            ser.reset_input_buffer()
-            ser.write(b'\n')
-            response = ser.read(64)
-            if response:
-                result['responds'] = True
-    except serial.SerialException as e:
-        result['error'] = f"Serial error: {e}"
-    except PermissionError:
-        result['error'] = (f"Permission denied: {device_path} — "
-                          "add user to 'dialout' group or use sudo")
-    except OSError as e:
-        result['error'] = f"OS error: {e}"
-
-    return result
 
 
 class MeshCoreSimulator:
@@ -447,53 +374,93 @@ class MeshCoreHandler(BaseMessageHandler):
             device_path = getattr(meshcore_config, 'device_path', '/dev/ttyUSB1')
             baud_rate = getattr(meshcore_config, 'baud_rate', 115200)
 
-            if conn_type == 'serial':
-                # Pre-flight: verify device exists and is accessible
-                preflight = validate_meshcore_device(device_path, baud_rate, timeout=2.0)
-                if not preflight['exists']:
-                    logger.error(f"MeshCore device not found: {device_path}")
-                    logger.info("Run 'Detect Devices' from the MeshCore TUI menu, "
-                                "or check USB connection")
-                    return
-                if not preflight['readable']:
-                    logger.error(f"MeshCore device not accessible: "
-                                 f"{preflight['error']}")
-                    return
-                if preflight['responds']:
-                    logger.info(f"MeshCore device responds on {device_path}")
-                else:
-                    logger.warning(f"MeshCore device at {device_path} exists but "
-                                   "did not respond to probe — attempting connection anyway")
-
-                logger.info(f"Connecting to MeshCore via serial: {device_path}")
-                # Cold-start serial connect handshakes the radio firmware,
-                # which can be slow on first power-up. 5s threshold matches
-                # the meshtasticd.tcp_connect override pattern.
-                with timed_boundary("meshcore.connect_serial",
-                                    target=device_path, threshold_s=5.0):
-                    self._meshcore = await MeshCore.create_serial(
-                        device_path, baud_rate
-                    )
-            elif conn_type == 'tcp':
-                tcp_host = getattr(meshcore_config, 'tcp_host', 'localhost')
-                tcp_port = getattr(meshcore_config, 'tcp_port', 4000)
-                logger.info(f"Connecting to MeshCore via TCP: {tcp_host}:{tcp_port}")
-                with timed_boundary("meshcore.connect_tcp",
-                                    target=f"{tcp_host}:{tcp_port}",
-                                    threshold_s=5.0):
-                    self._meshcore = await MeshCore.create_tcp(tcp_host, tcp_port)
-            else:
+            # All real connect paths go through the connection manager so
+            # short-lived consumers (TUI probes, future CLI helpers) can see
+            # who owns the radio. See utils.meshcore_connection.
+            if conn_type not in ('serial', 'tcp'):
                 logger.error(f"Unsupported MeshCore connection type: {conn_type}")
                 return
 
-            # Subscribe to events
-            self._subscribe_events()
+            with acquire_for_connect(owner="gateway-bridge",
+                                     lock_timeout=30.0) as got_lock:
+                if not got_lock:
+                    logger.error(
+                        "MeshCore connect aborted — could not acquire "
+                        "MESHCORE_CONNECTION_LOCK or persistent owner active"
+                    )
+                    return
 
-            # Start auto-fetching messages
-            if getattr(meshcore_config, 'auto_fetch_messages', True):
-                await self._meshcore.start_auto_message_fetching()
+                if conn_type == 'serial':
+                    # Pre-flight: verify device exists and is accessible.
+                    # validate_meshcore_device internally acquires the lock,
+                    # but we already hold it — pass through the unlocked
+                    # probe via MeshCoreConnection? No: we own the lock for
+                    # the connect window, so a re-acquire would deadlock.
+                    # Use the internal unlocked probe directly.
+                    from utils.meshcore_connection import _probe_device_unlocked
+                    preflight = _probe_device_unlocked(
+                        device_path, baud_rate, timeout=2.0,
+                    )
+                    if not preflight['exists']:
+                        logger.error(f"MeshCore device not found: {device_path}")
+                        logger.info("Run 'Detect Devices' from the MeshCore TUI menu, "
+                                    "or check USB connection")
+                        return
+                    if not preflight['readable']:
+                        logger.error(
+                            f"MeshCore device not accessible: {preflight['error']}"
+                        )
+                        return
+                    if preflight['responds']:
+                        logger.info(f"MeshCore device responds on {device_path}")
+                    else:
+                        logger.warning(
+                            f"MeshCore device at {device_path} exists but "
+                            "did not respond to probe — attempting connection anyway"
+                        )
 
-            self._connected = True
+                    logger.info(f"Connecting to MeshCore via serial: {device_path}")
+                    with timed_boundary("meshcore.connect_serial",
+                                        target=device_path, threshold_s=5.0):
+                        self._meshcore = await MeshCore.create_serial(
+                            device_path, baud_rate
+                        )
+                    persistent_mode = _MCConnectionMode.SERIAL
+                    persistent_device: Optional[str] = device_path
+                else:  # conn_type == 'tcp'
+                    tcp_host = getattr(meshcore_config, 'tcp_host', 'localhost')
+                    tcp_port = getattr(meshcore_config, 'tcp_port', 4000)
+                    logger.info(
+                        f"Connecting to MeshCore via TCP: {tcp_host}:{tcp_port}"
+                    )
+                    with timed_boundary("meshcore.connect_tcp",
+                                        target=f"{tcp_host}:{tcp_port}",
+                                        threshold_s=5.0):
+                        self._meshcore = await MeshCore.create_tcp(
+                            tcp_host, tcp_port
+                        )
+                    persistent_mode = _MCConnectionMode.TCP
+                    persistent_device = f"{tcp_host}:{tcp_port}"
+
+                # Subscribe to events
+                self._subscribe_events()
+
+                # Start auto-fetching messages
+                if getattr(meshcore_config, 'auto_fetch_messages', True):
+                    await self._meshcore.start_auto_message_fetching()
+
+                self._connected = True
+
+                # Publish ourselves as the persistent owner BEFORE the lock
+                # context releases — short-lived consumers see the link
+                # immediately on lock release without a race window.
+                _get_meshcore_connection_manager().register_persistent(
+                    self._meshcore,
+                    self._loop,
+                    owner="gateway-bridge",
+                    mode=persistent_mode,
+                    device=persistent_device,
+                )
 
             # Best-effort: prime the radio-state cache. Failures are logged
             # but don't fail the connect — the cache is purely informational.
@@ -505,6 +472,11 @@ class MeshCoreHandler(BaseMessageHandler):
         except Exception as e:
             logger.error(f"Failed to connect to MeshCore: {e}")
             self._connected = False
+            # If we registered persistent before the failure path, drop it.
+            try:
+                _get_meshcore_connection_manager().unregister_persistent()
+            except Exception:
+                pass
 
     def _subscribe_events(self) -> None:
         """Subscribe to meshcore_py events for message and node tracking."""
@@ -1096,6 +1068,12 @@ class MeshCoreHandler(BaseMessageHandler):
         self._connected = False
         self._meshcore = None
         self._subscriptions.clear()
+        # Drop the persistent registration so future short-lived consumers
+        # can probe the device freely.
+        try:
+            _get_meshcore_connection_manager().unregister_persistent()
+        except Exception as e:
+            logger.debug(f"Error unregistering MeshCore persistent owner: {e}")
         # Release the module-level handle if we were the active handler.
         _clear_active_handler(self)
         self._notify_status("meshcore_disconnected")
