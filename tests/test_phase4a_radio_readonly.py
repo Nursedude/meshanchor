@@ -103,7 +103,7 @@ class TestRadioStateCache:
         for key in (
             "radio_freq_mhz", "radio_bw_khz", "radio_sf", "radio_cr",
             "tx_power_dbm", "max_tx_power_dbm", "max_channels", "channels",
-            "node_name", "fw_build", "model", "fw_ver",
+            "node_name", "public_key", "fw_build", "model", "fw_ver",
             "last_refresh_ts", "source", "error",
         ):
             assert key in state
@@ -127,6 +127,8 @@ class TestRadioStateCache:
         assert snap["channels"] and snap["channels"][0]["name"] == "public"
         assert snap["error"] is None
         assert snap["last_refresh_ts"] is not None
+        # Simulator path doesn't carry a public_key; default stays None.
+        assert snap["public_key"] is None
 
     def test_refresh_when_disconnected_records_error(self, daemon_handler):
         daemon_handler._meshcore = None
