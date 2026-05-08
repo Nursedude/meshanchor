@@ -211,6 +211,43 @@ def validate_channel_name(name: str) -> str:
     return cleaned
 
 
+# MeshCore advertised node name. Firmware-side cap is 32 bytes; we
+# trim leading/trailing whitespace and reject embedded nulls.
+NODE_NAME_MAX_BYTES = 32
+
+
+def validate_node_name(name: str) -> str:
+    """Trim + bounds-check the advertised node name."""
+    if not isinstance(name, str):
+        raise RadioWriteError(f"name must be str, got {type(name).__name__}")
+    cleaned = name.strip()
+    if not cleaned:
+        raise RadioWriteError("node name is empty")
+    if "\x00" in cleaned:
+        raise RadioWriteError("node name contains a null byte")
+    encoded = cleaned.encode("utf-8")
+    if len(encoded) > NODE_NAME_MAX_BYTES:
+        raise RadioWriteError(
+            f"node name '{cleaned[:12]}…' exceeds {NODE_NAME_MAX_BYTES} bytes "
+            f"(encoded length: {len(encoded)})"
+        )
+    return cleaned
+
+
+def validate_coords(lat: Any, lon: Any) -> tuple:
+    """Coerce + bounds-check (lat, lon). Returns (lat, lon) as floats."""
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError) as e:
+        raise RadioWriteError(f"lat/lon must be numeric: {e}") from e
+    if not (-90.0 <= lat_f <= 90.0):
+        raise RadioWriteError(f"latitude out of range [-90, 90]: {lat_f}")
+    if not (-180.0 <= lon_f <= 180.0):
+        raise RadioWriteError(f"longitude out of range [-180, 180]: {lon_f}")
+    return lat_f, lon_f
+
+
 def _coerce_int(value: Any) -> Optional[int]:
     """Convert SELF_INFO/DEVICE_INFO numeric fields to int, tolerating None."""
     if value is None:
@@ -243,6 +280,8 @@ def _empty_radio_state() -> Dict[str, Any]:
         "max_channels": None,
         "channels": [],          # list[{idx, name, hash}] — secret never exposed
         "node_name": None,
+        "radio_lat": None,        # advertised latitude (decimal degrees)
+        "radio_lon": None,        # advertised longitude (decimal degrees)
         "fw_build": None,
         "model": None,
         "fw_ver": None,
@@ -388,6 +427,8 @@ class MeshCoreRadioConfig:
                     "max_channels": max_channels,
                     "channels": channels,
                     "node_name": self_info.get("name"),
+                    "radio_lat": _coerce_float(self_info.get("adv_lat")),
+                    "radio_lon": _coerce_float(self_info.get("adv_lon")),
                     "fw_build": dev_info.get("fw_build"),
                     "model": dev_info.get("model"),
                     "fw_ver": _coerce_int(dev_info.get("fw ver")),
@@ -499,6 +540,50 @@ class MeshCoreRadioConfig:
                 what=f"set_channel[{idx}]",
             )
         await self.refresh()
+        return self.get_state(refresh=False)
+
+    # ── Identity: advertised name + coordinates + announce ─────────────
+
+    async def set_name(self, name: str) -> Dict[str, Any]:
+        """Set the advertised node name. Validates + pushes + refreshes."""
+        cleaned = validate_node_name(name)
+        meshcore = self._require_meshcore()
+        if not _is_simulator(meshcore):
+            await self._await_ok(
+                meshcore.commands.set_name(cleaned),
+                what="set_name",
+            )
+        await self.refresh()
+        return self.get_state(refresh=False)
+
+    async def set_coords(self, lat: float, lon: float) -> Dict[str, Any]:
+        """Set the radio's GPS coordinates (used in subsequent adverts)."""
+        lat_f, lon_f = validate_coords(lat, lon)
+        meshcore = self._require_meshcore()
+        if not _is_simulator(meshcore):
+            await self._await_ok(
+                meshcore.commands.set_coords(lat_f, lon_f),
+                what="set_coords",
+            )
+        await self.refresh()
+        return self.get_state(refresh=False)
+
+    async def send_advert(self, flood: bool = False) -> Dict[str, Any]:
+        """Broadcast an advertisement so peers see name/coords/key updates.
+
+        ``flood=False`` is a one-hop advert (default in the firmware);
+        ``flood=True`` requests flood propagation across the mesh.
+        """
+        meshcore = self._require_meshcore()
+        if not _is_simulator(meshcore):
+            await self._await_ok(
+                meshcore.commands.send_advert(bool(flood)),
+                what="send_advert",
+            )
+        # send_advert doesn't change cached state; no refresh needed,
+        # but bump the timestamp so callers can confirm we ran.
+        with self._lock:
+            self._state["last_advert_ts"] = time.time()
         return self.get_state(refresh=False)
 
     # ── Session 4: soft reset ────────────────────────────────────────

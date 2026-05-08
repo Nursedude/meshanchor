@@ -491,6 +491,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
         while True:
             choices = [
                 ("view", "View                Current LoRa / channels / TX power"),
+                ("identity", "Identity & Position Set node name, lat/lon, send advertisement"),
                 ("lora", "Set LoRa Params     Frequency / bandwidth / SF / coding rate"),
                 ("txp", "Set TX Power        Region-aware cap enforced"),
                 ("channel", "Set Channel Slot    Name + secret per slot"),
@@ -509,6 +510,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
                 return
             dispatch = {
                 "view": ("MeshCore Radio (view)", self._meshcore_radio_status),
+                "identity": ("Identity & Position", self._meshcore_identity_menu),
                 "lora": ("Set LoRa Parameters", self._meshcore_set_lora),
                 "txp": ("Set TX Power", self._meshcore_set_tx_power),
                 "channel": ("Set Channel Slot", self._meshcore_set_channel),
