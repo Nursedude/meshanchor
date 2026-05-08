@@ -410,6 +410,18 @@ class MapDataCollector(
             if fid:
                 features[fid] = f
 
+        # Source 0a-self: the local MeshCore radio itself. The contacts
+        # iteration above only yields *discovered* nodes — the operator's
+        # own NOC radio never lands there. When /radio reports advertised
+        # coords, emit a synthetic feature so "this NOC" shows up on the
+        # map without requiring an operator placement.
+        self_feature = self._collect_meshcore_self()
+        if self_feature is not None:
+            self_feature = self._tag_source_origin([self_feature], "local_radio")[0]
+            fid = self_feature["properties"].get("id", "")
+            if fid:
+                features[fid] = self_feature
+
         # Source 0b: UnifiedNodeTracker (richest data — includes RNS + Meshtastic)
         # This is the same data source the topology view uses (378 nodes).
         # It includes nodes from RNS path table, meshtasticd, and gateway bridge.
@@ -805,6 +817,53 @@ class MapDataCollector(
             f"{len(position_less)} without GPS (total: {len(mc_nodes)})"
         )
         return features
+
+    def _collect_meshcore_self(self) -> Optional[Dict]:
+        """Emit a synthetic feature for the local MeshCore radio.
+
+        Reads the cached radio state from the active MeshCoreHandler. Returns
+        None when the handler isn't available, the radio hasn't been read
+        yet, advertised coords aren't valid, or the local pubkey is unknown
+        (the pubkey is the stable feature id — without it dedup against
+        discovered contacts can't work safely).
+        """
+        try:
+            from gateway.meshcore_handler import get_active_handler
+        except Exception:
+            return None
+
+        handler = get_active_handler()
+        if handler is None:
+            return None
+
+        try:
+            state = handler.get_radio_state(refresh=False)
+        except Exception as e:
+            logger.debug(f"MeshCore self-feature: get_radio_state failed: {e}")
+            return None
+
+        pubkey = (state.get("public_key") or "").lower()
+        lat = state.get("radio_lat")
+        lon = state.get("radio_lon")
+        if not pubkey or not self._is_valid_coordinate(lat, lon):
+            return None
+
+        feature = self._make_feature(
+            node_id=f"meshcore:{pubkey}",
+            name=state.get("node_name") or f"MC-{pubkey[:8]}",
+            lat=lat,
+            lon=lon,
+            network="meshcore",
+            is_online=True,
+            is_local=True,
+            last_seen="now",
+            last_heard=state.get("last_refresh_ts"),
+        )
+        feature["properties"]["source"] = "meshcore_self"
+        feature["properties"]["pubkey"] = pubkey
+        feature["properties"]["model"] = state.get("model") or ""
+        feature["properties"]["fw_build"] = state.get("fw_build") or ""
+        return feature
 
     def _collect_mqtt(self) -> List[Dict]:
         """Collect nodes from MQTT subscriber if available.

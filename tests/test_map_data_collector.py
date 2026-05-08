@@ -20,6 +20,26 @@ from src.gateway.node_tracker import UnifiedNode
 from src.gateway.node_models import Position
 
 
+@pytest.fixture(autouse=True)
+def _stub_external_collectors():
+    """Block live network + on-disk caches during unit tests.
+
+    PR #81 wired ``_collect_meshcore_public`` (hits map.meshcore.dev), and
+    ``_collect_node_tracker`` / ``_collect_aredn`` / ``_collect_meshforge_maps``
+    read from local cache files / mDNS / HTTP. Each can drop hundreds-to-thousands
+    of features into a test that means to assert on a single mocked node.
+    Stub them all to ``[]`` so per-test feature-count assertions stay deterministic.
+    """
+    base = "src.utils.map_data_collector.MapDataCollector"
+    with patch(f"{base}._collect_meshcore_public", return_value=[]), \
+         patch(f"{base}._collect_node_tracker", return_value=[]), \
+         patch(f"{base}._collect_aredn", return_value=[]), \
+         patch(f"{base}._collect_meshforge_maps", return_value=[]), \
+         patch(f"{base}._collect_mqtt", return_value=[]), \
+         patch(f"{base}._load_cache", return_value=[]):
+        yield
+
+
 def _make_meshcore_node(node_id, name, position=None, is_online=True,
                        pubkey="abc123def456", role="client", hops=2):
     """Build a UnifiedNode shaped like one created by meshcore_handler._on_advertisement."""
@@ -125,6 +145,113 @@ class TestMeshCoreSource:
         sources = result["properties"]["sources"]
         assert sources["meshcore"] == 1
         assert sources["meshtastic_enabled"] is False
+
+
+class TestMeshCoreSelfFeature:
+    """The local USB MeshCore radio appears as a feature when /radio has coords."""
+
+    def _make_handler(self, **state_overrides):
+        """Build a mock handler whose get_radio_state returns plausible data."""
+        from gateway.meshcore_handler import _empty_radio_state
+        state = _empty_radio_state()
+        state.update({
+            "node_name": "meshanchorRAK1",
+            "public_key": "ab" * 32,
+            "radio_lat": 19.435,
+            "radio_lon": -155.213,
+            "model": "RAK 4631",
+            "fw_build": "19-Apr-2026",
+            "source": "radio",
+            "last_refresh_ts": 1778266653.0,
+        })
+        state.update(state_overrides)
+        h = MagicMock()
+        h.get_radio_state.return_value = state
+        return h
+
+    def _empty_tracker(self):
+        t = MagicMock()
+        t.get_meshcore_nodes.return_value = []
+        t.to_geojson.return_value = {"type": "FeatureCollection", "features": []}
+        t.get_all_nodes.return_value = []
+        return t
+
+    def _patch_active_handler(self, handler):
+        """Patch both module spellings — the collector lazy-imports
+        ``gateway.meshcore_handler`` while pytest reaches the same code via
+        ``src.gateway.meshcore_handler``. They live as two separate module
+        objects in sys.modules, so the patch must hit both names."""
+        import contextlib
+        ctx = contextlib.ExitStack()
+        for path in (
+            "gateway.meshcore_handler.get_active_handler",
+            "src.gateway.meshcore_handler.get_active_handler",
+        ):
+            try:
+                ctx.enter_context(patch(path, return_value=handler))
+            except (AttributeError, ModuleNotFoundError):
+                continue
+        return ctx
+
+    def test_self_feature_emitted_when_radio_has_coords_and_pubkey(self):
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
+        with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
+             self._patch_active_handler(self._make_handler()):
+            result = collector.collect()
+
+        feats = result["features"]
+        assert len(feats) == 1
+        props = feats[0]["properties"]
+        assert props["network"] == "meshcore"
+        assert props["is_local"] is True
+        assert props["source"] == "meshcore_self"
+        assert props["pubkey"] == "ab" * 32
+        assert props["name"] == "meshanchorRAK1"
+        assert props["model"] == "RAK 4631"
+        assert feats[0]["geometry"]["coordinates"] == [-155.213, 19.435]
+
+    def test_no_self_feature_when_no_active_handler(self):
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
+        with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
+             self._patch_active_handler(None):
+            result = collector.collect()
+        assert result["features"] == []
+
+    def test_no_self_feature_when_pubkey_missing(self):
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
+        with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
+             self._patch_active_handler(self._make_handler(public_key=None)):
+            result = collector.collect()
+        assert result["features"] == []
+
+    def test_no_self_feature_when_coords_missing(self):
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
+        with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
+             self._patch_active_handler(self._make_handler(radio_lat=None, radio_lon=None)):
+            result = collector.collect()
+        assert result["features"] == []
+
+    def test_self_feature_dedups_against_discovered_contact_with_same_pubkey(self):
+        """When the local pubkey also matches a discovered contact, self wins (dict overwrite by id)."""
+        collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
+        position = Position(latitude=20.0, longitude=-156.0)
+        mock_tracker = MagicMock()
+        # Discovered contact with the SAME pubkey-as-id as the local radio
+        mock_tracker.get_meshcore_nodes.return_value = [
+            _make_meshcore_node(f"meshcore:{'ab'*32}", "From-Contacts", position=position),
+        ]
+        mock_tracker.to_geojson.return_value = {"type": "FeatureCollection", "features": []}
+        mock_tracker.get_all_nodes.return_value = []
+
+        with patch('src.utils.map_data_collector.get_node_tracker', return_value=mock_tracker), \
+             self._patch_active_handler(self._make_handler()):
+            result = collector.collect()
+
+        feats = result["features"]
+        assert len(feats) == 1
+        # Self overwrites because _collect_meshcore_self writes after the contacts pass.
+        assert feats[0]["properties"]["source"] == "meshcore_self"
+        assert feats[0]["properties"]["is_local"] is True
 
 
 class TestMeshtasticFeatureFlag:
