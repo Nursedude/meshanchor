@@ -66,8 +66,11 @@ class MeshCoreCLIHandler(BaseHandler):
     ]
 
     def menu_items(self):
+        # 3rd slot is the deployment-profile feature flag — must be
+        # "meshcore" (or None) per Phase 8.3 section invariants. The
+        # CLI surface is meshcore-specific, so gate it on "meshcore".
         return [
-            ("meshcore_cli", "MeshCore CLI        meshcore-cli passthrough", "meshcore_cli"),
+            ("meshcore_cli", "MeshCore CLI        meshcore-cli passthrough", "meshcore"),
         ]
 
     def execute(self, action):

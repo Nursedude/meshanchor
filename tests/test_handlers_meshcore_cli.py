@@ -323,5 +323,7 @@ class TestHandlerRegistration:
         assert h.menu_section == "meshcore"
         items = h.menu_items()
         assert len(items) == 1
-        action, _label, _section = items[0]
+        action, _label, flag = items[0]
         assert action == "meshcore_cli"
+        # Phase 8.3 invariant — meshcore-section flag must be "meshcore" or None.
+        assert flag in (None, "meshcore")
