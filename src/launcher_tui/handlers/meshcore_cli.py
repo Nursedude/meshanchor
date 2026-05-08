@@ -450,13 +450,17 @@ class MeshCoreCLIHandler(BaseHandler):
     # ─────────────────────────────────────────────────────────────────
 
     def _is_daemon_active(self) -> bool:
+        # ServiceState.AVAILABLE / DEGRADED both mean "the daemon owns
+        # the radio" (DEGRADED is "running but with issues"). The other
+        # states (NOT_RUNNING / FAILED / NOT_INSTALLED / UNKNOWN) mean
+        # the radio is free.
         try:
             from utils.service_check import check_service, ServiceState
         except ImportError:
             return False
         try:
             status = check_service(self.DAEMON_SERVICE)
-            return status.state == ServiceState.RUNNING
+            return status.state in (ServiceState.AVAILABLE, ServiceState.DEGRADED)
         except Exception as e:
             logger.debug("check_service failed: %s", e)
             return False

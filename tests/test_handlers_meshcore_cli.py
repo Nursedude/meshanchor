@@ -188,6 +188,35 @@ class TestDaemonHandoff:
             h._resume_daemon()
             start.assert_called_once()
 
+    def test_is_daemon_active_uses_real_servicestate_enum(self):
+        """Regression: _is_daemon_active() must reference enum members
+        that actually exist. ``ServiceState.RUNNING`` doesn't — the live
+        states are AVAILABLE / DEGRADED / NOT_RUNNING / FAILED /
+        NOT_INSTALLED / UNKNOWN. Caught on meshanchor-server when the
+        handler returned False against a clearly-running daemon."""
+        from utils.service_check import ServiceState
+        from types import SimpleNamespace
+
+        h = _make_handler()
+
+        def fake_check(name):
+            return SimpleNamespace(state=ServiceState.AVAILABLE)
+
+        with patch("utils.service_check.check_service", fake_check):
+            assert h._is_daemon_active() is True
+
+        def fake_check_degraded(name):
+            return SimpleNamespace(state=ServiceState.DEGRADED)
+
+        with patch("utils.service_check.check_service", fake_check_degraded):
+            assert h._is_daemon_active() is True
+
+        def fake_check_stopped(name):
+            return SimpleNamespace(state=ServiceState.NOT_RUNNING)
+
+        with patch("utils.service_check.check_service", fake_check_stopped):
+            assert h._is_daemon_active() is False
+
 
 # ── _run_cli_command — end-to-end handoff ────────────────────────────
 
