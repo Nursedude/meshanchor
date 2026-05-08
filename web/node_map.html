@@ -1761,9 +1761,19 @@
             iconCreateFunction: (cluster) => createClusterIcon(cluster, 'meshcore')
         })
     };
-    // meshcore is force-clustered: the global directory is too large to
-    // render unclustered. Bypasses the user's "Cluster view" toggle.
-    const FORCE_CLUSTER_NETWORKS = new Set(['meshcore']);
+    // Force-cluster every network that has a cluster group. The Phase 6.1
+    // meshforge-maps backport plus the meshcore.dev directory mean even
+    // "small" networks (meshtastic, aredn) routinely carry 1k–10k+
+    // features. Adding that many un-clustered SVG markers freezes the
+    // browser silently. The "Cluster view" toggle below is kept for
+    // backwards compatibility but is now effectively a no-op for these
+    // networks — they always cluster.
+    const FORCE_CLUSTER_NETWORKS = new Set([
+        'meshcore', 'meshtastic', 'rns', 'aredn', 'gateway',
+    ]);
+    // Some collectors tag features as `network: "reticulum"` instead of
+    // "rns" (Phase 6.1 external_maps). Normalize so they cluster too.
+    const NETWORK_ALIASES = { reticulum: 'rns' };
 
     // Selected node for terrain analysis
     let selectedNode = null;
@@ -2693,6 +2703,13 @@
             const coords = feature.geometry.coordinates;
             const id = props.id || `${coords[0]}_${coords[1]}`;
 
+            // Normalize collector-side network aliases so stats, filters
+            // and clustering all agree (e.g. external_maps tags some
+            // features `reticulum` while local sources use `rns`).
+            if (props.network && NETWORK_ALIASES[props.network]) {
+                props.network = NETWORK_ALIASES[props.network];
+            }
+
             // Stats (count all regardless of filter)
             total++;
             if (props.network === 'meshtastic' || props.network === 'both') meshtastic++;
@@ -2774,11 +2791,12 @@
                 marker.bindPopup(createPopupContent(props, coords));
                 marker.on('click', () => selectNodeForTerrain(feature));
 
-                // Determine network for clustering
+                // Determine network for clustering. props.network is
+                // already alias-normalized at the top of this forEach.
                 const network = props.is_gateway ? 'gateway' : (props.network || 'meshtastic');
                 const useClustering = document.getElementById('filter-clustering').checked;
-                // meshcore (and any other firehose source) must always
-                // cluster — 42k+ unclustered markers freeze the browser.
+                // Every clusterable network is force-clustered — the
+                // dataset is far past the un-clustered render budget.
                 const mustCluster = FORCE_CLUSTER_NETWORKS.has(network);
 
                 // Add to appropriate layer
