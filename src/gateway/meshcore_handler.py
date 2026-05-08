@@ -201,6 +201,10 @@ class MeshCoreHandler(BaseMessageHandler):
         self._meshcore = None  # meshcore_py MeshCore instance or simulator
         self._loop = None      # Dedicated asyncio event loop
         self._subscriptions = []
+        # Periodic-advert heartbeat task handle (asyncio.Task | None).
+        # Spawned post-connect when meshcore.advert_heartbeat_sec > 0;
+        # cancelled in _async_disconnect.
+        self._advert_heartbeat_task = None
 
         # Outbound message queue (bridge loop → MeshCore handler)
         self._send_queue: Queue = Queue(maxsize=100)
@@ -476,6 +480,11 @@ class MeshCoreHandler(BaseMessageHandler):
                 self._apply_desired_and_log_drift()
             except Exception as e:
                 logger.warning(f"Desired-config apply skipped: {e}")
+
+            # Periodic advert heartbeat — keep the NOC's name/coords/pubkey
+            # inside neighbors' contact-share TTL so portables can introduce
+            # us to others. Disabled when interval <= 0.
+            self._start_advert_heartbeat()
 
         except Exception as e:
             logger.error(f"Failed to connect to MeshCore: {e}")
@@ -1246,6 +1255,74 @@ class MeshCoreHandler(BaseMessageHandler):
         """Broadcast an advertisement so peers pick up name/coords/key changes."""
         return self._run_radio_write(self._radio.send_advert(flood=flood))
 
+    # ── Periodic advert heartbeat ───────────────────────────────────────
+
+    def _advert_heartbeat_settings(self) -> tuple:
+        """Read (interval_sec, flood) from gateway config. Defaults if absent."""
+        mc = getattr(self.config, "meshcore", None)
+        if mc is None:
+            return 0, False
+        interval = int(getattr(mc, "advert_heartbeat_sec", 600) or 0)
+        flood = bool(getattr(mc, "advert_heartbeat_flood", False))
+        return interval, flood
+
+    def _start_advert_heartbeat(self) -> None:
+        """Schedule the periodic-advert task on the event loop, if enabled."""
+        interval, flood = self._advert_heartbeat_settings()
+        if interval <= 0:
+            logger.debug("MeshCore advert heartbeat disabled (interval=%d)", interval)
+            return
+        if self._loop is None or not self._loop.is_running():
+            logger.debug("MeshCore advert heartbeat skipped: no running loop")
+            return
+        # Cancel any leftover task from a prior connect cycle.
+        self._cancel_advert_heartbeat()
+        self._advert_heartbeat_task = self._loop.create_task(
+            self._advert_heartbeat_loop(interval, flood),
+            name="meshcore-advert-heartbeat",
+        )
+        logger.info(
+            "MeshCore advert heartbeat: every %ds (flood=%s)", interval, flood,
+        )
+
+    def _cancel_advert_heartbeat(self) -> None:
+        """Cancel the heartbeat task if running. Safe to call repeatedly."""
+        task = self._advert_heartbeat_task
+        self._advert_heartbeat_task = None
+        if task is None or task.done():
+            return
+        try:
+            task.cancel()
+        except Exception as e:
+            logger.debug(f"Advert heartbeat cancel error: {e}")
+
+    async def _advert_heartbeat_loop(self, interval: int, flood: bool) -> None:
+        """Send one advert per ``interval`` seconds until stop or disconnect.
+
+        Failures are logged and swallowed — a transient wire glitch must
+        not kill the heartbeat. The loop also exits if the radio handle
+        gets swapped out from under us (reconnect creates a fresh task).
+        """
+        # Fire one immediately so neighbors don't have to wait a full
+        # interval after a daemon restart to hear from us.
+        await self._fire_heartbeat_advert(flood)
+        while not self._stop_event.is_set() and self._connected:
+            try:
+                await self._async_wait(interval)
+            except asyncio.CancelledError:
+                return
+            if self._stop_event.is_set() or not self._connected:
+                return
+            await self._fire_heartbeat_advert(flood)
+
+    async def _fire_heartbeat_advert(self, flood: bool) -> None:
+        """Send one heartbeat advert. Logs at INFO; never raises."""
+        try:
+            await self._radio.send_advert(flood=flood)
+            logger.info("MeshCore advert heartbeat fired (flood=%s)", flood)
+        except Exception as e:
+            logger.warning(f"MeshCore advert heartbeat failed: {e}")
+
     # ── Session 4 — radio control surfaces ──────────────────────────────
 
     def reset_radio(self) -> Dict[str, Any]:
@@ -1293,6 +1370,10 @@ class MeshCoreHandler(BaseMessageHandler):
 
     async def _async_disconnect(self) -> None:
         """Async disconnect cleanup."""
+        # Stop the heartbeat before tearing down the wire — sending an
+        # advert into a half-closed connection just spams "disconnected"
+        # warnings into the log.
+        self._cancel_advert_heartbeat()
         if self._meshcore:
             try:
                 if isinstance(self._meshcore, MeshCoreSimulator):
