@@ -1325,11 +1325,16 @@
                 <span class="label">AREDN:</span>
                 <span class="value" id="stat-aredn">0</span>
             </div>
+            <div class="stat-row">
+                <span class="label">MeshCore:</span>
+                <span class="value" id="stat-meshcore">0</span>
+            </div>
 
             <div class="filter-section">
                 <label><input type="checkbox" id="filter-meshtastic" checked> Meshtastic</label>
                 <label><input type="checkbox" id="filter-rns" checked> Reticulum</label>
                 <label><input type="checkbox" id="filter-aredn" checked> AREDN</label>
+                <label><input type="checkbox" id="filter-meshcore" checked> MeshCore</label>
                 <label><input type="checkbox" id="filter-online-only"> Online only</label>
                 <label><input type="checkbox" id="filter-coverage"> Coverage circles</label>
                 <label><input type="checkbox" id="filter-links" checked> Link lines</label>
@@ -1726,10 +1731,13 @@
         meshtastic: L.layerGroup().addTo(map),
         rns: L.layerGroup().addTo(map),
         aredn: L.layerGroup().addTo(map),
-        gateway: L.layerGroup().addTo(map)
+        gateway: L.layerGroup().addTo(map),
+        meshcore: L.layerGroup().addTo(map)
     };
 
-    // Phase 4: Cluster groups for each network
+    // Phase 4: Cluster groups for each network.
+    // meshcore.dev pulls ~42k worldwide nodes — clustering is mandatory
+    // there or the browser hangs adding individual markers.
     const clusterGroups = {
         meshtastic: L.markerClusterGroup({
             maxClusterRadius: 50,
@@ -1746,8 +1754,16 @@
         gateway: L.markerClusterGroup({
             maxClusterRadius: 30,
             iconCreateFunction: (cluster) => createClusterIcon(cluster, 'gateway')
+        }),
+        meshcore: L.markerClusterGroup({
+            maxClusterRadius: 60,
+            chunkedLoading: true,
+            iconCreateFunction: (cluster) => createClusterIcon(cluster, 'meshcore')
         })
     };
+    // meshcore is force-clustered: the global directory is too large to
+    // render unclustered. Bypasses the user's "Cluster view" toggle.
+    const FORCE_CLUSTER_NETWORKS = new Set(['meshcore']);
 
     // Selected node for terrain analysis
     let selectedNode = null;
@@ -1809,7 +1825,8 @@
             meshtastic: '#66bb6a',
             rns: '#ab47bc',
             aredn: '#ff7043',
-            gateway: '#ffa726'
+            gateway: '#ffa726',
+            meshcore: '#42a5f5'
         };
         const color = colors[network] || '#4fc3f7';
 
@@ -2660,6 +2677,7 @@
         const showMeshtastic = document.getElementById('filter-meshtastic').checked;
         const showRNS = document.getElementById('filter-rns').checked;
         const showAREDN = document.getElementById('filter-aredn').checked;
+        const showMeshcore = document.getElementById('filter-meshcore').checked;
         const onlineOnly = document.getElementById('filter-online-only').checked;
         const showCoverage = document.getElementById('filter-coverage').checked;
         const showLinks = document.getElementById('filter-links').checked;
@@ -2667,7 +2685,7 @@
 
         // Track which nodes are in this update
         const activeIds = new Set();
-        let total = 0, meshtastic = 0, rns = 0, aredn = 0, online = 0;
+        let total = 0, meshtastic = 0, rns = 0, aredn = 0, meshcore = 0, online = 0;
 
         // Process each feature
         state.currentGeoJSON.features.forEach(feature => {
@@ -2680,6 +2698,7 @@
             if (props.network === 'meshtastic' || props.network === 'both') meshtastic++;
             if (props.network === 'rns' || props.network === 'both') rns++;
             if (props.network === 'aredn') aredn++;
+            if (props.network === 'meshcore') meshcore++;
             if (props.is_online) online++;
 
             // Apply filters
@@ -2687,6 +2706,7 @@
             if (props.network === 'meshtastic' && !showMeshtastic) return;
             if (props.network === 'rns' && !showRNS) return;
             if (props.network === 'aredn' && !showAREDN) return;
+            if (props.network === 'meshcore' && !showMeshcore) return;
             // Role filter (RMAP-inspired node type filtering)
             if (roleFilter) {
                 if (roleFilter === 'rns') {
@@ -2757,9 +2777,12 @@
                 // Determine network for clustering
                 const network = props.is_gateway ? 'gateway' : (props.network || 'meshtastic');
                 const useClustering = document.getElementById('filter-clustering').checked;
+                // meshcore (and any other firehose source) must always
+                // cluster — 42k+ unclustered markers freeze the browser.
+                const mustCluster = FORCE_CLUSTER_NETWORKS.has(network);
 
                 // Add to appropriate layer
-                if (useClustering && clusterGroups[network]) {
+                if ((useClustering || mustCluster) && clusterGroups[network]) {
                     clusterGroups[network].addLayer(marker);
                 } else {
                     nodeLayer.addLayer(marker);
@@ -2801,17 +2824,18 @@
             }
         }
 
-        // Manage cluster layer visibility
-        if (useClustering) {
-            Object.keys(clusterGroups).forEach(net => {
-                if (!map.hasLayer(clusterGroups[net])) {
-                    map.addLayer(clusterGroups[net]);
-                }
-            });
-        } else {
-            // Hide cluster groups when not clustering
-            Object.keys(clusterGroups).forEach(net => map.removeLayer(clusterGroups[net]));
-        }
+        // Manage cluster layer visibility. Force-clustered networks
+        // (meshcore) stay on the map regardless of the user's "Cluster
+        // view" toggle — those layers MUST cluster or the browser
+        // chokes on the marker count.
+        Object.keys(clusterGroups).forEach(net => {
+            const shouldShow = useClustering || FORCE_CLUSTER_NETWORKS.has(net);
+            if (shouldShow && !map.hasLayer(clusterGroups[net])) {
+                map.addLayer(clusterGroups[net]);
+            } else if (!shouldShow && map.hasLayer(clusterGroups[net])) {
+                map.removeLayer(clusterGroups[net]);
+            }
+        });
 
         // Draw link lines between nodes that have SNR data (implies they can hear each other)
         linkLayer.clearLayers();
@@ -2827,6 +2851,7 @@
         document.getElementById('stat-meshtastic').textContent = meshtastic;
         document.getElementById('stat-rns').textContent = rns;
         document.getElementById('stat-aredn').textContent = aredn;
+        document.getElementById('stat-meshcore').textContent = meshcore;
         document.getElementById('stat-online').textContent = online;
 
         // Fit bounds only on first load
@@ -3637,8 +3662,9 @@
         updateDisplay();
     });
 
-    ['filter-meshtastic', 'filter-rns', 'filter-aredn', 'filter-online-only',
-     'filter-coverage', 'filter-links', 'filter-link-anim', 'filter-heatmap'].forEach(id => {
+    ['filter-meshtastic', 'filter-rns', 'filter-aredn', 'filter-meshcore',
+     'filter-online-only', 'filter-coverage', 'filter-links', 'filter-link-anim',
+     'filter-heatmap'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => {
             // Reset markers to force rebuild with new settings
             if (id === 'filter-coverage') {
