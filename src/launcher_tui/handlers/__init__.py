@@ -225,4 +225,11 @@ def get_all_handlers() -> List[Type]:
     from handlers.channel_config import ChannelConfigHandler
     handlers.append(ChannelConfigHandler)
 
+    # Batch 20 — MeshCore operator-placement: pin nodes on the map.
+    # MeshCore advertisements don't carry GPS, so this handler is the
+    # operator-facing way to make discovered (or known-but-unheard)
+    # MeshCore nodes show up as map markers.
+    from handlers.meshcore_positions import MeshCorePositionsHandler
+    handlers.append(MeshCorePositionsHandler)
+
     return handlers
