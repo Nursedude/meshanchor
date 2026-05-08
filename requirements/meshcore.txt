@@ -1,0 +1,13 @@
+# MeshAnchor MeshCore Dependencies (meshcore, gateway, full profiles)
+#
+# MeshAnchor is MeshCore-primary — these install by default for any
+# profile that touches the companion radio. The pyproject metadata for
+# meshcore-cli depends on meshcore>=2.3.7, so installing the CLI also
+# pulls in the meshcore_py library used by the gateway handler.
+
+# meshcore-cli — operator passthrough, driven by the
+# `MeshCore CLI` TUI handler (src/launcher_tui/handlers/meshcore_cli.py)
+# and reachable directly on the shell once installed. The CLI lands in
+# the active venv's bin (or ~/.local/bin under some site-packages
+# layouts); find_meshcore_cli() in utils/cli.py searches both.
+meshcore-cli>=1.5.0

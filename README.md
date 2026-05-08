@@ -42,6 +42,7 @@ Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the arch
 Plug in a MeshCore companion radio, run the installer, and you get:
 
 - **MeshCore integration** — direct companion radio management via meshcore_py, pre-flight device validation, persistent udev naming, in-TUI radio config (LoRa params, channels, TX power) with region-aware validation
+- **MeshCore CLI passthrough** — TUI surface that drops the operator into [meshcore-cli](https://github.com/meshcore-dev/meshcore-cli) (common verbs, send DM/channel, remote-admin `cmd` bridge to [docs.meshcore.io/cli_commands/](https://docs.meshcore.io/cli_commands/), interactive REPL) with the daemon's radio ownership handed off cleanly so the bridge resumes when the CLI exits
 - **Gateway bridge** — bidirectional MeshCore to Meshtastic/RNS message routing via CanonicalMessage
 - **RF engineering tools** — link budget, Fresnel zone, FSPL, coverage maps, space weather (NOAA)
 - **TUI interface** — 60 handler files, MeshCore-primary menu with Optional Gateways submenu, raspi-config style (whiptail/dialog), SSH-friendly
@@ -166,6 +167,8 @@ Main Menu (MeshAnchor NOC)
 ├── 2. MeshCore              Primary radio + Optional Gateways
 │       ├── MeshCore submenu Status, detect, config, radio (LoRa/TX/channels),
 │       │                    nodes, stats, chat, daemon control
+│       ├── MeshCore CLI     meshcore-cli passthrough — common verbs, DM/channel,
+│       │                    remote-admin cmd, interactive REPL (auto daemon handoff)
 │       └── Optional Gateways → Meshtastic, RNS, AREDN, MQTT, Gateway Bridge
 ├── 3. RF & SDR              Link budget, site planner, frequency slots, SDR
 ├── 4. Maps & Viz            Live NOC map, coverage, topology, traffic inspector,
@@ -234,6 +237,7 @@ sudo python3 src/launcher_tui/main.py
 | `Local changes would be overwritten` | `git stash` before pull, or use clean reinstall |
 | Service won't start | `journalctl -u meshanchor -n 50` |
 | `meshcore` module not found | `pip install meshcore` (or `--break-system-packages` on Bookworm+) |
+| `meshcore-cli not found` in TUI CLI menu | `/opt/meshanchor/venv/bin/pip install meshcore-cli` (or use TUI's *MeshCore CLI → Install / Locate*) |
 | USB device path changes on reboot | Install udev rules: `sudo cp scripts/99-meshcore.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules` |
 | Permission denied on serial port | Add user to dialout group: `sudo usermod -aG dialout $USER` then log out/in |
 | `meshtastic` module not found | `pip install meshtastic --break-system-packages --ignore-installed` |

@@ -2,9 +2,9 @@
 #
 # This installs ALL dependencies. For minimal installs, use profile-specific files:
 #
-#   Radio + Maps:  pip install -r requirements/core.txt -r requirements/maps.txt
+#   Radio + Maps:  pip install -r requirements/core.txt -r requirements/maps.txt -r requirements/meshcore.txt
 #   Monitor only:  pip install -r requirements/core.txt -r requirements/mqtt.txt
-#   Gateway mode:  pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt
+#   Gateway mode:  pip install -r requirements/core.txt -r requirements/rns.txt -r requirements/mqtt.txt -r requirements/meshcore.txt
 #   Full stack:    pip install -r requirements.txt
 #
 # See: src/utils/deployment_profiles.py for profile definitions
@@ -14,13 +14,12 @@
 -r requirements/rns.txt
 -r requirements/mqtt.txt
 -r requirements/monitoring.txt
+-r requirements/meshcore.txt
 
 # Meshtastic CLI for radio configuration is installed separately via pipx.
 # The meshtastic Python library (protobuf definitions) is in requirements/core.txt.
-
-# MeshCore companion radio support (optional, Python 3.10+)
-# Required for MeshCore bridge mode (meshcore_bridge / tri_bridge)
-# meshcore  # Optional: pip install meshcore
+# meshcore-cli + meshcore_py are in requirements/meshcore.txt above (MeshAnchor
+# is MeshCore-primary, so they install by default).
 
 # Testing (development only)
 -r requirements/dev.txt
