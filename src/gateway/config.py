@@ -207,6 +207,10 @@ def validate_hostname_config(host: str, field_name: str) -> Optional[ConfigValid
 @dataclass
 class MeshtasticConfig:
     """Meshtastic connection configuration"""
+    # When False, the gateway never starts a Meshtastic handler. Use this
+    # on MeshCore-primary or RNS-only NOCs where meshtasticd is intentionally
+    # absent — otherwise the handler retries TCP every 30s and spams logs.
+    enabled: bool = True
     host: str = "localhost"
     port: int = 4403
     channel: int = 0  # Primary channel for gateway messages
