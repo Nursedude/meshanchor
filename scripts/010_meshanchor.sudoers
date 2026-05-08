@@ -59,6 +59,24 @@ Cmnd_Alias MESHANCHOR_SYSTEMD = /usr/bin/systemctl daemon-reload
 
 Cmnd_Alias MESHANCHOR_LAUNCHER = /usr/bin/python3 /opt/meshanchor/src/launcher.py *
 
+# Drop-in installation for systemd unit overrides (cache-path fix, env
+# pinning, etc.). Scoped to /etc/systemd/system/meshanchor-*.service.d/
+# only, with sources restricted to /tmp/meshanchor-*.conf — the operator
+# (or claude on the operator's behalf) stages the .conf as wh6gxz under
+# /tmp first, then sudo install copies it atomically into the correct
+# drop-in directory. Wildcards in sudoers do NOT match `/` so /tmp/foo.conf
+# matches but /tmp/x/y.conf does not, and `..` segments fail the match.
+Cmnd_Alias MESHANCHOR_DROPIN = \
+    /usr/bin/mkdir -p /etc/systemd/system/meshanchor.service.d, \
+    /usr/bin/mkdir -p /etc/systemd/system/meshanchor-daemon.service.d, \
+    /usr/bin/mkdir -p /etc/systemd/system/meshanchor-map.service.d, \
+    /usr/bin/install -d /etc/systemd/system/meshanchor.service.d, \
+    /usr/bin/install -d /etc/systemd/system/meshanchor-daemon.service.d, \
+    /usr/bin/install -d /etc/systemd/system/meshanchor-map.service.d, \
+    /usr/bin/install -m 0644 /tmp/meshanchor-*.conf /etc/systemd/system/meshanchor.service.d/*.conf, \
+    /usr/bin/install -m 0644 /tmp/meshanchor-*.conf /etc/systemd/system/meshanchor-daemon.service.d/*.conf, \
+    /usr/bin/install -m 0644 /tmp/meshanchor-*.conf /etc/systemd/system/meshanchor-map.service.d/*.conf
+
 MESHANCHOR_OPS ALL=(root) NOPASSWD: \
     MESHANCHOR_SVC_RESTART, \
     MESHANCHOR_SVC_START, \
@@ -66,4 +84,5 @@ MESHANCHOR_OPS ALL=(root) NOPASSWD: \
     MESHANCHOR_SVC_STATUS, \
     MESHANCHOR_SVC_RELOAD, \
     MESHANCHOR_SYSTEMD, \
-    MESHANCHOR_LAUNCHER
+    MESHANCHOR_LAUNCHER, \
+    MESHANCHOR_DROPIN
