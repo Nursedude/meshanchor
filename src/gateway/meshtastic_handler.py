@@ -107,6 +107,10 @@ class MeshtasticHandler(BaseMessageHandler):
         self._conn_manager = None
         self._pubsub_handler = None
 
+        # Track whether we already warned that meshtasticd appears to be down.
+        # Reset on a successful connect so a fresh outage re-emits the warning.
+        self._service_down_warned = False
+
         # Reconnection strategy
         self._reconnect = ReconnectStrategy.for_meshtastic()
 
@@ -198,13 +202,18 @@ class MeshtasticHandler(BaseMessageHandler):
             return self._connected
 
         # Advisory pre-flight: warn if meshtasticd not detected, but attempt
-        # connection anyway — service may be running outside systemd (Docker, manual)
+        # connection anyway — service may be running outside systemd (Docker, manual).
+        # Warn once per outage; further retries log at DEBUG to avoid log spam.
         status = check_service('meshtasticd')
         if not status.available:
-            logger.warning("meshtasticd service check: %s (attempting connection anyway)",
-                           status.message)
-            if status.fix_hint:
-                logger.info("Fix: %s", status.fix_hint)
+            if not self._service_down_warned:
+                logger.warning("meshtasticd service check: %s (attempting connection anyway)",
+                               status.message)
+                if status.fix_hint:
+                    logger.info("Fix: %s", status.fix_hint)
+                self._service_down_warned = True
+            else:
+                logger.debug("meshtasticd still unavailable: %s", status.message)
 
         try:
             host = self.config.meshtastic.host
@@ -241,6 +250,7 @@ class MeshtasticHandler(BaseMessageHandler):
             self._update_nodes()
 
             self._connected = True
+            self._service_down_warned = False
             logger.info("Connected to Meshtastic via connection manager")
             self._notify_status("meshtastic_connected")
             return True

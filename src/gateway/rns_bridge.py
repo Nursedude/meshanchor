@@ -347,7 +347,15 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             self._heartbeat.start()
             logger.info("Cross-gateway heartbeat enabled (role=%s)", hb_config.role)
 
-        if self.config.bridge_mode == "mqtt_bridge" and HAS_MQTT_BRIDGE:
+        meshtastic_enabled = getattr(self.config.meshtastic, 'enabled', True)
+        if not meshtastic_enabled:
+            logger.info(
+                "Meshtastic handler disabled via config (meshtastic.enabled=false); "
+                "gateway will operate without a Meshtastic peer"
+            )
+            self._mesh_handler = None
+            self.health.set_subsystem_enabled("meshtastic", False)
+        elif self.config.bridge_mode == "mqtt_bridge" and HAS_MQTT_BRIDGE:
             logger.info("Using MQTT bridge handler (zero-interference mode)")
             self._mesh_handler = MQTTBridgeHandler(
                 config=self.config,
@@ -386,7 +394,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             )
 
         # Register Meshtastic sender now that handler exists
-        if self._persistent_queue:
+        if self._persistent_queue and self._mesh_handler:
             self._persistent_queue.register_sender(
                 "meshtastic", self._mesh_handler.queue_send
             )
