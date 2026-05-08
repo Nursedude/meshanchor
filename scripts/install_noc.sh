@@ -499,6 +499,7 @@ fi
 apt-get update -qq
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
+    python3-msgpack \
     git wget curl gnupg \
     libusb-1.0-0 \
     mosquitto mosquitto-clients \
