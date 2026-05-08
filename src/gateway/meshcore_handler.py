@@ -1234,6 +1234,18 @@ class MeshCoreHandler(BaseMessageHandler):
             self._radio.set_channel(idx, name, secret_hex)
         )
 
+    def set_radio_name(self, name: str) -> Dict[str, Any]:
+        """Set the advertised node name. Caller should send_advert after."""
+        return self._run_radio_write(self._radio.set_name(name))
+
+    def set_radio_coords(self, lat: float, lon: float) -> Dict[str, Any]:
+        """Set the radio's GPS coordinates. Caller should send_advert after."""
+        return self._run_radio_write(self._radio.set_coords(lat, lon))
+
+    def send_radio_advert(self, flood: bool = False) -> Dict[str, Any]:
+        """Broadcast an advertisement so peers pick up name/coords/key changes."""
+        return self._run_radio_write(self._radio.send_advert(flood=flood))
+
     # ── Session 4 — radio control surfaces ──────────────────────────────
 
     def reset_radio(self) -> Dict[str, Any]:

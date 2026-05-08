@@ -215,3 +215,212 @@ class MeshCoreRadioOpsMixin:
             "Wait ~10s for the radio to come back up, then use 'View' to "
             "confirm reconnection.",
         )
+
+    # ── Identity & position ─────────────────────────────────────────────
+
+    def _meshcore_identity_menu(self):
+        """Submenu: set node name / coords / send advertisement."""
+        while True:
+            snap = self._radio_fetch_state(refresh=False)
+            state = snap.get("radio") or {} if snap.get("ok") else {}
+            cur_name = state.get("node_name") or "(unknown)"
+            cur_lat = state.get("radio_lat")
+            cur_lon = state.get("radio_lon")
+            pos_str = (
+                f"{cur_lat:.5f}, {cur_lon:.5f}"
+                if cur_lat is not None and cur_lon is not None
+                else "(not set)"
+            )
+            subtitle = (
+                f"Current name: {cur_name}\n"
+                f"Current position: {pos_str}\n\n"
+                "Set what peers see for this node, then broadcast an "
+                "advertisement so other nodes pick up the change."
+            )
+            choice = self.ctx.dialog.menu(
+                "Identity & Position",
+                subtitle,
+                [
+                    ("name", "Set Node Name       Advertised long name (max 32 bytes)"),
+                    ("coords", "Set Coordinates     Lat / lon broadcast in adverts"),
+                    ("advert", "Send Advertisement  Broadcast name + coords now"),
+                    ("back", "Back"),
+                ],
+            )
+            if choice in (None, "back"):
+                return
+            dispatch = {
+                "name": ("Set Node Name", self._meshcore_set_name),
+                "coords": ("Set Coordinates", self._meshcore_set_coords),
+                "advert": ("Send Advertisement", self._meshcore_send_advert),
+            }
+            entry = dispatch.get(choice)
+            if entry:
+                self.ctx.safe_call(*entry)
+
+    def _meshcore_set_name(self):
+        """PUT /radio/name — change the advertised long name."""
+        snap = self._radio_fetch_state(refresh=False)
+        if not snap.get("ok"):
+            self.ctx.dialog.msgbox(
+                "Daemon Unreachable",
+                f"Couldn't read current radio state: {snap.get('error')}",
+            )
+            return
+        cur_name = (snap.get("radio") or {}).get("node_name") or ""
+
+        new_name = self.ctx.dialog.inputbox(
+            "Set Node Name",
+            "Advertised long name (max 32 bytes UTF-8).\n\n"
+            "Peers see this in adverts and chat. The 2-char shortname "
+            "is auto-derived by the firmware from this value.",
+            init=cur_name,
+        )
+        if new_name is None:
+            return
+        new_name = new_name.strip()
+        if not new_name:
+            self.ctx.dialog.msgbox("Set Node Name", "Name is empty — aborted.")
+            return
+        if len(new_name.encode("utf-8")) > 32:
+            self.ctx.dialog.msgbox(
+                "Set Node Name",
+                f"Name '{new_name}' is {len(new_name.encode('utf-8'))} bytes "
+                "(limit is 32). Pick a shorter name.",
+            )
+            return
+        if cur_name == new_name:
+            self.ctx.dialog.msgbox("Set Node Name", "No change — aborted.")
+            return
+        if not self.ctx.dialog.yesno(
+            "Confirm Set Name",
+            f"Change advertised name from\n\n  {cur_name or '(unknown)'}\n\nto\n\n  {new_name}\n\n"
+            "Continue?",
+            default_no=False,
+        ):
+            return
+        result = self._radio_put("name", {"name": new_name})
+        self._show_write_result("Set Node Name", result)
+        if result.get("ok"):
+            if self.ctx.dialog.yesno(
+                "Send Advertisement?",
+                "Name updated. Broadcast an advertisement now so peers "
+                "pick up the new name?",
+                default_no=False,
+            ):
+                self._meshcore_send_advert(skip_confirm=True)
+
+    def _meshcore_set_coords(self):
+        """PUT /radio/coords — change the advertised lat/lon."""
+        snap = self._radio_fetch_state(refresh=False)
+        state = snap.get("radio") or {}
+        cur_lat = state.get("radio_lat")
+        cur_lon = state.get("radio_lon")
+
+        lat_str = self.ctx.dialog.inputbox(
+            "Latitude",
+            "Latitude in decimal degrees (-90 to 90).\n\n"
+            "Empty leaves the current value.",
+            init=str(cur_lat) if cur_lat is not None else "",
+        )
+        if lat_str is None:
+            return
+        lon_str = self.ctx.dialog.inputbox(
+            "Longitude",
+            "Longitude in decimal degrees (-180 to 180):",
+            init=str(cur_lon) if cur_lon is not None else "",
+        )
+        if lon_str is None:
+            return
+        try:
+            lat = float(lat_str.strip())
+            lon = float(lon_str.strip())
+        except ValueError as e:
+            self.ctx.dialog.msgbox("Set Coordinates", f"Invalid input: {e}")
+            return
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            self.ctx.dialog.msgbox(
+                "Set Coordinates",
+                f"Out of range — lat must be -90..90, lon -180..180.\n"
+                f"Got lat={lat}, lon={lon}.",
+            )
+            return
+        if not self.ctx.dialog.yesno(
+            "Confirm Set Coords",
+            f"Push coordinates to radio?\n\n"
+            f"  Latitude:  {lat}\n"
+            f"  Longitude: {lon}\n\n"
+            "Coords are broadcast in adverts going forward. Continue?",
+            default_no=False,
+        ):
+            return
+        result = self._radio_put("coords", {"lat": lat, "lon": lon})
+        self._show_write_result("Set Coordinates", result)
+        if result.get("ok"):
+            if self.ctx.dialog.yesno(
+                "Send Advertisement?",
+                "Coordinates updated. Broadcast an advertisement now so "
+                "peers pick up the new position?",
+                default_no=False,
+            ):
+                self._meshcore_send_advert(skip_confirm=True)
+
+    def _meshcore_send_advert(self, skip_confirm: bool = False):
+        """POST /radio/advert — broadcast an advertisement."""
+        if not skip_confirm:
+            if not self.ctx.dialog.yesno(
+                "Send Advertisement",
+                "Broadcast a fresh advertisement?\n\n"
+                "Peers within range pick up the current name + coords + "
+                "public key. Use this after changing identity fields.",
+                default_no=False,
+            ):
+                return
+
+        flood = self.ctx.dialog.yesno(
+            "Flood?",
+            "Flood across the mesh (multi-hop), or single-hop only?\n\n"
+            "Yes = flood (use sparingly — uses airtime on every relay).\n"
+            "No  = single-hop (recommended for routine identity updates).",
+            default_no=True,
+        )
+
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = f"{self.CHAT_API_BASE}/radio/advert"
+        body = json.dumps({"flood": bool(flood)}).encode("utf-8")
+        try:
+            req = urllib.request.Request(
+                url, data=body, method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:
+            try:
+                err_payload = json.loads(e.read().decode("utf-8") or "{}")
+                msg = err_payload.get("error") or str(e)
+            except (ValueError, OSError):
+                msg = str(e)
+            self.ctx.dialog.msgbox(
+                "Send Advertisement — Failed",
+                f"HTTP {e.code}: {msg}",
+            )
+            return
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            self.ctx.dialog.msgbox(
+                "Send Advertisement — Failed",
+                f"Daemon unreachable: {e}",
+            )
+            return
+
+        self.ctx.dialog.msgbox(
+            "Advertisement Sent",
+            f"Advertisement broadcast ({'flood' if flood else 'single-hop'}).\n\n"
+            "Peers within range will see name + coords + key on next reception.",
+        )

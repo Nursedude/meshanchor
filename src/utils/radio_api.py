@@ -11,7 +11,10 @@ Routes (all served on :8081 by `ConfigAPIServer`):
     PUT  /radio/tx_power           — Phase 4b, localhost-only
     PUT  /radio/channel/<idx>      — Phase 4b, localhost-only
     PUT  /radio/preset             — Session 4, localhost-only
+    PUT  /radio/name               — Identity, localhost-only
+    PUT  /radio/coords             — Identity, localhost-only
     POST /radio/reset              — Session 4, localhost-only
+    POST /radio/advert             — Identity, localhost-only
 
 The handler argument is a live `ConfigAPIHandler` instance — we just need its
 I/O surface (`path`, `_send_json`, `_send_error_json`, `_read_body`). Typed as
@@ -136,6 +139,21 @@ def handle_put(handler: Any) -> None:
                 name=body.get("name", ""),
                 secret_hex=body.get("secret"),
             )
+        elif path == "/radio/name":
+            name = body.get("name")
+            if not isinstance(name, str):
+                handler._send_error_json(400, "name requires a string 'name' field")
+                return
+            state = active.set_radio_name(name=name)
+        elif path == "/radio/coords":
+            if "lat" not in body or "lon" not in body:
+                handler._send_error_json(
+                    400, "coords requires 'lat' and 'lon' fields"
+                )
+                return
+            state = active.set_radio_coords(
+                lat=body.get("lat"), lon=body.get("lon"),
+            )
         else:
             handler._send_error_json(404, f"Unknown radio path: {handler.path}")
             return
@@ -167,17 +185,32 @@ def handle_post(handler: Any) -> None:
         return
 
     path = handler.path.split("?", 1)[0]
-    if path != "/radio/reset":
-        handler._send_error_json(404, f"Unknown radio path: {handler.path}")
+    if path == "/radio/reset":
+        try:
+            state = active.reset_radio()
+        except RadioWriteError as e:
+            handler._send_error_json(400, str(e))
+            return
+        except Exception as e:
+            handler._send_error_json(500, f"Radio reset failed: {e}")
+            return
+        handler._send_json({"radio": state})
         return
 
-    try:
-        state = active.reset_radio()
-    except RadioWriteError as e:
-        handler._send_error_json(400, str(e))
-        return
-    except Exception as e:
-        handler._send_error_json(500, f"Radio reset failed: {e}")
+    if path == "/radio/advert":
+        body = handler._read_body() or {}
+        if not isinstance(body, dict):
+            body = {}
+        flood = bool(body.get("flood", False))
+        try:
+            state = active.send_radio_advert(flood=flood)
+        except RadioWriteError as e:
+            handler._send_error_json(400, str(e))
+            return
+        except Exception as e:
+            handler._send_error_json(500, f"send_advert failed: {e}")
+            return
+        handler._send_json({"radio": state})
         return
 
-    handler._send_json({"radio": state})
+    handler._send_error_json(404, f"Unknown radio path: {handler.path}")
