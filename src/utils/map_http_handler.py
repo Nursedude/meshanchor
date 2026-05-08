@@ -39,6 +39,7 @@ Radio Control API (MeshAnchor-owned):
 - POST /api/radio/message -> send message via radio
 """
 
+import gzip
 import json
 import ipaddress
 import logging
@@ -382,21 +383,35 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         else:
             self.send_error(404, f"File not found: {path_only}")
 
+    # Gzip threshold: payloads smaller than this skip compression so the
+    # CPU spent on tiny responses doesn't outweigh the transfer savings.
+    _GZIP_MIN_BYTES = 1024
+
+    def _accepts_gzip(self) -> bool:
+        """True if the client advertised gzip support."""
+        ae = self.headers.get('Accept-Encoding', '')
+        return 'gzip' in ae.lower()
+
+    def _maybe_gzip(self, data: bytes) -> tuple[bytes, Optional[str]]:
+        """Compress `data` with gzip if the client supports it and the
+        payload is large enough to be worth it.
+
+        Returns ``(payload_bytes, content_encoding)`` — caller writes the
+        ``Content-Encoding`` header iff the second element is non-None.
+        """
+        if len(data) < self._GZIP_MIN_BYTES or not self._accepts_gzip():
+            return data, None
+        # compresslevel=6 = python default. For 28MB JSON of node features
+        # this cuts the wire payload ~8.5x in well under 1s on a Pi 5.
+        return gzip.compress(data, compresslevel=6), 'gzip'
+
     def _serve_geojson(self):
         """Serve live node GeoJSON."""
         if self.collector:
             geojson = self.collector.collect()
         else:
             geojson = {"type": "FeatureCollection", "features": []}
-
-        data = json.dumps(geojson).encode()
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(data)))
-        self._send_cors_header()
-        self.send_header('Cache-Control', 'no-cache')
-        self.end_headers()
-        self.wfile.write(data)
+        self._serve_json(geojson)
 
     def _serve_map(self):
         """Serve the node_map.html file."""
@@ -408,14 +423,18 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         if map_path.exists():
             with open(map_path, 'rb') as f:
                 data = f.read()
+            payload, encoding = self._maybe_gzip(data)
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
-            self.send_header('Content-Length', str(len(data)))
+            if encoding:
+                self.send_header('Content-Encoding', encoding)
+                self.send_header('Vary', 'Accept-Encoding')
+            self.send_header('Content-Length', str(len(payload)))
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
             self.end_headers()
-            self.wfile.write(data)
+            self.wfile.write(payload)
         else:
             self.send_error(404, f"Map file not found: {map_path}")
 
@@ -591,15 +610,19 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         self._serve_json(geojson)
 
     def _serve_json(self, obj: Any, status: int = 200):
-        """Helper to serve a JSON response."""
+        """Helper to serve a JSON response (gzipped when client supports)."""
         data = json.dumps(obj).encode()
+        payload, encoding = self._maybe_gzip(data)
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(data)))
+        if encoding:
+            self.send_header('Content-Encoding', encoding)
+            self.send_header('Vary', 'Accept-Encoding')
+        self.send_header('Content-Length', str(len(payload)))
         self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(payload)
 
     def _serve_coverage(self, parts: List[str]):
         """Serve terrain-aware coverage prediction for a location.
