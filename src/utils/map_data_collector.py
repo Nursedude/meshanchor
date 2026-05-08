@@ -43,9 +43,15 @@ _msgpack, _HAS_MSGPACK = safe_import('msgpack')
 
 from utils._map_collector_rns import RNSDataCollectorMixin
 from utils._map_collector_meshtastic import MeshtasticDataCollectorMixin
+from utils._map_collector_meshcore_public import MeshCorePublicCollectorMixin
+from utils.meshcore_positions import get_position_store
 
 
-class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
+class MapDataCollector(
+    MeshtasticDataCollectorMixin,
+    RNSDataCollectorMixin,
+    MeshCorePublicCollectorMixin,
+):
     """Collects node data from all available sources into unified GeoJSON.
 
     Sources (tried in order, all merged):
@@ -429,6 +435,20 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             if fid and fid not in features:
                 features[fid] = f
 
+        # Source 5b: map.meshcore.dev public directory.
+        # Operator-submitted MeshCore nodes worldwide (~42k). MeshCore has
+        # no MQTT firehose, so this directory IS the live picture for
+        # MeshCore. Tagged with the existing `meshcore_public` source
+        # origin (already in node_history.py retention tiers; 30 days
+        # retention same as aredn_worldmap).
+        meshcore_public_features = self._tag_source_origin(
+            self._collect_meshcore_public(), "meshcore_public",
+        )
+        for f in meshcore_public_features:
+            fid = f["properties"].get("id", "")
+            if fid and fid not in features:
+                features[fid] = f
+
         # Source 6: meshforge-maps aggregated GeoJSON (Phase 6.1).
         # Lowest-priority external bulk source — only fills gaps. Local
         # collectors take precedence so meshforge-maps can't shadow data
@@ -457,6 +477,7 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             tcp_features, mqtt_features, tracker_features, aredn_features,
             direct_radio_features, rns_direct_features, tracker_unified_features,
             meshcore_features, meshforge_maps_features,
+            meshcore_public_features,
         )
         geojson = {
             "type": "FeatureCollection",
@@ -482,7 +503,8 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             f"direct_radio:{sources.get('direct_radio', 0)} "
             f"mqtt:{sources.get('mqtt', 0)} "
             f"tracker:{sources.get('node_tracker', 0)} "
-            f"rns_direct:{sources.get('rns_direct', 0)})"
+            f"rns_direct:{sources.get('rns_direct', 0)} "
+            f"meshcore_public:{sources.get('meshcore_public', 0)})"
         )
 
         # Cache result
@@ -609,8 +631,22 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             logger.debug("MeshCore: no nodes in tracker")
             return []
 
+        # Operator-placed positions (~/.config/meshanchor/meshcore_positions.json).
+        # MeshCore advertisements don't carry GPS, so a discovered contact
+        # only lands as a map marker if either (a) the node grew telemetry-
+        # with-position upstream, or (b) the operator manually pinned it
+        # via the TUI. Look up by pubkey so the join is stable across
+        # name changes.
+        try:
+            placements = get_position_store().list()
+        except Exception as e:
+            logger.debug(f"meshcore_positions read error: {e}")
+            placements = {}
+
         features: List[Dict] = []
         position_less: List[Dict] = []
+        placed_count = 0
+        consumed_pubkeys: set = set()
 
         for node in mc_nodes:
             position = getattr(node, 'position', None)
@@ -635,31 +671,98 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
                     role=getattr(node, 'meshcore_role', '') or '',
                     last_seen=node.get_age_string() if hasattr(node, 'get_age_string') else '',
                 ))
-            else:
-                last_seen = (
-                    node.get_age_string()
-                    if hasattr(node, 'get_age_string')
-                    else 'unknown'
+                continue
+
+            pubkey = getattr(node, 'meshcore_pubkey', '') or ''
+            placement = placements.get(pubkey.lower()) if pubkey else None
+            if placement and self._is_valid_coordinate(
+                placement.get("lat"), placement.get("lon")
+            ):
+                feature = self._make_feature(
+                    node_id=node.id,
+                    name=placement.get("name") or node.name or node.id,
+                    lat=placement["lat"],
+                    lon=placement["lon"],
+                    network="meshcore",
+                    is_online=node.is_online,
+                    snr=node.snr,
+                    rssi=node.rssi,
+                    role=getattr(node, 'meshcore_role', '') or '',
+                    last_seen=node.get_age_string() if hasattr(node, 'get_age_string') else '',
                 )
-                position_less.append({
-                    "id": node.id,
-                    "name": node.name or node.id,
-                    "network": "meshcore",
-                    "is_online": node.is_online,
-                    "last_seen": last_seen,
-                    "role": getattr(node, 'meshcore_role', '') or '',
-                    "snr": node.snr,
-                    "rssi": node.rssi,
-                    "hops_away": getattr(node, 'meshcore_hops', None),
-                    "pubkey": getattr(node, 'meshcore_pubkey', '') or '',
-                })
+                # Tag as operator-placed so the UI can distinguish hand-pinned
+                # nodes from radio-broadcast positions.
+                feature["properties"]["source"] = "meshcore_placed"
+                feature["properties"]["placed_at"] = placement.get("set_at")
+                if placement.get("notes"):
+                    feature["properties"]["notes"] = placement["notes"]
+                if placement.get("alt") is not None:
+                    feature["properties"]["altitude"] = placement["alt"]
+                features.append(feature)
+                placed_count += 1
+                consumed_pubkeys.add(pubkey.lower())
+                continue
+
+            last_seen = (
+                node.get_age_string()
+                if hasattr(node, 'get_age_string')
+                else 'unknown'
+            )
+            position_less.append({
+                "id": node.id,
+                "name": node.name or node.id,
+                "network": "meshcore",
+                "is_online": node.is_online,
+                "last_seen": last_seen,
+                "role": getattr(node, 'meshcore_role', '') or '',
+                "snr": node.snr,
+                "rssi": node.rssi,
+                "hops_away": getattr(node, 'meshcore_hops', None),
+                "pubkey": pubkey,
+            })
 
         # Surface position-less MeshCore nodes via the side-panel pipeline.
         self._nodes_without_position.extend(position_less)
         self._total_nodes_seen += len(mc_nodes)
 
+        # Second pass: placements whose pubkey we've never heard from. The
+        # operator may have pre-pinned a friend's node or a known fixed
+        # install that simply hasn't broadcast within range yet. Emit it
+        # as an offline operator-placed marker so it shows up on the map.
+        ghost_placed = 0
+        for pubkey, placement in placements.items():
+            if pubkey in consumed_pubkeys:
+                continue
+            if not self._is_valid_coordinate(
+                placement.get("lat"), placement.get("lon")
+            ):
+                continue
+            feature = self._make_feature(
+                node_id=f"meshcore:{pubkey}",
+                name=placement.get("name") or f"MC-{pubkey[:8]}",
+                lat=placement["lat"],
+                lon=placement["lon"],
+                network="meshcore",
+                is_online=False,
+                snr=None,
+                rssi=None,
+                role="",
+                last_seen="never heard",
+            )
+            feature["properties"]["source"] = "meshcore_placed"
+            feature["properties"]["placed_at"] = placement.get("set_at")
+            feature["properties"]["pubkey"] = pubkey
+            if placement.get("notes"):
+                feature["properties"]["notes"] = placement["notes"]
+            if placement.get("alt") is not None:
+                feature["properties"]["altitude"] = placement["alt"]
+            features.append(feature)
+            ghost_placed += 1
+
         logger.debug(
-            f"MeshCore: {len(features)} with GPS, "
+            f"MeshCore: {len(features)} with GPS "
+            f"({placed_count} operator-placed seen, "
+            f"{ghost_placed} placed-not-heard), "
             f"{len(position_less)} without GPS (total: {len(mc_nodes)})"
         )
         return features
@@ -1087,7 +1190,7 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
         self, tcp: List, mqtt: List, tracker: List, aredn: List = None,
         direct_radio: List = None, rns_direct: List = None,
         unified_tracker: List = None, meshcore: List = None,
-        meshforge_maps: List = None,
+        meshforge_maps: List = None, meshcore_public: List = None,
     ) -> Dict:
         """Summarize which sources contributed data."""
         summary = {
@@ -1100,6 +1203,7 @@ class MapDataCollector(MeshtasticDataCollectorMixin, RNSDataCollectorMixin):
             "aredn": len(aredn) if aredn else 0,
             "rns_direct": len(rns_direct) if rns_direct else 0,
             "meshforge_maps": len(meshforge_maps) if meshforge_maps else 0,
+            "meshcore_public": len(meshcore_public) if meshcore_public else 0,
         }
         # Surface meshtastic-disabled state so the map UI / API can
         # display "Meshtastic gateway disabled by profile" if needed.
