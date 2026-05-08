@@ -191,3 +191,100 @@ class TestPositionLessExtension:
             collector.collect(max_age_seconds=0)
             assert len(collector._nodes_without_position) == 1
             assert collector._nodes_without_position[0]["id"] == "meshcore:cycle2"
+
+
+class TestStaleWhileRevalidate:
+    """Stale-cache requests return immediately; refresh runs in background."""
+
+    def _make_collector(self):
+        return MapDataCollector(
+            meshtastic_enabled=False,
+            enable_history=False,
+            meshforge_maps_enabled=False,
+        )
+
+    def test_stale_cache_returns_immediately_and_kicks_off_refresh(self):
+        """Stale cache: caller gets stale data; a background refresh runs."""
+        import threading
+        import time as _t
+
+        collector = self._make_collector()
+
+        # Prime the in-memory cache directly so we can drive the
+        # stale-while-revalidate branch without doing a real collect.
+        sentinel = {"type": "FeatureCollection", "features": [],
+                    "properties": {"marker": "stale"}}
+        collector._cached_geojson = sentinel
+        collector._last_collect = _t.time() - 1000  # ancient
+
+        refresh_started = threading.Event()
+        refresh_can_finish = threading.Event()
+
+        def slow_refresh():
+            refresh_started.set()
+            refresh_can_finish.wait(timeout=5)
+            collector._cached_geojson = {"type": "FeatureCollection",
+                                         "features": [],
+                                         "properties": {"marker": "fresh"}}
+            collector._last_collect = _t.time()
+
+        with patch.object(collector, "_collect_locked", side_effect=slow_refresh):
+            t0 = _t.time()
+            result = collector.collect(max_age_seconds=30)
+            elapsed = _t.time() - t0
+
+            # Stale data returned immediately, NOT after refresh completes.
+            assert result is sentinel
+            assert elapsed < 0.5, f"stale path blocked for {elapsed:.2f}s"
+
+            # Background refresh should have started.
+            assert refresh_started.wait(timeout=2), "background refresh did not start"
+
+            # Let the refresh finish and confirm the lock is released.
+            refresh_can_finish.set()
+            for _ in range(50):
+                if collector._collect_lock.acquire(blocking=False):
+                    collector._collect_lock.release()
+                    break
+                _t.sleep(0.05)
+            else:
+                pytest.fail("background refresh did not release the lock")
+
+    def test_concurrent_stale_calls_spawn_only_one_refresh(self):
+        """Second stale request while a refresh is in flight does not spawn another."""
+        import threading
+        import time as _t
+
+        collector = self._make_collector()
+        collector._cached_geojson = {"type": "FeatureCollection", "features": []}
+        collector._last_collect = _t.time() - 1000
+
+        refresh_calls = []
+        proceed = threading.Event()
+
+        def slow_refresh():
+            refresh_calls.append(1)
+            proceed.wait(timeout=5)
+
+        with patch.object(collector, "_collect_locked", side_effect=slow_refresh):
+            # First call: kicks off a background refresh.
+            collector.collect(max_age_seconds=30)
+            # Wait for the bg thread to grab the lock.
+            for _ in range(50):
+                if collector._collect_lock.locked():
+                    break
+                _t.sleep(0.02)
+            # Second call: should see lock held, return stale, NOT spawn another refresh.
+            collector.collect(max_age_seconds=30)
+            collector.collect(max_age_seconds=30)
+
+            proceed.set()
+            # Drain the bg thread.
+            for _ in range(50):
+                if not collector._collect_lock.locked():
+                    break
+                _t.sleep(0.05)
+
+        assert len(refresh_calls) == 1, (
+            f"expected 1 background refresh, got {len(refresh_calls)}"
+        )

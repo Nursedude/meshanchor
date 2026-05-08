@@ -308,8 +308,18 @@ class MapDataCollector(
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.
 
+        Stale-while-revalidate: if a cached result exists but is older
+        than ``max_age_seconds``, return it immediately and refresh in a
+        background thread (one refresh at a time). Only the very first
+        call — when no cache exists yet — blocks for a full collect
+        cycle. This keeps the geojson endpoint responsive on Pi-class
+        hardware where a cold collect (42k features × json.dumps + SQLite
+        history writes) can take 5–17s.
+
         Args:
-            max_age_seconds: Use cached data if collected within this window.
+            max_age_seconds: Use cached data if collected within this
+                window. Pass 0 to force a synchronous collect (used by
+                tests and explicit refresh paths).
 
         Returns:
             GeoJSON FeatureCollection with all known nodes.
@@ -320,13 +330,42 @@ class MapDataCollector(
                 time.time() - self._last_collect < max_age_seconds):
             return self._cached_geojson
 
+        # max_age_seconds=0 = explicit synchronous collect (test path).
+        if max_age_seconds == 0:
+            with self._collect_lock:
+                return self._collect_locked()
+
+        # Stale-but-cached: serve stale, refresh in background. Use
+        # non-blocking acquire so a refresh already in flight doesn't
+        # spawn duplicates — the running thread will release the lock.
+        if self._cached_geojson is not None:
+            if self._collect_lock.acquire(blocking=False):
+                threading.Thread(
+                    target=self._refresh_in_background,
+                    name="MapDataCollector-refresh",
+                    daemon=True,
+                ).start()
+            return self._cached_geojson
+
+        # Cold start (no cache yet): must block for the first collect.
         with self._collect_lock:
-            # Re-check cache under the lock: another worker may have just
-            # finished a collect while we waited.
-            if (self._cached_geojson and self._last_collect and
-                    time.time() - self._last_collect < max_age_seconds):
+            if self._cached_geojson is not None:
                 return self._cached_geojson
             return self._collect_locked()
+
+    def _refresh_in_background(self) -> None:
+        """Run a collect cycle, then release the lock.
+
+        Caller must already hold ``_collect_lock`` (acquired non-blockingly
+        from ``collect()``). Exceptions are logged so a transient failure
+        doesn't poison subsequent refreshes.
+        """
+        try:
+            self._collect_locked()
+        except Exception:
+            logger.exception("Background map data refresh failed")
+        finally:
+            self._collect_lock.release()
 
     @staticmethod
     def _tag_source_origin(features: List[Dict[str, Any]], origin: str) -> List[Dict[str, Any]]:
