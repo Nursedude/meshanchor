@@ -405,37 +405,75 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         # this cuts the wire payload ~8.5x in well under 1s on a Pi 5.
         return gzip.compress(data, compresslevel=6), 'gzip'
 
+    # Region bboxes: (lat_min, lat_max, lon_min, lon_max).
+    # ``world`` (no filter) is handled by absence from this map. Pacific +
+    # other dateline-crossing regions are intentionally omitted for now
+    # because bbox math without longitude wrap-around mis-classifies them;
+    # operator can fall back to ``world`` and zoom in.
+    REGION_BBOXES = {
+        # Continental US + Alaska + Hawaii + Puerto Rico/USVI
+        "us": (15.0, 72.0, -170.0, -65.0),
+        # North America (US + Canada + Mexico + Central America)
+        "na": (7.0, 84.0, -170.0, -50.0),
+        # Hawaiian Islands only
+        "hi": (18.0, 23.0, -161.0, -154.0),
+        # Europe (mainland + UK + Iceland + Scandinavia)
+        "eu": (34.0, 72.0, -25.0, 45.0),
+        # Asia (mainland; excludes east of dateline)
+        "as": (-10.0, 60.0, 60.0, 145.0),
+        # Australia + NZ
+        "oc": (-50.0, -10.0, 110.0, 180.0),
+    }
+
     def _serve_geojson(self):
-        """Serve live node GeoJSON, with optional age-cutoff filter.
+        """Serve live node GeoJSON, with optional age and region filters.
 
         Query params:
           ``max_age_days=N``  Drop features whose ``last_heard`` is older
                               than N days. ``0`` disables the filter.
-                              When omitted, falls back to the operator
-                              default in map_settings (key
-                              ``max_age_days``, default 30).
+                              Default falls back to map_settings.max_age_days
+                              (ship default 30).
+          ``region=KEY``      Drop features outside the region bbox.
+                              KEY in {us, na, hi, eu, as, oc, world}.
+                              ``world`` disables the filter. Default falls
+                              back to map_settings.region (ship default
+                              ``us``).
 
-        The age filter is critical for the public meshcore.dev fetcher,
-        which can return 40k+ nodes — many last seen months ago. Filtering
-        at serve time keeps the collector cache warm; the operator can A/B
-        with ``?max_age_days=0`` for the unfiltered set.
+        Both filters are critical for the public meshcore.dev fetcher,
+        which can return 40k+ nodes — many old, many on other continents.
+        Filtering at serve time keeps the collector cache warm; the operator
+        can A/B with ``?max_age_days=0&region=world`` for the unfiltered
+        set.
         """
         if not self.collector:
             self._serve_json({"type": "FeatureCollection", "features": []})
             return
 
-        # The cache is mutable — never mutate it in place; always return
-        # a shallow copy with a filtered feature list.
+        # Always shallow-copy before mutating — the collector cache is
+        # shared across concurrent requests via ThreadingHTTPServer.
         geojson = self.collector.collect()
+        features = geojson.get("features") or []
+
         max_age_days = self._resolve_max_age_days()
+        region = self._resolve_region()
+
+        annotations: Dict[str, Any] = {}
         if max_age_days is not None and max_age_days > 0:
-            filtered = self._filter_by_age(geojson.get("features") or [], max_age_days)
+            features = self._filter_by_age(features, max_age_days)
+            annotations["max_age_days"] = max_age_days
+        if region and region != "world":
+            bbox = self.REGION_BBOXES.get(region)
+            if bbox is not None:
+                features = self._filter_by_region(features, bbox)
+                annotations["region"] = region
+                annotations["region_bbox"] = list(bbox)
+
+        if annotations:
             geojson = dict(geojson)
-            geojson["features"] = filtered
-            # Annotate so the UI can show the filter without guessing.
+            geojson["features"] = features
             props = dict(geojson.get("properties") or {})
-            props["max_age_days"] = max_age_days
-            props["features_after_age_filter"] = len(filtered)
+            props.update(annotations)
+            props["features_after_filter"] = len(features)
             geojson["properties"] = props
         self._serve_json(geojson)
 
@@ -484,6 +522,70 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
                 kept.append(f)
                 continue
             if last_heard >= cutoff:
+                kept.append(f)
+        return kept
+
+    def _resolve_region(self) -> Optional[str]:
+        """Read region from the query string or settings, or None.
+
+        Returns a known region key (``us``/``na``/``hi``/``eu``/``as``/
+        ``oc``/``world``) or None when value is unrecognized. Caller
+        treats None as "no filter".
+        """
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        raw = (qs.get("region") or [None])[0]
+        if raw is not None:
+            value = raw.strip().lower()
+            if value == "" or value == "world":
+                return "world"
+            if value in self.REGION_BBOXES:
+                return value
+            return None
+        try:
+            settings = self.collector._settings
+        except AttributeError:
+            return "us"
+        if settings is None:
+            return "us"
+        try:
+            saved = (settings.get("region", "us") or "us").strip().lower()
+        except (TypeError, AttributeError):
+            return "us"
+        if saved == "world" or saved in self.REGION_BBOXES:
+            return saved
+        return "us"
+
+    @staticmethod
+    def _filter_by_region(features: list, bbox: tuple) -> list:
+        """Keep features whose [lon, lat] falls inside ``bbox``.
+
+        ``bbox`` is (lat_min, lat_max, lon_min, lon_max). is_local features
+        are always kept (the NOC's own radio is in-region by definition,
+        even if the bbox is wrong). Features without valid geometry are
+        kept (the side-panel pipeline expects them).
+        """
+        lat_min, lat_max, lon_min, lon_max = bbox
+        kept = []
+        for f in features:
+            props = f.get("properties") or {}
+            if props.get("is_local"):
+                kept.append(f)
+                continue
+            geom = f.get("geometry") or {}
+            coords = geom.get("coordinates")
+            if (
+                not isinstance(coords, (list, tuple))
+                or len(coords) < 2
+            ):
+                kept.append(f)
+                continue
+            try:
+                lon, lat = float(coords[0]), float(coords[1])
+            except (TypeError, ValueError):
+                kept.append(f)
+                continue
+            if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
                 kept.append(f)
         return kept
 
