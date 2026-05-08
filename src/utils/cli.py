@@ -82,6 +82,56 @@ def is_meshtastic_cli_installed():
     return find_meshtastic_cli() is not None
 
 
+def find_meshcore_cli():
+    """Find the meshcore-cli executable.
+
+    Mirrors :func:`find_meshtastic_cli` but also checks the MeshAnchor venv
+    bin (``/opt/meshanchor/venv/bin/meshcore-cli``) which is where
+    ``install_noc.sh`` lands the upstream package on the field NOC.
+
+    Returns:
+        str: Full path to meshcore-cli, or None if not found.
+    """
+    cli_path = shutil.which('meshcore-cli')
+    if cli_path:
+        return cli_path
+
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user and sudo_user != 'root':
+        user_path = f'/home/{sudo_user}/.local/bin/meshcore-cli'
+        if os.path.isfile(user_path) and os.access(user_path, os.X_OK):
+            return user_path
+
+    from utils.paths import get_real_user_home
+    known_paths = [
+        '/opt/meshanchor/venv/bin/meshcore-cli',
+        '/root/.local/bin/meshcore-cli',
+        str(get_real_user_home() / '.local' / 'bin' / 'meshcore-cli'),
+        '/usr/local/bin/meshcore-cli',
+    ]
+    for path in known_paths:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+
+    try:
+        home_base = Path('/home')
+        if home_base.is_dir():
+            for user_dir in home_base.iterdir():
+                if user_dir.is_dir():
+                    candidate = user_dir / '.local' / 'bin' / 'meshcore-cli'
+                    if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                        return str(candidate)
+    except (PermissionError, OSError):
+        pass
+
+    return None
+
+
+def is_meshcore_cli_installed():
+    """Check if meshcore-cli is installed."""
+    return find_meshcore_cli() is not None
+
+
 def run_meshtastic_command(args, connection_args=None, capture=True, timeout=60):
     """Run a meshtastic CLI command
 

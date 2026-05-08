@@ -232,4 +232,9 @@ def get_all_handlers() -> List[Type]:
     from handlers.meshcore_positions import MeshCorePositionsHandler
     handlers.append(MeshCorePositionsHandler)
 
+    # Batch 21 — MeshCore CLI passthrough: drop the operator into
+    # meshcore-cli with the daemon's radio ownership handed off cleanly.
+    from handlers.meshcore_cli import MeshCoreCLIHandler
+    handlers.append(MeshCoreCLIHandler)
+
     return handlers
