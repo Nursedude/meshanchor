@@ -346,6 +346,22 @@ class MeshCoreConfig:
     # Polling fallback for CHANNEL_MSG_RECV event bug (meshcore_py #1232)
     channel_poll_interval_sec: int = 5
 
+    # Periodic advert heartbeat — meshcore_py only exposes one-shot
+    # send_advert(); without a host-driven heartbeat the NOC's name +
+    # coords + pubkey age out of every neighbor's contact-share TTL and
+    # portable nodes can't `share_contact` to introduce others. The
+    # daemon fires send_advert(flood=False) every N seconds. 0 disables
+    # the heartbeat (one-shot adverts via /radio/advert still work).
+    # Default 600s (10 min) — high enough to stay inside common
+    # contact-freshness windows, low enough to avoid airtime hogging
+    # at LoRa data rates.
+    advert_heartbeat_sec: int = 600
+    # Use flood=True on the heartbeat. Off by default because flood
+    # adverts re-radiate across every repeater on the channel; only
+    # turn it on for sparse/long-range NOC topologies where the gateway
+    # genuinely needs to be heard everywhere on the mesh.
+    advert_heartbeat_flood: bool = False
+
     # ── Session 3 (config-ownership): operator's desired radio state ──
     #
     # ``region`` + ``preset`` is the high-level handle — pick a row in
