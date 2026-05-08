@@ -28,9 +28,20 @@ import subprocess
 import time
 from typing import Dict, List, Optional
 
-# Meshtastic imports — optional gateway support in MeshAnchor
+# Meshtastic imports — optional gateway support in MeshAnchor.
+# Split into independent try blocks: meshtastic_http does not exist in
+# MeshAnchor (it was never ported from MeshForge). Importing it together
+# with meshtastic_connection meant a single ImportError nuked all five
+# names, and any subsequent reset_connection_manager() call crashed
+# /api/nodes/geojson with TypeError: 'NoneType' object is not callable.
 try:
     from utils.meshtastic_http import get_http_client
+    _HAS_MESHTASTIC_HTTP = True
+except ImportError:
+    _HAS_MESHTASTIC_HTTP = False
+    get_http_client = None
+
+try:
     from utils.meshtastic_connection import (
         get_connection_manager, safe_close_interface,
         ConnectionMode, reset_connection_manager,
@@ -38,7 +49,6 @@ try:
     _HAS_MESHTASTIC_CONN = True
 except ImportError:
     _HAS_MESHTASTIC_CONN = False
-    get_http_client = None
     get_connection_manager = None
     safe_close_interface = None
     ConnectionMode = None
@@ -100,6 +110,8 @@ class MeshtasticDataCollectorMixin:
         needing the TCP connection lock. This is the preferred collection
         method because it doesn't conflict with the gateway bridge.
         """
+        if not _HAS_MESHTASTIC_HTTP:
+            return []
         try:
             client = get_http_client(host=host)
             if not client.is_available:
@@ -174,6 +186,8 @@ class MeshtasticDataCollectorMixin:
         Returns list of GeoJSON features for nodes with valid positions.
         Also populates self._nodes_without_position for nodes lacking GPS.
         """
+        if not _HAS_MESHTASTIC_CONN:
+            return []
         features = []
         no_position_nodes = []
         host = self.get_meshtasticd_host()
@@ -233,11 +247,29 @@ class MeshtasticDataCollectorMixin:
 
         Returns list of GeoJSON features for nodes with valid positions.
         """
-        # Check if USB device is available
+        # Skip entirely if Meshtastic connection helpers aren't importable
+        # (e.g. utils.meshtastic_http missing). Calling reset_connection_manager()
+        # on the None fallback throws TypeError and crashes /api/nodes/geojson.
+        if not _HAS_MESHTASTIC_CONN:
+            return []
+
+        # Skip USB devices already claimed by MeshCore (RAK4631 etc.).
+        # Without this, on a MeshCore-primary host the glob returns the
+        # MeshCore radio's /dev/ttyACM0 and we race the MeshCore handler.
         import glob
-        usb_devices = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        import os
+        excluded: set = set()
+        if os.path.exists('/dev/ttyMeshCore'):
+            try:
+                excluded.add(os.path.realpath('/dev/ttyMeshCore'))
+            except OSError:
+                pass
+        usb_devices = [
+            d for d in (glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*'))
+            if os.path.realpath(d) not in excluded
+        ]
         if not usb_devices:
-            logger.debug("No USB radio devices found")
+            logger.debug("No USB radio devices found (MeshCore-claimed devices excluded)")
             return []
 
         features = []
