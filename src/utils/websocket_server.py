@@ -68,8 +68,23 @@ class MessageWebSocketServer:
     Thread-safe broadcast method can be called from any thread.
     """
 
-    # Allowed WebSocket origin prefixes (localhost only by default)
-    _ALLOWED_ORIGINS = ['http://localhost', 'https://localhost']
+    # Allowed WebSocket origins. The original two-entry list
+    # `['http://localhost', 'https://localhost']` was exact-match only —
+    # browsers at http://localhost:5000 send Origin: http://localhost:5000
+    # which mismatched the bare-host allowlist, so every real browser hit
+    # 403 and the live feed silently never connected. websockets.serve()
+    # does not support pattern matching for `origins`, so we enumerate
+    # http/https × {localhost, 127.0.0.1} × the common map ports.
+    _ALLOWED_ORIGINS = [
+        f'{scheme}://{host}{port_suffix}'
+        for scheme in ('http', 'https')
+        for host in ('localhost', '127.0.0.1')
+        for port_suffix in (
+            '',
+            ':5000', ':5001', ':5002', ':5003', ':5004', ':5005',
+            ':8080', ':8443',
+        )
+    ]
 
     def __init__(self, host: str = "127.0.0.1", port: int = 5001):
         """
