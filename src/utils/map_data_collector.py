@@ -127,6 +127,11 @@ class MapDataCollector(
                 # historical nodes most of which are dead; without a cutoff,
                 # browser cluster-index build dominates page-load time.
                 "max_age_days": 30,
+                # Map-serve filter: drop features outside the named region.
+                # Keys: us | na | hi | eu | as | oc | world. Default ``us``
+                # for North-America-band radios; switch to ``world`` to see
+                # everything or ``hi``/``eu``/etc. to scope tighter.
+                "region": "us",
             }
         )
 
