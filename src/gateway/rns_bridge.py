@@ -555,8 +555,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             logger.warning("Bridge already running")
             return True
 
-        # Issue #3: Pre-flight service check
-        if HAS_SERVICE_CHECK:
+        # Issue #3: Pre-flight service check (skip when operator disabled Meshtastic)
+        if HAS_SERVICE_CHECK and getattr(self.config.meshtastic, 'enabled', True):
             meshtasticd_status = check_service('meshtasticd')
             if not meshtasticd_status.available:
                 logger.warning(f"meshtasticd not available: {meshtasticd_status.message}")
