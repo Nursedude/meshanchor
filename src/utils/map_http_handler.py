@@ -471,9 +471,23 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         except Exception as e:
             logger.debug(f"TCP port check failed: {e}")
 
-        # Check USB serial device
+        # Check USB serial device. Exclude any device claimed by MeshCore
+        # via the persistent /dev/ttyMeshCore symlink (created by
+        # scripts/99-meshcore.rules). Without this filter, on a MeshCore-
+        # primary host the glob returns the RAK4631's /dev/ttyACM0 and we
+        # report mode='serial' as if a Meshtastic radio were attached.
         import glob
-        usb_devices = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        import os
+        excluded: set = set()
+        if os.path.exists('/dev/ttyMeshCore'):
+            try:
+                excluded.add(os.path.realpath('/dev/ttyMeshCore'))
+            except OSError:
+                pass
+        usb_devices = [
+            d for d in (glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*'))
+            if os.path.realpath(d) not in excluded
+        ]
         usb_available = len(usb_devices) > 0
 
         # Determine connection mode
