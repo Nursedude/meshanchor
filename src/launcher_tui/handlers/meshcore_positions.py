@@ -45,6 +45,7 @@ class MeshCorePositionsHandler(BaseHandler):
 
     handler_id = "meshcore_positions"
     menu_section = "meshcore"
+    CHAT_API_BASE = "http://127.0.0.1:8081"
 
     def menu_items(self):
         return [
@@ -77,6 +78,7 @@ class MeshCorePositionsHandler(BaseHandler):
                 "MeshCore Map Pins",
                 subtitle,
                 [
+                    ("self", "Pin this radio      Self-pin from /radio (name + coords)"),
                     ("place", "Place node          Pin a MeshCore node on the map"),
                     ("list", "List placements     Show all pinned nodes"),
                     ("edit", "Edit placement      Move a pin / rename"),
@@ -88,6 +90,7 @@ class MeshCorePositionsHandler(BaseHandler):
                 return
 
             dispatch = {
+                "self": ("Pin This Radio", self._pin_self),
                 "place": ("Place MeshCore Node", self._place),
                 "list": ("List Placements", self._list),
                 "edit": ("Edit Placement", self._edit),
@@ -96,6 +99,104 @@ class MeshCorePositionsHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+
+    # ---- Pin self -------------------------------------------------
+
+    def _fetch_local_radio(self) -> Optional[Dict]:
+        """GET /radio. Returns the ``radio`` payload dict or None on error."""
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = f"{self.CHAT_API_BASE}/radio"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = json.loads(resp.read().decode("utf-8") or "{}")
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
+            self.ctx.dialog.msgbox(
+                "Daemon unreachable",
+                f"Could not reach the local daemon at {self.CHAT_API_BASE}/radio.\n\n"
+                f"Reason: {e}\n\n"
+                "Start the daemon (System → Daemon Control) and try again.",
+            )
+            return None
+        if not isinstance(body, dict) or "radio" not in body:
+            self.ctx.dialog.msgbox(
+                "Unexpected response",
+                "The daemon returned a response without a 'radio' field.",
+            )
+            return None
+        return body.get("radio") or {}
+
+    def _pin_self(self) -> None:
+        """Pin the local USB MeshCore radio using its current /radio state.
+
+        Pulls pubkey + name + advertised lat/lon from /radio and writes a
+        placement so the local node shows on the map without manual data
+        entry. Falls through to the explicit lat/lon prompts when the
+        pubkey is known but coordinates aren't yet set on the chip.
+        """
+        radio = self._fetch_local_radio()
+        if radio is None:
+            return
+
+        pubkey = (radio.get("public_key") or "").strip()
+        if not pubkey:
+            self.ctx.dialog.msgbox(
+                "No public key",
+                "The daemon hasn't read a public_key from the radio yet.\n\n"
+                "Open Radio Config → View to refresh state, or wait for "
+                "the next SELF_INFO refresh.",
+            )
+            return
+
+        name = (radio.get("node_name") or "").strip()
+        lat = radio.get("radio_lat")
+        lon = radio.get("radio_lon")
+        coords_set = (
+            isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+            and -90 <= float(lat) <= 90 and -180 <= float(lon) <= 180
+            and not (float(lat) == 0.0 and float(lon) == 0.0)
+        )
+
+        if coords_set:
+            confirm = (
+                f"Pin this radio on the map?\n\n"
+                f"  Name:   {name or '(unnamed)'}\n"
+                f"  Pubkey: {_short_pubkey(pubkey)}…\n"
+                f"  Coords: ({float(lat):.5f}, {float(lon):.5f})\n\n"
+                "These come from /radio (the values sent in adverts)."
+            )
+            if not self.ctx.dialog.yesno("Pin This Radio", confirm):
+                return
+            try:
+                _get_position_store().set(
+                    pubkey, float(lat), float(lon),
+                    alt=None,
+                    name=name or None,
+                    notes="Self-pinned from /radio",
+                )
+            except ValueError as e:
+                self.ctx.dialog.msgbox("Could not save", str(e))
+                return
+            self.ctx.dialog.msgbox(
+                "Pinned",
+                f"{name or 'this radio'} placed at "
+                f"({float(lat):.5f}, {float(lon):.5f}).\n\n"
+                "Will appear on the map within ~5s.",
+            )
+            return
+
+        # Pubkey known but coords absent: fall through to manual entry,
+        # pre-filling the friendly name from /radio.
+        self.ctx.dialog.msgbox(
+            "Coords not set on radio",
+            "/radio doesn't report advertised lat/lon yet.\n\n"
+            "Set them via Radio Config → Identity & Position → Set Coordinates "
+            "(broadcast in adverts), or enter them manually now.",
+        )
+        self._prompt_and_save(pubkey, name)
 
     # ---- Place ----------------------------------------------------
 
