@@ -1516,8 +1516,12 @@
                 </div>
             </div>
 
-            <!-- Radio: use the Meshtastic web client for messaging -->
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a3a4a;">
+            <!-- Radio: use the Meshtastic web client for messaging.
+                 Hidden by default; revealed only when /api/status reports
+                 meshtasticd reachable (see meshtasticAvailabilityProbe in JS).
+                 This avoids a dead "Open Meshtastic Web Client" link on
+                 MeshCore-primary / RNS-only NOCs where meshtasticd is off. -->
+            <div id="meshtastic-web-client-link" style="display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a3a4a;">
                 <a href="/mesh/" class="btn-action" style="display: block; text-align: center; text-decoration: none;">
                     Open Meshtastic Web Client
                 </a>
@@ -4579,6 +4583,23 @@
 
     // Initialize WebSocket for real-time messages
     initWebSocket();
+
+    // Reveal "Open Meshtastic Web Client" button only if meshtasticd is
+    // actually reachable. On MeshCore-primary / RNS-only NOCs the button
+    // would otherwise redirect to a dead localhost:9443.
+    (async function meshtasticAvailabilityProbe() {
+        try {
+            const r = await fetch('/api/status');
+            if (!r.ok) return;
+            const s = await r.json();
+            if (s && s.radio && s.radio.tcp_available) {
+                const el = document.getElementById('meshtastic-web-client-link');
+                if (el) el.style.display = '';
+            }
+        } catch (e) {
+            // Leave button hidden on any error.
+        }
+    })();
 
     // Auto-refresh every 30 seconds (only if no embedded data pushing updates)
     if (!window.meshanchorData) {
