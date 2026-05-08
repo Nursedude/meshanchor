@@ -1164,8 +1164,10 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._handle_chat_send()
             return
 
-        # Radio reset — localhost-only, actuates the radio (soft reboot).
-        if self.path.split("?", 1)[0] == "/radio/reset":
+        # Radio POST — soft-reset and send-advertisement, both localhost-only
+        # since they actuate the radio.
+        radio_path = self.path.split("?", 1)[0]
+        if radio_path in ("/radio/reset", "/radio/advert"):
             if not self._check_localhost():
                 self._send_error_json(403, "Forbidden — localhost only")
                 return
