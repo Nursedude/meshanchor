@@ -148,13 +148,15 @@ class TestMeshCoreSource:
 
 
 class TestMeshCoreSelfFeature:
-    """The local USB MeshCore radio appears as a feature when /radio has coords."""
+    """The local USB MeshCore radio appears as a feature when /radio has coords.
 
-    def _make_handler(self, **state_overrides):
-        """Build a mock handler whose get_radio_state returns plausible data."""
-        from gateway.meshcore_handler import _empty_radio_state
-        state = _empty_radio_state()
-        state.update({
+    The collector fetches radio state from the daemon's HTTP /radio endpoint
+    because meshanchor-map and meshanchor-daemon run in separate processes.
+    Tests stub the fetch by patching ``_fetch_daemon_radio_state``.
+    """
+
+    def _radio_state(self, **overrides):
+        state = {
             "node_name": "meshanchorRAK1",
             "public_key": "ab" * 32,
             "radio_lat": 19.435,
@@ -163,11 +165,9 @@ class TestMeshCoreSelfFeature:
             "fw_build": "19-Apr-2026",
             "source": "radio",
             "last_refresh_ts": 1778266653.0,
-        })
-        state.update(state_overrides)
-        h = MagicMock()
-        h.get_radio_state.return_value = state
-        return h
+        }
+        state.update(overrides)
+        return state
 
     def _empty_tracker(self):
         t = MagicMock()
@@ -176,27 +176,15 @@ class TestMeshCoreSelfFeature:
         t.get_all_nodes.return_value = []
         return t
 
-    def _patch_active_handler(self, handler):
-        """Patch both module spellings — the collector lazy-imports
-        ``gateway.meshcore_handler`` while pytest reaches the same code via
-        ``src.gateway.meshcore_handler``. They live as two separate module
-        objects in sys.modules, so the patch must hit both names."""
-        import contextlib
-        ctx = contextlib.ExitStack()
-        for path in (
-            "gateway.meshcore_handler.get_active_handler",
-            "src.gateway.meshcore_handler.get_active_handler",
-        ):
-            try:
-                ctx.enter_context(patch(path, return_value=handler))
-            except (AttributeError, ModuleNotFoundError):
-                continue
-        return ctx
+    def _patch_radio(self, state):
+        """Patch ``MapDataCollector._fetch_daemon_radio_state`` to return ``state``."""
+        return patch.object(MapDataCollector, "_fetch_daemon_radio_state",
+                            return_value=state)
 
     def test_self_feature_emitted_when_radio_has_coords_and_pubkey(self):
         collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
-             self._patch_active_handler(self._make_handler()):
+             self._patch_radio(self._radio_state()):
             result = collector.collect()
 
         feats = result["features"]
@@ -210,24 +198,24 @@ class TestMeshCoreSelfFeature:
         assert props["model"] == "RAK 4631"
         assert feats[0]["geometry"]["coordinates"] == [-155.213, 19.435]
 
-    def test_no_self_feature_when_no_active_handler(self):
+    def test_no_self_feature_when_daemon_unreachable(self):
         collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
-             self._patch_active_handler(None):
+             self._patch_radio(None):
             result = collector.collect()
         assert result["features"] == []
 
     def test_no_self_feature_when_pubkey_missing(self):
         collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
-             self._patch_active_handler(self._make_handler(public_key=None)):
+             self._patch_radio(self._radio_state(public_key=None)):
             result = collector.collect()
         assert result["features"] == []
 
     def test_no_self_feature_when_coords_missing(self):
         collector = MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
         with patch('src.utils.map_data_collector.get_node_tracker', return_value=self._empty_tracker()), \
-             self._patch_active_handler(self._make_handler(radio_lat=None, radio_lon=None)):
+             self._patch_radio(self._radio_state(radio_lat=None, radio_lon=None)):
             result = collector.collect()
         assert result["features"] == []
 
@@ -244,7 +232,7 @@ class TestMeshCoreSelfFeature:
         mock_tracker.get_all_nodes.return_value = []
 
         with patch('src.utils.map_data_collector.get_node_tracker', return_value=mock_tracker), \
-             self._patch_active_handler(self._make_handler()):
+             self._patch_radio(self._radio_state()):
             result = collector.collect()
 
         feats = result["features"]
@@ -252,6 +240,57 @@ class TestMeshCoreSelfFeature:
         # Self overwrites because _collect_meshcore_self writes after the contacts pass.
         assert feats[0]["properties"]["source"] == "meshcore_self"
         assert feats[0]["properties"]["is_local"] is True
+
+
+class TestFetchDaemonRadioState:
+    """The HTTP fetch helper that bridges the map → daemon process boundary."""
+
+    def _make_collector(self):
+        return MapDataCollector(meshtastic_enabled=False, enable_history=False, meshforge_maps_enabled=False)
+
+    def _urlopen_with_body(self, body_dict):
+        from io import BytesIO
+        cm = MagicMock()
+        cm.__enter__ = lambda self: BytesIO(__import__("json").dumps(body_dict).encode("utf-8"))
+        cm.__exit__ = lambda self, *a: False
+        return patch("urllib.request.urlopen", return_value=cm)
+
+    def test_returns_radio_dict_on_200(self):
+        collector = self._make_collector()
+        radio = {"node_name": "x", "public_key": "ab" * 32}
+        with self._urlopen_with_body({"radio": radio}):
+            out = collector._fetch_daemon_radio_state()
+        assert out == radio
+
+    def test_returns_none_when_daemon_unreachable(self):
+        import urllib.error
+        collector = self._make_collector()
+        with patch("urllib.request.urlopen",
+                   side_effect=urllib.error.URLError("connection refused")):
+            out = collector._fetch_daemon_radio_state()
+        assert out is None
+
+    def test_returns_none_on_unexpected_response_shape(self):
+        collector = self._make_collector()
+        with self._urlopen_with_body({"unexpected": "shape"}):
+            out = collector._fetch_daemon_radio_state()
+        assert out is None
+
+    def test_caches_within_ttl(self):
+        """Concurrent collects don't re-hit the daemon every cycle."""
+        collector = self._make_collector()
+        radio = {"node_name": "x", "public_key": "ab" * 32}
+        with patch("urllib.request.urlopen") as mock_open:
+            from io import BytesIO
+            cm = MagicMock()
+            cm.__enter__ = lambda self: BytesIO(__import__("json").dumps({"radio": radio}).encode("utf-8"))
+            cm.__exit__ = lambda self, *a: False
+            mock_open.return_value = cm
+            collector._fetch_daemon_radio_state()
+            collector._fetch_daemon_radio_state()
+            collector._fetch_daemon_radio_state()
+        # One real HTTP call, two cache hits.
+        assert mock_open.call_count == 1
 
 
 class TestMeshtasticFeatureFlag:

@@ -78,6 +78,9 @@ class MapDataCollector(
     # Meshtasticd connection defaults
     DEFAULT_MESHTASTICD_HOST = "localhost"
     DEFAULT_MESHTASTICD_PORT = 4403
+    # Daemon /radio HTTP endpoint (cross-process self-feature lookup).
+    DAEMON_RADIO_URL = "http://127.0.0.1:8081/radio"
+    DAEMON_RADIO_TTL_SECONDS = 10.0
 
     def __init__(self, cache_dir: Optional[Path] = None, enable_history: bool = True,
                  meshtastic_enabled: bool = True, meshforge_maps_enabled: bool = True):
@@ -134,6 +137,12 @@ class MapDataCollector(
                 "region": "us",
             }
         )
+
+        # Daemon /radio HTTP cache — see _fetch_daemon_radio_state.
+        # Cached for DAEMON_RADIO_TTL_SECONDS so concurrent map requests
+        # don't hammer the daemon every collect cycle.
+        self._daemon_radio_state: Optional[Dict[str, Any]] = None
+        self._daemon_radio_state_at: float = 0.0
 
         # Track nodes without GPS for reporting
         self._nodes_without_position: List[Dict] = []
@@ -829,28 +838,57 @@ class MapDataCollector(
         )
         return features
 
+    def _fetch_daemon_radio_state(self) -> Optional[Dict[str, Any]]:
+        """GET /radio from the daemon and return the ``radio`` payload.
+
+        meshanchor-map and meshanchor-daemon are separate processes —
+        in-process ``get_active_handler()`` returns None on the map side.
+        Cross-process state goes through the daemon's HTTP endpoint.
+
+        Cached for ``DAEMON_RADIO_TTL_SECONDS`` so concurrent collects
+        don't pound the daemon. Returns None when the daemon is
+        unreachable or the response shape is unexpected.
+        """
+        now = time.time()
+        if (self._daemon_radio_state is not None
+                and now - self._daemon_radio_state_at < self.DAEMON_RADIO_TTL_SECONDS):
+            return self._daemon_radio_state
+
+        import urllib.error
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                self.DAEMON_RADIO_URL,
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                body = json.loads(resp.read().decode("utf-8") or "{}")
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
+            logger.debug(f"daemon /radio unreachable: {e}")
+            self._daemon_radio_state = None
+            self._daemon_radio_state_at = now
+            return None
+        if not isinstance(body, dict):
+            return None
+        radio = body.get("radio")
+        if not isinstance(radio, dict):
+            return None
+        self._daemon_radio_state = radio
+        self._daemon_radio_state_at = now
+        return radio
+
     def _collect_meshcore_self(self) -> Optional[Dict]:
         """Emit a synthetic feature for the local MeshCore radio.
 
-        Reads the cached radio state from the active MeshCoreHandler. Returns
-        None when the handler isn't available, the radio hasn't been read
-        yet, advertised coords aren't valid, or the local pubkey is unknown
-        (the pubkey is the stable feature id — without it dedup against
-        discovered contacts can't work safely).
+        Fetches radio state from the daemon via ``GET /radio`` because the
+        map service runs in a different process from meshanchor-daemon —
+        ``get_active_handler()`` would return None here. Returns None when
+        the daemon is unreachable, the pubkey is missing, or coords aren't
+        valid. The pubkey is the stable feature id — without it dedup
+        against discovered contacts can't work safely.
         """
-        try:
-            from gateway.meshcore_handler import get_active_handler
-        except Exception:
-            return None
-
-        handler = get_active_handler()
-        if handler is None:
-            return None
-
-        try:
-            state = handler.get_radio_state(refresh=False)
-        except Exception as e:
-            logger.debug(f"MeshCore self-feature: get_radio_state failed: {e}")
+        state = self._fetch_daemon_radio_state()
+        if state is None:
             return None
 
         pubkey = (state.get("public_key") or "").lower()
