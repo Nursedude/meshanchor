@@ -311,6 +311,8 @@ def _setup_mock_meshcore(daemon_handler):
             "radio_freq": 915.0, "radio_bw": 250.0,
             "radio_sf": 11, "radio_cr": 5,
             "tx_power": 22, "max_tx_power": 30, "name": "Mock",
+            "public_key": "a" * 64,
+            "adv_lat": 19.4, "adv_lon": -155.2,
         },
     ))
     mock_mc.commands.send_device_query = AsyncMock(return_value=SimpleNamespace(
@@ -337,6 +339,10 @@ class TestSetterWrappers:
         assert state["radio_freq_mhz"] == 915.0
         assert state["radio_sf"] == 11
         assert state["source"] == "radio"
+        # SELF_INFO public_key + adv_lat/lon flow through the refresh.
+        assert state["public_key"] == "a" * 64
+        assert state["radio_lat"] == 19.4
+        assert state["radio_lon"] == -155.2
 
     def test_set_lora_validation_runs_before_dispatch(self, daemon_handler):
         mock_mc = _setup_mock_meshcore(daemon_handler)

@@ -280,6 +280,7 @@ def _empty_radio_state() -> Dict[str, Any]:
         "max_channels": None,
         "channels": [],          # list[{idx, name, hash}] — secret never exposed
         "node_name": None,
+        "public_key": None,       # 32-byte hex; identifies this radio on the mesh
         "radio_lat": None,        # advertised latitude (decimal degrees)
         "radio_lon": None,        # advertised longitude (decimal degrees)
         "fw_build": None,
@@ -427,6 +428,7 @@ class MeshCoreRadioConfig:
                     "max_channels": max_channels,
                     "channels": channels,
                     "node_name": self_info.get("name"),
+                    "public_key": (self_info.get("public_key") or None),
                     "radio_lat": _coerce_float(self_info.get("adv_lat")),
                     "radio_lon": _coerce_float(self_info.get("adv_lon")),
                     "fw_build": dev_info.get("fw_build"),
