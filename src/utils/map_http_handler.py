@@ -406,12 +406,86 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
         return gzip.compress(data, compresslevel=6), 'gzip'
 
     def _serve_geojson(self):
-        """Serve live node GeoJSON."""
-        if self.collector:
-            geojson = self.collector.collect()
-        else:
-            geojson = {"type": "FeatureCollection", "features": []}
+        """Serve live node GeoJSON, with optional age-cutoff filter.
+
+        Query params:
+          ``max_age_days=N``  Drop features whose ``last_heard`` is older
+                              than N days. ``0`` disables the filter.
+                              When omitted, falls back to the operator
+                              default in map_settings (key
+                              ``max_age_days``, default 30).
+
+        The age filter is critical for the public meshcore.dev fetcher,
+        which can return 40k+ nodes — many last seen months ago. Filtering
+        at serve time keeps the collector cache warm; the operator can A/B
+        with ``?max_age_days=0`` for the unfiltered set.
+        """
+        if not self.collector:
+            self._serve_json({"type": "FeatureCollection", "features": []})
+            return
+
+        # The cache is mutable — never mutate it in place; always return
+        # a shallow copy with a filtered feature list.
+        geojson = self.collector.collect()
+        max_age_days = self._resolve_max_age_days()
+        if max_age_days is not None and max_age_days > 0:
+            filtered = self._filter_by_age(geojson.get("features") or [], max_age_days)
+            geojson = dict(geojson)
+            geojson["features"] = filtered
+            # Annotate so the UI can show the filter without guessing.
+            props = dict(geojson.get("properties") or {})
+            props["max_age_days"] = max_age_days
+            props["features_after_age_filter"] = len(filtered)
+            geojson["properties"] = props
         self._serve_json(geojson)
+
+    def _resolve_max_age_days(self) -> Optional[int]:
+        """Read max_age_days from the query string or settings, or None."""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        raw = (qs.get("max_age_days") or [None])[0]
+        if raw is not None:
+            try:
+                value = int(raw)
+            except ValueError:
+                return None
+            return max(value, 0)
+        # Fall back to operator default. SettingsManager lookups raise
+        # nothing — missing keys return the default. 30 days is the
+        # ship default; ``0`` means "never filter".
+        try:
+            settings = self.collector._settings
+        except AttributeError:
+            return 30
+        if settings is None:
+            return 30
+        try:
+            return int(settings.get("max_age_days", 30))
+        except (TypeError, ValueError):
+            return 30
+
+    @staticmethod
+    def _filter_by_age(features: list, max_age_days: int) -> list:
+        """Keep features whose ``last_heard`` is within ``max_age_days``.
+
+        Features without a numeric ``last_heard`` are kept (we can't prove
+        they're stale). is_local features are always kept. The cutoff is
+        wall-clock now − max_age_days.
+        """
+        cutoff = time.time() - (max_age_days * 86400)
+        kept = []
+        for f in features:
+            props = f.get("properties") or {}
+            if props.get("is_local"):
+                kept.append(f)
+                continue
+            last_heard = props.get("last_heard")
+            if not isinstance(last_heard, (int, float)):
+                kept.append(f)
+                continue
+            if last_heard >= cutoff:
+                kept.append(f)
+        return kept
 
     def _serve_map(self):
         """Serve the node_map.html file."""

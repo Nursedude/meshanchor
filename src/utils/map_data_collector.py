@@ -121,6 +121,12 @@ class MapDataCollector(
                 "mqtt_threshold_minutes": self.DEFAULT_MQTT_THRESHOLD_MINUTES,
                 "rns_threshold_minutes": self.DEFAULT_RNS_THRESHOLD_MINUTES,
                 "aredn_threshold_minutes": self.DEFAULT_AREDN_THRESHOLD_MINUTES,
+                # Map-serve filter: drop features older than N days at the
+                # /api/nodes/geojson endpoint. 0 = no filter. Default 30 days
+                # because the public meshcore.dev fetcher returns 40k+
+                # historical nodes most of which are dead; without a cutoff,
+                # browser cluster-index build dominates page-load time.
+                "max_age_days": 30,
             }
         )
 
