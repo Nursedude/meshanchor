@@ -1,0 +1,68 @@
+[Unit]
+Description=MeshAnchor Fleet Collector - long-haul observability writer
+Documentation=https://github.com/Nursedude/meshanchor
+# Map service is the data source. We can start before it (the collector's
+# fetches degrade soft on 5xx and the heartbeat row writes regardless),
+# but ordering it first means the very first cycle has data to record.
+After=network.target meshanchor-map.service
+Wants=meshanchor-map.service
+
+# Stop crash-looping after 5 failures in 60s. More permissive than
+# meshanchor-map (3) since the collector's load is lighter and a
+# transient hiccup shouldn't fault us out — Restart=always is the
+# normal recovery path.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshanchor/src
+
+# Use venv if available, fall back to system Python — mirrors
+# meshanchor-map.service. Ports the dev/prod split: VolcanoAI :5002,
+# meshanchor-server :5000. Operator adjusts --base-url here for non-
+# canonical layouts; the default targets the canonical NOC port.
+ExecStart=/bin/bash -c '\
+    if [ -x /opt/meshanchor/venv/bin/python ]; then \
+        exec /opt/meshanchor/venv/bin/python -m monitoring.fleet_collector --base-url http://127.0.0.1:5000; \
+    else \
+        exec python3 -m monitoring.fleet_collector --base-url http://127.0.0.1:5000; \
+    fi'
+
+# Graceful shutdown — fleet_collector handles SIGTERM by setting its
+# stop_event and exiting after the current cycle completes (≤60s + a
+# few ms for the SQLite flush).
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=15
+
+# Restart=always: any exit (including clean operator stops) flips back
+# to running. The "doesn't fall silent" guarantee is downstream of this
+# being true — a process that stays exited becomes invisible silence.
+Restart=always
+RestartSec=10
+
+# Environment
+# SUDO_USER closes deploy drift #6 — User=root + no SUDO_USER causes
+# get_real_user_home() to return /root, which on meshanchor-server
+# would steer fleet_history.db away from the canonical
+# /home/wh6gxz/.local/share/meshanchor/ path the dashboard reads.
+Environment=SUDO_USER=wh6gxz
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/meshanchor/src
+
+# Logging — every cycle logs INFO with fetched/recorded/duration.
+# Tail with: journalctl -u meshanchor-fleet-collector -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshanchor-fleet-collector
+
+# Security hardening (relaxed; matches meshanchor-map.service since
+# both write to /home/wh6gxz/.local/share/meshanchor/).
+ProtectSystem=false
+PrivateTmp=false
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

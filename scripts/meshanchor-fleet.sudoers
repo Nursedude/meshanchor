@@ -1,0 +1,32 @@
+# MeshAnchor Fleet observability — sudoers drop-in.
+#
+# Install:
+#   sudo install -m 0440 -o root -g root \
+#     /opt/meshanchor/scripts/meshanchor-fleet.sudoers \
+#     /etc/sudoers.d/011_meshanchor-fleet
+#   sudo visudo -c   # syntax check; refuses to apply if broken
+#
+# Companion to /etc/sudoers.d/010_meshanchor (existing rules for the
+# original three services). Keeping the fleet rules in their own file
+# means S5b can be uninstalled (`rm /etc/sudoers.d/011_meshanchor-fleet`)
+# without touching the rules already validated for the rest of the NOC.
+#
+# Scope rationale: NOPASSWD only on the lifecycle commands the dashboard
+# / TUI need. NO blanket systemctl access — operator who wants to edit
+# the unit file itself uses `sudo systemctl edit ...` interactively.
+
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl restart meshanchor-fleet-collector.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl start   meshanchor-fleet-collector.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl stop    meshanchor-fleet-collector.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl status  meshanchor-fleet-collector.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl reload  meshanchor-fleet-collector.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl enable  meshanchor-fleet-collector.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl disable meshanchor-fleet-collector.service
+
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl restart meshanchor-fleet-watchdog.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl start   meshanchor-fleet-watchdog.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl stop    meshanchor-fleet-watchdog.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl status  meshanchor-fleet-watchdog.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl reload  meshanchor-fleet-watchdog.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl enable  meshanchor-fleet-watchdog.service
+wh6gxz ALL=(root) NOPASSWD: /usr/bin/systemctl disable meshanchor-fleet-watchdog.service
