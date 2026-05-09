@@ -30,6 +30,35 @@ class FleetEndpointsMixin:
     advertised name/preset. No mutating operations live here.
     """
 
+    def _serve_fleet_dashboard(self) -> None:
+        """Serve the always-on `/fleet` HTML dashboard.
+
+        Single-file vanilla HTML+CSS+JS that polls `/fleet/{slo,
+        activity,rollup,federation}` every 5s. Same dark theme as
+        `node_map.html`. Lives under `web/fleet.html`."""
+        from pathlib import Path
+        if self.web_dir:
+            file_path = Path(self.web_dir) / "fleet.html"
+        else:
+            file_path = Path(__file__).parent.parent.parent / "web" / "fleet.html"
+        try:
+            file_path = file_path.resolve()
+        except Exception:
+            self.send_error(400, "Invalid path")
+            return
+        if not file_path.exists():
+            self.send_error(404, "fleet.html not found")
+            return
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.end_headers()
+        self.wfile.write(data)
+
     def _serve_fleet_health(self) -> None:
         """Full snapshot — services + boundaries + daemon health + radio
         + recent chat + collector stats. This is the diagnostic deep

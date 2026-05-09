@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet Monitor — MeshAnchor NOC</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #0a0e1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        body { padding: 16px; }
+
+        /* ── Top bar ───────────────────────────────────────── */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 18px;
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            margin-bottom: 16px;
+        }
+        .topbar h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #4fc3f7;
+            letter-spacing: 0.3px;
+        }
+        .topbar .meta {
+            font-size: 12px;
+            color: #6a7a8a;
+        }
+        .topbar .meta strong { color: #b0c0d0; font-weight: 500; }
+        .pulse {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #66bb6a;
+            margin-right: 6px;
+            box-shadow: 0 0 6px rgba(102,187,106,0.7);
+            animation: pulse 1.6s infinite;
+        }
+        .pulse.stale { background: #ef5350; box-shadow: 0 0 6px rgba(239,83,80,0.7); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.4; }
+        }
+
+        /* ── Layout grid ───────────────────────────────────── */
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+        }
+        .col { display: flex; flex-direction: column; gap: 16px; }
+
+        /* ── Cards ─────────────────────────────────────────── */
+        .card {
+            background: #141e2e;
+            border: 1px solid #2a3a4a;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .card h2 {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 10px 16px;
+            background: #0f1622;
+            color: #6a7a8a;
+            border-bottom: 1px solid #2a3a4a;
+        }
+        .card .body { padding: 14px 16px; }
+
+        /* ── SLO banner ────────────────────────────────────── */
+        .slo-banner {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding: 18px 20px;
+            background: linear-gradient(135deg, #102030 0%, #1a2438 100%);
+            border-bottom: 1px solid #2a3a4a;
+        }
+        .slo-status {
+            font-size: 28px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .slo-status.ready    { color: #66bb6a; text-shadow: 0 0 12px rgba(102,187,106,0.5); }
+        .slo-status.degraded { color: #ffa726; text-shadow: 0 0 12px rgba(255,167,38,0.5); }
+        .slo-status.error    { color: #ef5350; text-shadow: 0 0 12px rgba(239,83,80,0.5); }
+        .slo-status.unknown  { color: #6a7a8a; }
+        .slo-detail { color: #b0c0d0; font-size: 13px; flex: 1; }
+        .slo-detail strong { color: #e0e0e0; font-weight: 600; }
+
+        /* ── Service pills ─────────────────────────────────── */
+        .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+        .pill {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .pill.available     { background: #1b3a25; color: #66bb6a; }
+        .pill.degraded      { background: #3d2c10; color: #ffa726; }
+        .pill.failed        { background: #3a1a1a; color: #ef5350; }
+        .pill.not_running   { background: #2a2a2a; color: #999; }
+        .pill.not_installed { background: #1a1a1a; color: #555; }
+        .pill.unknown       { background: #1a2030; color: #6a7a8a; }
+
+        /* ── Tables ────────────────────────────────────────── */
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid #1a2638;
+        }
+        th {
+            color: #6a7a8a;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+        }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; color: #b0c0d0; }
+        td.label { color: #e0e0e0; font-family: ui-monospace, 'SF Mono', monospace; font-size: 11px; }
+        tr:last-child td { border-bottom: none; }
+
+        /* ── Activity feed ─────────────────────────────────── */
+        .feed { max-height: 360px; overflow-y: auto; }
+        .feed-item {
+            padding: 8px 16px;
+            border-bottom: 1px solid #1a2638;
+            font-size: 12px;
+            display: grid;
+            grid-template-columns: 90px 1fr;
+            gap: 10px;
+        }
+        .feed-item:last-child { border-bottom: none; }
+        .feed-item .who { color: #4fc3f7; font-weight: 600; }
+        .feed-item .what { color: #e0e0e0; word-break: break-word; }
+        .feed-item.warn .who { color: #ffa726; }
+        .feed-item.error .who { color: #ef5350; }
+
+        /* ── Peer cards ────────────────────────────────────── */
+        .peer-grid { display: grid; gap: 10px; padding: 14px 16px; }
+        .peer-row {
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 12px;
+            align-items: center;
+            padding: 10px 12px;
+            background: #0f1622;
+            border: 1px solid #1a2638;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+        .peer-row.ready    { border-left: 3px solid #66bb6a; }
+        .peer-row.degraded { border-left: 3px solid #ffa726; }
+        .peer-row.error    { border-left: 3px solid #ef5350; }
+        .peer-row.unknown  { border-left: 3px solid #6a7a8a; }
+        .peer-name { font-weight: 600; color: #e0e0e0; }
+        .peer-host { color: #6a7a8a; font-size: 11px; font-family: ui-monospace, monospace; }
+        .peer-stat { color: #b0c0d0; font-size: 12px; font-variant-numeric: tabular-nums; }
+        .peer-radio.online  { color: #66bb6a; }
+        .peer-radio.offline { color: #6a7a8a; }
+        .peer-row.peer-error .peer-stat { color: #ef5350; font-size: 11px; }
+
+        /* ── Federation peers ─────────────────────────────── */
+        .fed-summary {
+            padding: 6px 16px 0;
+            font-size: 11px;
+            color: #6a7a8a;
+        }
+        .fed-summary strong { color: #b0c0d0; }
+        .source-tag {
+            display: inline-block;
+            font-size: 9px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            background: #2a3a4a;
+            color: #4fc3f7;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .source-tag.directory { background: #1a2638; color: #6a7a8a; }
+
+        /* ── Misc ──────────────────────────────────────────── */
+        .empty { padding: 24px 16px; text-align: center; color: #6a7a8a; font-size: 12px; }
+        .err-list { padding: 8px 16px; font-size: 11px; color: #ffa726; }
+        .err-list .err { padding: 2px 0; }
+
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Fleet Monitor — MeshAnchor NOC</h1>
+        <div class="meta">
+            <span id="indicator" class="pulse"></span>
+            <strong id="self-host">…</strong>
+            &middot; updated <strong id="updated">never</strong>
+            &middot; refresh every <strong id="refresh-int">5</strong>s
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="col">
+            <!-- SLO banner + pills -->
+            <div class="card">
+                <div class="slo-banner">
+                    <span id="slo-status" class="slo-status unknown">…</span>
+                    <div class="slo-detail">
+                        <div><strong id="slo-services">…</strong> services available</div>
+                        <div>uptime <strong id="slo-uptime">…</strong></div>
+                    </div>
+                </div>
+                <div class="body">
+                    <div class="pills" id="slo-pills"></div>
+                </div>
+            </div>
+
+            <!-- Top boundaries -->
+            <div class="card">
+                <h2>Top Boundaries (call volume)</h2>
+                <table>
+                    <thead>
+                        <tr><th>label</th><th class="num">count</th><th class="num">p50</th><th class="num">p95</th><th class="num">p99</th><th class="num">err</th></tr>
+                    </thead>
+                    <tbody id="boundaries-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Activity feed -->
+            <div class="card">
+                <h2>Activity</h2>
+                <div class="feed" id="activity-feed"></div>
+            </div>
+        </div>
+
+        <div class="col">
+            <!-- Peer rollup -->
+            <div class="card">
+                <h2>Fleet Rollup</h2>
+                <div class="peer-grid" id="peer-grid"></div>
+            </div>
+
+            <!-- Federation peers -->
+            <div class="card">
+                <h2>Federation Peers (RNS / LXMF)</h2>
+                <div class="fed-summary" id="fed-summary"></div>
+                <table>
+                    <thead>
+                        <tr><th>name</th><th>type</th><th class="num">last</th><th>src</th></tr>
+                    </thead>
+                    <tbody id="federation-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Errors -->
+            <div class="card" id="error-card" style="display:none;">
+                <h2>Soft Failures</h2>
+                <div class="err-list" id="error-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const REFRESH_MS = 5000;
+        const STALE_THRESHOLD_MS = 12000;
+        let lastUpdateMs = 0;
+
+        const $ = (id) => document.getElementById(id);
+
+        document.getElementById('refresh-int').textContent = REFRESH_MS / 1000;
+
+        // ── Helpers ────────────────────────────────────────────
+        function fmtUptime(s) {
+            if (s == null) return '?';
+            s = Math.floor(s);
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            return `${h}h ${m}m`;
+        }
+        function fmtAge(s) {
+            if (s == null) return '—';
+            if (s < 60) return `${Math.round(s)}s`;
+            if (s < 3600) return `${Math.round(s / 60)}m`;
+            return `${(s / 3600).toFixed(1)}h`;
+        }
+        function fmtMs(s) {
+            if (s == null) return '—';
+            return (s * 1000).toFixed(1) + 'ms';
+        }
+        function el(tag, attrs = {}, children = []) {
+            const e = document.createElement(tag);
+            for (const [k, v] of Object.entries(attrs)) {
+                if (k === 'class') e.className = v;
+                else if (k === 'text') e.textContent = v;
+                else e.setAttribute(k, v);
+            }
+            (Array.isArray(children) ? children : [children]).forEach(c => {
+                if (c == null) return;
+                e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+            });
+            return e;
+        }
+        async function fetchJson(path) {
+            const resp = await fetch(path, { headers: { 'Accept': 'application/json' } });
+            if (!resp.ok) throw new Error(`${path} ${resp.status}`);
+            return resp.json();
+        }
+
+        // ── Renderers ──────────────────────────────────────────
+        function renderSlo(slo) {
+            $('self-host').textContent = slo.host || '?';
+            const status = (slo.overall_status || 'unknown').toLowerCase();
+            const sloEl = $('slo-status');
+            sloEl.textContent = status;
+            sloEl.className = 'slo-status ' + status;
+            const services = slo.services || {};
+            $('slo-services').textContent =
+                `${services.available || 0} / ${services.total || 0}`;
+            $('slo-uptime').textContent = fmtUptime(slo.uptime_s);
+
+            // Service pills
+            const pills = $('slo-pills');
+            pills.innerHTML = '';
+            const byState = services.by_state || {};
+            for (const [state, count] of Object.entries(byState)) {
+                pills.appendChild(el('span', { class: `pill ${state}`, text: `${state} ${count}` }));
+            }
+
+            // Top boundaries
+            const tbody = $('boundaries-tbody');
+            tbody.innerHTML = '';
+            const top = slo.boundaries_top || [];
+            if (top.length === 0) {
+                tbody.appendChild(el('tr', {}, el('td', { colspan: 6, class: 'empty', text: 'no boundary calls yet' })));
+            } else {
+                for (const b of top.slice(0, 8)) {
+                    const tr = el('tr');
+                    tr.appendChild(el('td', { class: 'label', text: b.label }));
+                    tr.appendChild(el('td', { class: 'num', text: String(b.count) }));
+                    tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p50_s) }));
+                    tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p95_s) }));
+                    tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p99_s) }));
+                    tr.appendChild(el('td', { class: 'num', text: b.error_rate ? (b.error_rate * 100).toFixed(1) + '%' : '0' }));
+                    tbody.appendChild(tr);
+                }
+            }
+        }
+
+        function renderActivity(activity) {
+            const feed = $('activity-feed');
+            feed.innerHTML = '';
+            const chat = activity.chat_recent || [];
+            const slow = activity.slow_boundaries || [];
+            if (chat.length === 0 && slow.length === 0) {
+                feed.appendChild(el('div', { class: 'empty', text: 'no recent activity' }));
+                return;
+            }
+            for (const entry of chat.slice(-15).reverse()) {
+                const cls = 'feed-item';
+                const sender = entry.sender || entry.from || entry.contact || '—';
+                const text = entry.text || '';
+                feed.appendChild(el('div', { class: cls }, [
+                    el('div', { class: 'who', text: sender }),
+                    el('div', { class: 'what', text: text }),
+                ]));
+            }
+            for (const b of slow.slice(0, 5)) {
+                const cls = b.error_count > 0 ? 'feed-item error' : 'feed-item warn';
+                const detail = `slow=${b.slow_count} err=${b.error_count} p99=${fmtMs(b.p99_s)}`;
+                feed.appendChild(el('div', { class: cls }, [
+                    el('div', { class: 'who', text: b.label.split('.')[0] }),
+                    el('div', { class: 'what', text: `${b.label} — ${detail}` }),
+                ]));
+            }
+        }
+
+        function renderRollup(rollup) {
+            const grid = $('peer-grid');
+            grid.innerHTML = '';
+            const rows = [
+                {
+                    name: rollup.self_host || 'self',
+                    host: '(this host)',
+                    snapshot: rollup.self_snapshot,
+                    error: null,
+                    is_self: true,
+                },
+                ...(rollup.peers || []).map(p => ({ ...p, is_self: false })),
+            ];
+            for (const row of rows) {
+                const snap = row.snapshot || {};
+                const status = (snap.overall_status || (row.error ? 'error' : 'unknown')).toLowerCase();
+                const services = snap.services || {};
+                const radio = snap.radio || {};
+                const cls = row.error ? 'peer-row peer-error error' : `peer-row ${status}`;
+                const div = el('div', { class: cls });
+                div.appendChild(el('div', {}, [
+                    el('div', { class: 'peer-name', text: row.name }),
+                    el('div', { class: 'peer-host', text: row.host || '' }),
+                ]));
+                if (row.error) {
+                    div.appendChild(el('div', { class: 'peer-stat', text: row.error.slice(0, 30) }));
+                    div.appendChild(el('div'));
+                    div.appendChild(el('div'));
+                } else {
+                    div.appendChild(el('div', { class: 'peer-stat', text: status }));
+                    div.appendChild(el('div', { class: 'peer-stat', text: `${services.available ?? 0}/${services.total ?? 0}` }));
+                    div.appendChild(el('div', {
+                        class: 'peer-stat peer-radio ' + (radio.connected ? 'online' : 'offline'),
+                        text: radio.connected ? 'radio on' : 'radio —',
+                    }));
+                }
+                grid.appendChild(div);
+            }
+        }
+
+        function renderFederation(fed) {
+            const summary = $('fed-summary');
+            summary.innerHTML = '';
+            const sources = fed.sources || [];
+            const peers = fed.peers || [];
+            summary.textContent = `${peers.length} peers · sources: ${sources.length ? sources.join(', ') : 'none'}`;
+
+            const tbody = $('federation-tbody');
+            tbody.innerHTML = '';
+            if (peers.length === 0) {
+                tbody.appendChild(el('tr', {}, el('td', { colspan: 4, class: 'empty', text: 'no federation peers heard yet' })));
+                return;
+            }
+            for (const p of peers.slice(0, 30)) {
+                const tr = el('tr');
+                tr.appendChild(el('td', { class: 'label', text: (p.name || p.node_id || '').slice(0, 28) }));
+                tr.appendChild(el('td', { text: (p.service_type || p.source_origin || '').toLowerCase() }));
+                tr.appendChild(el('td', { class: 'num', text: fmtAge(p.last_seen_age_s) }));
+                tr.appendChild(el('td', {}, el('span', { class: 'source-tag ' + (p.source || ''), text: p.source || '?' })));
+                tbody.appendChild(tr);
+            }
+        }
+
+        function renderErrors(errors) {
+            const card = $('error-card');
+            const list = $('error-list');
+            list.innerHTML = '';
+            if (!errors || errors.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = '';
+            for (const e of errors) {
+                list.appendChild(el('div', { class: 'err', text: `${e.source || '?'}: ${e.error || ''}` }));
+            }
+        }
+
+        // ── Polling loop ───────────────────────────────────────
+        async function tick() {
+            try {
+                const [slo, activity, rollup, federation] = await Promise.all([
+                    fetchJson('/fleet/slo'),
+                    fetchJson('/fleet/activity'),
+                    fetchJson('/fleet/rollup'),
+                    fetchJson('/fleet/federation'),
+                ]);
+                renderSlo(slo);
+                renderActivity(activity);
+                renderRollup(rollup);
+                renderFederation(federation);
+                // Aggregate soft errors from every endpoint that surfaced any.
+                const errs = []
+                    .concat(slo.errors || [])
+                    .concat(activity.errors || [])
+                    .concat(rollup.errors || [])
+                    .concat(federation.errors || []);
+                renderErrors(errs);
+
+                lastUpdateMs = Date.now();
+                $('updated').textContent = new Date().toLocaleTimeString();
+            } catch (e) {
+                console.error('fleet poll failed:', e);
+                $('updated').textContent = 'fetch failed';
+            }
+            // Stale indicator if we haven't updated in 12s.
+            const indicator = $('indicator');
+            if (lastUpdateMs && (Date.now() - lastUpdateMs) > STALE_THRESHOLD_MS) {
+                indicator.classList.add('stale');
+            } else {
+                indicator.classList.remove('stale');
+            }
+        }
+
+        tick();
+        setInterval(tick, REFRESH_MS);
+    </script>
+</body>
+</html>

@@ -198,6 +198,8 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
         # ─────────────────────────────────────────────────────────────
         # Fleet Monitor API — engineering-grade NOC dashboard surface
         # ─────────────────────────────────────────────────────────────
+        elif self.path == '/fleet' or self.path == '/fleet/' or self.path == '/fleet.html':
+            self._serve_fleet_dashboard()
         elif self.path == '/fleet/health' or self.path == '/fleet/health/':
             self._serve_fleet_health()
         elif self.path == '/fleet/slo' or self.path == '/fleet/slo/':
