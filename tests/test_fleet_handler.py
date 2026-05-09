@@ -188,9 +188,11 @@ def test_show_federation_renders_peers():
     body = {
         "enabled": True,
         "fresh_window_s": 7200,
+        "sources": ["daemon"],
         "peers": [
             {"node_id": "moc", "name": "moc-gw", "network": "rns",
-             "source_origin": "rns_announce",
+             "source_origin": "rns_announce", "source": "daemon",
+             "service_type": "LXMF_DELIVERY",
              "last_seen": 0, "last_seen_age_s": 30.0},
         ],
     }
@@ -199,6 +201,8 @@ def test_show_federation_renders_peers():
     text = handler.ctx.dialog.last_msgbox_text
     assert "moc-gw" in text
     assert "30s ago" in text
+    assert "daemon" in text
+    assert "LXMF_DELIVERY" in text
 
 
 def test_show_federation_disabled_path():

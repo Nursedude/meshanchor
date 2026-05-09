@@ -207,17 +207,20 @@ class FleetMonitorHandler(BaseHandler):
             )
             return
         peers = body.get("peers") or []
+        sources = body.get("sources") or []
         lines = [
             f"Window:     {body.get('fresh_window_s', 0)}s freshness",
             f"Peers:      {len(peers)}",
+            f"Sources:    {', '.join(sources) if sources else '(none)'}",
             "",
         ]
         for peer in peers[:30]:
             name = peer.get("name") or peer.get("node_id", "")
             age = peer.get("last_seen_age_s")
             age_str = self._format_age(age)
-            origin = peer.get("source_origin", "")
-            lines.append(f"  {name[:24]:24s}  {age_str:>10s}  {origin}")
+            src = peer.get("source", "?")
+            kind = peer.get("service_type") or peer.get("source_origin", "")
+            lines.append(f"  {name[:20]:20s}  {age_str:>10s}  [{src}]  {kind}")
         if len(peers) > 30:
             lines.append(f"  ... and {len(peers) - 30} more")
         self._render(body, "Federation Peers", lines)

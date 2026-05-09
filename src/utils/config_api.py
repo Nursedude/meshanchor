@@ -1028,6 +1028,15 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._handle_health_get()
             return
 
+        # Fleet federation — daemon-side RNS announce registry. The
+        # map service has its own /fleet/federation that proxies this
+        # one (issue #102: the map's directory cache doesn't persist
+        # RNS announces, so the daemon is the source of truth).
+        if self.path == "/fleet/federation" or self.path.startswith("/fleet/federation?"):
+            from utils.fleet_api import handle_get as _fleet_handle_get
+            _fleet_handle_get(self)
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
