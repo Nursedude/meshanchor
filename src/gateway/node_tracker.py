@@ -182,6 +182,26 @@ class UnifiedNodeTracker:
                 # instance_name MUST match what rnsd actually uses — the shared-instance
                 # socket is namespaced as @rns/<instance_name> and a mismatch makes the
                 # client spawn its own fresh socket instead of attaching to rnsd.
+                #
+                # rpc_key MUST also match rnsd's: RNS 1.2.0+ derives a default rpc_key
+                # from RNS.Transport.identity.private_key when the config has no rpc_key
+                # line. Our /tmp client config has its own (different) Transport identity,
+                # so the derived rpc_key won't match rnsd's. That mismatch makes every
+                # multiprocessing.connection.Client RPC call (Identity.recall,
+                # get_packet_rssi, etc) fail with "digest sent was rejected", which kills
+                # Link.__update_phy_stats on every incoming Link packet — silently
+                # blocking ALL inbound LXMF DM delivery to the daemon. Compute the same
+                # rpc_key rnsd would derive by hashing rnsd's transport identity.
+                rpc_key_line = ""
+                try:
+                    rnsd_identity_path = "/etc/reticulum/storage/transport_identity"
+                    if os.path.isfile(rnsd_identity_path):
+                        rnsd_identity = RNS.Identity.from_file(rnsd_identity_path)
+                        rpc_key = RNS.Identity.full_hash(rnsd_identity.get_private_key()).hex()
+                        rpc_key_line = f"rpc_key = {rpc_key}\n"
+                except Exception as _e:
+                    logger.warning("Could not derive rpc_key from rnsd transport identity: %s", _e)
+
                 client_config_file.write_text(
                     "# MeshAnchor RNS Client Config (auto-generated)\n"
                     "# Connects to existing rnsd without creating interfaces\n\n"
@@ -190,6 +210,7 @@ class UnifiedNodeTracker:
                     "shared_instance_port = 37428\n"
                     "instance_control_port = 37429\n"
                     f"instance_name = {instance_name}\n"
+                    + rpc_key_line
                 )
 
                 # Pre-flight: check if shared instance port is listening
