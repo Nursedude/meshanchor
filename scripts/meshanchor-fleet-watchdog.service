@@ -1,0 +1,63 @@
+[Unit]
+Description=MeshAnchor Fleet Watchdog - silence detection for the observability platform
+Documentation=https://github.com/Nursedude/meshanchor
+# Ordering hint only — the watchdog must run even when the collector
+# has failed (the WHOLE POINT of a separate watchdog is detecting
+# silence regardless of upstream). `Wants=` not `Requires=` so a
+# collector failure does NOT pull the watchdog down.
+After=network.target meshanchor-map.service meshanchor-fleet-collector.service
+Wants=meshanchor-map.service
+
+# Stop crash-looping after 5 failures in 60s — same shape as the
+# collector. The watchdog is the silence detector; a watchdog
+# wedged in restart loops needs surfacing to the operator.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/meshanchor/src
+
+# Use venv if available, fall back to system Python.
+# Default thresholds: --interval 30 --stale 120 --frozen-window 3.
+# Override here if a particular host needs different tuning.
+ExecStart=/bin/bash -c '\
+    if [ -x /opt/meshanchor/venv/bin/python ]; then \
+        exec /opt/meshanchor/venv/bin/python -m monitoring.fleet_watchdog; \
+    else \
+        exec python3 -m monitoring.fleet_watchdog; \
+    fi'
+
+# Graceful shutdown — watchdog handles SIGTERM the same way the
+# collector does.
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=15
+
+# Restart=always — silence detection that stays exited is itself
+# silent. Same reasoning as the collector.
+Restart=always
+RestartSec=10
+
+# Environment — same SUDO_USER pin so the watchdog reads the same
+# fleet_history.db the collector writes.
+Environment=SUDO_USER=wh6gxz
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/meshanchor/src
+
+# Logging — INFO per cycle when nothing's wrong, WARNING when a
+# kind goes active. journalctl -u meshanchor-fleet-watchdog -f
+# is the operator's "have I missed an incident?" tail.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshanchor-fleet-watchdog
+
+# Security hardening — same posture as the collector. Both processes
+# read/write the same DB under /home/wh6gxz/.local/share/meshanchor/.
+ProtectSystem=false
+PrivateTmp=false
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target
