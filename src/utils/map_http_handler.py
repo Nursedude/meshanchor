@@ -84,9 +84,10 @@ mimetypes.add_type('image/avif', '.avif')
 
 from utils._map_meshtastic_proxy import MeshtasticProxyMixin
 from utils._map_radio_endpoints import RadioEndpointsMixin
+from utils._map_fleet import FleetEndpointsMixin
 
 
-class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPRequestHandler):
+class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPRequestHandler):
     """HTTP handler that serves the map HTML and node GeoJSON API."""
 
     collector = None  # MapDataCollector instance
@@ -194,6 +195,15 @@ class MapRequestHandler(RadioEndpointsMixin, MeshtasticProxyMixin, SimpleHTTPReq
             self._serve_radio_channels()
         elif self.path == '/api/radio/status' or self.path == '/api/radio/status/':
             self._serve_radio_status()
+        # ─────────────────────────────────────────────────────────────
+        # Fleet Monitor API — engineering-grade NOC dashboard surface
+        # ─────────────────────────────────────────────────────────────
+        elif self.path == '/fleet/health' or self.path == '/fleet/health/':
+            self._serve_fleet_health()
+        elif self.path == '/fleet/slo' or self.path == '/fleet/slo/':
+            self._serve_fleet_slo()
+        elif self.path == '/fleet/activity' or self.path == '/fleet/activity/':
+            self._serve_fleet_activity()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
