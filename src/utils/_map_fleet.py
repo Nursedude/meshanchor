@@ -55,6 +55,43 @@ class FleetEndpointsMixin:
         snap = self._collect_fleet_snapshot(include_daemon_health=False)
         self._serve_json(activity_view(snap))
 
+    def _serve_fleet_rollup(self) -> None:
+        """Multi-host rollup — self + every peer in `~/.config/meshanchor/
+        fleet.json` + RNS federation peers from the directory cache.
+        The dashboard polls this for the cross-host SLO grid."""
+        from monitoring.fleet_config import load_fleet_config
+        from monitoring.fleet_rollup import collect_fleet_rollup
+        try:
+            config = load_fleet_config()
+            rollup = collect_fleet_rollup(config, collector=self.collector)
+        except Exception as e:
+            logger.error("fleet rollup failed: %s", e)
+            self._serve_json({"error": str(e), "peers": [], "federation_peers": []},
+                             status=500)
+            return
+        self._serve_json(rollup.to_dict())
+
+    def _serve_fleet_federation(self) -> None:
+        """Federation peers only — useful when the dashboard wants to
+        refresh the RNS-side panel without paying for the full peer
+        rollup. Returns just the federation slice."""
+        from monitoring.fleet_config import load_fleet_config
+        from monitoring.fleet_rollup import _collect_federation_peers
+        from dataclasses import asdict
+        config = load_fleet_config()
+        if not config.federation.scrape_rns_announces:
+            self._serve_json({"enabled": False, "peers": []})
+            return
+        peers = _collect_federation_peers(
+            self.collector,
+            fresh_window_s=config.federation.fresh_window_s,
+        )
+        self._serve_json({
+            "enabled": True,
+            "fresh_window_s": config.federation.fresh_window_s,
+            "peers": [asdict(p) for p in peers],
+        })
+
     def _collect_fleet_snapshot(self, *, include_daemon_health: bool):
         """Single collection point so all three endpoints share the same
         defaults (daemon URL, timeout). Each request collects fresh —

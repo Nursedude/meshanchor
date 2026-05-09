@@ -237,4 +237,10 @@ def get_all_handlers() -> List[Type]:
     from handlers.meshcore_cli import MeshCoreCLIHandler
     handlers.append(MeshCoreCLIHandler)
 
+    # Batch 22 — Fleet Monitor (Session 2): NOC SLO + activity + peer
+    # rollup + federation peers. Surfaces the same /fleet/* JSON the
+    # always-on web dashboard renders, so the TUI is the source of truth.
+    from handlers.fleet_monitor import FleetMonitorHandler
+    handlers.append(FleetMonitorHandler)
+
     return handlers
