@@ -79,6 +79,40 @@ def _reset_event_bus_subscribers():
         warnings.warn(f"event_bus.clear_subscribers failed: {e}", stacklevel=2)
 
 
+def _clear_all_service_check_caches():
+    """Clear the TTL cache regardless of how the test imported the
+    module. Some tests use `from src.utils.service_check import ...`
+    and others use `from utils.service_check import ...`; Python
+    treats those as two separate modules with their own caches, so
+    we have to clear every loaded variant.
+    """
+    import sys
+    for module_name in ("utils.service_check", "src.utils.service_check"):
+        mod = sys.modules.get(module_name)
+        if mod is not None:
+            try:
+                mod.clear_service_cache()
+            except Exception:
+                pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_service_check_cache():
+    """Clear the `check_service` TTL cache between every test.
+
+    The cache cuts production load from dashboard polling but it
+    persists across in-process pytest runs, so a real `check_service`
+    call in test A pollutes the cache and short-circuits a mocked
+    `check_service` call in test B (e.g. test_status_consistency
+    mocks subprocess.run but never sees the call because the cache
+    hits first). Clearing before AND after keeps tests independent
+    regardless of order.
+    """
+    _clear_all_service_check_caches()
+    yield
+    _clear_all_service_check_caches()
+
+
 # Track RNSMeshtasticBridge instances so we can stop leaked background threads.
 # Threads like _bridge_loop otherwise keep calling emit_service_status after
 # pytest closes captured streams, producing "I/O operation on closed file" noise.
