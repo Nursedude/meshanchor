@@ -210,6 +210,8 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             self._serve_fleet_rollup()
         elif self.path == '/fleet/federation' or self.path == '/fleet/federation/':
             self._serve_fleet_federation()
+        elif self.path == '/fleet/history' or self.path.startswith('/fleet/history?'):
+            self._serve_fleet_history()
         else:
             # Serve static files from web/ directory
             if self.web_dir:
