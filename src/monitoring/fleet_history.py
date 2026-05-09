@@ -119,6 +119,32 @@ CREATE TABLE IF NOT EXISTS service_state_events (
 
 CREATE INDEX IF NOT EXISTS idx_service_events_ts
     ON service_state_events(ts);
+
+-- Blackout intervals: start/end timestamps + kind classifier. Active
+-- blackouts have ts_ended IS NULL; the watchdog opens a row on
+-- detection and closes it (sets ts_ended) on recovery.
+--
+-- ``kind`` distinguishes the two flavors of silence:
+--   "no_data"   — heartbeat table is empty (collector never ran or
+--                 history DB freshly created).
+--   "http_dead" — most recent heartbeat is older than the watchdog's
+--                 stale threshold; collector can't reach the map.
+--   "frozen"    — heartbeat row landed but uptime_s isn't advancing
+--                 across consecutive cycles; map answers but the
+--                 daemon is stuck behind a healthy front door.
+CREATE TABLE IF NOT EXISTS blackout_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_started  REAL NOT NULL,
+    ts_ended    REAL,
+    kind        TEXT NOT NULL,
+    reason      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_blackout_active
+    ON blackout_events(kind, ts_ended);
+
+CREATE INDEX IF NOT EXISTS idx_blackout_started
+    ON blackout_events(ts_started);
 """
 
 
@@ -512,6 +538,146 @@ def list_boundary_labels(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Blackouts
+# ──────────────────────────────────────────────────────────────────────
+
+
+def record_blackout_started(
+    kind: str,
+    *,
+    reason: Optional[str] = None,
+    ts: Optional[float] = None,
+    db_path: Optional[Path] = None,
+) -> Optional[int]:
+    """Open a blackout interval. Idempotent per ``kind``: if an active
+    blackout of the same kind exists, returns its existing id without
+    inserting. Returns the row id (existing or new), or ``None`` on
+    SQLite failure (caller logs + degrades — never raises)."""
+    path = init_db(db_path)
+    ts = ts if ts is not None else time.time()
+    conn = connect_tuned(path)
+    try:
+        with conn:
+            existing = conn.execute(
+                """
+                SELECT id FROM blackout_events
+                WHERE kind = ? AND ts_ended IS NULL
+                ORDER BY ts_started DESC LIMIT 1
+                """,
+                (kind,),
+            ).fetchone()
+            if existing is not None:
+                return existing[0]
+            cur = conn.execute(
+                """
+                INSERT INTO blackout_events (ts_started, ts_ended, kind, reason)
+                VALUES (?, NULL, ?, ?)
+                """,
+                (ts, kind, reason),
+            )
+            return cur.lastrowid
+    except sqlite3.Error as e:
+        logger.error("fleet_history.record_blackout_started: %s", e)
+        return None
+    finally:
+        conn.close()
+
+
+def record_blackout_ended(
+    kind: str,
+    *,
+    ts: Optional[float] = None,
+    db_path: Optional[Path] = None,
+) -> int:
+    """Close every active blackout matching ``kind``. Returns the
+    number of rows updated (0 if no active blackout of that kind).
+    Idempotent: calling on an already-closed kind is a no-op."""
+    path = init_db(db_path)
+    ts = ts if ts is not None else time.time()
+    conn = connect_tuned(path)
+    try:
+        with conn:
+            cur = conn.execute(
+                """
+                UPDATE blackout_events
+                SET ts_ended = ?
+                WHERE kind = ? AND ts_ended IS NULL
+                """,
+                (ts, kind),
+            )
+            return cur.rowcount
+    except sqlite3.Error as e:
+        logger.error("fleet_history.record_blackout_ended: %s", e)
+        return 0
+    finally:
+        conn.close()
+
+
+def query_active_blackouts(
+    *,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Currently-open blackouts (ts_ended IS NULL). Used by the
+    dashboard banner."""
+    path = init_db(db_path)
+    conn = connect_tuned(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, ts_started, ts_ended, kind, reason
+            FROM blackout_events
+            WHERE ts_ended IS NULL
+            ORDER BY ts_started ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def query_blackout_history(
+    *,
+    since: float,
+    until: Optional[float] = None,
+    include_active: bool = True,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Past + (optionally) active blackouts in window."""
+    path = init_db(db_path)
+    until = until if until is not None else time.time()
+    if until < since:
+        return []
+    conn = connect_tuned(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        if include_active:
+            rows = conn.execute(
+                """
+                SELECT id, ts_started, ts_ended, kind, reason
+                FROM blackout_events
+                WHERE ts_started <= ?
+                  AND (ts_ended IS NULL OR ts_ended >= ?)
+                ORDER BY ts_started ASC
+                """,
+                (until, since),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, ts_started, ts_ended, kind, reason
+                FROM blackout_events
+                WHERE ts_started <= ? AND ts_ended >= ?
+                ORDER BY ts_started ASC
+                """,
+                (until, since),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Retention
 # ──────────────────────────────────────────────────────────────────────
 
@@ -523,10 +689,22 @@ def prune_history(
 ) -> Dict[str, int]:
     """Delete rows older than ``retention_s`` seconds. Returns row
     counts removed per table. Idempotent and cheap when nothing's
-    expired."""
+    expired.
+
+    Service-state events and ended blackouts are kept on a longer
+    horizon (≥ 2× retention or 7d minimum) — both are event logs that
+    answer "did X flap last week?" long after raw rows aged out.
+    Active blackouts (ts_ended IS NULL) are NEVER pruned — leaving
+    them behind would lose the "still in trouble" signal.
+    """
     path = init_db(db_path)
     cutoff = time.time() - retention_s
-    deleted = {"heartbeat": 0, "boundary_snapshots": 0, "service_state_events": 0}
+    deleted = {
+        "heartbeat": 0,
+        "boundary_snapshots": 0,
+        "service_state_events": 0,
+        "blackout_events": 0,
+    }
 
     conn = connect_tuned(path)
     try:
@@ -539,15 +717,21 @@ def prune_history(
                 "DELETE FROM boundary_snapshots WHERE ts < ?", (cutoff,)
             )
             deleted["boundary_snapshots"] = cur.rowcount
-            # Service events kept longer (event log, not snapshot stream)
-            # — keep at least double the retention so "when did rnsd
-            # flap last week?" still answers after the rest pruned.
             event_cutoff = time.time() - max(retention_s * 2, 7 * 24 * 3600)
             cur = conn.execute(
                 "DELETE FROM service_state_events WHERE ts < ?",
                 (event_cutoff,),
             )
             deleted["service_state_events"] = cur.rowcount
+            cur = conn.execute(
+                """
+                DELETE FROM blackout_events
+                WHERE ts_ended IS NOT NULL
+                  AND ts_ended < ?
+                """,
+                (event_cutoff,),
+            )
+            deleted["blackout_events"] = cur.rowcount
     finally:
         conn.close()
     return deleted
@@ -602,4 +786,9 @@ __all__ = [
     "prune_history",
     "should_record_now",
     "reset_record_throttle",
+    # Blackout API (S5a)
+    "record_blackout_started",
+    "record_blackout_ended",
+    "query_active_blackouts",
+    "query_blackout_history",
 ]
