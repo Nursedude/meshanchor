@@ -251,6 +251,45 @@
         .err-list { padding: 8px 16px; font-size: 11px; color: #ffa726; }
         .err-list .err { padding: 2px 0; }
 
+        /* ── BLACKOUT banner ──────────────────────────────────
+           Red strip across the top when the watchdog has open
+           blackout rows. The banner is the operator's "things have
+           fallen silent" signal — keep it loud and unambiguous.
+        */
+        .blackout-banner {
+            display: none;
+            background: linear-gradient(90deg, #b71c1c 0%, #d32f2f 100%);
+            color: #ffeeee;
+            padding: 14px 20px;
+            border-radius: 10px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            box-shadow: 0 0 16px rgba(239, 83, 80, 0.4);
+            border: 1px solid #ef5350;
+        }
+        .blackout-banner.show { display: block; }
+        .blackout-banner h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 6px;
+        }
+        .blackout-banner .blackout-list {
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            font-weight: 400;
+        }
+        .blackout-banner .kind {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 1px 6px;
+            border-radius: 4px;
+            margin-right: 6px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
         @media (max-width: 900px) {
             .grid { grid-template-columns: 1fr; }
         }
@@ -265,6 +304,11 @@
             &middot; updated <strong id="updated">never</strong>
             &middot; refresh every <strong id="refresh-int">5</strong>s
         </div>
+    </div>
+
+    <div id="blackout-banner" class="blackout-banner">
+        <h3>⚠ Blackout detected</h3>
+        <div class="blackout-list" id="blackout-list"></div>
     </div>
 
     <div class="grid">
@@ -460,6 +504,46 @@
             }
             const area = `${line} L ${width} ${height} L 0 ${height} Z`;
             return { line, area, minV, maxV };
+        }
+
+        // ── Blackout banner ──────────────────────────────────
+        // Polls /fleet/blackouts every 10s. Shows the red banner
+        // only when there are active blackouts. Independent of
+        // the main 5s tick so a slow blackouts query can't gate
+        // the live SLO panel.
+        function fmtBlackoutDuration(startedTs) {
+            const dur = Math.max(0, (Date.now() / 1000) - startedTs);
+            if (dur < 60) return `${Math.round(dur)}s`;
+            if (dur < 3600) return `${Math.round(dur / 60)}m`;
+            return `${(dur / 3600).toFixed(1)}h`;
+        }
+        async function pollBlackouts() {
+            const banner = $('blackout-banner');
+            const list = $('blackout-list');
+            try {
+                const body = await fetchJson('/fleet/blackouts?active_only=1');
+                const active = body.active || [];
+                if (active.length === 0) {
+                    banner.classList.remove('show');
+                    return;
+                }
+                banner.classList.add('show');
+                list.innerHTML = '';
+                for (const b of active) {
+                    const dur = fmtBlackoutDuration(b.ts_started);
+                    const div = el('div', {}, [
+                        el('span', { class: 'kind', text: b.kind }),
+                        document.createTextNode(`${b.reason || ''} · ongoing ${dur}`),
+                    ]);
+                    list.appendChild(div);
+                }
+            } catch (e) {
+                // Silent failure — a fetch error shouldn't pop the
+                // banner because the banner itself is a fetch result.
+                // The main panel's stale-pulse handles "we're not
+                // fetching" detection.
+                console.warn('blackouts poll failed:', e);
+            }
         }
 
         async function pollSparklines() {
@@ -693,6 +777,12 @@
         // populated before we look up its labels.
         setTimeout(pollSparklines, 2000);
         setInterval(pollSparklines, 15000);
+        // Blackout banner: poll every 10s. Tighter than sparklines
+        // because a blackout is the most operationally important
+        // thing the dashboard can show; still slower than the main
+        // tick to avoid racing the watchdog's own update cadence.
+        pollBlackouts();
+        setInterval(pollBlackouts, 10000);
     </script>
 </body>
 </html>

@@ -142,6 +142,54 @@ class FleetEndpointsMixin:
             return
         self._serve_json(rollup.to_dict())
 
+    def _serve_fleet_blackouts(self) -> None:
+        """Active + recent blackout intervals.
+
+        Active blackouts power the dashboard's red banner; the recent
+        list (default last 24h, includes already-ended rows) shows
+        the operator the platform's reliability over the day.
+
+        Query params (optional):
+          since=<unix>   default: now - 24h
+          until=<unix>   default: now
+          active_only=1  return just the active blackouts (cheaper)
+        """
+        from urllib.parse import urlparse, parse_qs
+        import time as _time
+
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+
+        from monitoring import fleet_history
+        try:
+            if params.get("active_only", ["0"])[0] == "1":
+                rows = fleet_history.query_active_blackouts()
+                self._serve_json({"active": rows, "history": []})
+                return
+
+            try:
+                since = float(params.get("since", [str(_time.time() - 86400)])[0])
+                until = float(params.get("until", [str(_time.time())])[0])
+            except (ValueError, TypeError):
+                self._serve_json({"error": "since/until must be numbers"},
+                                 status=400)
+                return
+
+            history = fleet_history.query_blackout_history(
+                since=since, until=until, include_active=True,
+            )
+            active = [r for r in history if r.get("ts_ended") is None]
+            self._serve_json({
+                "active": active,
+                "history": history,
+                "since": since,
+                "until": until,
+            })
+        except Exception as e:
+            logger.error("fleet_blackouts query failed: %s", e)
+            self._serve_json({"error": str(e), "active": [], "history": []},
+                             status=500)
+
     def _serve_fleet_history(self) -> None:
         """Historical timeseries for the dashboard's sparklines.
 
