@@ -73,10 +73,52 @@ class FleetEndpointsMixin:
 
         Skips the slow daemon `/health` fetch — `slo_view` derives
         `overall_status` from the local `check_service` rollup when
-        `daemon_health` is absent."""
+        `daemon_health` is absent.
+
+        S4 bootstrap (remove when S5's collector ships): records a
+        history snapshot opportunistically — throttled to ≥30s between
+        writes so concurrent browser polls don't hammer SQLite. The
+        records use the *full* services dict (not the slo_view rollup)
+        so service-state events get the per-name detail they need.
+        """
         from monitoring.fleet_aggregator import slo_view
         snap = self._collect_fleet_snapshot(include_daemon_health=False)
-        self._serve_json(slo_view(snap))
+        slo = slo_view(snap)
+        # Bootstrap-record path. Cheap when throttled, no-op on failure.
+        try:
+            from monitoring import fleet_history
+            if fleet_history.should_record_now():
+                # The slo_view rollup loses per-service detail; pass it
+                # via a private key so record_snapshot can emit
+                # service-state-events without re-deriving.
+                slo_with_detail = dict(slo)
+                slo_with_detail["_services_detail"] = snap.services
+                # We need /fleet/activity + /fleet/federation shapes
+                # too. Reuse the in-process snapshot — far cheaper than
+                # an HTTP self-fetch.
+                from monitoring.fleet_aggregator import activity_view
+                from monitoring.fleet_config import load_fleet_config
+                from monitoring.fleet_rollup import _collect_federation_peers
+                act = activity_view(snap)
+                fed_cfg = load_fleet_config()
+                fed_peers = (
+                    _collect_federation_peers(
+                        self.collector,
+                        fresh_window_s=fed_cfg.federation.fresh_window_s,
+                    ) if fed_cfg.federation.scrape_rns_announces else []
+                )
+                from dataclasses import asdict
+                fed_view = {
+                    "peers": [asdict(p) for p in fed_peers],
+                    "errors": [],
+                }
+                fleet_history.record_snapshot(
+                    slo_with_detail, act, fed_view, host=snap.host,
+                )
+        except Exception as e:
+            # Never let bootstrap-record affect the dashboard response.
+            logger.debug("fleet_history bootstrap-record skipped: %s", e)
+        self._serve_json(slo)
 
     def _serve_fleet_activity(self) -> None:
         """Live-feed surface for the dashboard's lower panel."""
@@ -99,6 +141,96 @@ class FleetEndpointsMixin:
                              status=500)
             return
         self._serve_json(rollup.to_dict())
+
+    def _serve_fleet_history(self) -> None:
+        """Historical timeseries for the dashboard's sparklines.
+
+        Query params:
+          metric=boundary&label=<label>&since=<unix>&until=<unix>&resolution=<s>
+          metric=heartbeat&since=<unix>&until=<unix>&resolution=<s>
+          metric=service_events&since=<unix>&until=<unix>
+          metric=labels                          (returns distinct labels)
+
+        ``since`` defaults to (now - 1h) when omitted. ``until`` defaults
+        to now. ``resolution`` defaults to native (60s) — pass larger
+        values for compressed views (5min/1h) on long windows.
+
+        All queries are read-only; the writer is ``_serve_fleet_slo``'s
+        bootstrap path today, the S5 collector tomorrow.
+        """
+        from urllib.parse import urlparse, parse_qs
+        import time as _time
+
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+
+        metric = params.get("metric", ["heartbeat"])[0]
+        try:
+            since = float(params.get("since", [str(_time.time() - 3600)])[0])
+            until = float(params.get("until", [str(_time.time())])[0])
+            resolution = int(params.get("resolution", ["60"])[0])
+        except (ValueError, TypeError):
+            self._serve_json({"error": "since/until/resolution must be numbers"},
+                             status=400)
+            return
+
+        # Bound the window size to keep the response small. 24h × 60s =
+        # 1440 points per series — plenty for a sparkline. Caller can
+        # pass `resolution` to widen the window proportionally.
+        max_points = 5000
+        if (until - since) / max(resolution, 1) > max_points:
+            self._serve_json({
+                "error": "window too large for resolution",
+                "max_points": max_points,
+            }, status=400)
+            return
+
+        from monitoring import fleet_history
+        try:
+            if metric == "labels":
+                rows = fleet_history.list_boundary_labels(since=since)
+                self._serve_json({"labels": rows})
+                return
+            if metric == "boundary":
+                label = params.get("label", [""])[0]
+                if not label:
+                    self._serve_json({"error": "label required for metric=boundary"},
+                                     status=400)
+                    return
+                rows = fleet_history.query_boundary_history(
+                    label=label, since=since, until=until,
+                    resolution_s=resolution,
+                )
+                self._serve_json({
+                    "metric": "boundary", "label": label,
+                    "since": since, "until": until,
+                    "resolution_s": resolution, "points": rows,
+                })
+                return
+            if metric == "heartbeat":
+                rows = fleet_history.query_heartbeat_history(
+                    since=since, until=until, resolution_s=resolution,
+                )
+                self._serve_json({
+                    "metric": "heartbeat",
+                    "since": since, "until": until,
+                    "resolution_s": resolution, "points": rows,
+                })
+                return
+            if metric == "service_events":
+                rows = fleet_history.query_service_events(
+                    since=since, until=until,
+                )
+                self._serve_json({
+                    "metric": "service_events",
+                    "since": since, "until": until,
+                    "events": rows,
+                })
+                return
+            self._serve_json({"error": f"unknown metric: {metric}"}, status=400)
+        except Exception as e:
+            logger.error("fleet_history query failed: %s", e)
+            self._serve_json({"error": str(e), "points": []}, status=500)
 
     def _serve_fleet_federation(self) -> None:
         """Federation peers only — useful when the dashboard wants to

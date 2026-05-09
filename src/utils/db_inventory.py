@@ -179,6 +179,18 @@ INVENTORY: List[DBSpec] = [
         retention_days=None,
         notes="LXMF broadcast bridge subscriber list. Operator-managed via DM.",
     ),
+    DBSpec(
+        name="fleet_history",
+        path_factory=lambda: _meshanchor_data_dir() / "fleet_history.db",
+        creator_module="monitoring.fleet_history",
+        has_auto_prune=True,
+        retention_days=7,  # raw 60s rows; service events held 2x
+        notes=(
+            "Fleet observability history. Three tables: heartbeat "
+            "(per-cycle liveness + watchdog source), boundary_snapshots "
+            "(sparkline source), service_state_events (transitions only)."
+        ),
+    ),
 ]
 
 

@@ -137,6 +137,21 @@
         td.label { color: #e0e0e0; font-family: ui-monospace, 'SF Mono', monospace; font-size: 11px; }
         tr:last-child td { border-bottom: none; }
 
+        /* ── Sparklines ────────────────────────────────────────
+           Each boundary row carries a 60-point p95 sparkline. The
+           SVG sizes itself to its td via viewBox; CSS controls the
+           visible width. Rendered client-side from /fleet/history JSON.
+        */
+        td.spark { padding: 4px 10px; width: 96px; }
+        td.spark svg {
+            display: block;
+            width: 90px;
+            height: 22px;
+        }
+        td.spark .spark-line { fill: none; stroke: #4fc3f7; stroke-width: 1.2; }
+        td.spark .spark-area { fill: rgba(79,195,247,0.15); stroke: none; }
+        td.spark.empty { color: #6a7a8a; font-size: 10px; }
+
         /* ── Activity feed ─────────────────────────────────── */
         .feed { max-height: 420px; overflow-y: auto; }
         .feed-item {
@@ -273,7 +288,7 @@
                 <h2>Top Boundaries (call volume)</h2>
                 <table>
                     <thead>
-                        <tr><th>label</th><th class="num">count</th><th class="num">p50</th><th class="num">p95</th><th class="num">p99</th><th class="num">err</th></tr>
+                        <tr><th>label</th><th class="num">count</th><th class="num">p50</th><th class="num">p95</th><th class="num">p99</th><th class="num">err</th><th>p95 trend</th></tr>
                     </thead>
                     <tbody id="boundaries-tbody"></tbody>
                 </table>
@@ -405,7 +420,7 @@
             tbody.innerHTML = '';
             const top = slo.boundaries_top || [];
             if (top.length === 0) {
-                tbody.appendChild(el('tr', {}, el('td', { colspan: 6, class: 'empty', text: 'no boundary calls yet' })));
+                tbody.appendChild(el('tr', {}, el('td', { colspan: 7, class: 'empty', text: 'no boundary calls yet' })));
             } else {
                 for (const b of top.slice(0, 8)) {
                     const tr = el('tr');
@@ -415,7 +430,71 @@
                     tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p95_s) }));
                     tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p99_s) }));
                     tr.appendChild(el('td', { class: 'num', text: b.error_rate ? (b.error_rate * 100).toFixed(1) + '%' : '0' }));
+                    // Sparkline cell — empty placeholder; populated
+                    // asynchronously by `pollSparklines()` so the row
+                    // renders immediately and history fetches don't
+                    // block the main poll.
+                    const sparkCell = el('td', { class: 'spark empty', text: '…' });
+                    sparkCell.dataset.label = b.label;
+                    tr.appendChild(sparkCell);
                     tbody.appendChild(tr);
+                }
+            }
+        }
+
+        // ── Sparkline rendering ─────────────────────────────────
+        // Build an SVG path from a sequence of (ts, value) points.
+        // Caller owns layout (width/height); this just produces the
+        // `d` attribute strings for line + filled area.
+        function buildSparkPath(points, width, height, valueKey) {
+            if (!points || points.length < 2) return null;
+            const values = points.map(p => p[valueKey] ?? 0);
+            const minV = Math.min(...values);
+            const maxV = Math.max(...values);
+            const range = maxV - minV || 1;  // avoid /0 on flat series
+            const dx = width / (points.length - 1);
+            const ys = values.map(v => height - ((v - minV) / range) * height);
+            let line = `M 0 ${ys[0].toFixed(2)}`;
+            for (let i = 1; i < points.length; i++) {
+                line += ` L ${(i * dx).toFixed(2)} ${ys[i].toFixed(2)}`;
+            }
+            const area = `${line} L ${width} ${height} L 0 ${height} Z`;
+            return { line, area, minV, maxV };
+        }
+
+        async function pollSparklines() {
+            // For each visible boundary row, fetch its p95 history and
+            // render. Done independently of the main /fleet/slo poll so
+            // a slow history query doesn't block the live panel.
+            const cells = document.querySelectorAll('td.spark[data-label]');
+            const since = Date.now() / 1000 - 1800;  // last 30 min
+            for (const cell of cells) {
+                const label = cell.dataset.label;
+                try {
+                    const url = `/fleet/history?metric=boundary&label=${encodeURIComponent(label)}&since=${since.toFixed(0)}&resolution=60`;
+                    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                    if (!resp.ok) throw new Error(`history ${resp.status}`);
+                    const body = await resp.json();
+                    const pts = body.points || [];
+                    const path = buildSparkPath(pts, 90, 22, 'p95_ms');
+                    if (!path) {
+                        cell.classList.add('empty');
+                        cell.classList.remove('filled');
+                        cell.textContent = pts.length === 1 ? `1 pt` : '—';
+                        continue;
+                    }
+                    cell.classList.remove('empty');
+                    cell.classList.add('filled');
+                    cell.innerHTML = `
+                        <svg viewBox="0 0 90 22" preserveAspectRatio="none">
+                            <path class="spark-area" d="${path.area}"/>
+                            <path class="spark-line" d="${path.line}"/>
+                        </svg>`;
+                    cell.title = `p95 ${path.minV.toFixed(1)}–${path.maxV.toFixed(1)}ms over last ${pts.length} samples`;
+                } catch (e) {
+                    cell.classList.add('empty');
+                    cell.textContent = 'err';
+                    cell.title = String(e);
                 }
             }
         }
@@ -607,6 +686,13 @@
         tickAll();
         setInterval(tickAll, REFRESH_MS);
         setInterval(staleTick, 1000);
+        // Sparklines refresh every 15s — much slower than the main
+        // panel (5s) since 30-min history doesn't tick that fast and
+        // each cell is its own /fleet/history fetch (~50ms × 8 rows).
+        // Initial render delayed by 2s so the boundaries table has
+        // populated before we look up its labels.
+        setTimeout(pollSparklines, 2000);
+        setInterval(pollSparklines, 15000);
     </script>
 </body>
 </html>
