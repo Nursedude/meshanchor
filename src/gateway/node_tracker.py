@@ -183,24 +183,44 @@ class UnifiedNodeTracker:
                 # socket is namespaced as @rns/<instance_name> and a mismatch makes the
                 # client spawn its own fresh socket instead of attaching to rnsd.
                 #
-                # rpc_key MUST also match rnsd's: RNS 1.2.0+ derives a default rpc_key
-                # from RNS.Transport.identity.private_key when the config has no rpc_key
-                # line. Our /tmp client config has its own (different) Transport identity,
-                # so the derived rpc_key won't match rnsd's. That mismatch makes every
-                # multiprocessing.connection.Client RPC call (Identity.recall,
-                # get_packet_rssi, etc) fail with "digest sent was rejected", which kills
-                # Link.__update_phy_stats on every incoming Link packet — silently
-                # blocking ALL inbound LXMF DM delivery to the daemon. Compute the same
-                # rpc_key rnsd would derive by hashing rnsd's transport identity.
+                # rpc_key MUST match rnsd's: RNS 1.2.0+ requires the multiprocessing
+                # RPC authkey to match between client and rnsd. Two cases:
+                #   (a) /etc/reticulum/config has an explicit `rpc_key = ...` line —
+                #       use THAT verbatim (it overrides derivation).
+                #   (b) No explicit line — RNS 1.2.0 derives the key as
+                #       Identity.full_hash(Transport.identity.private_key) from the
+                #       configdir's transport_identity. Our /tmp client has its own
+                #       (different) Transport identity, so the derived key won't match
+                #       rnsd's. Compute rnsd's derived value by reading
+                #       /etc/reticulum/storage/transport_identity (mode 0666).
+                # Without this, every multiprocessing.connection.Client RPC call
+                # (Identity.recall, get_packet_rssi, etc) fails with "digest sent was
+                # rejected", which propagates through Link.__update_phy_stats on every
+                # incoming Link packet — silently blocking ALL inbound LXMF DM
+                # delivery to the daemon (gateway and broadcast bridge alike).
                 rpc_key_line = ""
                 try:
-                    rnsd_identity_path = "/etc/reticulum/storage/transport_identity"
-                    if os.path.isfile(rnsd_identity_path):
-                        rnsd_identity = RNS.Identity.from_file(rnsd_identity_path)
-                        rpc_key = RNS.Identity.full_hash(rnsd_identity.get_private_key()).hex()
-                        rpc_key_line = f"rpc_key = {rpc_key}\n"
+                    rnsd_config_path = "/etc/reticulum/config"
+                    explicit = ""
+                    if os.path.isfile(rnsd_config_path):
+                        with open(rnsd_config_path) as _cfg:
+                            for _line in _cfg:
+                                _s = _line.strip()
+                                if _s.startswith("rpc_key"):
+                                    _left, _, _right = _s.partition("=")
+                                    if _left.strip() == "rpc_key":
+                                        explicit = _right.strip()
+                                        break
+                    if explicit:
+                        rpc_key_line = f"rpc_key = {explicit}\n"
+                    else:
+                        rnsd_identity_path = "/etc/reticulum/storage/transport_identity"
+                        if os.path.isfile(rnsd_identity_path):
+                            rnsd_identity = RNS.Identity.from_file(rnsd_identity_path)
+                            rpc_key = RNS.Identity.full_hash(rnsd_identity.get_private_key()).hex()
+                            rpc_key_line = f"rpc_key = {rpc_key}\n"
                 except Exception as _e:
-                    logger.warning("Could not derive rpc_key from rnsd transport identity: %s", _e)
+                    logger.warning("Could not resolve rpc_key for rnsd shared instance: %s", _e)
 
                 client_config_file.write_text(
                     "# MeshAnchor RNS Client Config (auto-generated)\n"
