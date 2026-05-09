@@ -295,6 +295,14 @@ class RNSServiceRegistry:
         self._parsers: Dict[str, type] = {}
         self._service_callbacks: List[Callable[[AnnounceEvent], None]] = []
         self._discovered_services: Dict[str, ServiceInfo] = {}  # hash_hex -> ServiceInfo
+        # Per-hash announce timing — populated by `parse_announce`. Used
+        # by the fleet monitor's /fleet/federation endpoint to surface
+        # how recently each peer announced (issue #102: the map's
+        # directory cache only sees meshcore/meshtastic data, so the
+        # daemon needs to be the source of truth for RNS announce
+        # freshness).
+        self._first_announce: Dict[str, datetime] = {}
+        self._last_announce: Dict[str, datetime] = {}
 
         # Register built-in parsers
         self._register_builtin_parsers()
@@ -353,8 +361,13 @@ class RNSServiceRegistry:
                 aspect=aspect or "unknown",
             )
 
-        # Store discovered service
+        # Store discovered service + timing. The first-seen timestamp
+        # is preserved across re-announces so the panel can show "first
+        # heard X ago / last seen Y ago" — useful for distinguishing
+        # long-standing federation peers (moc/moc3) from transients.
         self._discovered_services[event.hash_hex] = event.service_info
+        self._last_announce[event.hash_hex] = event.timestamp
+        self._first_announce.setdefault(event.hash_hex, event.timestamp)
 
         # Notify callbacks
         for callback in self._service_callbacks:
@@ -384,6 +397,43 @@ class RNSServiceRegistry:
             type_name = service.service_type.name
             stats[type_name] = stats.get(type_name, 0) + 1
         return stats
+
+    def get_announce_timing(self, hash_hex: str) -> Optional[Dict[str, Any]]:
+        """Return `{first, last}` datetimes for a discovered hash, or
+        `None` when the hash hasn't been heard yet. Both are populated
+        by `parse_announce`."""
+        last = self._last_announce.get(hash_hex)
+        if last is None:
+            return None
+        return {
+            "first": self._first_announce.get(hash_hex, last),
+            "last": last,
+        }
+
+    def get_all_with_timing(self) -> Dict[str, Dict[str, Any]]:
+        """Snapshot every discovered service plus its announce timing.
+
+        Returns `{hash_hex: {"info": ServiceInfo, "first": dt, "last": dt}}`.
+        Used by the daemon's `/fleet/federation` endpoint — see
+        `utils/fleet_api.py`. Snapshot is a fresh dict so the caller
+        can iterate without holding any lock."""
+        out: Dict[str, Dict[str, Any]] = {}
+        # Copy first to keep the iteration consistent under concurrent
+        # `parse_announce` writes (GIL covers each operation, but we
+        # don't want a service to appear without timing or vice versa).
+        services = dict(self._discovered_services)
+        first = dict(self._first_announce)
+        last = dict(self._last_announce)
+        for h, info in services.items():
+            ts = last.get(h)
+            if ts is None:
+                continue
+            out[h] = {
+                "info": info,
+                "first": first.get(h, ts),
+                "last": ts,
+            }
+        return out
 
 
 # Global registry instance

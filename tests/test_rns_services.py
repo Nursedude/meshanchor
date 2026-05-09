@@ -159,6 +159,55 @@ class TestServiceRegistry(unittest.TestCase):
         self.assertEqual(stats.get('LXMF_DELIVERY', 0), 2)
         self.assertEqual(stats.get('NOMAD_PAGE', 0), 1)
 
+    def test_announce_timing_populated_on_parse(self):
+        """parse_announce records first/last timestamps for each hash."""
+        from gateway.rns_services import RNSServiceRegistry
+        from datetime import datetime
+        registry = RNSServiceRegistry()
+        h = bytes.fromhex('44' * 16)
+        before = datetime.now()
+        registry.parse_announce(h, None, b'peer1', 'lxmf.delivery')
+        after = datetime.now()
+        timing = registry.get_announce_timing(h.hex())
+        self.assertIsNotNone(timing)
+        self.assertLessEqual(before, timing['first'])
+        self.assertLessEqual(timing['first'], after)
+        self.assertEqual(timing['first'], timing['last'])
+
+    def test_announce_timing_first_preserved_across_reannounces(self):
+        """A re-announce updates `last` but leaves `first` alone."""
+        from gateway.rns_services import RNSServiceRegistry
+        registry = RNSServiceRegistry()
+        h = bytes.fromhex('55' * 16)
+        registry.parse_announce(h, None, b'peer', 'lxmf.delivery')
+        first_first = registry.get_announce_timing(h.hex())['first']
+        # Force a small sleep so the second timestamp is measurably later.
+        import time as _time
+        _time.sleep(0.01)
+        registry.parse_announce(h, None, b'peer', 'lxmf.delivery')
+        timing = registry.get_announce_timing(h.hex())
+        self.assertEqual(timing['first'], first_first)
+        self.assertGreater(timing['last'], timing['first'])
+
+    def test_announce_timing_returns_none_for_unknown_hash(self):
+        from gateway.rns_services import RNSServiceRegistry
+        registry = RNSServiceRegistry()
+        self.assertIsNone(registry.get_announce_timing('aa' * 16))
+
+    def test_get_all_with_timing_shape(self):
+        """get_all_with_timing snapshots service info + first/last per hash."""
+        from gateway.rns_services import RNSServiceRegistry
+        registry = RNSServiceRegistry()
+        registry.parse_announce(bytes.fromhex('66' * 16), None, b'a', 'lxmf.delivery')
+        registry.parse_announce(bytes.fromhex('77' * 16), None, b'b', 'nomadnetwork.node')
+        snap = registry.get_all_with_timing()
+        self.assertEqual(set(snap.keys()),
+                         {'66' * 16, '77' * 16})
+        for entry in snap.values():
+            self.assertIn('info', entry)
+            self.assertIn('first', entry)
+            self.assertIn('last', entry)
+
 
 class TestNetworkTopology(unittest.TestCase):
     """Test network topology graph"""

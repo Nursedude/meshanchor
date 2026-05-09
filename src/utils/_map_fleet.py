@@ -74,22 +74,96 @@ class FleetEndpointsMixin:
     def _serve_fleet_federation(self) -> None:
         """Federation peers only — useful when the dashboard wants to
         refresh the RNS-side panel without paying for the full peer
-        rollup. Returns just the federation slice."""
+        rollup.
+
+        Two data sources, tried in order (issue #102):
+
+        1. The daemon's `/fleet/federation` endpoint — the canonical
+           source for RNS announces, which live in the daemon's
+           `rns_services._service_registry` and never touch the map's
+           directory cache.
+        2. The map's directory cache filtered to `network=="rns"` —
+           a fallback for hosts that DO end up persisting RNS
+           announces into the directory (e.g. via a future collector).
+
+        Each peer carries a `source` field so the dashboard can show
+        provenance ("from daemon" vs "from directory")."""
         from monitoring.fleet_config import load_fleet_config
         from monitoring.fleet_rollup import _collect_federation_peers
+        from monitoring.fleet_aggregator import (
+            _http_get_json, DEFAULT_DAEMON_URL, DEFAULT_HTTP_TIMEOUT_S,
+        )
         from dataclasses import asdict
+
         config = load_fleet_config()
         if not config.federation.scrape_rns_announces:
-            self._serve_json({"enabled": False, "peers": []})
+            self._serve_json({"enabled": False, "peers": [], "sources": []})
             return
-        peers = _collect_federation_peers(
-            self.collector,
-            fresh_window_s=config.federation.fresh_window_s,
+
+        peers_out = []
+        sources = []
+        errors = []
+        fresh_window = config.federation.fresh_window_s
+
+        # 1. Daemon-side registry (canonical).
+        body, err = _http_get_json(
+            f"{DEFAULT_DAEMON_URL}/fleet/federation",
+            timeout=DEFAULT_HTTP_TIMEOUT_S,
         )
+        if err is None and isinstance(body, dict):
+            sources.append("daemon")
+            for peer in body.get("peers") or []:
+                if not isinstance(peer, dict):
+                    continue
+                age = peer.get("last_seen_age_s")
+                if fresh_window > 0 and (age is None or age > fresh_window):
+                    continue
+                peers_out.append({
+                    "node_id": peer.get("hash_hex", ""),
+                    "name": peer.get("name") or peer.get("hash_hex", ""),
+                    "network": "rns",
+                    "service_type": peer.get("service_type", ""),
+                    "aspect": peer.get("aspect", ""),
+                    "source_origin": "rns_announce",
+                    "source": "daemon",
+                    "last_seen": peer.get("last_seen"),
+                    "last_seen_age_s": age,
+                    "first_seen_age_s": peer.get("first_seen_age_s"),
+                })
+        elif err is not None:
+            errors.append({"source": "daemon", "error": err})
+
+        # 2. Directory cache fallback. Even when the daemon answered,
+        # we union with directory entries — different hosts may be
+        # configured differently and the panel should show whatever
+        # data is available.
+        directory_peers = _collect_federation_peers(
+            self.collector,
+            fresh_window_s=fresh_window,
+        )
+        if directory_peers:
+            sources.append("directory")
+            seen_ids = {p["node_id"] for p in peers_out}
+            for fp in directory_peers:
+                if fp.node_id in seen_ids:
+                    # Daemon registry already covered it — skip.
+                    continue
+                row = asdict(fp)
+                row["source"] = "directory"
+                peers_out.append(row)
+
+        # Newest first regardless of source.
+        peers_out.sort(
+            key=lambda p: p.get("last_seen_age_s")
+            if p.get("last_seen_age_s") is not None else 1e18
+        )
+
         self._serve_json({
             "enabled": True,
-            "fresh_window_s": config.federation.fresh_window_s,
-            "peers": [asdict(p) for p in peers],
+            "fresh_window_s": fresh_window,
+            "peers": peers_out,
+            "sources": sources,
+            "errors": errors,
         })
 
     def _collect_fleet_snapshot(self, *, include_daemon_health: bool):
