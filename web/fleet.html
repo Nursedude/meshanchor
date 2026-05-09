@@ -138,20 +138,32 @@
         tr:last-child td { border-bottom: none; }
 
         /* ── Activity feed ─────────────────────────────────── */
-        .feed { max-height: 360px; overflow-y: auto; }
+        .feed { max-height: 420px; overflow-y: auto; }
         .feed-item {
-            padding: 8px 16px;
+            padding: 10px 16px;
             border-bottom: 1px solid #1a2638;
-            font-size: 12px;
+            font-size: 13px;
             display: grid;
-            grid-template-columns: 90px 1fr;
-            gap: 10px;
+            grid-template-columns: 110px 1fr;
+            gap: 12px;
+            line-height: 1.4;
         }
         .feed-item:last-child { border-bottom: none; }
-        .feed-item .who { color: #4fc3f7; font-weight: 600; }
+        .feed-item .who-name {
+            color: #4fc3f7;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .feed-item .who-ts {
+            color: #6a7a8a;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, monospace;
+            margin-top: 2px;
+        }
         .feed-item .what { color: #e0e0e0; word-break: break-word; }
-        .feed-item.warn .who { color: #ffa726; }
-        .feed-item.error .who { color: #ef5350; }
+        .feed-item.warn .who-name { color: #ffa726; }
+        .feed-item.error .who-name { color: #ef5350; }
 
         /* ── Peer cards ────────────────────────────────────── */
         .peer-grid { display: grid; gap: 10px; padding: 14px 16px; }
@@ -196,6 +208,28 @@
             letter-spacing: 0.5px;
         }
         .source-tag.directory { background: #1a2638; color: #6a7a8a; }
+        /* Federation freshness — active gateways like moc/moc3
+           re-announce every ~5-15 min; everything else is stale-but-
+           still-alive coasting on the freshness window. */
+        .fed-active td.fed-age { color: #66bb6a; font-weight: 600; }
+        .fed-stale td.fed-age { color: #6a7a8a; }
+        .fed-name-row { display: flex; align-items: center; gap: 6px; }
+        .fed-name-row .fed-hash {
+            color: #6a7a8a;
+            font-family: ui-monospace, monospace;
+            font-size: 10px;
+        }
+        .freshness-tag {
+            display: inline-block;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 6px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .freshness-tag.active { background: #1b3a25; color: #66bb6a; }
+        .freshness-tag.stale  { background: #2a2a2a; color: #999; }
 
         /* ── Misc ──────────────────────────────────────────── */
         .empty { padding: 24px 16px; text-align: center; color: #6a7a8a; font-size: 12px; }
@@ -302,6 +336,27 @@
             if (s < 3600) return `${Math.round(s / 60)}m`;
             return `${(s / 3600).toFixed(1)}h`;
         }
+        function fmtClock(unix) {
+            if (!unix) return '';
+            const d = new Date(unix * 1000);
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            const ss = String(d.getSeconds()).padStart(2, '0');
+            return `${hh}:${mm}:${ss}`;
+        }
+        // Pull a "name:" or "name: " prefix off the text field when the
+        // dedicated `sender` field comes back empty. MeshCore handler
+        // packs the contact name into the message body for some
+        // channels, so without this the dashboard renders every chat as
+        // "—  meshanchor p3:  hello" which buries the actual content.
+        function splitSender(entry) {
+            const explicit = entry.sender || entry.from || entry.contact;
+            if (explicit) return { sender: explicit, text: entry.text || '' };
+            const text = entry.text || '';
+            const match = text.match(/^([^:\n]{1,40}?):\s+(.*)$/s);
+            if (match) return { sender: match[1].trim(), text: match[2].trim() };
+            return { sender: '—', text };
+        }
         function fmtMs(s) {
             if (s == null) return '—';
             return (s * 1000).toFixed(1) + 'ms';
@@ -375,11 +430,14 @@
                 return;
             }
             for (const entry of chat.slice(-15).reverse()) {
-                const cls = 'feed-item';
-                const sender = entry.sender || entry.from || entry.contact || '—';
-                const text = entry.text || '';
-                feed.appendChild(el('div', { class: cls }, [
-                    el('div', { class: 'who', text: sender }),
+                const { sender, text } = splitSender(entry);
+                const ts = fmtClock(entry.ts);
+                const dirTag = entry.direction === 'tx' ? '→ ' : '';
+                feed.appendChild(el('div', { class: 'feed-item' }, [
+                    el('div', { class: 'who' }, [
+                        el('div', { class: 'who-name', text: dirTag + sender }),
+                        ts ? el('div', { class: 'who-ts', text: ts }) : null,
+                    ]),
                     el('div', { class: 'what', text: text }),
                 ]));
             }
@@ -433,12 +491,22 @@
             }
         }
 
+        // Active = re-announced inside this window. moc/moc3 typically
+        // announce every 5-15 min; the threshold is generous (20 min)
+        // so transient gaps don't flap a peer to "stale".
+        const FED_ACTIVE_AGE_S = 1200;
+
         function renderFederation(fed) {
             const summary = $('fed-summary');
             summary.innerHTML = '';
             const sources = fed.sources || [];
             const peers = fed.peers || [];
-            summary.textContent = `${peers.length} peers · sources: ${sources.length ? sources.join(', ') : 'none'}`;
+            const active = peers.filter(p =>
+                p.last_seen_age_s != null && p.last_seen_age_s <= FED_ACTIVE_AGE_S
+            ).length;
+            summary.textContent =
+                `${peers.length} peers (${active} active, ${peers.length - active} stale) · ` +
+                `sources: ${sources.length ? sources.join(', ') : 'none'}`;
 
             const tbody = $('federation-tbody');
             tbody.innerHTML = '';
@@ -447,11 +515,32 @@
                 return;
             }
             for (const p of peers.slice(0, 30)) {
-                const tr = el('tr');
-                tr.appendChild(el('td', { class: 'label', text: (p.name || p.node_id || '').slice(0, 28) }));
+                const age = p.last_seen_age_s;
+                const isActive = age != null && age <= FED_ACTIVE_AGE_S;
+                const tr = el('tr', { class: isActive ? 'fed-active' : 'fed-stale' });
+
+                // Name + short hash so mojibake-named peers (e.g. iF@p@)
+                // are still identifiable at a glance.
+                const nameCell = el('td', { class: 'label' });
+                const hashShort = (p.hash_hex || p.node_id || '').slice(0, 8);
+                nameCell.appendChild(el('div', { class: 'fed-name-row' }, [
+                    el('span', { text: (p.name || hashShort).slice(0, 24) }),
+                    hashShort && p.name && p.name !== hashShort
+                        ? el('span', { class: 'fed-hash', text: hashShort })
+                        : null,
+                    el('span', {
+                        class: 'freshness-tag ' + (isActive ? 'active' : 'stale'),
+                        text: isActive ? 'active' : 'stale',
+                    }),
+                ]));
+                tr.appendChild(nameCell);
+
                 tr.appendChild(el('td', { text: (p.service_type || p.source_origin || '').toLowerCase() }));
-                tr.appendChild(el('td', { class: 'num', text: fmtAge(p.last_seen_age_s) }));
-                tr.appendChild(el('td', {}, el('span', { class: 'source-tag ' + (p.source || ''), text: p.source || '?' })));
+                tr.appendChild(el('td', { class: 'num fed-age', text: fmtAge(age) }));
+                tr.appendChild(el('td', {}, el('span', {
+                    class: 'source-tag ' + (p.source || ''),
+                    text: p.source || '?',
+                })));
                 tbody.appendChild(tr);
             }
         }
@@ -471,33 +560,42 @@
         }
 
         // ── Polling loop ───────────────────────────────────────
-        async function tick() {
+        // Each endpoint fetches + renders independently so a slow
+        // /fleet/rollup (which can run ~1.8s) doesn't block the
+        // activity feed (~160ms). A failure in one endpoint also
+        // doesn't suppress the rest — the previous Promise.all version
+        // would render nothing if any single fetch threw.
+        let aggregatedErrors = {};
+        function bumpUpdate() {
+            lastUpdateMs = Date.now();
+            $('updated').textContent = new Date().toLocaleTimeString();
+        }
+        async function pollEndpoint(name, path, render) {
             try {
-                const [slo, activity, rollup, federation] = await Promise.all([
-                    fetchJson('/fleet/slo'),
-                    fetchJson('/fleet/activity'),
-                    fetchJson('/fleet/rollup'),
-                    fetchJson('/fleet/federation'),
-                ]);
-                renderSlo(slo);
-                renderActivity(activity);
-                renderRollup(rollup);
-                renderFederation(federation);
-                // Aggregate soft errors from every endpoint that surfaced any.
-                const errs = []
-                    .concat(slo.errors || [])
-                    .concat(activity.errors || [])
-                    .concat(rollup.errors || [])
-                    .concat(federation.errors || []);
-                renderErrors(errs);
-
-                lastUpdateMs = Date.now();
-                $('updated').textContent = new Date().toLocaleTimeString();
+                const body = await fetchJson(path);
+                render(body);
+                aggregatedErrors[name] = body.errors || [];
+                bumpUpdate();
             } catch (e) {
-                console.error('fleet poll failed:', e);
-                $('updated').textContent = 'fetch failed';
+                console.error(`fleet ${name} fetch failed:`, e);
+                aggregatedErrors[name] = [{ source: name, error: String(e) }];
             }
-            // Stale indicator if we haven't updated in 12s.
+            // Re-render the soft-error card whenever any endpoint
+            // updates, since errors are per-endpoint.
+            const all = Object.values(aggregatedErrors).flat();
+            renderErrors(all);
+        }
+        function tickAll() {
+            // Activity + slo are the user's "live" view — refresh
+            // every interval. Rollup + federation are heavier / less
+            // time-critical; they run on the same cadence here but
+            // could be slowed independently in a future revision.
+            pollEndpoint('slo', '/fleet/slo', renderSlo);
+            pollEndpoint('activity', '/fleet/activity', renderActivity);
+            pollEndpoint('rollup', '/fleet/rollup', renderRollup);
+            pollEndpoint('federation', '/fleet/federation', renderFederation);
+        }
+        function staleTick() {
             const indicator = $('indicator');
             if (lastUpdateMs && (Date.now() - lastUpdateMs) > STALE_THRESHOLD_MS) {
                 indicator.classList.add('stale');
@@ -506,8 +604,9 @@
             }
         }
 
-        tick();
-        setInterval(tick, REFRESH_MS);
+        tickAll();
+        setInterval(tickAll, REFRESH_MS);
+        setInterval(staleTick, 1000);
     </script>
 </body>
 </html>

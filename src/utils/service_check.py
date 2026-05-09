@@ -63,6 +63,7 @@ def _sudo_cmd(cmd: List[str]) -> List[str]:
 __all__ = [
     # Main entry points
     'check_service',        # Primary status checker (SINGLE SOURCE OF TRUTH)
+    'clear_service_cache',  # Drop the TTL cache (post-mutation, tests)
     'require_service',      # Check with exception on failure
     'check_port',           # TCP port check (utility)
     'check_udp_port',       # UDP port check (utility)
@@ -176,7 +177,37 @@ from utils._port_detection import (  # noqa: F401, E402
 )
 
 
-def check_service(name: str, port: Optional[int] = None, host: str = 'localhost') -> ServiceStatus:
+# In-process TTL cache for `check_service` results — cuts the
+# systemd shell-out load from dashboard polling.
+#
+# The fleet dashboard polls /fleet/slo every 5s, and each call iterates
+# every KNOWN_SERVICES entry; a single browser drives ~144 systemctl
+# shell-outs per minute. The 73-min soak captured ~16k boundary calls
+# with zero anomalies, but the load is wasted work — service state
+# rarely changes mid-second. A 6s TTL means each entry serves at most
+# one cache hit between systemd reads (5s poll < 6s TTL ≤ 10s next
+# poll), cutting the load roughly in half while keeping state changes
+# visible within ~6s of the operator's actual systemctl restart.
+#
+# `_CACHE_TTL_S` is module-level so tests + callers wanting fresh data
+# can override or call `clear_service_cache()`. The cache is global
+# (single dict) — same `(name, port, host)` key produces the same
+# answer regardless of caller.
+_CACHE_TTL_S: float = 6.0
+_service_cache: dict = {}
+_service_cache_lock = __import__("threading").Lock()
+
+
+def clear_service_cache() -> None:
+    """Drop every cached result. Used by tests and after explicit
+    service-mutation operations (start/stop/restart) so the next
+    `check_service` call sees the fresh state immediately."""
+    with _service_cache_lock:
+        _service_cache.clear()
+
+
+def check_service(name: str, port: Optional[int] = None, host: str = 'localhost',
+                  *, use_cache: bool = True) -> ServiceStatus:
     """
     Check if a service is available and provide actionable feedback.
 
@@ -189,6 +220,11 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
         name: Service name (e.g., 'meshtasticd', 'rnsd', 'mosquitto')
         port: Override port to check (uses known default if not specified)
         host: Host to check (default localhost)
+        use_cache: When True (default), return a cached ServiceStatus
+            up to ``_CACHE_TTL_S`` seconds old. The fleet dashboard
+            relies on this; explicit operator actions (e.g. service
+            menu start/stop) should pass ``use_cache=False`` so the
+            UI sees the post-mutation state immediately.
 
     Returns:
         ServiceStatus with availability info and fix hints
@@ -200,6 +236,24 @@ def check_service(name: str, port: Optional[int] = None, host: str = 'localhost'
         - ServiceStatus.detection_method: How status was determined
         - Known services: meshtasticd, rnsd, mosquitto, nomadnet
     """
+    if use_cache:
+        cache_key = (name, port, host)
+        now = time.monotonic()
+        with _service_cache_lock:
+            entry = _service_cache.get(cache_key)
+            if entry is not None and (now - entry[0]) < _CACHE_TTL_S:
+                return entry[1]
+    status = _check_service_uncached(name, port, host)
+    if use_cache:
+        with _service_cache_lock:
+            _service_cache[cache_key] = (time.monotonic(), status)
+    return status
+
+
+def _check_service_uncached(name: str, port: Optional[int] = None,
+                             host: str = 'localhost') -> ServiceStatus:
+    """Cache-bypass implementation — the original `check_service` body.
+    Always shells out to systemctl for systemd services."""
     config = KNOWN_SERVICES.get(name, {})
     check_port_num = port or config.get('port')
     systemd_name = config.get('systemd_name', name)
@@ -791,6 +845,7 @@ def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             logger.error(f"start {service_name} failed: {error_msg}")
             return False, f"start {service_name} failed: {error_msg}"
 
+        clear_service_cache()  # post-mutation: next check_service hits systemd
         logger.info(f"Successfully started {service_name}")
         return True, f"{service_name} started"
 
@@ -837,6 +892,7 @@ def stop_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             logger.error(f"stop {service_name} failed: {error_msg}")
             return False, f"stop {service_name} failed: {error_msg}"
 
+        clear_service_cache()  # post-mutation: next check_service hits systemd
         logger.info(f"Successfully stopped {service_name}")
         return True, f"{service_name} stopped"
 
@@ -887,6 +943,7 @@ def restart_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
             logger.error(f"restart {service_name} failed: {error_msg}")
             return False, f"restart {service_name} failed: {error_msg}"
 
+        clear_service_cache()  # post-mutation: next check_service hits systemd
         logger.info(f"Successfully restarted {service_name}")
         return True, f"{service_name} restarted"
 

@@ -711,3 +711,99 @@ class TestRNSSharedInstanceExports:
         """Verify get_rns_shared_instance_info is in __all__."""
         from src.utils import service_check
         assert 'get_rns_shared_instance_info' in service_check.__all__
+
+
+class TestCheckServiceCache:
+    """Tests for the TTL cache wrapper around check_service.
+
+    The cache cuts the systemctl shell-out load from dashboard polling
+    (see fleet monitor charter). Each test clears the cache first so
+    runs are deterministic regardless of order.
+    """
+
+    def setup_method(self, method):
+        from utils.service_check import clear_service_cache
+        clear_service_cache()
+
+    def test_warm_call_skips_systemd(self):
+        """A second call inside the TTL window should NOT shell out
+        to systemctl — the cached ServiceStatus comes back instead."""
+        from utils import service_check
+        from utils.service_check import check_service, ServiceState
+        with patch.object(service_check, '_check_service_uncached') as inner:
+            inner.return_value = service_check.ServiceStatus(
+                name='mosquitto', available=True, state=ServiceState.AVAILABLE,
+                message='ok', detection_method='systemctl'
+            )
+            check_service('mosquitto')
+            check_service('mosquitto')
+            check_service('mosquitto')
+            assert inner.call_count == 1
+
+    def test_use_cache_false_bypasses(self):
+        """`use_cache=False` always shells out — used by post-mutation
+        callers that need to see the live state."""
+        from utils import service_check
+        from utils.service_check import check_service, ServiceState
+        with patch.object(service_check, '_check_service_uncached') as inner:
+            inner.return_value = service_check.ServiceStatus(
+                name='rnsd', available=True, state=ServiceState.AVAILABLE,
+                message='ok', detection_method='systemctl'
+            )
+            check_service('rnsd')
+            check_service('rnsd', use_cache=False)
+            check_service('rnsd', use_cache=False)
+            assert inner.call_count == 3
+
+    def test_clear_service_cache_drops_entries(self):
+        """clear_service_cache() forces the next call back to systemd.
+        Service-mutation helpers (start/stop/restart) call it for us."""
+        from utils import service_check
+        from utils.service_check import check_service, clear_service_cache, ServiceState
+        with patch.object(service_check, '_check_service_uncached') as inner:
+            inner.return_value = service_check.ServiceStatus(
+                name='meshtasticd', available=True, state=ServiceState.AVAILABLE,
+                message='ok', detection_method='systemctl'
+            )
+            check_service('meshtasticd')
+            clear_service_cache()
+            check_service('meshtasticd')
+            assert inner.call_count == 2
+
+    def test_cache_keys_are_per_args(self):
+        """Different (name, port, host) triples have separate cache
+        slots — overriding the port shouldn't poison the default."""
+        from utils import service_check
+        from utils.service_check import check_service, ServiceState
+        with patch.object(service_check, '_check_service_uncached') as inner:
+            inner.return_value = service_check.ServiceStatus(
+                name='mosquitto', available=True, state=ServiceState.AVAILABLE,
+                message='ok', detection_method='systemctl'
+            )
+            check_service('mosquitto')
+            check_service('mosquitto', port=9999)
+            check_service('mosquitto', host='other')
+            assert inner.call_count == 3
+
+    def test_ttl_expiry(self, monkeypatch):
+        """Once the TTL elapses, the next call shells out again."""
+        from utils import service_check
+        from utils.service_check import check_service, ServiceState
+        monkeypatch.setattr(service_check, '_CACHE_TTL_S', 0.05)
+        with patch.object(service_check, '_check_service_uncached') as inner:
+            inner.return_value = service_check.ServiceStatus(
+                name='rnsd', available=True, state=ServiceState.AVAILABLE,
+                message='ok', detection_method='systemctl'
+            )
+            check_service('rnsd')
+            check_service('rnsd')  # within TTL — cached
+            import time as _time
+            _time.sleep(0.08)
+            check_service('rnsd')  # past TTL — refreshes
+            assert inner.call_count == 2
+
+    def test_clear_service_cache_in_all(self):
+        """The new symbol is exported via __all__ so callers can
+        import it from `utils.service_check` directly."""
+        from utils import service_check
+        assert 'clear_service_cache' in service_check.__all__
