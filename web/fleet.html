@@ -101,9 +101,25 @@
         .slo-status.unknown  { color: #6a7a8a; }
         .slo-detail { color: #b0c0d0; font-size: 13px; flex: 1; }
         .slo-detail strong { color: #e0e0e0; font-weight: 600; }
+        .slo-optional { color: #6a7a8a; font-size: 11px; margin-left: 6px; }
 
         /* ── Service pills ─────────────────────────────────── */
         .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+        .pills-optional {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px dashed #2a3a4a;
+        }
+        .pills-optional::before {
+            content: "optional:";
+            font-size: 10px;
+            color: #6a7a8a;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            align-self: center;
+            margin-right: 4px;
+        }
+        .pills-optional:empty { display: none; }
         .pill {
             padding: 4px 10px;
             border-radius: 12px;
@@ -111,6 +127,13 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+        /* Optional pills muted — they shouldn't compete with required
+           pills for attention. Same hue family, lower contrast. */
+        .pills-optional .pill {
+            opacity: 0.65;
+            font-size: 10px;
+            padding: 3px 8px;
         }
         .pill.available     { background: #1b3a25; color: #66bb6a; }
         .pill.degraded      { background: #3d2c10; color: #ffa726; }
@@ -318,12 +341,13 @@
                 <div class="slo-banner">
                     <span id="slo-status" class="slo-status unknown">…</span>
                     <div class="slo-detail">
-                        <div><strong id="slo-services">…</strong> services available</div>
+                        <div><strong id="slo-services">…</strong> required services available <span id="slo-services-optional" class="slo-optional"></span></div>
                         <div>uptime <strong id="slo-uptime">…</strong></div>
                     </div>
                 </div>
                 <div class="body">
                     <div class="pills" id="slo-pills"></div>
+                    <div class="pills pills-optional" id="slo-pills-optional"></div>
                 </div>
             </div>
 
@@ -449,16 +473,39 @@
             sloEl.textContent = status;
             sloEl.className = 'slo-status ' + status;
             const services = slo.services || {};
-            $('slo-services').textContent =
-                `${services.available || 0} / ${services.total || 0}`;
+            // Prefer the `required` slice for the headline so MeshCore-
+            // primary NOCs read 2/2 instead of 2/6 when the four
+            // optional services (meshtasticd*, nomadnet, meshcore-radio
+            // supervisor) are intentionally down. Falls back to the
+            // legacy total/available fields for older daemons that
+            // don't ship the split.
+            const required = services.required;
+            const optional = services.optional;
+            const headAvail = required ? required.available : (services.available || 0);
+            const headTotal = required ? required.total : (services.total || 0);
+            $('slo-services').textContent = `${headAvail} / ${headTotal}`;
+            const optTag = $('slo-services-optional');
+            if (optional && optional.total > 0) {
+                optTag.textContent = `(${optional.available} / ${optional.total} optional up)`;
+            } else {
+                optTag.textContent = '';
+            }
             $('slo-uptime').textContent = fmtUptime(slo.uptime_s);
 
-            // Service pills
+            // Service pills — split required (top) from optional (below
+            // a divider, muted) so a row of "not_running" optional pills
+            // doesn't drown the actually-load-bearing services.
             const pills = $('slo-pills');
+            const pillsOpt = $('slo-pills-optional');
             pills.innerHTML = '';
-            const byState = services.by_state || {};
-            for (const [state, count] of Object.entries(byState)) {
+            pillsOpt.innerHTML = '';
+            const reqByState = (required && required.by_state) || services.by_state || {};
+            for (const [state, count] of Object.entries(reqByState)) {
                 pills.appendChild(el('span', { class: `pill ${state}`, text: `${state} ${count}` }));
+            }
+            const optByState = (optional && optional.by_state) || {};
+            for (const [state, count] of Object.entries(optByState)) {
+                pillsOpt.appendChild(el('span', { class: `pill ${state}`, text: `${state} ${count}` }));
             }
 
             // Top boundaries
@@ -675,7 +722,13 @@
                     div.appendChild(el('div'));
                 } else {
                     div.appendChild(el('div', { class: 'peer-stat', text: status }));
-                    div.appendChild(el('div', { class: 'peer-stat', text: `${services.available ?? 0}/${services.total ?? 0}` }));
+                    // Peer card services count: prefer `required` slice
+                    // so a peer's optional Meshtastic-side daemons being
+                    // down doesn't make it look unhealthier than it is.
+                    const reqStats = services.required;
+                    const sAvail = reqStats ? reqStats.available : (services.available ?? 0);
+                    const sTotal = reqStats ? reqStats.total : (services.total ?? 0);
+                    div.appendChild(el('div', { class: 'peer-stat', text: `${sAvail}/${sTotal}` }));
                     div.appendChild(el('div', {
                         class: 'peer-stat peer-radio ' + (radio.connected ? 'online' : 'offline'),
                         text: radio.connected ? 'radio on' : 'radio —',
