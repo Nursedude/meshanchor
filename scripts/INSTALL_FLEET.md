@@ -69,6 +69,13 @@ curl -s http://127.0.0.1:5000/fleet/blackouts | python3 -m json.tool
 This is the operationally important test. **Schedule it for a quiet
 window** since you'll deliberately stop the daemon for a couple minutes.
 
+The expected detection here is **`daemon_dead`** (not `frozen`). The
+first BLACKOUT smoke on 2026-05-09 surfaced a gap: `slo.uptime_s` is
+the map's uptime, so the `frozen` rule doesn't fire when the map is
+healthy but the daemon is down. The post-smoke fix added a
+`daemon_dead` kind that polls `meshanchor-daemon` directly via
+`check_service` with 2-cycle hysteresis (≥ 60s before fire).
+
 ```bash
 # 1. Confirm clean state
 curl -s 'http://127.0.0.1:5000/fleet/blackouts?active_only=1' \
@@ -76,15 +83,16 @@ curl -s 'http://127.0.0.1:5000/fleet/blackouts?active_only=1' \
 # → {"active": []}
 
 # 2. Stop the daemon. The map service stays up — this is exactly
-#    the "semantically frozen" failure mode we want to catch.
+#    the "healthy front door over a dead back end" failure mode.
 sudo systemctl stop meshanchor-daemon.service
 
-# 3. Wait ~2 min for the watchdog's stale_threshold (120s) to elapse,
-#    then check again
-sleep 130
+# 3. Wait ≥ 70s for the 2-cycle hysteresis to fire (watchdog runs
+#    every 30s; first inactive read sets streak=1, second fires at
+#    streak=2). 90s gives a comfortable margin.
+sleep 90
 curl -s 'http://127.0.0.1:5000/fleet/blackouts?active_only=1' \
     | python3 -m json.tool
-# → should show an active "frozen" or "http_dead" blackout
+# → should show an active "daemon_dead" blackout
 
 # 4. The dashboard banner should now be visible. Refresh the
 #    browser tab if it's been idle.
@@ -92,20 +100,20 @@ curl -s 'http://127.0.0.1:5000/fleet/blackouts?active_only=1' \
 # 5. Restore service
 sudo systemctl start meshanchor-daemon.service
 
-# 6. Within ~2 cycles, the blackout closes
-sleep 90
+# 6. Within ~1 cycle, the streak resets and reconcile closes the row.
+sleep 45
 curl -s 'http://127.0.0.1:5000/fleet/blackouts?active_only=1' \
     | python3 -m json.tool
 # → {"active": []} again
 
 # 7. The history endpoint shows the closed event
 curl -s http://127.0.0.1:5000/fleet/blackouts | python3 -m json.tool
-# → {"active": [], "history": [{kind:..., ts_started:..., ts_ended:...}]}
+# → {"active": [], "history": [{kind: "daemon_dead", ts_started: ..., ts_ended: ...}]}
 ```
 
-If steps 3 & 4 do NOT fire the BLACKOUT banner, the silence detection
-is broken and that's a P0 — file an issue with the journalctl output
-of both units during the stop window.
+If steps 3 & 4 do NOT fire a `daemon_dead` BLACKOUT, the silence
+detection is broken and that's a P0 — file an issue with the
+journalctl output of both units during the stop window.
 
 ## Uninstall
 

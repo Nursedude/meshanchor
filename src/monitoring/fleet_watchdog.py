@@ -8,13 +8,21 @@ Periodically reads the most recent heartbeat row(s) and classifies:
   The collector can't reach the map, or the map service is down.
 - **Frozen** — heartbeats are landing but ``uptime_s`` isn't strictly
   increasing across the last 3 cycles. The map answers `200 OK` but the
-  daemon (or the host) is stuck behind a healthy front door.
+  ``uptime_s`` source is stuck (note: this is the MAP's uptime today —
+  see daemon_dead below for daemon-specific detection).
 - **No data** — heartbeat table is empty. Collector never ran or the
   history DB was just created. Emits an early-warning blackout so the
   operator sees "the platform isn't running" rather than nothing.
+- **Daemon-dead** — ``meshanchor-daemon.service`` is not active for
+  ≥ ``HYSTERESIS_CYCLES`` consecutive checks. Uses ``check_service``
+  directly — independent of heartbeat freshness, so it catches the
+  exact failure mode the post-S5b BLACKOUT smoke surfaced (2026-05-09):
+  daemon down + map up means heartbeats land fine and frozen-rule
+  reads the map's still-incrementing uptime, but the back end is
+  silent.
 
-Two flavors of silence are non-negotiable: a healthy HTTP layer over a
-frozen daemon is the failure mode that's hardest to catch by accident,
+These flavors of silence are non-negotiable: a healthy HTTP layer over
+a dead daemon is the failure mode that's hardest to catch by accident,
 and the operator's "things don't fall silent" requirement is what
 this whole charter is about.
 
@@ -62,11 +70,49 @@ flagging — long enough to ride out a single SQLite write contention,
 short enough to catch a real wedge inside the operator's attention
 window."""
 
+DAEMON_HYSTERESIS_CYCLES = 2
+"""How many consecutive ``not active`` reads of meshanchor-daemon
+trigger the daemon_dead blackout. Two cycles × 30s default interval
+= 60s minimum to fire — long enough to ride out a daemon `restart`
+mid-cycle (which typically completes in <5s), short enough to satisfy
+the smoke procedure's ~120s daemon-stop window."""
+
 # Blackout kind classifiers. Stored in `blackout_events.kind`.
 KIND_NO_DATA = "no_data"
 KIND_HTTP_DEAD = "http_dead"
 KIND_FROZEN = "frozen"
-ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN)
+KIND_DAEMON_DEAD = "daemon_dead"
+ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN, KIND_DAEMON_DEAD)
+
+
+# Module-level hysteresis state for daemon_dead. The watchdog runs as
+# a single long-lived process so this is safe; multiple concurrent
+# watchdogs would corrupt the streak counter, but that's already
+# disallowed by the systemd unit (single instance).
+_daemon_state: Dict[str, int] = {"inactive_streak": 0}
+
+
+def _reset_daemon_state() -> None:
+    """Test helper — resets the daemon_dead streak counter to 0."""
+    _daemon_state["inactive_streak"] = 0
+
+
+def _check_daemon_active() -> Optional[bool]:
+    """Probe meshanchor-daemon.service via ``check_service``.
+
+    Returns:
+        True  — service is active.
+        False — service is not active (any state ≠ available).
+        None  — probe raised; treat as "no signal" so the streak
+                doesn't advance OR reset on transient systemctl errors.
+    """
+    try:
+        from utils.service_check import check_service
+        status = check_service("meshanchor-daemon")
+        return bool(getattr(status, "available", False))
+    except Exception as e:
+        logger.debug("check_service('meshanchor-daemon') raised: %s", e)
+        return None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -136,6 +182,25 @@ def detect_silence(
                     f"uptime_s stuck at {uptimes[0]:.1f}s across last "
                     f"{frozen_window_cycles} heartbeats"
                 )
+
+    # Daemon-dead check: independent of the heartbeat-derived signals
+    # above. Catches the failure mode where the map keeps serving
+    # /fleet/* (so heartbeats land and uptime_s — sourced from the map
+    # process — keeps incrementing) while meshanchor-daemon is down.
+    # Hysteresis bias is "false negative for one cycle" rather than
+    # "false positive on a 5s daemon restart" — the streak counter
+    # advances only on confirmed-inactive reads.
+    daemon_active = _check_daemon_active()
+    if daemon_active is True:
+        _daemon_state["inactive_streak"] = 0
+    elif daemon_active is False:
+        _daemon_state["inactive_streak"] += 1
+        if _daemon_state["inactive_streak"] >= DAEMON_HYSTERESIS_CYCLES:
+            out[KIND_DAEMON_DEAD] = (
+                f"meshanchor-daemon.service not active for "
+                f"{_daemon_state['inactive_streak']} consecutive checks"
+            )
+    # daemon_active is None → probe failed; leave streak unchanged.
 
     return out
 

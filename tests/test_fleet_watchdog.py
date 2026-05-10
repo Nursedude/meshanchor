@@ -1,25 +1,49 @@
 """Tests for monitoring.fleet_watchdog.
 
-S5a — silence detector. Two flavors:
-  no_data   — heartbeat table empty.
-  http_dead — most recent heartbeat older than stale_threshold_s.
-  frozen    — uptime_s not strictly increasing across last N heartbeats.
+S5a — silence detector. Kinds:
+  no_data     — heartbeat table empty.
+  http_dead   — most recent heartbeat older than stale_threshold_s.
+  frozen      — uptime_s not strictly increasing across last N heartbeats.
+  daemon_dead — meshanchor-daemon.service inactive ≥ 2 consecutive checks
+                (added 2026-05-09 after BLACKOUT smoke surfaced the gap).
 
 Plus reconcile_blackouts: open-on-detect + close-on-recover, idempotent.
 """
 from __future__ import annotations
 
 import time
+from unittest.mock import patch
 
 import pytest
 
 from monitoring import fleet_history as fh
 from monitoring import fleet_watchdog as wd
 
+# Saved BEFORE the autouse fixture below patches the module attr —
+# tests that need to exercise the real wrapper (e.g. the
+# exception-handling test) call this reference directly.
+_real_check_daemon_active = wd._check_daemon_active
+
 
 @pytest.fixture
 def db(tmp_path):
     return tmp_path / "fleet_watchdog.db"
+
+
+@pytest.fixture(autouse=True)
+def _stub_daemon_probe():
+    """Default: daemon is active, streak resets every test.
+
+    The watchdog's daemon_dead check shells out to systemctl, which
+    isn't hermetic in CI. Every test gets a clean module-level streak
+    counter and a probe stubbed to "active" by default — tests that
+    care about the daemon-dead behavior override the patch with a
+    nested ``with patch(...)`` block.
+    """
+    wd._reset_daemon_state()
+    with patch.object(wd, "_check_daemon_active", return_value=True):
+        yield
+    wd._reset_daemon_state()
 
 
 def _heartbeat(db_path, *, ts, uptime_s):
@@ -246,3 +270,113 @@ def test_blackout_history_can_exclude_active(db):
         since=999, until=1100, include_active=False, db_path=db,
     )
     assert rows == []
+
+
+# ──────────────────────────────────────────────────────────────────────
+# detect_silence — daemon_dead (added 2026-05-09)
+#
+# These tests target the failure mode that survived the original
+# three-rule design: meshanchor-daemon down + map up. The map keeps
+# serving /fleet/*, heartbeats land, frozen-rule reads the map's
+# still-incrementing uptime → none of the original rules fire.
+# `daemon_dead` queries `check_service('meshanchor-daemon')` directly
+# with 2-cycle hysteresis to avoid flap-firing during routine restarts.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_daemon_dead_listed_in_all_kinds():
+    """Regression guard — reconcile_blackouts iterates ALL_KINDS,
+    so adding the kind to the constant is what wires it through to
+    the open/close lifecycle."""
+    assert wd.KIND_DAEMON_DEAD in wd.ALL_KINDS
+    assert wd.KIND_DAEMON_DEAD == "daemon_dead"
+
+
+def test_daemon_dead_does_not_fire_on_single_inactive_read(db):
+    """Hysteresis: a single 'not active' result must not fire — that's
+    almost always a transient (a 5s daemon restart caught mid-cycle)."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        out = wd.detect_silence(db_path=db, now=1010.0)
+    assert out[wd.KIND_DAEMON_DEAD] is None
+    assert wd._daemon_state["inactive_streak"] == 1
+
+
+def test_daemon_dead_fires_on_second_consecutive_inactive_read(db):
+    """Two consecutive inactive reads = real outage. Default
+    DAEMON_HYSTERESIS_CYCLES is 2 so this is the "fires for real" case."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        wd.detect_silence(db_path=db, now=1010.0)  # streak → 1
+        out = wd.detect_silence(db_path=db, now=1040.0)  # streak → 2 ⇒ fire
+    assert out[wd.KIND_DAEMON_DEAD] is not None
+    assert "not active" in out[wd.KIND_DAEMON_DEAD]
+    assert "2 consecutive" in out[wd.KIND_DAEMON_DEAD]
+
+
+def test_daemon_dead_streak_resets_on_recovery(db):
+    """A single 'active' read between two 'inactive' reads must NOT
+    fire — the streak resets on every active confirmation."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        wd.detect_silence(db_path=db, now=1010.0)  # streak → 1
+    with patch.object(wd, "_check_daemon_active", return_value=True):
+        wd.detect_silence(db_path=db, now=1040.0)  # streak → 0
+    assert wd._daemon_state["inactive_streak"] == 0
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        out = wd.detect_silence(db_path=db, now=1070.0)  # streak → 1, no fire
+    assert out[wd.KIND_DAEMON_DEAD] is None
+
+
+def test_daemon_dead_clears_immediately_on_recovery(db):
+    """Once daemon comes back, the next detect call returns None even
+    if a previous cycle had reported daemon_dead. reconcile_blackouts
+    will then close the open blackout row on the next reconcile pass."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        wd.detect_silence(db_path=db, now=1010.0)
+        out_fired = wd.detect_silence(db_path=db, now=1040.0)
+    assert out_fired[wd.KIND_DAEMON_DEAD] is not None
+    with patch.object(wd, "_check_daemon_active", return_value=True):
+        out_recovered = wd.detect_silence(db_path=db, now=1070.0)
+    assert out_recovered[wd.KIND_DAEMON_DEAD] is None
+    assert wd._daemon_state["inactive_streak"] == 0
+
+
+def test_daemon_dead_probe_exception_leaves_streak_unchanged(db):
+    """If check_service raises (transient systemctl error), the probe
+    returns None — the streak counter must NOT change. Otherwise an
+    intermittent systemctl failure would either falsely fire or
+    falsely clear a real outage."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        wd.detect_silence(db_path=db, now=1010.0)  # streak → 1
+    with patch.object(wd, "_check_daemon_active", return_value=None):
+        out = wd.detect_silence(db_path=db, now=1040.0)  # streak unchanged
+    assert wd._daemon_state["inactive_streak"] == 1
+    assert out[wd.KIND_DAEMON_DEAD] is None
+
+
+def test_check_daemon_active_swallows_check_service_exception():
+    """The wrapper itself must not propagate. The watchdog can't crash
+    on a transient systemctl error mid-cycle. Calls the saved real
+    function so the autouse fixture's stub doesn't short-circuit."""
+    with patch("utils.service_check.check_service",
+               side_effect=RuntimeError("systemctl boom")):
+        result = _real_check_daemon_active()
+    assert result is None
+
+
+def test_reconcile_opens_daemon_dead_through_to_blackout_row(db):
+    """End-to-end: detect → reconcile → row in blackout_events with
+    kind='daemon_dead'. The wiring through ALL_KINDS is what makes
+    this work without any reconcile-side changes."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        wd.detect_silence(db_path=db, now=1010.0)
+        decisions = wd.detect_silence(db_path=db, now=1040.0)
+    summary = wd.reconcile_blackouts(decisions, now=1040.0, db_path=db)
+    assert summary[wd.KIND_DAEMON_DEAD] == "opened"
+    rows = fh.query_active_blackouts(db_path=db)
+    kinds = {r["kind"] for r in rows}
+    assert "daemon_dead" in kinds

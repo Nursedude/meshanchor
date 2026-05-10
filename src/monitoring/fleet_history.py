@@ -124,14 +124,20 @@ CREATE INDEX IF NOT EXISTS idx_service_events_ts
 -- blackouts have ts_ended IS NULL; the watchdog opens a row on
 -- detection and closes it (sets ts_ended) on recovery.
 --
--- ``kind`` distinguishes the two flavors of silence:
---   "no_data"   — heartbeat table is empty (collector never ran or
---                 history DB freshly created).
---   "http_dead" — most recent heartbeat is older than the watchdog's
---                 stale threshold; collector can't reach the map.
---   "frozen"    — heartbeat row landed but uptime_s isn't advancing
---                 across consecutive cycles; map answers but the
---                 daemon is stuck behind a healthy front door.
+-- ``kind`` distinguishes flavors of silence:
+--   "no_data"     — heartbeat table is empty (collector never ran or
+--                   history DB freshly created).
+--   "http_dead"   — most recent heartbeat is older than the watchdog's
+--                   stale threshold; collector can't reach the map.
+--   "frozen"      — heartbeat row landed but uptime_s isn't advancing
+--                   across consecutive cycles. Note: uptime_s is the
+--                   MAP service's uptime today, so this only catches a
+--                   stuck map process — daemon-stuck-behind-healthy-map
+--                   is covered by daemon_dead instead.
+--   "daemon_dead" — meshanchor-daemon.service is not active for ≥ 2
+--                   consecutive watchdog checks. The "healthy front
+--                   door over a dead back end" detector (added after
+--                   the post-S5b smoke surfaced this gap on 2026-05-09).
 CREATE TABLE IF NOT EXISTS blackout_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts_started  REAL NOT NULL,
