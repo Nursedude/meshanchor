@@ -267,6 +267,114 @@ def _feature_directory(node_id: str, *, network: str = "meshtastic",
     return {"type": "Feature", "geometry": geom, "properties": props}
 
 
+class TestPhase1SkipObservation:
+    """Phase 1 SD-survival fix (2026-05-09): federation-receiver and
+    external-bulk features SHOULD upsert into the `nodes` directory but
+    must NOT generate `node_observations` rows. Cuts insert rate from
+    ~75k/hr to a few hundred/hr on a federation-enabled box; eliminates
+    the structural cause of the multi-day backlog the multi-batch prune
+    was mitigating.
+
+    MeshAnchor doesn't ship federation today, but the predicate guards
+    external-bulk origins (meshcore_public, etc.) regardless and is
+    federation-ready for parity with MeshForge."""
+
+    @pytest.fixture
+    def hist(self, tmp_path: Path):
+        from utils.node_history import NodeHistoryDB
+        return NodeHistoryDB(db_path=tmp_path / "phase1.db",
+                             retention_seconds=86400)
+
+    def _fed_feature(self, node_id, *, federated_from="moc3",
+                     source_origin="local_radio"):
+        return {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0.1, 0.2]},
+            "properties": {
+                "id": node_id, "name": node_id, "network": "meshtastic",
+                "is_online": True,
+                "source": "federation",
+                "source_origin": source_origin,
+                "federated": True,
+                "federated_from": federated_from,
+            },
+        }
+
+    def _local_feature(self, node_id):
+        return {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0.1, 0.2]},
+            "properties": {
+                "id": node_id, "name": node_id, "network": "meshtastic",
+                "is_online": True,
+                "source_origin": "local_radio",
+            },
+        }
+
+    def _external_bulk_feature(self, node_id, origin="meshcore_public"):
+        return {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0.1, 0.2]},
+            "properties": {
+                "id": node_id, "name": node_id, "network": "meshcore",
+                "is_online": True,
+                "source_origin": origin,
+            },
+        }
+
+    def test_federated_feature_does_not_insert_observation(self, hist):
+        inserted = hist.record_observations([self._fed_feature("!fed1")])
+        assert inserted == 0
+        assert hist.get_trajectory("!fed1", hours=24) == []
+
+    def test_external_bulk_does_not_insert_observation(self, hist):
+        inserted = hist.record_observations([
+            self._external_bulk_feature("!mc_pub", origin="meshcore_public"),
+        ])
+        assert inserted == 0
+        assert hist.get_trajectory("!mc_pub", hours=24) == []
+
+    def test_all_external_bulk_origins_skip_observations(self, hist):
+        from utils.node_history import EXTERNAL_BULK_ORIGINS
+        for origin in EXTERNAL_BULK_ORIGINS:
+            nid = f"!ext_{origin}"
+            inserted = hist.record_observations([
+                self._external_bulk_feature(nid, origin=origin),
+            ])
+            assert inserted == 0, (
+                f"{origin} should be in the skip list but inserted obs"
+            )
+
+    def test_local_feature_still_inserts_observation(self, hist):
+        # Regression guard: local sources MUST still write trajectories.
+        inserted = hist.record_observations([self._local_feature("!loc1")])
+        assert inserted == 1
+        assert len(hist.get_trajectory("!loc1", hours=24)) == 1
+
+    def test_mixed_batch_inserts_only_locals(self, hist):
+        inserted = hist.record_observations([
+            self._fed_feature("!f1"),
+            self._external_bulk_feature("!e1"),
+            self._local_feature("!l1"),
+            self._local_feature("!l2"),
+        ])
+        assert inserted == 2, (
+            f"expected 2 local observations from mixed batch, got {inserted}"
+        )
+
+    def test_federated_from_alone_triggers_skip(self, hist):
+        feat = {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0.1, 0.2]},
+            "properties": {
+                "id": "!ff_only", "name": "ff", "network": "meshtastic",
+                "source_origin": "local_radio",
+                "federated_from": "moc3",
+            },
+        }
+        assert hist.record_observations([feat]) == 0
+
+
 class TestNodesDirectory:
     """UPSERT semantics, position-null preservation, sticky source_origin
     promotion, and protocol_meta size cap on the new `nodes` directory."""
@@ -487,14 +595,16 @@ class TestDirectoryRetention:
     def test_prune_batch_cap_caps_observation_delete(self, tmp_path):
         """Defensive bound — caught live on moc3 (790MB DB on Pi 3B,
         first prune after 7d→48h cutover generated 465MB WAL and stalled
-        the service 10+ minutes). With prune_batch_limit=10000, the
-        excess rolls over to the next hourly prune so the box stays
-        responsive during a one-time rebalance."""
+        the service 10+ minutes). The per-batch cap bounds individual
+        transaction size; the per-cycle cap (max_batches) bounds total
+        work. With max_batches=1 we get the legacy single-batch
+        behavior — backlog rolls over to the next hourly prune."""
         from utils.node_history import NodeHistoryDB
         h = NodeHistoryDB(
             db_path=tmp_path / "batch.db",
             retention_seconds=3600,            # 1h
             prune_batch_limit=5,               # tiny cap for the test
+            prune_max_batches_per_cycle=1,     # legacy single-batch
         )
         # Seed 12 aged-out observations directly so we can prove the cap.
         import sqlite3, time as _t

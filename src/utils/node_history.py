@@ -63,14 +63,28 @@ DEFAULT_DIRECTORY_RETENTION_LOCAL = 30 * 24 * 3600     # 30 days
 DEFAULT_DIRECTORY_RETENTION_EXTERNAL = 7 * 24 * 3600   # 7 days
 DEFAULT_DIRECTORY_MAX_ROWS = 50_000                    # hard cap, LRU evict
 
-# Cap rows deleted per prune cycle. Without this, a retention shrink
-# (e.g. observation-stream cut 7d → 48h) on a fleet box that's been
-# accumulating for weeks does ONE giant DELETE → multi-hundred-MB WAL →
-# multi-minute checkpoint stall on Pi-class hardware. Caught live on
-# moc3 (790 MB DB, Pi 3B): first prune after the cutover ran for 10+
-# minutes with a 465 MB WAL. Capping per-cycle means rebalance happens
-# over ~hours of hourly prunes — the box stays responsive throughout.
+# Cap rows deleted per prune BATCH (single transaction). Without this,
+# a retention shrink (e.g. observation-stream cut 7d → 48h) on a fleet
+# box that's been accumulating for weeks does ONE giant DELETE →
+# multi-hundred-MB WAL → multi-minute checkpoint stall on Pi-class
+# hardware. Caught live on moc3 (790 MB DB, Pi 3B): first prune after
+# the cutover ran for 10+ minutes with a 465 MB WAL. The per-batch
+# cap bounds individual transaction size; the per-cycle cap (below)
+# bounds how many such batches one cycle runs.
 DEFAULT_PRUNE_BATCH_LIMIT = 10_000
+
+# Number of batches a single prune cycle may run. Each batch is its
+# own commit so WAL pages drain between batches; total throughput per
+# cycle = batch_limit × max_batches. Pre-2026-05-09 this was implicitly
+# 1 — caught live on a federation-enabled fleet box where heartbeats
+# inserted ~75k observation rows/hour into node_observations while the
+# single-batch prune drained only 10k/hour. Net +65k/hr accumulated to
+# 5.7 GB before manual intervention. 12 batches × 10k = 120k/hour
+# drains the steady-state firehose with headroom; bursts catch up over
+# 1-2 cycles instead of stalling forever. Set to 1 to restore the
+# legacy single-batch behavior (tests that want deterministic
+# per-cycle deletion).
+DEFAULT_PRUNE_MAX_BATCHES_PER_CYCLE = 12
 
 # source_origin tags. The writer derives these from the feature properties;
 # the prune query filters on them. Single source of truth so prune SQL and
@@ -113,6 +127,35 @@ def _origin_priority(origin: Optional[str]) -> int:
     return _ORIGIN_PRIORITY.get(origin, 10)  # unknown origin: low priority
 
 
+def _should_skip_observation(props: Dict[str, Any], source_origin: str) -> bool:
+    """True when a feature should NOT generate a node_observations row.
+
+    Two cases produce a "skip":
+      1. Federation-fetched features. The peer that originally heard the
+         node owns its trajectory; duplicating observations on every
+         federation receiver multiplies SD write pressure linearly with
+         peer count for zero query value (the trajectory query against
+         a federated node returns the same data the home box already
+         has). Identified by `properties.federated == True` or the
+         presence of `properties.federated_from`.
+      2. External-bulk origins (meshcore_public, aredn_worldmap,
+         mqtt_global, public_fallback). These are global firehoses of
+         mostly-stationary nodes — observations on them generate
+         heartbeat-driven inserts at upstream poll rate × node count
+         (a federation-enabled fleet box, 2026-05-09: 75k inserts/hr)
+         for trajectory data that's never queried.
+
+    The `nodes` directory table still UPSERTs in both cases — it's the
+    long-tail "did we ever hear this node" record. Only the time-series
+    `node_observations` insert is suppressed.
+    """
+    if props.get("federated") or props.get("federated_from"):
+        return True
+    if source_origin in EXTERNAL_BULK_ORIGINS:
+        return True
+    return False
+
+
 @dataclass
 class NodeObservation:
     """A single node observation at a point in time."""
@@ -144,7 +187,8 @@ class NodeHistoryDB:
                  directory_retention_local: int = DEFAULT_DIRECTORY_RETENTION_LOCAL,
                  directory_retention_external: int = DEFAULT_DIRECTORY_RETENTION_EXTERNAL,
                  directory_max_rows: int = DEFAULT_DIRECTORY_MAX_ROWS,
-                 prune_batch_limit: int = DEFAULT_PRUNE_BATCH_LIMIT):
+                 prune_batch_limit: int = DEFAULT_PRUNE_BATCH_LIMIT,
+                 prune_max_batches_per_cycle: int = DEFAULT_PRUNE_MAX_BATCHES_PER_CYCLE):
         """Initialize node history database.
 
         Args:
@@ -178,6 +222,8 @@ class NodeHistoryDB:
         self.directory_max_rows = max(0, directory_max_rows)
         # 0 disables the per-cycle cap (legacy unbounded prune).
         self.prune_batch_limit = max(0, prune_batch_limit)
+        # Multi-batch loop cap; 1 = legacy single-batch-per-cycle.
+        self.prune_max_batches_per_cycle = max(1, prune_max_batches_per_cycle)
         self._lock = threading.Lock()
         self._last_recorded: Dict[str, float] = {}  # node_id -> last record time
         # Last (round(lat,6), round(lon,6), network) per node. Pruned in
@@ -490,6 +536,15 @@ class NodeHistoryDB:
             if not node_id:
                 continue
 
+            # Phase 1 SD-survival fix (2026-05-09): skip observation insert
+            # for federated and external-bulk features. Directory still
+            # upserts via _apply_features_to_directory above. Drops the
+            # observation insert rate on federation receivers from ~75k/hr
+            # to a few hundred/hr — the firehose was the structural cause
+            # of the multi-day DB bloat the multi-batch prune mitigated.
+            if _should_skip_observation(props, props.get("source_origin", "")):
+                continue
+
             # Throttle: skip if recorded recently
             last = self._last_recorded.get(node_id, 0)
             if now - last < MIN_RECORD_INTERVAL:
@@ -604,55 +659,65 @@ class NodeHistoryDB:
         with self._lock:
             conn = self._connect()
             try:
-                # Phase 1 — observation-stream prune. Batch-capped via
-                # rowid subquery so a retention shrink on a long-lived
-                # DB doesn't generate hundreds of MB of WAL in one shot.
-                # When prune_batch_limit > 0 and rows-needing-deletion
-                # exceed the cap, the excess gets cleaned up by the next
-                # hourly prune cycle. Acceptable trade — the rebalance
-                # converges over ~N hours instead of stalling the
-                # service for minutes mid-cycle.
+                # Phase 1 — observation-stream prune. Loops up to
+                # prune_max_batches_per_cycle batches; each batch is
+                # its own commit so WAL pages drain between batches
+                # and a long-running reader can never block the whole
+                # cycle on a single multi-hundred-MB transaction. The
+                # per-batch cap (prune_batch_limit) bounds individual
+                # transaction size for Pi-class hardware; the per-cycle
+                # cap bounds total work. Pre-2026-05-09 this was a
+                # single batch and a 75k inserts/hour firehose
+                # accumulated ~65k/hour backlog forever; 12-batch cycles
+                # drain 120k/hour, with headroom for bursts.
                 deleted_obs = 0
                 if self.retention_seconds > 0:
                     cutoff = now - self.retention_seconds
                     if self.prune_batch_limit > 0:
-                        cursor = conn.execute(
-                            """
-                            DELETE FROM node_observations
-                            WHERE rowid IN (
-                                SELECT rowid FROM node_observations
-                                WHERE timestamp < ?
-                                LIMIT ?
+                        for _ in range(self.prune_max_batches_per_cycle):
+                            cursor = conn.execute(
+                                """
+                                DELETE FROM node_observations
+                                WHERE rowid IN (
+                                    SELECT rowid FROM node_observations
+                                    WHERE timestamp < ?
+                                    LIMIT ?
+                                )
+                                """,
+                                (cutoff, self.prune_batch_limit),
                             )
-                            """,
-                            (cutoff, self.prune_batch_limit),
-                        )
+                            rc = cursor.rowcount
+                            deleted_obs += rc
+                            conn.commit()
+                            if rc < self.prune_batch_limit:
+                                break
                     else:
                         cursor = conn.execute(
                             "DELETE FROM node_observations WHERE timestamp < ?",
                             (cutoff,),
                         )
-                    deleted_obs = cursor.rowcount
+                        deleted_obs = cursor.rowcount
+                        conn.commit()
                     if deleted_obs > 0:
+                        cycle_cap = (self.prune_batch_limit
+                                     * self.prune_max_batches_per_cycle
+                                     if self.prune_batch_limit > 0 else 0)
+                        capped = (cycle_cap > 0 and deleted_obs >= cycle_cap)
                         logger.info(
                             f"Node history auto-prune: deleted {deleted_obs} "
                             f"observation rows older than {self.retention_seconds // 3600}h"
-                            + (f" (capped at {self.prune_batch_limit})"
-                               if self.prune_batch_limit > 0 and deleted_obs == self.prune_batch_limit
-                               else "")
+                            + (f" (cycle cap reached at {cycle_cap})"
+                               if capped else "")
                         )
 
-                # Phase 2 — directory tiered time prune. Same batch cap.
+                # Phase 2 — directory tiered time prune. Same multi-batch
+                # shape as Phase 1.
                 external_origins = list(EXTERNAL_BULK_ORIGINS)
                 deleted_dir = 0
                 if self.directory_retention_local > 0 or self.directory_retention_external > 0:
                     placeholders = ",".join("?" * len(external_origins))
-                    # rowid subquery picks at most prune_batch_limit
-                    # candidate rows; if cap is 0 we fall back to the
-                    # unbounded form.
                     if self.prune_batch_limit > 0:
-                        cursor = conn.execute(
-                            f"""
+                        capped_sql = f"""
                             DELETE FROM nodes
                             WHERE rowid IN (
                                 SELECT rowid FROM nodes
@@ -664,15 +729,21 @@ class NodeHistoryDB:
                                         AND last_seen < ?)
                                 LIMIT ?
                             )
-                            """,
-                            [
-                                *external_origins,
-                                now - self.directory_retention_external,
-                                *external_origins,
-                                now - self.directory_retention_local,
-                                self.prune_batch_limit,
-                            ],
-                        )
+                            """
+                        capped_params = [
+                            *external_origins,
+                            now - self.directory_retention_external,
+                            *external_origins,
+                            now - self.directory_retention_local,
+                            self.prune_batch_limit,
+                        ]
+                        for _ in range(self.prune_max_batches_per_cycle):
+                            cursor = conn.execute(capped_sql, capped_params)
+                            rc = cursor.rowcount
+                            deleted_dir += rc
+                            conn.commit()
+                            if rc < self.prune_batch_limit:
+                                break
                     else:
                         cursor = conn.execute(
                             f"""
@@ -691,12 +762,14 @@ class NodeHistoryDB:
                                 now - self.directory_retention_local,
                             ],
                         )
-                    deleted_dir = cursor.rowcount
+                        deleted_dir = cursor.rowcount
+                        conn.commit()
 
                 # Phase 3 — count cap LRU. After time prune, if the
                 # directory is still over the hard ceiling, drop the
-                # oldest-last_seen rows. Protects against a configuration
-                # that turns on every external bulk source at once.
+                # oldest-last_seen rows. Stays single-shot — bounded by
+                # excess (typically a few thousand) and runs after tier
+                # prune so it sees the post-Phase-2 total.
                 cap_evicted = 0
                 if self.directory_max_rows > 0:
                     total = conn.execute(
@@ -716,8 +789,7 @@ class NodeHistoryDB:
                             (excess,),
                         )
                         cap_evicted = cursor.rowcount
-
-                conn.commit()
+                        conn.commit()
 
                 if deleted_dir > 0 or cap_evicted > 0:
                     logger.info(
@@ -726,6 +798,19 @@ class NodeHistoryDB:
                         f"external>{self.directory_retention_external // 86400}d), "
                         f"evicted {cap_evicted} by count-cap (max={self.directory_max_rows})"
                     )
+
+                # Force WAL truncation so long-running readers don't let
+                # the WAL file grow unbounded between auto-checkpoints.
+                # TRUNCATE is non-blocking — if a reader holds a snapshot
+                # it falls through and we'll retry next cycle. Caught live
+                # on a federation-enabled fleet box (688 MB WAL with
+                # 5.7 GB DB, 2026-05-09) where federation-poll readers
+                # prevented the default passive checkpoint from ever
+                # truncating.
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.Error as e:
+                    logger.debug(f"WAL checkpoint truncate skipped: {e}")
             except sqlite3.Error as e:
                 logger.error(f"Auto-prune failed: {e}")
             finally:
