@@ -42,11 +42,11 @@ trivial (~600k rows for a single host across ~10 boundaries).
 Coupling
 ========
 The dashboard is a *reader* — `_serve_fleet_history` queries this
-module. The collector (S5, separate systemd unit) is the canonical
-*writer*. As an S4 v1 bootstrap, `_serve_fleet_slo` calls
-`record_snapshot()` as a throttled side effect so sparklines have
-data *immediately* without depending on S5 shipping. Marked clearly
-for removal once S5 lands.
+module. The collector (S5, `meshanchor-fleet-collector.service`) is
+the *canonical sole writer*. An earlier S4 bootstrap path in
+`_serve_fleet_slo` also wrote opportunistically while the collector
+was being built; that path was removed 2026-05-09 once the collector
+had soaked cleanly.
 """
 from __future__ import annotations
 
@@ -748,39 +748,8 @@ def prune_history(
 # ──────────────────────────────────────────────────────────────────────
 
 
-# Until S5's collector ships, the dashboard's /fleet/slo endpoint
-# records snapshots opportunistically. To avoid hammering SQLite from
-# concurrent browser polls we throttle to once per ``MIN_RECORD_INTERVAL_S``.
-MIN_RECORD_INTERVAL_S: float = 30.0
-_last_record_ts_lock = threading.Lock()
-_last_record_ts: float = 0.0
-
-
-def should_record_now(*, min_interval_s: float = MIN_RECORD_INTERVAL_S) -> bool:
-    """True if at least ``min_interval_s`` has elapsed since the last
-    successful record. Atomic per process; concurrent callers either
-    all see True together (rare) or get throttled. Used by the
-    bootstrap path in `_serve_fleet_slo`."""
-    global _last_record_ts
-    now = time.time()
-    with _last_record_ts_lock:
-        if now - _last_record_ts < min_interval_s:
-            return False
-        _last_record_ts = now
-        return True
-
-
-def reset_record_throttle() -> None:
-    """Test hook — clear the throttle so unit tests don't have to
-    wait MIN_RECORD_INTERVAL_S between calls."""
-    global _last_record_ts
-    with _last_record_ts_lock:
-        _last_record_ts = 0.0
-
-
 __all__ = [
     "FEDERATION_ACTIVE_AGE_S",
-    "MIN_RECORD_INTERVAL_S",
     "get_history_db_path",
     "init_db",
     "record_snapshot",
@@ -790,8 +759,6 @@ __all__ = [
     "query_service_events",
     "list_boundary_labels",
     "prune_history",
-    "should_record_now",
-    "reset_record_throttle",
     # Blackout API (S5a)
     "record_blackout_started",
     "record_blackout_ended",

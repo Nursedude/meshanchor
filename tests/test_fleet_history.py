@@ -2,9 +2,8 @@
 
 S4 data foundation. Covers schema migration, record/query round-trip,
 service-state event de-duplication (only writes on transition),
-resolution-aggregation correctness, retention pruning, and the
-bootstrap throttle that prevents concurrent browser polls from
-hammering SQLite before S5's collector ships.
+resolution-aggregation correctness, and retention pruning. The
+canonical writer is `monitoring.fleet_collector` (S5).
 """
 from __future__ import annotations
 
@@ -23,11 +22,8 @@ from monitoring import fleet_history as fh
 
 @pytest.fixture
 def db(tmp_path):
-    """Per-test isolated SQLite. Throttle reset so should_record_now()
-    behaves predictably regardless of test order."""
-    fh.reset_record_throttle()
+    """Per-test isolated SQLite — fresh DB per test, no shared state."""
     yield tmp_path / "fleet_history.db"
-    fh.reset_record_throttle()
 
 
 def _slo(boundaries=None, services_detail=None, **overrides):
@@ -327,34 +323,6 @@ def test_service_events_kept_double_retention(db):
     assert deleted["service_state_events"] == 0
     events = fh.query_service_events(since=0, until=now, db_path=db)
     assert len(events) == 1
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Throttle (bootstrap path)
-# ──────────────────────────────────────────────────────────────────────
-
-
-def test_should_record_now_first_call_true(db):
-    fh.reset_record_throttle()
-    assert fh.should_record_now() is True
-
-
-def test_should_record_now_throttles_within_interval(db):
-    fh.reset_record_throttle()
-    assert fh.should_record_now(min_interval_s=60) is True
-    assert fh.should_record_now(min_interval_s=60) is False
-    assert fh.should_record_now(min_interval_s=60) is False
-
-
-def test_should_record_now_allows_after_interval(db, monkeypatch):
-    fh.reset_record_throttle()
-    fake_now = [1000.0]
-    monkeypatch.setattr(fh.time, "time", lambda: fake_now[0])
-    assert fh.should_record_now(min_interval_s=60) is True
-    fake_now[0] += 30
-    assert fh.should_record_now(min_interval_s=60) is False
-    fake_now[0] += 35
-    assert fh.should_record_now(min_interval_s=60) is True
 
 
 # ──────────────────────────────────────────────────────────────────────
