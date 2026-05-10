@@ -265,19 +265,27 @@ class TestMetricsIntegration:
     prometheus_client output, both valid Prom format."""
 
     def test_body_contains_both_surfaces(self):
+        """Test the WIRING — does _serve_fleet_metrics append the
+        secondary render() output? Patch map_metrics.render with a
+        known fake body so this test runs whether prometheus_client
+        is installed or not (CI's default test env doesn't install
+        the optional monitoring.txt deps)."""
         h = _make_handler()
+        fake_secondary = b"# fake map_metrics surface\nmeshanchor_map_marker 1\n"
         with patch(
             "utils.prometheus_exporter.PrometheusExporter.export",
             return_value=_FAKE_BODY,
+        ), patch(
+            "utils.map_metrics.render",
+            return_value=(fake_secondary, "text/plain"),
         ):
             h._serve_fleet_metrics()
         body = _read_body(h, gzipped=False)
         # Primary surface (hand-rolled).
         assert "meshanchor_node_count" in body
-        # Secondary surface (prometheus_client via map_metrics).
-        # The metric exists at module import — even with no recorded
-        # requests, the SERVICE_UP gauge is present.
-        assert "meshanchor_map_service_up" in body
+        # Secondary surface — present iff render() was called and
+        # its output was concatenated into the body.
+        assert "meshanchor_map_marker" in body
 
     def test_body_still_serves_when_map_metrics_returns_empty(self):
         """If prometheus_client isn't installed, render() returns
