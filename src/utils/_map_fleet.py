@@ -75,50 +75,18 @@ class FleetEndpointsMixin:
         `overall_status` from the local `check_service` rollup when
         `daemon_health` is absent.
 
-        S4 bootstrap (remove when S5's collector ships): records a
-        history snapshot opportunistically — throttled to ≥30s between
-        writes so concurrent browser polls don't hammer SQLite. The
-        records use the *full* services dict (not the slo_view rollup)
-        so service-state events get the per-name detail they need.
+        Read-only: the canonical writer is the S5 collector
+        (`monitoring.fleet_collector`, shipped in PR #108 / installed
+        as `meshanchor-fleet-collector.service` per S5b). Earlier
+        revisions of this method also wrote a heartbeat row
+        opportunistically as a bootstrap; that path was removed
+        2026-05-09 once the collector had soaked cleanly so dashboard
+        polls and the collector don't compete for the heartbeat
+        sequence.
         """
         from monitoring.fleet_aggregator import slo_view
         snap = self._collect_fleet_snapshot(include_daemon_health=False)
-        slo = slo_view(snap)
-        # Bootstrap-record path. Cheap when throttled, no-op on failure.
-        try:
-            from monitoring import fleet_history
-            if fleet_history.should_record_now():
-                # The slo_view rollup loses per-service detail; pass it
-                # via a private key so record_snapshot can emit
-                # service-state-events without re-deriving.
-                slo_with_detail = dict(slo)
-                slo_with_detail["_services_detail"] = snap.services
-                # We need /fleet/activity + /fleet/federation shapes
-                # too. Reuse the in-process snapshot — far cheaper than
-                # an HTTP self-fetch.
-                from monitoring.fleet_aggregator import activity_view
-                from monitoring.fleet_config import load_fleet_config
-                from monitoring.fleet_rollup import _collect_federation_peers
-                act = activity_view(snap)
-                fed_cfg = load_fleet_config()
-                fed_peers = (
-                    _collect_federation_peers(
-                        self.collector,
-                        fresh_window_s=fed_cfg.federation.fresh_window_s,
-                    ) if fed_cfg.federation.scrape_rns_announces else []
-                )
-                from dataclasses import asdict
-                fed_view = {
-                    "peers": [asdict(p) for p in fed_peers],
-                    "errors": [],
-                }
-                fleet_history.record_snapshot(
-                    slo_with_detail, act, fed_view, host=snap.host,
-                )
-        except Exception as e:
-            # Never let bootstrap-record affect the dashboard response.
-            logger.debug("fleet_history bootstrap-record skipped: %s", e)
-        self._serve_json(slo)
+        self._serve_json(slo_view(snap))
 
     def _serve_fleet_activity(self) -> None:
         """Live-feed surface for the dashboard's lower panel."""
@@ -203,8 +171,9 @@ class FleetEndpointsMixin:
         to now. ``resolution`` defaults to native (60s) — pass larger
         values for compressed views (5min/1h) on long windows.
 
-        All queries are read-only; the writer is ``_serve_fleet_slo``'s
-        bootstrap path today, the S5 collector tomorrow.
+        All queries are read-only; the canonical writer is
+        ``monitoring.fleet_collector`` (shipped S5a, deployed S5b as
+        ``meshanchor-fleet-collector.service``).
         """
         from urllib.parse import urlparse, parse_qs
         import time as _time
