@@ -136,7 +136,12 @@ def _collect_services() -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, s
         return {}, {"source": "services", "error": f"import: {e}"}
 
     out: Dict[str, Dict[str, Any]] = {}
-    for name in KNOWN_SERVICES:
+    for name, cfg in KNOWN_SERVICES.items():
+        # Carry the `optional` flag through to the snapshot so downstream
+        # rollups can split required vs optional without re-importing
+        # `KNOWN_SERVICES` (and so peer snapshots fetched over HTTP from
+        # other hosts stay self-describing).
+        optional = bool(cfg.get("optional", False))
         try:
             status = check_service(name)
         except Exception as e:
@@ -146,6 +151,7 @@ def _collect_services() -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, s
                 "message": f"check_service raised: {e}",
                 "port": None,
                 "detection_method": "exception",
+                "optional": optional,
             }
             continue
         out[name] = {
@@ -154,6 +160,7 @@ def _collect_services() -> tuple[Dict[str, Dict[str, Any]], Optional[Dict[str, s
             "message": status.message,
             "port": status.port,
             "detection_method": status.detection_method,
+            "optional": optional,
         }
     return out, None
 
@@ -321,15 +328,51 @@ def collect_local_snapshot(
 
 
 def _services_rollup(services: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    available = sum(1 for s in services.values() if s.get("available"))
-    by_state: Dict[str, int] = {}
+    """Top-level counts plus a required/optional split.
+
+    `total` / `available` / `by_state` count *all* services for
+    back-compat with the SQLite history schema and any external
+    consumer keyed off the legacy fields. The `required` and `optional`
+    sub-dicts give the dashboard the SLO denominator it actually wants:
+    a MeshCore-primary NOC where Meshtastic-side daemons are intentionally
+    down should read 2/2 required-available, not 2/6.
+    """
+    by_state_all: Dict[str, int] = {}
+    by_state_req: Dict[str, int] = {}
+    by_state_opt: Dict[str, int] = {}
+    avail_all = avail_req = avail_opt = 0
+    total_req = total_opt = 0
     for s in services.values():
         st = s.get("state", "unknown")
-        by_state[st] = by_state.get(st, 0) + 1
+        is_avail = bool(s.get("available"))
+        is_optional = bool(s.get("optional", False))
+        by_state_all[st] = by_state_all.get(st, 0) + 1
+        if is_avail:
+            avail_all += 1
+        if is_optional:
+            total_opt += 1
+            by_state_opt[st] = by_state_opt.get(st, 0) + 1
+            if is_avail:
+                avail_opt += 1
+        else:
+            total_req += 1
+            by_state_req[st] = by_state_req.get(st, 0) + 1
+            if is_avail:
+                avail_req += 1
     return {
         "total": len(services),
-        "available": available,
-        "by_state": by_state,
+        "available": avail_all,
+        "by_state": by_state_all,
+        "required": {
+            "total": total_req,
+            "available": avail_req,
+            "by_state": by_state_req,
+        },
+        "optional": {
+            "total": total_opt,
+            "available": avail_opt,
+            "by_state": by_state_opt,
+        },
     }
 
 
@@ -387,19 +430,24 @@ def _derive_overall_status(snapshot: FleetSnapshot) -> str:
     """Local fallback when daemon_health wasn't fetched.
 
     Mirrors the spirit of `startup_health.run_health_check`: ready when
-    every known service is available, degraded when at least one is
-    down but core services (rnsd or meshcore-radio for MeshCore hosts)
-    are still up, error otherwise. Returns "unknown" if the local
-    services map itself failed to populate."""
+    every required service is available; degraded when at least one
+    required service is down but at least one is still up; error when
+    no required services are up. Optional services (meshtasticd*,
+    nomadnet, meshcore-radio supervisor — see `KNOWN_SERVICES`) are
+    advisory and don't affect the rollup. Returns "unknown" if the
+    local services map itself failed to populate.
+    """
     if not snapshot.services:
         return "unknown"
-    available = sum(1 for s in snapshot.services.values() if s.get("available"))
-    total = len(snapshot.services)
+    required = [s for s in snapshot.services.values() if not s.get("optional")]
+    if not required:
+        # Pathological config: every service marked optional. Fall back
+        # to the full set so we still produce a meaningful answer.
+        required = list(snapshot.services.values())
+    available = sum(1 for s in required if s.get("available"))
+    total = len(required)
     if available == total:
         return "ready"
-    # Optional gateways (meshtasticd-alt, meshcore-radio) being down
-    # shouldn't flip the rollup to error on a host that doesn't run
-    # them — degraded captures "operating with reduced surface."
     return "degraded" if available > 0 else "error"
 
 

@@ -366,6 +366,75 @@ def test_slo_view_derives_overall_when_daemon_health_absent():
     assert view["overall_status"] == "error"
 
 
+def test_services_rollup_splits_required_and_optional():
+    """`_services_rollup` must expose required/optional sub-counts so the
+    dashboard can read 2/2 (required available) instead of 2/6 when the
+    Meshtastic-side / supervisor optional services are down on a
+    MeshCore-primary NOC. The legacy `total` / `available` / `by_state`
+    fields stay populated for back-compat with the SQLite history
+    schema."""
+    services = {
+        # Required
+        "rnsd":            {"available": True,  "state": "available",   "optional": False},
+        "mosquitto":       {"available": True,  "state": "available",   "optional": False},
+        # Optional, all down
+        "meshtasticd":     {"available": False, "state": "not_running", "optional": True},
+        "nomadnet":        {"available": False, "state": "not_running", "optional": True},
+        "meshtasticd-alt": {"available": False, "state": "not_running", "optional": True},
+        "meshcore-radio":  {"available": False, "state": "not_running", "optional": True},
+    }
+    rollup = fa._services_rollup(services)
+    # Legacy totals — unchanged shape, count everything.
+    assert rollup["total"] == 6
+    assert rollup["available"] == 2
+    assert rollup["by_state"] == {"available": 2, "not_running": 4}
+    # Required slice — what the headline reads from.
+    assert rollup["required"]["total"] == 2
+    assert rollup["required"]["available"] == 2
+    assert rollup["required"]["by_state"] == {"available": 2}
+    # Optional slice — rendered separately, doesn't gate the SLO.
+    assert rollup["optional"]["total"] == 4
+    assert rollup["optional"]["available"] == 0
+    assert rollup["optional"]["by_state"] == {"not_running": 4}
+
+
+def test_overall_status_ignores_optional_services_when_down():
+    """A MeshCore-primary NOC where every required service is up but
+    every optional service is down should read `ready`, not `degraded`.
+    Before option-2, `_derive_overall_status` counted all services and
+    flagged this state as degraded forever."""
+    snap = fa.FleetSnapshot(generated_at=0, host="x", uptime_s=0)
+    snap.services = {
+        "rnsd":            {"available": True,  "state": "available",   "optional": False},
+        "mosquitto":       {"available": True,  "state": "available",   "optional": False},
+        "meshtasticd":     {"available": False, "state": "not_running", "optional": True},
+        "meshcore-radio":  {"available": False, "state": "not_running", "optional": True},
+    }
+    assert fa._derive_overall_status(snap) == "ready"
+
+    # Required goes down → degraded (not error — at least one still up).
+    snap.services["rnsd"]["available"] = False
+    snap.services["rnsd"]["state"] = "not_running"
+    assert fa._derive_overall_status(snap) == "degraded"
+
+    # All required down → error, regardless of optionals.
+    snap.services["mosquitto"]["available"] = False
+    snap.services["mosquitto"]["state"] = "not_running"
+    assert fa._derive_overall_status(snap) == "error"
+
+
+def test_overall_status_falls_back_when_all_services_optional():
+    """Pathological config with every service marked optional must not
+    crash and must not always return ready — fall back to full-set
+    semantics so the rollup stays meaningful."""
+    snap = fa.FleetSnapshot(generated_at=0, host="x", uptime_s=0)
+    snap.services = {
+        "a": {"available": False, "state": "not_running", "optional": True},
+        "b": {"available": False, "state": "not_running", "optional": True},
+    }
+    assert fa._derive_overall_status(snap) == "error"
+
+
 def test_activity_view_drops_clean_boundaries():
     """Boundaries with zero slow_count and zero error_count don't surface
     on the activity feed — the feed is for anomalies only."""

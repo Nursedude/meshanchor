@@ -120,11 +120,22 @@ class ServiceStatus:
 # Known services and their configurations
 # Port numbers imported from utils.ports for centralization
 # NOTE: is_systemd=True means we ONLY trust systemctl for status
+# `optional: True` marks services that are NOT load-bearing on a
+# MeshAnchor (MeshCore-primary) NOC. They show on the dashboard for
+# visibility but don't count toward the SLO denominator and don't
+# degrade `overall_status` when down. The split:
+#   - rnsd, mosquitto       → required (federation transport + MQTT broker)
+#   - meshtasticd*, nomadnet, meshcore-radio → optional
+# Rationale: MeshAnchor sister-projects MeshForge as a Meshtastic-primary
+# fork; here Meshtastic-side daemons exist for compatibility but aren't
+# required. `meshcore-radio` is the opt-in supervisor (PR #70 playbook);
+# the bridge runs in-process by default.
 KNOWN_SERVICES = {
     'meshtasticd': {
         'port': MESHTASTICD_PORT,
         'systemd_name': 'meshtasticd',
         'is_systemd': True,  # Trust systemctl only
+        'optional': True,
         'description': 'Meshtastic daemon',
         'fix_hint': 'Start with: sudo systemctl start meshtasticd',
     },
@@ -147,6 +158,7 @@ KNOWN_SERVICES = {
         'port': None,  # NomadNet uses RNS shared instance, no dedicated port
         'systemd_name': 'nomadnet',
         'is_systemd': False,  # NomadNet is a user-space app, NOT a systemd service
+        'optional': True,
         'description': 'NomadNet mesh messaging client',
         'fix_hint': 'Start with: nomadnetwork (run as user, not root)',
     },
@@ -154,6 +166,7 @@ KNOWN_SERVICES = {
         'port': MESHTASTICD_ALT_PORT,
         'systemd_name': 'meshtasticd-alt',
         'is_systemd': True,
+        'optional': True,
         'description': 'Meshtastic daemon (secondary/failover)',
         'fix_hint': 'Start with: sudo systemctl start meshtasticd-alt',
     },
@@ -163,6 +176,7 @@ KNOWN_SERVICES = {
         'port': None,
         'systemd_name': 'meshcore-radio',
         'is_systemd': True,
+        'optional': True,
         'description': 'MeshCore radio supervisor (owns /dev/ttyMeshCore)',
         'fix_hint': 'Start with: sudo systemctl start meshcore-radio',
     },
