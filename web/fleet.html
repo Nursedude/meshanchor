@@ -373,7 +373,9 @@
     </div>
 
     <script>
-        const REFRESH_MS = 5000;
+        const REFRESH_MS = 5000;          // /fleet/slo + /fleet/activity (live panel)
+        const SLOW_REFRESH_MS = 15000;    // /fleet/rollup (~5s) + /fleet/federation
+        const SPARK_REFRESH_MS = 30000;   // background sparkline refresh
         const STALE_THRESHOLD_MS = 12000;
         let lastUpdateMs = 0;
 
@@ -474,12 +476,19 @@
                     tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p95_s) }));
                     tr.appendChild(el('td', { class: 'num', text: fmtMs(b.p99_s) }));
                     tr.appendChild(el('td', { class: 'num', text: b.error_rate ? (b.error_rate * 100).toFixed(1) + '%' : '0' }));
-                    // Sparkline cell — empty placeholder; populated
-                    // asynchronously by `pollSparklines()` so the row
-                    // renders immediately and history fetches don't
-                    // block the main poll.
-                    const sparkCell = el('td', { class: 'spark empty', text: '…' });
+                    // Sparkline cell — replays cached SVG immediately so
+                    // the chart doesn't flash on every 5s tbody rebuild.
+                    // Background `pollSparklines()` keeps the cache fresh.
+                    const sparkCell = el('td', { class: 'spark' });
                     sparkCell.dataset.label = b.label;
+                    const cached = sparkCache[b.label];
+                    if (cached) {
+                        sparkCell.innerHTML = cached.html;
+                        sparkCell.title = cached.title;
+                    } else {
+                        sparkCell.classList.add('empty');
+                        sparkCell.textContent = '…';
+                    }
                     tr.appendChild(sparkCell);
                     tbody.appendChild(tr);
                 }
@@ -546,40 +555,62 @@
             }
         }
 
+        // Cache of rendered sparkline HTML keyed by boundary label.
+        // The main /fleet/slo render replays from this so the chart
+        // doesn't flash to "…" every 5s when the tbody is rebuilt.
+        // Each entry: { html: '<svg…>', title: 'p95 …', empty: false }
+        const sparkCache = {};
+        let sparkInFlight = false;
         async function pollSparklines() {
-            // For each visible boundary row, fetch its p95 history and
-            // render. Done independently of the main /fleet/slo poll so
-            // a slow history query doesn't block the live panel.
-            const cells = document.querySelectorAll('td.spark[data-label]');
-            const since = Date.now() / 1000 - 1800;  // last 30 min
-            for (const cell of cells) {
-                const label = cell.dataset.label;
-                try {
-                    const url = `/fleet/history?metric=boundary&label=${encodeURIComponent(label)}&since=${since.toFixed(0)}&resolution=60`;
-                    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
-                    if (!resp.ok) throw new Error(`history ${resp.status}`);
-                    const body = await resp.json();
-                    const pts = body.points || [];
-                    const path = buildSparkPath(pts, 90, 22, 'p95_ms');
-                    if (!path) {
-                        cell.classList.add('empty');
-                        cell.classList.remove('filled');
-                        cell.textContent = pts.length === 1 ? `1 pt` : '—';
-                        continue;
+            // Skip if a previous run is still in flight — protects
+            // against piling up fetches when the server is slow.
+            if (sparkInFlight) return;
+            sparkInFlight = true;
+            try {
+                const cells = Array.from(document.querySelectorAll('td.spark[data-label]'));
+                if (cells.length === 0) return;
+                const since = Math.floor(Date.now() / 1000 - 1800);  // last 30 min
+                // Parallel fetch — 8 cells × ~5ms serial is fine, but
+                // doing them in parallel keeps the spark refresh tight
+                // even if the server picks up latency.
+                await Promise.all(cells.map(async (cell) => {
+                    const label = cell.dataset.label;
+                    try {
+                        const url = `/fleet/history?metric=boundary&label=${encodeURIComponent(label)}&since=${since}&resolution=60`;
+                        const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                        if (!resp.ok) throw new Error(`history ${resp.status}`);
+                        const body = await resp.json();
+                        const pts = body.points || [];
+                        const path = buildSparkPath(pts, 90, 22, 'p95_ms');
+                        if (!path) {
+                            const placeholder = pts.length === 1 ? '1 pt' : '—';
+                            sparkCache[label] = { html: '', title: '', empty: true, placeholder };
+                            cell.classList.add('empty');
+                            cell.classList.remove('filled');
+                            cell.textContent = placeholder;
+                            return;
+                        }
+                        const html = `<svg viewBox="0 0 90 22" preserveAspectRatio="none">` +
+                            `<path class="spark-area" d="${path.area}"/>` +
+                            `<path class="spark-line" d="${path.line}"/></svg>`;
+                        const title = `p95 ${path.minV.toFixed(1)}–${path.maxV.toFixed(1)}ms over last ${pts.length} samples`;
+                        sparkCache[label] = { html, title, empty: false };
+                        cell.classList.remove('empty');
+                        cell.classList.add('filled');
+                        cell.innerHTML = html;
+                        cell.title = title;
+                    } catch (e) {
+                        // Don't poison the cache on transient fetch
+                        // failures — keep the last good render visible.
+                        if (!sparkCache[label]) {
+                            cell.classList.add('empty');
+                            cell.textContent = 'err';
+                            cell.title = String(e);
+                        }
                     }
-                    cell.classList.remove('empty');
-                    cell.classList.add('filled');
-                    cell.innerHTML = `
-                        <svg viewBox="0 0 90 22" preserveAspectRatio="none">
-                            <path class="spark-area" d="${path.area}"/>
-                            <path class="spark-line" d="${path.line}"/>
-                        </svg>`;
-                    cell.title = `p95 ${path.minV.toFixed(1)}–${path.maxV.toFixed(1)}ms over last ${pts.length} samples`;
-                } catch (e) {
-                    cell.classList.add('empty');
-                    cell.textContent = 'err';
-                    cell.title = String(e);
-                }
+                }));
+            } finally {
+                sparkInFlight = false;
             }
         }
 
@@ -729,32 +760,46 @@
         // doesn't suppress the rest — the previous Promise.all version
         // would render nothing if any single fetch threw.
         let aggregatedErrors = {};
+        const inFlight = {};
         function bumpUpdate() {
             lastUpdateMs = Date.now();
             $('updated').textContent = new Date().toLocaleTimeString();
         }
-        async function pollEndpoint(name, path, render) {
+        async function pollEndpoint(name, path, render, onSuccess) {
+            // Drop overlapping calls — /fleet/rollup can take ~5s, so
+            // without this guard a slow tick stacks requests on the
+            // server. The next interval will retry naturally.
+            if (inFlight[name]) return;
+            inFlight[name] = true;
             try {
                 const body = await fetchJson(path);
                 render(body);
                 aggregatedErrors[name] = body.errors || [];
                 bumpUpdate();
+                if (onSuccess) onSuccess(body);
             } catch (e) {
                 console.error(`fleet ${name} fetch failed:`, e);
                 aggregatedErrors[name] = [{ source: name, error: String(e) }];
+            } finally {
+                inFlight[name] = false;
             }
             // Re-render the soft-error card whenever any endpoint
             // updates, since errors are per-endpoint.
             const all = Object.values(aggregatedErrors).flat();
             renderErrors(all);
         }
-        function tickAll() {
-            // Activity + slo are the user's "live" view — refresh
-            // every interval. Rollup + federation are heavier / less
-            // time-critical; they run on the same cadence here but
-            // could be slowed independently in a future revision.
-            pollEndpoint('slo', '/fleet/slo', renderSlo);
+        function tickFast() {
+            // Live panel: SLO + activity. Sparklines refresh right
+            // after the SLO render lands so the boundaries table and
+            // its sparkline column stay in lockstep — eliminates the
+            // "graphs disappear between ticks" flicker.
+            pollEndpoint('slo', '/fleet/slo', renderSlo, () => pollSparklines());
             pollEndpoint('activity', '/fleet/activity', renderActivity);
+        }
+        function tickSlow() {
+            // Rollup is ~5s on this host (SSH peer polling); federation
+            // is steadier. Both change slowly enough that 15s is plenty
+            // and avoids the overlap-with-itself thrash on rollup.
             pollEndpoint('rollup', '/fleet/rollup', renderRollup);
             pollEndpoint('federation', '/fleet/federation', renderFederation);
         }
@@ -767,16 +812,16 @@
             }
         }
 
-        tickAll();
-        setInterval(tickAll, REFRESH_MS);
+        tickFast();
+        tickSlow();
+        setInterval(tickFast, REFRESH_MS);
+        setInterval(tickSlow, SLOW_REFRESH_MS);
         setInterval(staleTick, 1000);
-        // Sparklines refresh every 15s — much slower than the main
-        // panel (5s) since 30-min history doesn't tick that fast and
-        // each cell is its own /fleet/history fetch (~50ms × 8 rows).
-        // Initial render delayed by 2s so the boundaries table has
-        // populated before we look up its labels.
-        setTimeout(pollSparklines, 2000);
-        setInterval(pollSparklines, 15000);
+        // Background sparkline refresh as a safety net — the main
+        // refresh is now driven by tickFast() right after renderSlo,
+        // but this catches the edge case where the boundaries table
+        // didn't change but the underlying history has new points.
+        setInterval(pollSparklines, SPARK_REFRESH_MS);
         // Blackout banner: poll every 10s. Tighter than sparklines
         // because a blackout is the most operationally important
         // thing the dashboard can show; still slower than the main
