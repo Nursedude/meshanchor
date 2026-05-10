@@ -95,16 +95,23 @@ class TestRunHealthCheck:
     @patch('utils.startup_health.check_mosquitto')
     @patch('utils.startup_health.check_rnsd')
     @patch('utils.startup_health.check_meshtasticd')
-    def test_degraded_when_optional_down(self, mock_mesh, mock_rns, mock_mqtt,
-                                          mock_hw, mock_nodes):
-        """Overall status is degraded when optional services down."""
+    def test_ready_when_only_optional_down(self, mock_mesh, mock_rns, mock_mqtt,
+                                           mock_hw, mock_nodes):
+        """Overall status is ready when only optional services are down.
+
+        By definition of "optional", an optional service being down
+        doesn't degrade the rollup. This aligns the daemon-side health
+        derivation with the web /fleet/slo path (PR #117) so the two
+        surfaces don't disagree on a host where the operator chose to
+        run a profile with non-load-bearing services.
+        """
         mock_mesh.return_value = ServiceHealth(name="meshtasticd", running=True, optional=False)
         mock_rns.return_value = ServiceHealth(name="rnsd", running=False, optional=True)
         mock_mqtt.return_value = ServiceHealth(name="mosquitto", running=False, optional=True)
         mock_hw.return_value = HardwareHealth()
 
         summary = run_health_check()
-        assert summary.overall_status == "degraded"
+        assert summary.overall_status == "ready"
 
     @patch('utils.startup_health.get_node_count', return_value=0)
     @patch('utils.startup_health.detect_hardware')
@@ -163,7 +170,14 @@ class TestProfileAwareHealthCheck:
     @patch('utils.startup_health.check_meshtasticd')
     def test_monitor_profile_all_optional(self, mock_mesh, mock_rns, mock_mqtt,
                                            mock_hw, mock_nodes):
-        """Monitor profile has no required services."""
+        """Monitor profile has no required services.
+
+        With every service classified optional and all of them down,
+        the all-optional fallback (PR #117 alignment) treats the full
+        set like a required slice. All down → "error". This stays
+        meaningful instead of always returning "ready" for
+        all-optional configs.
+        """
         mock_mesh.return_value = ServiceHealth(name="meshtasticd", running=False, optional=False)
         mock_rns.return_value = ServiceHealth(name="rnsd", running=False, optional=True)
         mock_mqtt.return_value = ServiceHealth(name="mosquitto", running=False, optional=True)
@@ -178,9 +192,9 @@ class TestProfileAwareHealthCheck:
         # With no required services, all should be optional
         for svc in summary.services:
             assert svc.optional is True, f"{svc.name} should be optional for monitor"
-        # No critical services => critical_ok is True (vacuously)
-        # All optional services down => overall is "degraded"
-        assert summary.overall_status == "degraded"
+        # All-optional fallback: full set acts as the denominator;
+        # all three services down → "error".
+        assert summary.overall_status == "error"
 
 
 class TestPrintHealthSummary:

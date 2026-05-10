@@ -421,16 +421,35 @@ def run_health_check(profile=None) -> HealthSummary:
         summary.network.nodes_visible = get_node_count()
 
     # Determine overall status — ignore not_applicable services.
+    # Optional services going down does NOT degrade the rollup. The
+    # whole point of "optional" is that the operator declared it
+    # non-load-bearing for this profile; flagging "degraded" when an
+    # optional service is down made the dashboard's status field
+    # noisy and disagree with /fleet/slo's view (PR #117 aligned the
+    # web/SLO path to count required only). This block aligns the
+    # daemon-side view with that. Required up + any optional state
+    # → ready. Some required down (but not all) → degraded. All
+    # required down → error.
     relevant = [s for s in summary.services if not s.not_applicable]
-    critical_ok = all(s.running for s in relevant if not s.optional)
-    optional_ok = all(s.running for s in relevant if s.optional)
-
-    if critical_ok and optional_ok:
-        summary.overall_status = "ready"
-    elif critical_ok:
-        summary.overall_status = "degraded"
+    required = [s for s in relevant if not s.optional]
+    if required:
+        required_running = sum(1 for s in required if s.running)
+        if required_running == len(required):
+            summary.overall_status = "ready"
+        elif required_running > 0:
+            summary.overall_status = "degraded"
+        else:
+            summary.overall_status = "error"
     else:
-        summary.overall_status = "error"
+        # No required services in this profile — fall back to the
+        # full set so the rollup stays meaningful instead of always
+        # returning ready.
+        if all(s.running for s in relevant):
+            summary.overall_status = "ready"
+        elif any(s.running for s in relevant):
+            summary.overall_status = "degraded"
+        else:
+            summary.overall_status = "error"
 
     return summary
 
