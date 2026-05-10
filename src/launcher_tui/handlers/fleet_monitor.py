@@ -98,15 +98,30 @@ class FleetMonitorHandler(BaseHandler):
         services = body.get("services") or {}
         radio = body.get("radio") or {}
         top = body.get("boundaries_top") or []
+        # Prefer the `required` slice for the headline so a MeshCore-
+        # primary NOC reads 2/2 instead of 2/6 when optional services
+        # are intentionally down. Falls back to the legacy fields for
+        # peers running an older daemon that doesn't ship the split.
+        req = services.get("required") if isinstance(services, dict) else None
+        opt = services.get("optional") if isinstance(services, dict) else None
+        head_avail = req.get("available", 0) if isinstance(req, dict) else services.get("available", 0)
+        head_total = req.get("total", 0) if isinstance(req, dict) else services.get("total", 0)
         lines = [
             f"Host:       {body.get('host', '?')}",
             f"Status:     {body.get('overall_status', '?')}",
             f"Uptime:     {self._format_uptime(body.get('uptime_s', 0))}",
             "",
-            f"Services:   {services.get('available', 0)}/{services.get('total', 0)} available",
+            f"Services:   {head_avail}/{head_total} required available",
         ]
-        for state, count in (services.get("by_state") or {}).items():
+        req_states = (req.get("by_state") if isinstance(req, dict) else None) or services.get("by_state") or {}
+        for state, count in req_states.items():
             lines.append(f"  {state:14s} {count}")
+        if isinstance(opt, dict) and opt.get("total", 0) > 0:
+            lines.append(
+                f"Optional:   {opt.get('available', 0)}/{opt.get('total', 0)} optional up"
+            )
+            for state, count in (opt.get("by_state") or {}).items():
+                lines.append(f"  {state:14s} {count}")
         lines.append("")
         lines.append(f"Radio:      {'connected' if radio.get('connected') else 'offline'}")
         if radio.get("name"):
@@ -172,7 +187,16 @@ class FleetMonitorHandler(BaseHandler):
             # NOT the per-service dict. Be defensive in case a peer is
             # running an older build that returned the full snapshot.
             services = snap.get("services") if isinstance(snap, dict) else None
-            if isinstance(services, dict) and "total" in services:
+            # Prefer the `required` slice when present so peer rows
+            # don't look unhealthier than they are when optional
+            # services (Meshtastic-side / supervisor) are intentionally
+            # down. Fall back to legacy fields for peers running an
+            # older build that pre-dates the required/optional split.
+            req = services.get("required") if isinstance(services, dict) else None
+            if isinstance(req, dict) and "total" in req:
+                available = req.get("available", 0)
+                total = req.get("total", 0)
+            elif isinstance(services, dict) and "total" in services:
                 available = services.get("available", 0)
                 total = services.get("total", 0)
             elif isinstance(services, dict):

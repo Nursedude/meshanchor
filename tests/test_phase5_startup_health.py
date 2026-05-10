@@ -108,34 +108,48 @@ class TestProfileAwareClassification:
         assert meshtasticd.not_applicable is True
         assert meshtasticd.running is True  # state still reported
 
-    def test_full_profile_missing_required_rnsd_is_error(self):
-        """FULL profile requires rnsd — its absence is an error, not a degradation."""
+    def test_full_profile_partial_required_is_degraded(self):
+        """FULL profile requires rnsd + mosquitto. With one of two
+        required services down (rnsd) and at least one still up
+        (mosquitto), the rollup is degraded — partial health, not
+        total failure. This aligns with the web /fleet/slo path's
+        derivation (PR #117): `available == total` → ready,
+        `available > 0 and < total` → degraded, `available == 0` → error.
+        """
         with self._patch_checks(meshtasticd=True, rnsd=False, mosquitto=True):
             summary = run_health_check(profile=PROFILES[ProfileName.FULL])
-        assert summary.overall_status == "error"
-        assert summary.is_ready is False
+        assert summary.overall_status == "degraded"
+        assert summary.is_ready is True  # degraded counts as ready
         rnsd = next(s for s in summary.services if s.name == "rnsd")
         assert rnsd.not_applicable is False
         assert rnsd.optional is False  # required under FULL
 
-    def test_full_profile_missing_optional_meshtasticd_is_degraded(self):
-        """FULL marks meshtasticd as optional — its absence degrades but doesn't break."""
+    def test_full_profile_missing_optional_meshtasticd_is_ready(self):
+        """FULL marks meshtasticd as optional — its absence does NOT
+        degrade the rollup. By definition of "optional", the operator
+        declared it non-load-bearing for this profile. PR #117 aligned
+        the daemon-side derivation with the web /fleet/slo path so
+        optional-down → ready, not degraded.
+        """
         with self._patch_checks(meshtasticd=False, rnsd=True, mosquitto=True):
             summary = run_health_check(profile=PROFILES[ProfileName.FULL])
-        assert summary.overall_status == "degraded"
-        assert summary.is_ready is True  # degraded counts as ready
+        assert summary.overall_status == "ready"
+        assert summary.is_ready is True
         meshtasticd = next(s for s in summary.services if s.name == "meshtasticd")
         assert meshtasticd.optional is True
         assert meshtasticd.not_applicable is False
 
-    def test_gateway_profile_all_optional_so_no_services_running_is_ready(self):
-        """GATEWAY lists meshtasticd/rnsd/mosquitto as optional — none required."""
+    def test_gateway_profile_all_optional_all_down_is_error(self):
+        """GATEWAY lists meshtasticd/rnsd/mosquitto as optional — none
+        required. With every service optional and all down, the
+        all-optional fallback (PR #117) treats the full set like a
+        required slice so the rollup stays meaningful instead of
+        always returning ready. All down → error.
+        """
         with self._patch_checks(meshtasticd=False, rnsd=False, mosquitto=False):
             summary = run_health_check(profile=PROFILES[ProfileName.GATEWAY])
-        # All three are optional under GATEWAY, so none required → critical_ok
-        # but optional_ok=False → "degraded" (still reported as ready).
-        assert summary.overall_status == "degraded"
-        assert summary.is_ready is True
+        assert summary.overall_status == "error"
+        assert summary.is_ready is False
 
     def test_no_profile_falls_back_to_legacy_behaviour(self):
         """Backward compat — without a profile, meshtasticd is the gate."""
