@@ -81,10 +81,21 @@ get_topology_snapshot_store, _HAS_TOPOLOGY_SNAPSHOT = safe_import(
 
 logger = logging.getLogger(__name__)
 
-# Shared node data cache to avoid repeated MapDataCollector instantiation
-_node_geojson_cache: Dict[str, Any] = {}
+# Shared node data cache to avoid repeated MapDataCollector instantiation.
+#
+# TTL sized to typical Prometheus scrape intervals (15-60s) so back-to-back
+# scrapes hit the cache instead of each one paying the full meshcore.dev
+# 12.5 MB HTTPS fetch (the dominant cost on meshcore-primary hosts after
+# PR #111 closed the meshtasticd TCP path). Freshness loss bounded to
+# 90s of stale node counts — acceptable for an observability surface.
+#
+# Cache uses an explicit ``None`` sentinel rather than dict-truthiness so
+# an empty result is correctly cached. Without this, a transient empty
+# response from MapDataCollector forces every subsequent scrape to re-do
+# the expensive fetch until a non-empty response arrives.
+_node_geojson_cache: Optional[Dict[str, Any]] = None
 _node_geojson_cache_time: float = 0.0
-_NODE_CACHE_TTL: float = 5.0  # seconds
+_NODE_CACHE_TTL: float = 90.0  # seconds
 
 
 def _meshtastic_enabled() -> bool:
@@ -140,7 +151,8 @@ def _collect_node_geojson() -> Dict[str, Any]:
     """
     global _node_geojson_cache, _node_geojson_cache_time
     now = time.time()
-    if now - _node_geojson_cache_time < _NODE_CACHE_TTL and _node_geojson_cache:
+    if (_node_geojson_cache is not None
+            and now - _node_geojson_cache_time < _NODE_CACHE_TTL):
         return _node_geojson_cache
     if not _HAS_MAP_COLLECTOR:
         return {}
@@ -155,7 +167,7 @@ def _collect_node_geojson() -> Dict[str, Any]:
         return geojson
     except Exception as e:
         logger.debug(f"MapDataCollector error: {e}")
-        return _node_geojson_cache if _node_geojson_cache else {}
+        return _node_geojson_cache if _node_geojson_cache is not None else {}
 
 
 class PrometheusExporter:

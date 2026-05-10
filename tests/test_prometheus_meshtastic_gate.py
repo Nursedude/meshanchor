@@ -53,8 +53,13 @@ def _mock_profile(meshtastic_enabled: bool) -> SimpleNamespace:
 
 
 def _reset_node_cache():
-    """Force the next ``_collect_node_geojson`` call to re-collect."""
-    pe._node_geojson_cache = {}
+    """Force the next ``_collect_node_geojson`` call to re-collect.
+
+    Uses ``None`` (the cache sentinel introduced when the TTL was
+    bumped) — setting to ``{}`` would falsely register as cached
+    under the new ``is not None`` check.
+    """
+    pe._node_geojson_cache = None
     pe._node_geojson_cache_time = 0.0
 
 
@@ -186,3 +191,101 @@ class TestCollectNodeGeojsonPlumbing:
         _reset_node_cache()
         with patch.object(pe, "_HAS_MAP_COLLECTOR", False):
             assert pe._collect_node_geojson() == {}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Cache semantics — TTL sizing + None sentinel
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestCacheSemantics:
+    """The cache fix that landed alongside _meshtastic_enabled():
+    longer TTL covers Prom scrape intervals, and the ``is not None``
+    check correctly caches empty results so a transient empty response
+    doesn't force every subsequent scrape to re-fetch."""
+
+    def test_ttl_covers_typical_prom_scrape_intervals(self):
+        """Prometheus default scrape interval is 15s; common values
+        are 15-60s. A TTL <= scrape interval defeats the cache for
+        every other scrape. 90s is generous enough that even slow
+        scrape configs benefit, while bounding stale-data risk."""
+        assert pe._NODE_CACHE_TTL >= 60.0
+        assert pe._NODE_CACHE_TTL <= 300.0  # not absurdly stale either
+
+    def test_empty_geojson_is_cached_not_re_fetched(self):
+        """Regression guard: a previous version used
+        ``if _node_geojson_cache:`` which falsy-checks empty dicts,
+        so an empty ``{}`` from MapDataCollector forced every
+        subsequent scrape to redo the expensive fetch."""
+        _reset_node_cache()
+        ctor = MagicMock(return_value=MagicMock(
+            collect=MagicMock(return_value={}),
+        ))
+        with patch.object(pe, "MapDataCollector", ctor), \
+             patch.object(pe, "_HAS_MAP_COLLECTOR", True), \
+             patch.object(pe, "_meshtastic_enabled", return_value=False):
+            first = pe._collect_node_geojson()
+            second = pe._collect_node_geojson()
+            third = pe._collect_node_geojson()
+        # Empty dict is a legitimate cache value — only one fetch.
+        assert ctor.call_count == 1
+        assert first == {} and second == {} and third == {}
+
+    def test_none_sentinel_initial_state_triggers_fetch(self):
+        """The ``None`` sentinel — distinct from ``{}`` — is what
+        signals "never fetched yet"."""
+        _reset_node_cache()
+        assert pe._node_geojson_cache is None
+        ctor = MagicMock(return_value=MagicMock(
+            collect=MagicMock(return_value={"features": [{"id": "x"}]}),
+        ))
+        with patch.object(pe, "MapDataCollector", ctor), \
+             patch.object(pe, "_HAS_MAP_COLLECTOR", True), \
+             patch.object(pe, "_meshtastic_enabled", return_value=False):
+            pe._collect_node_geojson()
+        assert ctor.call_count == 1
+        # Now cache is populated and second call hits it.
+        with patch.object(pe, "MapDataCollector", ctor), \
+             patch.object(pe, "_HAS_MAP_COLLECTOR", True), \
+             patch.object(pe, "_meshtastic_enabled", return_value=False):
+            pe._collect_node_geojson()
+        assert ctor.call_count == 1  # no extra constructor call
+
+    def test_exception_path_returns_empty_on_first_failure(self):
+        """If collect() raises before any cache entry exists, the
+        function returns ``{}`` — without crashing or returning a
+        falsy stale value that would be re-fetched."""
+        _reset_node_cache()
+        ctor = MagicMock(return_value=MagicMock(
+            collect=MagicMock(side_effect=RuntimeError("bad day")),
+        ))
+        with patch.object(pe, "MapDataCollector", ctor), \
+             patch.object(pe, "_HAS_MAP_COLLECTOR", True), \
+             patch.object(pe, "_meshtastic_enabled", return_value=False):
+            result = pe._collect_node_geojson()
+        assert result == {}
+
+    def test_exception_path_returns_stale_cache_when_available(self):
+        """Once a cache entry exists, transient failures should NOT
+        wipe it — fall back to the stale value."""
+        _reset_node_cache()
+        good = {"features": [{"id": "cached"}]}
+        ctor = MagicMock(return_value=MagicMock(
+            collect=MagicMock(return_value=good),
+        ))
+        with patch.object(pe, "MapDataCollector", ctor), \
+             patch.object(pe, "_HAS_MAP_COLLECTOR", True), \
+             patch.object(pe, "_meshtastic_enabled", return_value=False):
+            pe._collect_node_geojson()
+        # Force cache time well into the past so the next call
+        # bypasses the freshness short-circuit and re-fetches.
+        pe._node_geojson_cache_time = 0.0
+        bad_ctor = MagicMock(return_value=MagicMock(
+            collect=MagicMock(side_effect=RuntimeError("blew up")),
+        ))
+        with patch.object(pe, "MapDataCollector", bad_ctor), \
+             patch.object(pe, "_HAS_MAP_COLLECTOR", True), \
+             patch.object(pe, "_meshtastic_enabled", return_value=False):
+            result = pe._collect_node_geojson()
+        # Got the stale-but-good cache, not an empty dict.
+        assert result == good
