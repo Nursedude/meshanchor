@@ -538,9 +538,18 @@ class TestCheckRNSSharedInstance:
     )
 
     def test_detects_unix_domain_socket_passive(self):
-        """Test passive detection via /proc/net/unix (primary method)."""
+        """Test passive detection via /proc/net/unix (primary method).
+
+        Pass `instance_name='default'` explicitly so the test doesn't
+        consult the live RNS config via `ReticulumPaths
+        .get_configured_instance_name()` — `Path.read_text` uses `io.open`
+        which holds a separate reference from `builtins.open` and bypasses
+        the patch, so on hosts where rnsd is configured with a non-default
+        instance (e.g. `volcano ai rns`) the test would scan the StringIO
+        for the wrong socket name.
+        """
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITH_RNS)):
-            result = check_rns_shared_instance()
+            result = check_rns_shared_instance(instance_name='default')
 
             assert result is True
 
@@ -609,8 +618,11 @@ class TestCheckRNSSharedInstance:
         # RNS instance names are exact. The @rns/default check will match
         # @rns/defaults, which is acceptable since it indicates RNS is running.
         # This test documents the behavior.
+        # `instance_name='default'` pins the search target so the test
+        # doesn't depend on the host's live RNS config (see
+        # test_detects_unix_domain_socket_passive for why).
         with patch('builtins.open', return_value=__import__('io').StringIO(content)):
-            result = check_rns_shared_instance()
+            result = check_rns_shared_instance(instance_name='default')
 
             assert result is True  # substring match is acceptable
 
@@ -622,9 +634,15 @@ class TestGetRNSSharedInstanceInfo:
     PROC_NET_UNIX_WITHOUT_RNS = TestCheckRNSSharedInstance.PROC_NET_UNIX_WITHOUT_RNS
 
     def test_unix_socket_info(self):
-        """Test info dict when detected via /proc/net/unix."""
+        """Test info dict when detected via /proc/net/unix.
+
+        `instance_name='default'` pins the search target — without it,
+        `get_rns_shared_instance_info` reads the live RNS config (which
+        bypasses the `builtins.open` patch) and the assertion strings
+        embed the host's real instance_name instead of `default`.
+        """
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITH_RNS)):
-            info = get_rns_shared_instance_info()
+            info = get_rns_shared_instance_info(instance_name='default')
 
             assert info['available'] is True
             assert info['method'] == 'unix_socket'
@@ -654,11 +672,15 @@ class TestGetRNSSharedInstanceInfo:
                     assert 'UDP' in info['detail']
 
     def test_unavailable_info(self):
-        """Test info dict when no method works."""
+        """Test info dict when no method works.
+
+        `instance_name='default'` pins the search target so the
+        assertion strings don't pick up the host's real instance_name.
+        """
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITHOUT_RNS)):
             with patch('utils._port_detection.check_port', return_value=False):
                 with patch('utils._port_detection.check_udp_port', return_value=False):
-                    info = get_rns_shared_instance_info()
+                    info = get_rns_shared_instance_info(instance_name='default')
 
                     assert info['available'] is False
                     assert info['method'] == 'none'
@@ -667,9 +689,13 @@ class TestGetRNSSharedInstanceInfo:
                     assert 'UDP:37428' in info['detail']
 
     def test_info_has_required_keys(self):
-        """Test that info dict always has required keys."""
+        """Test that info dict always has required keys.
+
+        `instance_name='default'` keeps the test independent of the
+        host's live RNS config.
+        """
         with patch('builtins.open', return_value=__import__('io').StringIO(self.PROC_NET_UNIX_WITH_RNS)):
-            info = get_rns_shared_instance_info()
+            info = get_rns_shared_instance_info(instance_name='default')
 
             assert 'available' in info
             assert 'method' in info
