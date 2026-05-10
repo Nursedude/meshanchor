@@ -280,6 +280,44 @@ class FleetEndpointsMixin:
             logger.error("fleet_history query failed: %s", e)
             self._serve_json({"error": str(e), "points": []}, status=500)
 
+    def _serve_fleet_metrics(self) -> None:
+        """Prometheus exposition format at the bare ``/metrics`` path.
+
+        Localhost-only: scrapers run on-box or behind an authenticated
+        proxy. Exposing all node positions, service states, and MQTT
+        broker addresses to the LAN gives a passive attacker a full
+        asset map.
+
+        The PrometheusExporter already covers node counts, service
+        health, MQTT/TCP/RNS stats, env sensors, and queue depth. This
+        method is just the HTTP wiring; gzip is honored via the
+        existing ``_maybe_gzip`` helper because the exposition format
+        compresses well (~5×).
+        """
+        if not self._is_localhost():
+            self.send_error(403, "Metrics only available from localhost")
+            return
+        try:
+            from utils.prometheus_exporter import PrometheusExporter
+            body = PrometheusExporter().export().encode("utf-8")
+        except Exception as e:
+            logger.error("metrics export failed: %s", e)
+            self.send_error(500, "metrics export failed")
+            return
+        payload, encoding = self._maybe_gzip(body)
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "text/plain; version=0.0.4; charset=utf-8",
+        )
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _serve_fleet_federation(self) -> None:
         """Federation peers only — useful when the dashboard wants to
         refresh the RNS-side panel without paying for the full peer
