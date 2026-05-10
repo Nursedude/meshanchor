@@ -5,3 +5,9 @@ psutil>=5.9.0
 
 # WebSocket support (real-time message broadcast)
 websockets>=12.0
+
+# Prometheus client — feeds the HTTP-side /metrics histogram + counters.
+# Optional; map_metrics.py no-ops if missing, /metrics still serves the
+# hand-rolled prometheus_exporter exposition. Reverse port from MeshForge
+# (2026-05-09) — Phase E observability.
+prometheus_client>=0.17.0

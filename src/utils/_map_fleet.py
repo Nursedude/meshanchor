@@ -288,18 +288,29 @@ class FleetEndpointsMixin:
         broker addresses to the LAN gives a passive attacker a full
         asset map.
 
-        The PrometheusExporter already covers node counts, service
-        health, MQTT/TCP/RNS stats, env sensors, and queue depth. This
-        method is just the HTTP wiring; gzip is honored via the
-        existing ``_maybe_gzip`` helper because the exposition format
-        compresses well (~5×).
+        Body is the concatenation of two surfaces:
+          1. ``PrometheusExporter().export()`` — hand-rolled exposition
+             covering node counts, service health, MQTT/TCP/RNS stats,
+             env sensors, queue depth (10 collectors).
+          2. ``map_metrics.render()`` — HTTP-side metrics from the
+             reverse port (PR after #113): request counters labeled
+             by method/endpoint/status_class, latency histogram
+             labeled by endpoint. No-op when ``prometheus_client``
+             isn't installed.
+
+        Both are valid Prom exposition; concatenating with a newline
+        separator produces a single valid body. Gzip is honored via
+        ``_maybe_gzip`` because the exposition compresses ~5×.
         """
         if not self._is_localhost():
             self.send_error(403, "Metrics only available from localhost")
             return
         try:
             from utils.prometheus_exporter import PrometheusExporter
-            body = PrometheusExporter().export().encode("utf-8")
+            from utils import map_metrics
+            primary = PrometheusExporter().export().encode("utf-8")
+            secondary, _ = map_metrics.render()
+            body = primary + b"\n" + secondary if secondary else primary
         except Exception as e:
             logger.error("metrics export failed: %s", e)
             self.send_error(500, "metrics export failed")

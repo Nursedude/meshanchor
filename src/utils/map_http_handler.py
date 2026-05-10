@@ -128,7 +128,114 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             # Default fallback for localhost
             self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
 
+    def send_response(self, code, message=None):
+        """Override to capture status code for HTTP-side instrumentation.
+
+        ``BaseHTTPRequestHandler.send_response`` writes the status
+        line but doesn't expose the code. The do_GET wrapper below
+        needs it to bucket requests as 2xx/3xx/4xx/5xx in Prometheus.
+        Storing on ``self`` is per-request safe — each request is a
+        fresh handler instance under ThreadingHTTPServer.
+        """
+        self._last_status = code
+        super().send_response(code, message)
+
+    @staticmethod
+    def _endpoint_label(path_only: str) -> str:
+        """Normalize a request path into a stable Prometheus label.
+
+        Bucket parametrized paths (e.g. ``/api/nodes/trajectory/<id>``)
+        into a single template so cardinality stays bounded — one
+        time-series per route, not one per node id. This is the
+        bag-of-routes downstream Grafana panels will graph.
+        """
+        # Stable, no-parameter routes → return as-is.
+        STABLE = (
+            "", "/index.html", "/healthz", "/metrics",
+            "/api/status", "/api/nodes/geojson", "/api/nodes/history",
+            "/api/nodes/directory",
+            "/api/messages/queue", "/api/messages/rx-status",
+            "/api/messages/received",
+            "/api/network/topology", "/api/weather",
+            "/api/websocket/status", "/api/proxy/status",
+            "/api/radio/info", "/api/radio/nodes",
+            "/api/radio/channels", "/api/radio/status",
+            "/fleet", "/fleet.html",
+            "/fleet/health", "/fleet/slo", "/fleet/activity",
+            "/fleet/rollup", "/fleet/federation",
+            "/fleet/history", "/fleet/blackouts",
+        )
+        if path_only in STABLE:
+            return path_only or "/"
+        # Parametrized routes — bucket by prefix.
+        if path_only.startswith("/api/nodes/trajectory/"):
+            return "/api/nodes/trajectory/{id}"
+        if path_only.startswith("/api/nodes/snapshot"):
+            return "/api/nodes/snapshot"
+        if path_only.startswith("/api/coverage/"):
+            return "/api/coverage/{lat}/{lon}/{alt}"
+        if path_only.startswith("/api/los/"):
+            return "/api/los/{lat1}/{lon1}/{lat2}/{lon2}"
+        if path_only.startswith("/api/v1/"):
+            return "/api/v1/*"  # meshtastic proxy fan-out
+        if path_only.startswith("/json/"):
+            return "/json/*"  # meshtastic proxy fan-out
+        if path_only.startswith("/mesh/"):
+            return "/mesh/*"  # meshtastic web client
+        return "/other"
+
+    def _serve_healthz(self):
+        """Lightweight up/down probe.
+
+        Distinct from ``/metrics`` which is heavyweight (12.5MB
+        meshcore.dev fetch on cold cache — see PR #112's 90s TTL).
+        Generic is-host-up monitors (uptime checks, load balancer
+        health probes) want a fast unconditional 200; this is that.
+
+        Body carries ``state`` so a future warming pattern can be
+        added without changing the response code. MA's map service
+        binds and is ready immediately, so today the body is always
+        ``{"state": "ready"}`` — but the field is here for parity
+        with MeshForge's pattern when MA grows a warming concept.
+        """
+        self._serve_json({"state": "ready"}, status=200)
+
     def do_GET(self):
+        # HTTP-side instrumentation wrapper. The inner dispatch logic
+        # is unchanged — we only time + record around it. Failures in
+        # the metrics layer are swallowed so they can never break a
+        # response.
+        import time as _time
+        from urllib.parse import urlparse
+        start = _time.perf_counter()
+        try:
+            path_only = urlparse(self.path).path.rstrip('/')
+        except Exception:
+            path_only = self.path or ""
+        self._last_status = 0  # send_response will overwrite
+
+        try:
+            self._dispatch_get()
+        finally:
+            try:
+                from utils import map_metrics
+                duration = _time.perf_counter() - start
+                map_metrics.record_http(
+                    method="GET",
+                    endpoint=self._endpoint_label(path_only),
+                    status_code=self._last_status or 0,
+                    duration_s=duration,
+                )
+            except Exception:
+                pass  # metrics MUST NEVER break dispatch
+
+    def _dispatch_get(self):
+        # Lightweight /healthz first — never gated, never warming-blocked,
+        # always cheap. Generic uptime probes hit this constantly so it
+        # must short-circuit before any heavier work.
+        if self.path == '/healthz' or self.path == '/healthz/':
+            self._serve_healthz()
+            return
         if self.path == '/api/nodes/geojson' or self.path == '/api/nodes/geojson/':
             self._serve_geojson()
         elif self.path == '/' or self.path == '/index.html':
