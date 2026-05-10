@@ -87,11 +87,56 @@ _node_geojson_cache_time: float = 0.0
 _NODE_CACHE_TTL: float = 5.0  # seconds
 
 
+def _meshtastic_enabled() -> bool:
+    """Resolve whether Meshtastic should be polled by metric collectors.
+
+    Two operator-controlled gates feed this:
+
+    1. ``GatewayConfig.meshtastic.enabled`` (PRs #74/#75) — fine-grained
+       gateway-level disable. Flipping this to ``false`` is the
+       operator's explicit "don't talk to meshtasticd" intent.
+    2. ``deployment_profiles`` ``feature_flags["meshtastic"]`` —
+       coarse profile-level disable (e.g. ``meshcore`` / ``monitor``
+       profiles set this to False).
+
+    Returns False if EITHER says off. Defaults to True on any
+    config-load error so a misconfigured host doesn't suddenly stop
+    emitting node metrics. Result is NOT cached: the surrounding
+    ``_collect_node_geojson`` already caches the expensive call below
+    for ``_NODE_CACHE_TTL`` seconds, and config-flag reads are cheap
+    JSON parses.
+    """
+    try:
+        from gateway.config import GatewayConfig
+        cfg = GatewayConfig.load()
+        if not getattr(cfg.meshtastic, "enabled", True):
+            return False
+    except Exception as e:
+        logger.debug("GatewayConfig load failed in _meshtastic_enabled: %s", e)
+    try:
+        from utils.deployment_profiles import load_or_detect_profile
+        profile = load_or_detect_profile()
+        if not bool(profile.feature_flags.get("meshtastic", True)):
+            return False
+    except Exception as e:
+        logger.debug(
+            "deployment_profiles load failed in _meshtastic_enabled: %s", e,
+        )
+    return True
+
+
 def _collect_node_geojson() -> Dict[str, Any]:
     """Collect node GeoJSON from MapDataCollector with short-lived cache.
 
     Returns cached data if called within _NODE_CACHE_TTL seconds.
     Returns empty dict if MapDataCollector is unavailable.
+
+    Honors ``_meshtastic_enabled()``: when the operator has disabled
+    Meshtastic at either the gateway-config or profile level, the
+    underlying MapDataCollector skips its meshtasticd TCP path. Without
+    this flag the collector defaults ``meshtastic_enabled=True`` and
+    blocks ~12-19s per scrape on a TCP connect-timeout, defeating the
+    Prometheus default 10s scrape_timeout.
     """
     global _node_geojson_cache, _node_geojson_cache_time
     now = time.time()
@@ -100,7 +145,10 @@ def _collect_node_geojson() -> Dict[str, Any]:
     if not _HAS_MAP_COLLECTOR:
         return {}
     try:
-        collector = MapDataCollector(enable_history=False)
+        collector = MapDataCollector(
+            enable_history=False,
+            meshtastic_enabled=_meshtastic_enabled(),
+        )
         geojson = collector.collect(max_age_seconds=60)
         _node_geojson_cache = geojson
         _node_geojson_cache_time = now
