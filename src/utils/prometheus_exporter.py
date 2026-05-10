@@ -5,7 +5,24 @@ Exports MeshAnchor metrics in Prometheus exposition format, enabling
 integration with Grafana dashboards, alerting, and the broader
 observability ecosystem.
 
-Usage:
+## Names are the contract
+
+The metric NAMES emitted by this module are part of MeshAnchor's
+observability contract. Renaming breaks every saved Grafana panel,
+every alertmanager rule, and every recording rule that references
+them. Adding new metrics is fine; renaming or repurposing existing
+ones is not. Treat this discipline the same way as a public API:
+deprecate-and-remove rather than rename.
+
+This discipline was adopted on 2026-05-09 as part of the MeshForge
+reverse port — sister project codified the same rule in its
+``map_metrics.py`` (Phase D-3) and the audit found MeshAnchor would
+benefit from the same explicit lock. The HTTP-side surface lives in
+``utils.map_metrics``; the two are concatenated by
+``_serve_fleet_metrics`` so a Prom scraper sees both with one fetch.
+
+## Usage
+
     from utils.prometheus_exporter import PrometheusExporter, start_metrics_server
 
     # Option 1: Generate metrics string
