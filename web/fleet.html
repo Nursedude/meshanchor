@@ -226,6 +226,17 @@
         .peer-radio.online  { color: #66bb6a; }
         .peer-radio.offline { color: #6a7a8a; }
         .peer-row.peer-error .peer-stat { color: #ef5350; font-size: 11px; }
+        /* "stale" tag — peer fetch timed out but we're replaying the
+           last good snapshot rather than red-flagging a healthy box.
+           Muted yellow so it reads as "advisory, not alarm". */
+        .peer-stale {
+            color: #ffa726;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
 
         /* ── Federation peers ─────────────────────────────── */
         .fed-summary {
@@ -692,6 +703,20 @@
             }
         }
 
+        // Cache of last-known-good peer snapshots keyed by peer name.
+        // The /fleet/rollup poll fetches every peer over HTTP with a
+        // 5s timeout per peer; under load a transient slowdown on the
+        // peer's box (CPU spike, GC pause) can blow that budget and
+        // the rollup row paints `err`. Replaying the cached snapshot
+        // with a "stale Xs" tag keeps the dashboard honest about what
+        // we last saw instead of red-flagging a peer that's healthy.
+        // TTL caps how long we keep showing stale data — past that
+        // the row falls through to the raw error display, since
+        // "we haven't heard from this peer in 5 min" deserves the
+        // red treatment.
+        const PEER_SNAPSHOT_CACHE = {};        // name → {snapshot, ts, host}
+        const PEER_STALE_TTL_MS = 300_000;     // 5 min before we stop pretending
+
         function renderRollup(rollup) {
             const grid = $('peer-grid');
             grid.innerHTML = '';
@@ -705,18 +730,55 @@
                 },
                 ...(rollup.peers || []).map(p => ({ ...p, is_self: false })),
             ];
+            const now = Date.now();
             for (const row of rows) {
-                const snap = row.snapshot || {};
+                let snap = row.snapshot || {};
+                let staleAge = null;  // ms since last good fetch, or null when fresh
+
+                // Self never stales — we have its snapshot in this very
+                // response. Only peers go through the cache path.
+                if (!row.is_self) {
+                    const haveFreshSnap = row.snapshot && row.snapshot.overall_status;
+                    if (haveFreshSnap) {
+                        PEER_SNAPSHOT_CACHE[row.name] = {
+                            snapshot: row.snapshot,
+                            ts: now,
+                            host: row.host,
+                        };
+                    } else {
+                        // Fetch failed (row.error set) OR snapshot missing/empty.
+                        // Replay cache if it exists and is within TTL.
+                        const cached = PEER_SNAPSHOT_CACHE[row.name];
+                        if (cached && (now - cached.ts) <= PEER_STALE_TTL_MS) {
+                            snap = cached.snapshot;
+                            staleAge = now - cached.ts;
+                        }
+                    }
+                }
+
                 const status = (snap.overall_status || (row.error ? 'error' : 'unknown')).toLowerCase();
                 const services = snap.services || {};
                 const radio = snap.radio || {};
-                const cls = row.error ? 'peer-row peer-error error' : `peer-row ${status}`;
+                // When we're replaying cache, the row stays in its last
+                // good colour but gets a "stale" hint. Only show full
+                // error treatment when we have neither fresh data nor a
+                // recent cached snapshot.
+                const isReplay = staleAge !== null;
+                const showError = row.error && !isReplay;
+                const cls = showError ? 'peer-row peer-error error' : `peer-row ${status}`;
                 const div = el('div', { class: cls });
-                div.appendChild(el('div', {}, [
+                const headerLines = [
                     el('div', { class: 'peer-name', text: row.name }),
                     el('div', { class: 'peer-host', text: row.host || '' }),
-                ]));
-                if (row.error) {
+                ];
+                if (isReplay) {
+                    headerLines.push(el('div', {
+                        class: 'peer-stale',
+                        text: `stale ${fmtAge(staleAge / 1000)}`,
+                    }));
+                }
+                div.appendChild(el('div', {}, headerLines));
+                if (showError) {
                     div.appendChild(el('div', { class: 'peer-stat', text: row.error.slice(0, 30) }));
                     div.appendChild(el('div'));
                     div.appendChild(el('div'));
