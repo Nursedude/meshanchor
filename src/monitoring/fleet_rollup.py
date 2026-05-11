@@ -109,6 +109,52 @@ def _fetch_peer_snapshot(peer, timeout: float):
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _collect_daemon_federation_peers(
+    *, timeout: float, fresh_window_s: int,
+) -> List[FederationPeer]:
+    """Fetch RNS announces from the daemon's `/fleet/federation` registry.
+
+    The canonical source — daemon's `rns_services._service_registry`
+    holds every LXMF / RNS announce the box has heard. Without this,
+    the rollup only sees the directory cache (filtered to `network==rns`),
+    which is empty on hosts that don't persist RNS announces into the
+    directory.
+
+    Regression observed 2026-05-11 on meshanchor-server:
+    `/fleet/federation` directly returned 17 peers while
+    `/fleet/rollup.federation_peers` returned 0. This helper closes the
+    gap by mirroring the daemon-fetch already in `_serve_fleet_federation`.
+    """
+    from monitoring.fleet_aggregator import (
+        _http_get_json, DEFAULT_DAEMON_URL,
+    )
+
+    body, err = _http_get_json(
+        f"{DEFAULT_DAEMON_URL}/fleet/federation", timeout=timeout,
+    )
+    if err is not None or not isinstance(body, dict):
+        return []
+
+    cutoff = float(fresh_window_s) if fresh_window_s > 0 else None
+    out: List[FederationPeer] = []
+    for entry in body.get("peers") or []:
+        if not isinstance(entry, dict):
+            continue
+        age = entry.get("last_seen_age_s")
+        if cutoff is not None and (age is None or age > cutoff):
+            continue
+        hash_hex = entry.get("hash_hex", "")
+        out.append(FederationPeer(
+            node_id=str(hash_hex),
+            name=str(entry.get("name") or hash_hex),
+            network="rns",
+            source_origin="rns_announce",
+            last_seen=entry.get("last_seen"),
+            last_seen_age_s=age,
+        ))
+    return out
+
+
 def _collect_federation_peers(collector, fresh_window_s: int) -> List[FederationPeer]:
     """Filter the directory snapshot to RNS-network nodes seen within
     the freshness window. Returns at most ~50 entries — enough for a
@@ -227,10 +273,29 @@ def collect_fleet_rollup(
         ))
 
     if config.federation.scrape_rns_announces:
-        rollup.federation_peers = _collect_federation_peers(
+        # Daemon registry is the canonical source (live RNS announces);
+        # directory cache is the fallback for hosts that persist RNS
+        # entries via a future collector. Union, daemon-first, dedup by
+        # node_id — matches the pattern in `_serve_fleet_federation`.
+        daemon_peers = _collect_daemon_federation_peers(
+            timeout=timeout,
+            fresh_window_s=config.federation.fresh_window_s,
+        )
+        directory_peers = _collect_federation_peers(
             collector,
             fresh_window_s=config.federation.fresh_window_s,
         )
+        seen_ids = {p.node_id for p in daemon_peers}
+        merged = list(daemon_peers)
+        for fp in directory_peers:
+            if fp.node_id not in seen_ids:
+                merged.append(fp)
+                seen_ids.add(fp.node_id)
+        # Newest first; absent ages sort to the bottom.
+        merged.sort(
+            key=lambda p: p.last_seen_age_s if p.last_seen_age_s is not None else 1e18,
+        )
+        rollup.federation_peers = merged[:50]
 
     return rollup
 

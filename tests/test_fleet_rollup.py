@@ -233,6 +233,130 @@ def test_federation_handles_directory_exception():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Daemon-side federation registry — canonical source
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_federation_includes_daemon_registry_peers():
+    """Daemon's /fleet/federation returns the live RNS announce registry.
+    Without this, the rollup only sees directory cache (empty on
+    meshanchor-server) — the regression observed 2026-05-11 where
+    /fleet/federation directly showed 17 peers but
+    rollup.federation_peers showed 0.
+    """
+    daemon_body = {"peers": [
+        {"hash_hex": "abc123", "name": "moc-MF-gateway",
+         "last_seen": 1000.0, "last_seen_age_s": 30.0},
+        {"hash_hex": "def456", "name": "remote-nomadnet",
+         "last_seen": 999.0, "last_seen_age_s": 75.0},
+    ]}
+    cfg = _make_config(federation=FederationConfig(fresh_window_s=3600))
+
+    def fake_http(url, timeout=3.0):
+        if "/fleet/federation" in url:
+            return daemon_body, None
+        return None, "no match"
+
+    with patch("monitoring.fleet_aggregator._http_get_json", side_effect=fake_http):
+        rollup = fr.collect_fleet_rollup(cfg, collector=None)
+
+    names = [p.name for p in rollup.federation_peers]
+    assert names == ["moc-MF-gateway", "remote-nomadnet"]
+    assert all(p.network == "rns" for p in rollup.federation_peers)
+    assert all(p.source_origin == "rns_announce" for p in rollup.federation_peers)
+
+
+def test_federation_unions_daemon_and_directory_dedup_by_node_id():
+    """Daemon and directory may both surface the same peer. The daemon
+    registry wins (it's the canonical source); the directory contributes
+    extras."""
+    daemon_body = {"peers": [
+        {"hash_hex": "shared", "name": "shared-daemon-name",
+         "last_seen": 1000.0, "last_seen_age_s": 20.0},
+    ]}
+    collector = _make_collector(position_less=[
+        {"id": "shared", "name": "shared-directory-name", "network": "rns",
+         "last_seen_age_s": 25.0, "source_origin": "rns_path_table"},
+        {"id": "directory_only", "name": "dir-extra", "network": "rns",
+         "last_seen_age_s": 40.0, "source_origin": "rns_path_table"},
+    ])
+    cfg = _make_config(federation=FederationConfig(fresh_window_s=3600))
+
+    def fake_http(url, timeout=3.0):
+        if "/fleet/federation" in url:
+            return daemon_body, None
+        return None, "no match"
+
+    with patch("monitoring.fleet_aggregator._http_get_json", side_effect=fake_http):
+        rollup = fr.collect_fleet_rollup(cfg, collector=collector)
+
+    by_id = {p.node_id: p for p in rollup.federation_peers}
+    # Both peers present.
+    assert set(by_id) == {"shared", "directory_only"}
+    # Daemon won for `shared` — the daemon-supplied name beats the directory.
+    assert by_id["shared"].name == "shared-daemon-name"
+    assert by_id["shared"].source_origin == "rns_announce"
+
+
+def test_federation_daemon_failure_falls_back_to_directory():
+    """If the daemon doesn't answer (down, timeout), the rollup still
+    returns whatever the directory has — degradation, not silence."""
+    collector = _make_collector(position_less=[
+        {"id": "only-in-dir", "name": "directory-peer", "network": "rns",
+         "last_seen_age_s": 50.0, "source_origin": "rns_path_table"},
+    ])
+    cfg = _make_config(federation=FederationConfig(fresh_window_s=3600))
+
+    with patch("monitoring.fleet_aggregator._http_get_json",
+               return_value=(None, "down")):
+        rollup = fr.collect_fleet_rollup(cfg, collector=collector)
+
+    names = [p.name for p in rollup.federation_peers]
+    assert names == ["directory-peer"]
+
+
+def test_federation_daemon_respects_fresh_window():
+    """Peers outside the freshness window are dropped, even from the
+    daemon registry."""
+    daemon_body = {"peers": [
+        {"hash_hex": "fresh", "name": "fresh-peer",
+         "last_seen_age_s": 100.0},
+        {"hash_hex": "stale", "name": "stale-peer",
+         "last_seen_age_s": 99999.0},
+    ]}
+    cfg = _make_config(federation=FederationConfig(fresh_window_s=3600))
+
+    def fake_http(url, timeout=3.0):
+        if "/fleet/federation" in url:
+            return daemon_body, None
+        return None, "no match"
+
+    with patch("monitoring.fleet_aggregator._http_get_json", side_effect=fake_http):
+        rollup = fr.collect_fleet_rollup(cfg, collector=None)
+
+    assert [p.name for p in rollup.federation_peers] == ["fresh-peer"]
+
+
+def test_federation_daemon_uses_hash_hex_when_name_missing():
+    """Daemon entries without a `name` fall back to the hash as the
+    display name — never silently drop a real announce."""
+    daemon_body = {"peers": [
+        {"hash_hex": "deadbeef1234", "last_seen_age_s": 10.0},
+    ]}
+    cfg = _make_config(federation=FederationConfig(fresh_window_s=3600))
+
+    def fake_http(url, timeout=3.0):
+        if "/fleet/federation" in url:
+            return daemon_body, None
+        return None, "no match"
+
+    with patch("monitoring.fleet_aggregator._http_get_json", side_effect=fake_http):
+        rollup = fr.collect_fleet_rollup(cfg, collector=None)
+
+    assert [p.name for p in rollup.federation_peers] == ["deadbeef1234"]
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Serialization
 # ──────────────────────────────────────────────────────────────────────
 
