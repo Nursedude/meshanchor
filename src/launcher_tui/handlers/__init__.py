@@ -243,4 +243,11 @@ def get_all_handlers() -> List[Type]:
     from handlers.fleet_monitor import FleetMonitorHandler
     handlers.append(FleetMonitorHandler)
 
+    # Batch 23 — Stack Health (T0 of cmd/diag/analyzer triad).
+    # Sister to MeshForge's FleetHealthHandler (commit 6812fd2 there).
+    # Local silence-mode detection — complements FleetMonitor's
+    # multi-host rollup view with "is MY stack stuck?".
+    from handlers.fleet_health import FleetHealthHandler
+    handlers.append(FleetHealthHandler)
+
     return handlers
