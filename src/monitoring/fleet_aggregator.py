@@ -215,7 +215,50 @@ def _collect_radio(daemon_url: str, timeout: float):
         return None, {"source": "radio", "error": err}
     if not isinstance(body, dict):
         return None, {"source": "radio", "error": "non-dict body"}
-    return body.get("radio"), None
+    raw = body.get("radio")
+    if not isinstance(raw, dict):
+        return None, None
+    return _radio_slo_shape(raw), None
+
+
+def _radio_slo_shape(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate the daemon's MeshCore `/radio` body into slo_view's shape.
+
+    The daemon publishes the radio's *config* (`radio_freq_mhz`, `radio_sf`,
+    `node_name`, …) — those fields are only populated after a live serial
+    handshake with the radio, so a populated `radio_freq_mhz` is the
+    canonical "connected" signal. Without this translation, slo_view
+    reads non-existent `radio.connected` / `radio.name` keys and renders
+    every healthy peer as `connected=False` (regression observed in
+    fleet rollup on 2026-05-11 — the meshanchor-server peer reported
+    radio-disconnected while the daemon's `/radio` showed full config
+    incl. 910.525 MHz / SF7 / node_name=meshanchorRAK1).
+
+    `connected` precedence:
+    1. Explicit `connected=True` if the daemon ever starts emitting one.
+    2. Populated `radio_freq_mhz` — only set on a live read.
+    3. Fall back to False.
+    """
+    connected = (
+        raw.get("connected") is True
+        or raw.get("radio_freq_mhz") is not None
+    )
+    name = raw.get("node_name") or raw.get("name")
+    preset = raw.get("preset")
+    if preset is None:
+        bw = raw.get("radio_bw_khz")
+        sf = raw.get("radio_sf")
+        if bw is not None and sf is not None:
+            try:
+                preset = f"BW{int(bw)}/SF{int(sf)}"
+            except (TypeError, ValueError):
+                preset = None
+    return {
+        "connected": bool(connected),
+        "name": name,
+        "preset": preset,
+        "battery_pct": raw.get("battery_pct"),
+    }
 
 
 def _collect_chat(daemon_url: str, timeout: float):

@@ -163,8 +163,13 @@ def test_daemon_health_failure_is_soft(mock_daemon_endpoints):
     assert snap.daemon_health is None
     sources = {e["source"] for e in snap.errors}
     assert "daemon_health" in sources
-    # Successful sibling fetches still landed.
-    assert snap.radio == {"connected": True}
+    # Successful sibling fetches still landed. `_collect_radio` now
+    # normalizes the daemon body into the slo_view contract — the
+    # explicit `connected=True` in the input still surfaces, plus
+    # the contract's nullable fields.
+    assert snap.radio == {
+        "connected": True, "name": None, "preset": None, "battery_pct": None,
+    }
 
 
 def test_chat_caps_recent_to_limit():
@@ -273,6 +278,72 @@ def test_slo_view_handles_empty_snapshot():
     assert view["services"]["total"] == 0
     assert view["boundaries_top"] == []
     assert view["radio"]["connected"] is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# _radio_slo_shape — daemon body → slo_view contract
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_radio_slo_shape_meshcore_full_body_is_connected():
+    """Daemon publishes a fully-populated MeshCore body after a live
+    serial handshake. `radio_freq_mhz` non-null IS the connected signal.
+    Regression: 2026-05-11 fleet rollup showed connected=False despite
+    a healthy 910.525 MHz radio on meshanchor-server."""
+    raw = {
+        "radio_freq_mhz": 910.525,
+        "radio_bw_khz": 62.5,
+        "radio_sf": 7,
+        "radio_cr": 5,
+        "node_name": "meshanchorRAK1",
+        "tx_power_dbm": 22,
+    }
+    view = fa._radio_slo_shape(raw)
+    assert view["connected"] is True
+    assert view["name"] == "meshanchorRAK1"
+    assert view["preset"] == "BW62/SF7"
+    assert view["battery_pct"] is None
+
+
+def test_radio_slo_shape_all_null_body_is_disconnected():
+    """Daemon reachable but no radio attached — every field null."""
+    raw = {
+        "radio_freq_mhz": None, "radio_bw_khz": None, "radio_sf": None,
+        "node_name": None, "tx_power_dbm": None,
+    }
+    view = fa._radio_slo_shape(raw)
+    assert view["connected"] is False
+    assert view["name"] is None
+    assert view["preset"] is None
+
+
+def test_radio_slo_shape_explicit_connected_field_wins():
+    """Forward-compat: if the daemon starts emitting `connected`, honor it."""
+    raw = {"connected": True, "name": "explicit-name"}
+    view = fa._radio_slo_shape(raw)
+    assert view["connected"] is True
+    assert view["name"] == "explicit-name"
+
+
+def test_radio_slo_shape_preset_skipped_when_modem_params_partial():
+    """Don't fabricate a preset string if either bw or sf is missing."""
+    raw = {"radio_freq_mhz": 910.525, "radio_bw_khz": 62.5}  # no sf
+    view = fa._radio_slo_shape(raw)
+    assert view["connected"] is True
+    assert view["preset"] is None
+
+
+def test_radio_slo_shape_uses_preset_passthrough_if_present():
+    """If a future daemon publishes a preset string, pass it through."""
+    raw = {"radio_freq_mhz": 910.525, "preset": "MeshCore-US-2"}
+    view = fa._radio_slo_shape(raw)
+    assert view["preset"] == "MeshCore-US-2"
+
+
+def test_radio_slo_shape_battery_pct_passed_through():
+    raw = {"radio_freq_mhz": 910.525, "battery_pct": 87}
+    view = fa._radio_slo_shape(raw)
+    assert view["battery_pct"] == 87
 
 
 def test_slo_view_uses_daemon_overall_status():
