@@ -27,7 +27,12 @@
 Description=NomadNet LXMF Client
 After=default.target network-online.target rnsd.service
 Wants=network-online.target
-Requires=rnsd.service
+# Requires=rnsd.service intentionally omitted — when rnsd runs at the
+# SYSTEM level (the common case on MeshAnchor boxes per Issue #41), a
+# user-scope Requires= resolves to a user-scope rnsd.service that may
+# not be installed, fails with 203/EXEC, and tears NomadNet down with
+# it. After= still gives soft ordering. If you specifically run rnsd
+# in user scope on this box, add `Requires=rnsd.service` here yourself.
 
 [Service]
 Type=simple
