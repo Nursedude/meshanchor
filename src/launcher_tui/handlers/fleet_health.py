@@ -177,7 +177,9 @@ class FleetHealthHandler(BaseHandler):
         )
 
     def _probe_rns_hub_peers(self) -> ProbeResult:
-        out = self._run(["ss", "-tn", "state", "established"], timeout=5)
+        # `ss -tn` keeps the state column so the column indices below match
+        # both the live output and the test fixtures.
+        out = self._run(["ss", "-tn"], timeout=5)
         if out is None:
             return ProbeResult(
                 label="RNS hub peers",
