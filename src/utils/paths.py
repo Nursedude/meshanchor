@@ -10,6 +10,7 @@ config files, not root's.
 """
 
 from pathlib import Path
+from typing import Optional
 import os
 import tempfile
 
@@ -260,6 +261,64 @@ class ReticulumPaths:
     def get_interfaces_dir(cls) -> Path:
         """Get RNS custom interfaces directory (for plugins like Meshtastic_Interface)"""
         return cls.get_config_dir() / 'interfaces'
+
+    @classmethod
+    def get_shared_rpc_key(cls) -> Optional[str]:
+        """Resolve the rnsd shared-instance rpc_key for client config writers.
+
+        Mirrors MeshForge's helper of the same name. rnsd derives its RPC
+        key from the transport identity's private bytes by default. Any
+        client using a different configdir gets a different identity and
+        therefore a different key — every RPC to rnsd then fails with
+        ``AuthenticationError: digest sent was rejected``.
+
+        Resolution order:
+          1. Explicit ``rpc_key`` line in the active RNS config — return
+             it verbatim. (Pinning makes the key deterministic and
+             identity-independent. Operators on RNS 1.1.x typically pin.)
+          2. Derive from rnsd's transport identity (RNS 1.2.0 default):
+             ``Identity.full_hash(transport_identity.private_key)`` read
+             from ``<configdir>/storage/transport_identity``.
+          3. Return None — caller writes no rpc_key line and falls back
+             to RNS's own derivation (works only when client and rnsd
+             share the same configdir/identity).
+
+        Note: the RNS option name is literally ``rpc_key``. An older
+        variant used ``shared_instance_rpc_key`` which RNS silently
+        ignores; do not propagate that name.
+
+        Returns the 64-char lowercase hex string, or None.
+        """
+        cfg = cls.get_config_file()
+        try:
+            text = cfg.read_text()
+        except (OSError, PermissionError):
+            text = ""
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            name, _, value = line.partition('=')
+            if name.strip() != 'rpc_key':
+                continue
+            key = value.strip()
+            if len(key) == 64 and all(c in '0123456789abcdefABCDEF' for c in key):
+                return key.lower()
+            return None
+
+        try:
+            import RNS  # type: ignore
+            identity_path = cls.get_config_file().parent / 'storage' / 'transport_identity'
+            if identity_path.is_file():
+                identity = RNS.Identity.from_file(str(identity_path))
+                if identity is not None:
+                    return RNS.Identity.full_hash(identity.get_private_key()).hex()
+        except Exception:
+            return None
+
+        return None
 
     @classmethod
     def get_configured_instance_name(cls) -> str:
