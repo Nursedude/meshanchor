@@ -384,10 +384,12 @@ def main(argv=None) -> int:
     )
 
     # Always exit 0 — the tracer is an observability tool, not a gating
-    # Aggregator reads journal lines, not exit code — this is for ad-hoc
-    # operator runs where exit status matters.
-    failed = [r for r in results if r.result != "ok"]
-    return 0 if not failed else 1
+    # check. Per-peer results live in the journal (which the aggregator
+    # reads). Returning non-zero on partial failures would flag
+    # `meshanchor-tracer.service` as failed in systemd every cycle that
+    # has a single timeout/no-route, drowning real failures (like the
+    # daemon crashing) in routine red.
+    return 0
 
 
 if __name__ == "__main__":
