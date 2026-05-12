@@ -398,9 +398,12 @@ class FleetHealthHandler(BaseHandler):
             idx = ln.find("Discovered RNS node: ")
             if idx >= 0:
                 tail = ln[idx + len("Discovered RNS node: "):]
-                # Extract name from the parenthesized portion.
+                # Extract name from the OUTERMOST parenthesized portion.
+                # Names like "MeshForge Gateway (moc)" have nested parens —
+                # use rfind to grab the right closing paren, otherwise we
+                # truncate at "MeshForge Gateway (moc".
                 lp = tail.find("(")
-                rp = tail.find(")", lp + 1) if lp >= 0 else -1
+                rp = tail.rfind(")") if lp >= 0 else -1
                 if lp >= 0 and rp > lp:
                     name = tail[lp + 1:rp].strip()
                     # Filter to peer-gateway-style names. Liberal match

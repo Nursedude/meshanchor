@@ -404,6 +404,36 @@ def test_probe_peer_gateways_node_tracker_signal(monkeypatch):
     assert "MeshForge Gateway" in r.headline or "MeshAnchor Broadcast" in r.headline
 
 
+def test_probe_peer_gateways_handles_nested_parens_in_name(monkeypatch):
+    """Production names have nested parens — must not truncate at inner ).
+
+    Real journal line on moc3:
+        Discovered RNS node: 3dfbdb5d (MeshForge Gateway (moc)) [LXMF_DELIVERY]
+
+    Parser must extract `MeshForge Gateway (moc)` (with closing paren),
+    not `MeshForge Gateway (moc` (truncated at the inner close).
+    """
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "Discovered RNS node: 3dfbdb5d (MeshForge Gateway (moc)) "
+        "[LXMF_DELIVERY]\n"
+        "Discovered RNS node: f68c2f56 (MeshForge Gateway (moc3)) "
+        "[LXMF_DELIVERY]\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "ok"
+    # Both names should appear in full, with their closing parens.
+    assert "MeshForge Gateway (moc)" in r.headline
+    assert "MeshForge Gateway (moc3)" in r.headline
+
+
 def test_probe_peer_gateways_ignores_non_gateway_rns_nodes(monkeypatch):
     """RNS announces from non-gateway destinations must NOT count.
 
