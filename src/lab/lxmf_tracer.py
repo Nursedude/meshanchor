@@ -383,7 +383,7 @@ def main(argv=None) -> int:
         ack_timeout_s=args.ack_timeout,
     )
 
-    # Exit code: 0 if every peer ACKed, 1 if any timeout/no-route.
+    # Always exit 0 — the tracer is an observability tool, not a gating
     # Aggregator reads journal lines, not exit code — this is for ad-hoc
     # operator runs where exit status matters.
     failed = [r for r in results if r.result != "ok"]
