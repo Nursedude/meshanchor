@@ -271,6 +271,130 @@ def test_probe_meshanchor_daemon_active(monkeypatch):
     assert "2.0 hr" in r.headline
 
 
+# ---------------------------------------------------- peer-gateway probe
+
+
+def test_probe_peer_gateways_daemon_inactive(monkeypatch):
+    """If meshanchor-daemon isn't running, the probe is N/A (info)."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=False),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "info"
+    assert "not applicable" in r.headline
+
+
+def test_probe_peer_gateways_silent_journal(monkeypatch):
+    """Daemon up but journalctl returns nothing — warn, not fail."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    monkeypatch.setattr(FleetHealthHandler, "_run", staticmethod(lambda *a, **k: ""))
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "warn"
+    assert "no daemon journal output" in r.headline
+
+
+def test_probe_peer_gateways_no_peers_in_log(monkeypatch):
+    """Daemon active, journal has output but no peer lines — isolation warn."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: "May 11 08:25 just a regular log line\n"),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "warn"
+    assert "no peer-gateway log entries" in r.headline
+
+
+def test_probe_peer_gateways_one_live_peer(monkeypatch):
+    """One discovered peer, still live (no DOWN line)."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "May 11 08:20 ma-daemon[123]: Discovered peer gateway: moc3-mf "
+        "(role=meshtastic)\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "ok"
+    assert "1 live" in r.headline
+    assert "moc3-mf" in r.headline
+
+
+def test_probe_peer_gateways_one_live_one_down(monkeypatch):
+    """Two peers, one alive, one DOWN."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "May 11 08:20 ma-daemon[123]: Discovered peer gateway: moc3-mf "
+        "(role=meshtastic)\n"
+        "May 11 08:21 ma-daemon[123]: Discovered peer gateway: peer-2 (role=test)\n"
+        "May 11 08:25 ma-daemon[123]: GATEWAY HEARTBEAT: peer peer-2 is DOWN\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "ok"
+    assert "1 live" in r.headline
+    assert "1 DOWN" in r.headline
+    assert "moc3-mf" in r.headline
+
+
+def test_probe_peer_gateways_all_down(monkeypatch):
+    """All known peers are DOWN — fail."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "May 11 08:20 ma-daemon[123]: Discovered peer gateway: only-peer "
+        "(role=test)\n"
+        "May 11 08:25 ma-daemon[123]: GATEWAY HEARTBEAT: peer only-peer is DOWN\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "fail"
+    assert "all marked DOWN" in r.headline
+
+
+def test_probe_peer_gateways_recovery(monkeypatch):
+    """A peer marked DOWN then RECOVERED comes back to live count."""
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "May 11 08:20 ma-daemon[123]: Discovered peer gateway: bouncy (role=t)\n"
+        "May 11 08:21 ma-daemon[123]: GATEWAY HEARTBEAT: peer bouncy is DOWN\n"
+        "May 11 08:25 ma-daemon[123]: GATEWAY HEARTBEAT: peer bouncy RECOVERED\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "ok"
+    assert "1 live" in r.headline
+
+
 # ----------------------------------------------------------------- Map DB
 
 
@@ -332,6 +456,7 @@ def test_render_overview_does_not_raise(monkeypatch, capsys):
     monkeypatch.setattr(h, "_probe_nomadnet", lambda: _fake("nomadnet", "warn"))
     monkeypatch.setattr(h, "_probe_lxmf_queue", lambda: _fake("queue"))
     monkeypatch.setattr(h, "_probe_meshanchor_daemon", lambda: _fake("daemon"))
+    monkeypatch.setattr(h, "_probe_peer_gateways", lambda: _fake("peers"))
     monkeypatch.setattr(h, "_probe_map_db", lambda: _fake("db"))
     monkeypatch.setattr(h, "_probe_meshtasticd_radio", lambda: _fake("radio"))
 
@@ -358,8 +483,8 @@ def test_probe_exception_is_isolated(monkeypatch, capsys):
     monkeypatch.setattr(h, "_probe_rnsd", boom)
     for name in (
         "_probe_rns_path_table", "_probe_rns_hub_peers", "_probe_nomadnet",
-        "_probe_lxmf_queue", "_probe_meshanchor_daemon", "_probe_map_db",
-        "_probe_meshtasticd_radio",
+        "_probe_lxmf_queue", "_probe_meshanchor_daemon",
+        "_probe_peer_gateways", "_probe_map_db", "_probe_meshtasticd_radio",
     ):
         monkeypatch.setattr(
             h, name,

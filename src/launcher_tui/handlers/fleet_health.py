@@ -96,6 +96,7 @@ class FleetHealthHandler(BaseHandler):
             self._probe_nomadnet,
             self._probe_lxmf_queue,
             self._probe_meshanchor_daemon,
+            self._probe_peer_gateways,
             self._probe_map_db,
             self._probe_meshtasticd_radio,
         ]
@@ -336,6 +337,102 @@ class FleetHealthHandler(BaseHandler):
             label="MeshAnchor daemon",
             status="ok",
             headline=f"active, {uptime_label}",
+        )
+
+    def _probe_peer_gateways(self) -> ProbeResult:
+        """Surface peer-gateway visibility across the fleet.
+
+        Answers the load-bearing question: "does THIS box see the OTHER
+        gateways yet?" That's the precondition for any cross-stack
+        bridge traffic (MeshCore↔MA↔RNS↔MF↔Meshtastic).
+
+        Reads the MeshAnchor daemon journal for `gateway_heartbeat`'s
+        peer-discovery log lines from the last hour. Distinct peer
+        gateway_id counts go to the headline; freshness goes to the
+        hint. If the daemon isn't running, returns info (probe is
+        irrelevant on non-gateway boxes).
+        """
+        from utils.service_check import check_service
+
+        # If the daemon's not up, there's nothing to read from.
+        state = check_service("meshanchor-daemon")
+        if not state.available:
+            return ProbeResult(
+                label="Peer gateways",
+                status="info",
+                headline="not applicable (meshanchor-daemon not running)",
+            )
+
+        out = self._run(
+            ["journalctl", "-u", "meshanchor-daemon",
+             "--since", "1 hour ago", "--no-pager"],
+            timeout=15,
+        )
+        if not out:
+            return ProbeResult(
+                label="Peer gateways",
+                status="warn",
+                headline="no daemon journal output in last hour",
+                hint="Daemon may have gone silent — check 'journalctl -u "
+                     "meshanchor-daemon --since \"1 hour ago\"'",
+            )
+
+        # Track distinct peers + the most recent log line per peer.
+        # Heartbeat log shape (from gateway_heartbeat.py):
+        #   "Discovered peer gateway: <id> (role=<r>)"
+        #   "GATEWAY HEARTBEAT: peer <id> is DOWN"
+        #   "GATEWAY HEARTBEAT: peer <id> RECOVERED"
+        peers_seen: dict = {}  # peer_id -> (last_ts_str, last_line)
+        peers_down: set = set()
+        for ln in out.splitlines():
+            for marker in ("Discovered peer gateway:", "GATEWAY HEARTBEAT: peer "):
+                idx = ln.find(marker)
+                if idx < 0:
+                    continue
+                tail = ln[idx + len(marker):].strip()
+                # Next whitespace-separated token is the peer_id.
+                peer_id = tail.split()[0].rstrip(":,")
+                peers_seen[peer_id] = ln
+                if "is DOWN" in ln:
+                    peers_down.add(peer_id)
+                elif "RECOVERED" in ln or "Discovered peer gateway" in ln:
+                    peers_down.discard(peer_id)
+                break
+
+        if not peers_seen:
+            return ProbeResult(
+                label="Peer gateways",
+                status="warn",
+                headline="no peer-gateway log entries in last hour",
+                hint="This gateway is running but isolated — peers may not be "
+                     "discovering each other (MQTT broker reach? RNS path table?)",
+            )
+
+        live = [p for p in peers_seen if p not in peers_down]
+        if not live:
+            return ProbeResult(
+                label="Peer gateways",
+                status="fail",
+                headline=f"{len(peers_seen)} peer(s) known, all marked DOWN",
+                hint="Heartbeat broker may be unreachable or all peers offline",
+            )
+
+        # Build a short peer-id summary. Truncate long ids for the
+        # one-line headline; full list goes to the hint.
+        def _short(pid: str) -> str:
+            return pid[:12] + "…" if len(pid) > 12 else pid
+
+        live_short = ", ".join(_short(p) for p in sorted(live)[:3])
+        more = "" if len(live) <= 3 else f" (+{len(live) - 3} more)"
+
+        down_note = ""
+        if peers_down:
+            down_note = f", {len(peers_down)} DOWN"
+
+        return ProbeResult(
+            label="Peer gateways",
+            status="ok",
+            headline=f"{len(live)} live{down_note} — {live_short}{more}",
         )
 
     def _probe_map_db(self) -> ProbeResult:
