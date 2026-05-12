@@ -375,6 +375,61 @@ def test_probe_peer_gateways_all_down(monkeypatch):
     assert "all marked DOWN" in r.headline
 
 
+def test_probe_peer_gateways_node_tracker_signal(monkeypatch):
+    """Production signal: node_tracker RNS announces (heartbeat off).
+
+    This is the line shape that ACTUALLY fires in production today.
+    The probe must surface peer-gateway-named RNS nodes as live peers
+    even when the heartbeat MQTT feature is disabled.
+    """
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "May 11 16:39:42 host py[1]: 2026-05-11 16:39:42 | "
+        "gateway.node_tracker | INFO | Discovered RNS node: 3dfbdb5d "
+        "(MeshForge Gateway (moc)) [LXMF_DELIVERY]\n"
+        "May 11 16:46:26 host py[1]: 2026-05-11 16:46:26 | "
+        "gateway.node_tracker | INFO | Discovered RNS node: 627fa566 "
+        "(MeshAnchor Broadcast) [LXMF_DELIVERY]\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "ok"
+    assert "2 live" in r.headline
+    assert "MeshForge Gateway" in r.headline or "MeshAnchor Broadcast" in r.headline
+
+
+def test_probe_peer_gateways_ignores_non_gateway_rns_nodes(monkeypatch):
+    """RNS announces from non-gateway destinations must NOT count.
+
+    The fleet has lots of LXMF identities — NomadNet clients, lab
+    echo daemons, validator scripts. None should be counted as peer
+    gateways. Only display names matching 'Gateway' or 'Broadcast'
+    qualify.
+    """
+    monkeypatch.setattr(
+        "utils.service_check.check_service",
+        lambda name: MagicMock(available=True),
+    )
+    journal = (
+        "Discovered RNS node: aaa (lab-echo (volcanoai)) [LXMF_DELIVERY]\n"
+        "Discovered RNS node: bbb (random nomadnet user) [LXMF_DELIVERY]\n"
+        "Discovered RNS node: ccc (validator) [LXMF_DELIVERY]\n"
+    )
+    monkeypatch.setattr(
+        FleetHealthHandler, "_run",
+        staticmethod(lambda *a, **k: journal),
+    )
+    r = _handler()._probe_peer_gateways()
+    assert r.status == "warn"
+    assert "no peer-gateway log entries" in r.headline
+
+
 def test_probe_peer_gateways_recovery(monkeypatch):
     """A peer marked DOWN then RECOVERED comes back to live count."""
     monkeypatch.setattr(

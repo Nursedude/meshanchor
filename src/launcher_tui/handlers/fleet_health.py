@@ -346,11 +346,23 @@ class FleetHealthHandler(BaseHandler):
         gateways yet?" That's the precondition for any cross-stack
         bridge traffic (MeshCore↔MA↔RNS↔MF↔Meshtastic).
 
-        Reads the MeshAnchor daemon journal for `gateway_heartbeat`'s
-        peer-discovery log lines from the last hour. Distinct peer
-        gateway_id counts go to the headline; freshness goes to the
-        hint. If the daemon isn't running, returns info (probe is
-        irrelevant on non-gateway boxes).
+        Reads the daemon journal for TWO signals (whichever is producing
+        data), since heartbeat MQTT is feature-flagged off by default
+        and the load-bearing peer-discovery in production is RNS
+        announce reception:
+
+        1. ``node_tracker`` log lines: ``Discovered RNS node: <hash>
+           (<name>) [LXMF_DELIVERY]`` — filtered to names matching
+           gateway patterns (``Gateway``, ``Broadcast``). Fires
+           whenever the gateway hears a peer's LXMF announce; this is
+           the path that actually carries bridge traffic.
+        2. ``gateway_heartbeat`` log lines: ``Discovered peer gateway:
+           <id>`` + DOWN/RECOVERED transitions. Only fires when the
+           heartbeat MQTT feature is enabled
+           (``gateway_heartbeat_enabled=True`` in gateway config).
+
+        If both signals are silent, the gateway is isolated — that's
+        the diagnostic surface the operator wants.
         """
         from utils.service_check import check_service
 
@@ -377,20 +389,34 @@ class FleetHealthHandler(BaseHandler):
                      "meshanchor-daemon --since \"1 hour ago\"'",
             )
 
-        # Track distinct peers + the most recent log line per peer.
-        # Heartbeat log shape (from gateway_heartbeat.py):
-        #   "Discovered peer gateway: <id> (role=<r>)"
-        #   "GATEWAY HEARTBEAT: peer <id> is DOWN"
-        #   "GATEWAY HEARTBEAT: peer <id> RECOVERED"
-        peers_seen: dict = {}  # peer_id -> (last_ts_str, last_line)
-        peers_down: set = set()
+        peers_seen: dict = {}  # name -> latest log line containing it
+        peers_down: set = set()  # MQTT-heartbeat peer IDs marked DOWN
+
         for ln in out.splitlines():
-            for marker in ("Discovered peer gateway:", "GATEWAY HEARTBEAT: peer "):
-                idx = ln.find(marker)
-                if idx < 0:
+            # Signal 1: node_tracker RNS announces — load-bearing path.
+            # "Discovered RNS node: <hash> (<name>) [LXMF_DELIVERY]"
+            idx = ln.find("Discovered RNS node: ")
+            if idx >= 0:
+                tail = ln[idx + len("Discovered RNS node: "):]
+                # Extract name from the parenthesized portion.
+                lp = tail.find("(")
+                rp = tail.find(")", lp + 1) if lp >= 0 else -1
+                if lp >= 0 and rp > lp:
+                    name = tail[lp + 1:rp].strip()
+                    # Filter to peer-gateway-style names. Liberal match
+                    # so we catch "MeshForge Gateway (moc3)", "MeshAnchor
+                    # Broadcast", "MeshAnchor Gateway (xxx)", etc.
+                    if any(k in name for k in ("Gateway", "Broadcast")):
+                        peers_seen[name] = ln
+                continue
+
+            # Signal 2: gateway_heartbeat MQTT (only if enabled).
+            for marker in ("Discovered peer gateway:",
+                           "GATEWAY HEARTBEAT: peer "):
+                hidx = ln.find(marker)
+                if hidx < 0:
                     continue
-                tail = ln[idx + len(marker):].strip()
-                # Next whitespace-separated token is the peer_id.
+                tail = ln[hidx + len(marker):].strip()
                 peer_id = tail.split()[0].rstrip(":,")
                 peers_seen[peer_id] = ln
                 if "is DOWN" in ln:
@@ -405,7 +431,7 @@ class FleetHealthHandler(BaseHandler):
                 status="warn",
                 headline="no peer-gateway log entries in last hour",
                 hint="This gateway is running but isolated — peers may not be "
-                     "discovering each other (MQTT broker reach? RNS path table?)",
+                     "announcing on RNS (path table?) or heartbeat is off",
             )
 
         live = [p for p in peers_seen if p not in peers_down]
@@ -417,10 +443,10 @@ class FleetHealthHandler(BaseHandler):
                 hint="Heartbeat broker may be unreachable or all peers offline",
             )
 
-        # Build a short peer-id summary. Truncate long ids for the
+        # Build a short summary. Truncate long identifiers for the
         # one-line headline; full list goes to the hint.
         def _short(pid: str) -> str:
-            return pid[:12] + "…" if len(pid) > 12 else pid
+            return pid[:24] + "…" if len(pid) > 25 else pid
 
         live_short = ", ".join(_short(p) for p in sorted(live)[:3])
         more = "" if len(live) <= 3 else f" (+{len(live) - 3} more)"
