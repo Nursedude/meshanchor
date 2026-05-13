@@ -250,4 +250,11 @@ def get_all_handlers() -> List[Type]:
     from handlers.fleet_health import FleetHealthHandler
     handlers.append(FleetHealthHandler)
 
+    # Batch 24 — LXMF Broadcast Bridge diagnostic + Subscribe Local
+    # Client. Closes the gap where local NomadNet never landed in the
+    # bridge's SQLite subscriber DB (so MeshCore broadcasts reached
+    # remote subscribers but the on-box client stayed silent).
+    from handlers.lxmf_broadcast import LXMFBroadcastHandler
+    handlers.append(LXMFBroadcastHandler)
+
     return handlers

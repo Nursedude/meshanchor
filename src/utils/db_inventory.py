@@ -177,7 +177,14 @@ INVENTORY: List[DBSpec] = [
         creator_module="gateway.lxmf_broadcast_bridge",
         has_auto_prune=False,
         retention_days=None,
-        notes="LXMF broadcast bridge subscriber list. Operator-managed via DM.",
+        notes=(
+            "LXMF broadcast bridge subscriber list. Operator-managed via DM "
+            "or TUI Subscribe Local Client. Schema: lxmf_hash (PK), added_at, "
+            "last_delivery, tier {local|federation|external}, state "
+            "{healthy|degraded|stale|dead}, consecutive_failures, "
+            "last_failure_at. State transitions to degraded/stale/dead arrive "
+            "with charter S3; S1 only writes healthy."
+        ),
     ),
     DBSpec(
         name="fleet_history",

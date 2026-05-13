@@ -1028,6 +1028,15 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._handle_health_get()
             return
 
+        # LXMF broadcast bridge — diagnostic surface for "is my local
+        # NomadNet subscribed?" The status path exposes destination hash
+        # (already announced on RNS), channels, fanout stats, subscriber
+        # rows. LAN-readable to match /chat /radio convention.
+        if self.path.startswith("/lxmf-broadcast"):
+            from utils.lxmf_broadcast_api import handle_get as _lxmfb_get
+            _lxmfb_get(self)
+            return
+
         # Fleet federation — daemon-side RNS announce registry. The
         # map service has its own /fleet/federation that proxies this
         # one (issue #102: the map's directory cache doesn't persist
@@ -1121,6 +1130,15 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
         if not self._check_localhost():
             self._send_error_json(403, "Forbidden — localhost only")
             return
+
+        # LXMF broadcast subscriber prune — localhost-only since it changes
+        # the fan-out set. Routed before the api null-check because the
+        # bridge endpoint doesn't depend on the config-store API surface.
+        if self.path.split("?", 1)[0].startswith("/lxmf-broadcast/subscribers/"):
+            from utils.lxmf_broadcast_api import handle_delete as _lxmfb_del
+            _lxmfb_del(self)
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
@@ -1181,6 +1199,16 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
                 self._send_error_json(403, "Forbidden — localhost only")
                 return
             self._handle_radio_post()
+            return
+
+        # LXMF broadcast subscriber add — localhost-only since it actuates
+        # which LXMF identities receive fan-outs from this gateway.
+        if self.path.split("?", 1)[0].rstrip("/") == "/lxmf-broadcast/subscribers":
+            if not self._check_localhost():
+                self._send_error_json(403, "Forbidden — localhost only")
+                return
+            from utils.lxmf_broadcast_api import handle_post as _lxmfb_post
+            _lxmfb_post(self)
             return
 
         if not self._check_localhost():

@@ -519,7 +519,7 @@ def test_handler_registration_shape():
     items = h.menu_items()
     assert len(items) == 1
     tag, label, gate = items[0]
-    assert tag == "datapath"
+    assert tag == "stack_health"
     assert "Stack Health" in label
     assert gate is None
 
@@ -546,7 +546,7 @@ def test_render_overview_does_not_raise(monkeypatch, capsys):
     monkeypatch.setattr(h, "_probe_meshtasticd_radio", lambda: _fake("radio"))
 
     with patch("backend.clear_screen", lambda: None):
-        h.execute("datapath")
+        h.execute("stack_health")
 
     out = capsys.readouterr().out
     assert "Stack Health" in out
@@ -579,7 +579,7 @@ def test_probe_exception_is_isolated(monkeypatch, capsys):
         )
 
     with patch("backend.clear_screen", lambda: None):
-        h.execute("datapath")
+        h.execute("stack_health")
 
     out = capsys.readouterr().out
     assert "probe error" in out

@@ -97,12 +97,47 @@ _VERB_CHANNELS = "channels"
 _VERB_HELP = "help"
 
 
+# Tier categorises where a subscriber came from: local clients on this pi
+# (NomadNet, MeshChatX), federation peers (other NOCs), or external random
+# RNS peers that DMed `subscribe`. Drives tier-aware retry budgets (S3) and
+# alertability (S4).
+TIER_LOCAL = "local"
+TIER_FEDERATION = "federation"
+TIER_EXTERNAL = "external"
+
+# State machine values. mark_delivered always returns to `healthy`.
+# Automatic degraded/stale/dead transitions land in mark_failed.
+STATE_HEALTHY = "healthy"
+STATE_DEGRADED = "degraded"
+STATE_STALE = "stale"
+STATE_DEAD = "dead"
+
+# Per-tier backoff windows: (floor_seconds, cap_seconds). Backoff after N
+# failures = min(floor * 2^(N-1), cap). Local clients on this pi recover
+# fast (small floor); external random peers get lazy retries so a dead
+# stranger doesn't burn cycles every broadcast.
+_BACKOFF_BY_TIER = {
+    TIER_LOCAL:      (1.0,  600.0),    # 1s → 10m cap (~10 fails to reach cap)
+    TIER_FEDERATION: (5.0,  1800.0),   # 5s → 30m cap
+    TIER_EXTERNAL:   (30.0, 3600.0),   # 30s → 1h cap
+}
+
+# State-transition thresholds.
+_DEGRADED_FAIL_THRESHOLD = 3                  # consecutive failures
+_STALE_SINCE_SUCCESS_SEC = 24 * 3600          # 24h with no success
+_DEAD_SINCE_SUCCESS_SEC = 7 * 24 * 3600       # 7d with no success
+
+
 @dataclass
 class Subscriber:
     """One LXMF identity opted in to the broadcast fan-out."""
     lxmf_hash: str          # 16-char hex destination hash
     added_at: datetime
     last_delivery: Optional[datetime] = None
+    tier: str = TIER_EXTERNAL
+    state: str = STATE_HEALTHY
+    consecutive_failures: int = 0
+    last_failure_at: Optional[datetime] = None
 
 
 class SubscriberStore:
@@ -121,6 +156,15 @@ class SubscriberStore:
         self._init_schema()
 
     def _init_schema(self) -> None:
+        """Create table + apply S1 column migrations.
+
+        Live `meshanchor-server` already has a populated subscribers table
+        from before the state-machine columns existed; `ADD COLUMN ... DEFAULT`
+        is the idempotent path that promotes pre-S1 rows to
+        `tier='external'`, `state='healthy'`, `consecutive_failures=0` without
+        copying data. SQLite tolerates the column already existing only if we
+        guard with a `PRAGMA table_info` check, which is what this does.
+        """
         with self._lock, connect_tuned(self._db_path) as conn:
             conn.execute(
                 """
@@ -131,16 +175,39 @@ class SubscriberStore:
                 )
                 """
             )
+            existing_cols = {
+                row[1]  # row = (cid, name, type, notnull, dflt_value, pk)
+                for row in conn.execute("PRAGMA table_info(subscribers)")
+            }
+            migrations = [
+                ("tier", f"TEXT NOT NULL DEFAULT '{TIER_EXTERNAL}'"),
+                ("state", f"TEXT NOT NULL DEFAULT '{STATE_HEALTHY}'"),
+                ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
+                ("last_failure_at", "TEXT"),
+            ]
+            for col_name, col_def in migrations:
+                if col_name in existing_cols:
+                    continue
+                conn.execute(
+                    f"ALTER TABLE subscribers ADD COLUMN {col_name} {col_def}"
+                )
             conn.commit()
 
-    def add(self, lxmf_hash: str) -> bool:
-        """Add subscriber. Returns True if newly added, False if already present."""
+    def add(self, lxmf_hash: str, tier: str = TIER_EXTERNAL) -> bool:
+        """Add subscriber. Returns True if newly added, False if already present.
+
+        `tier` is set at first insert and not touched by subsequent `add()`
+        calls — the idempotency contract still holds. S2 promotes existing
+        rows in-place via a separate path when auto-discovery lights up.
+        """
         lxmf_hash = lxmf_hash.lower()
         now = datetime.utcnow().isoformat()
         with self._lock, connect_tuned(self._db_path) as conn:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO subscribers(lxmf_hash, added_at) VALUES (?, ?)",
-                (lxmf_hash, now),
+                "INSERT OR IGNORE INTO subscribers("
+                "lxmf_hash, added_at, tier, state, consecutive_failures"
+                ") VALUES (?, ?, ?, ?, 0)",
+                (lxmf_hash, now, tier, STATE_HEALTHY),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -155,31 +222,188 @@ class SubscriberStore:
             conn.commit()
             return cur.rowcount > 0
 
+    _ALL_COLS = (
+        "lxmf_hash, added_at, last_delivery, tier, state, "
+        "consecutive_failures, last_failure_at"
+    )
+
+    def _row_to_subscriber(self, row) -> Subscriber:
+        h, added, last, tier, state, fails, failed = row
+        return Subscriber(
+            lxmf_hash=h,
+            added_at=_parse_iso(added) or datetime.utcnow(),
+            last_delivery=_parse_iso(last),
+            tier=tier or TIER_EXTERNAL,
+            state=state or STATE_HEALTHY,
+            consecutive_failures=int(fails or 0),
+            last_failure_at=_parse_iso(failed),
+        )
+
     def list_all(self) -> List[Subscriber]:
         with self._lock, connect_tuned(self._db_path) as conn:
             rows = conn.execute(
-                "SELECT lxmf_hash, added_at, last_delivery FROM subscribers"
+                f"SELECT {self._ALL_COLS} FROM subscribers"
             ).fetchall()
-        out: List[Subscriber] = []
-        for h, added, last in rows:
-            out.append(
-                Subscriber(
-                    lxmf_hash=h,
-                    added_at=_parse_iso(added) or datetime.utcnow(),
-                    last_delivery=_parse_iso(last),
-                )
-            )
-        return out
+        return [self._row_to_subscriber(r) for r in rows]
+
+    def list_by_state(self, state: str) -> List[Subscriber]:
+        with self._lock, connect_tuned(self._db_path) as conn:
+            rows = conn.execute(
+                f"SELECT {self._ALL_COLS} FROM subscribers WHERE state = ?",
+                (state,),
+            ).fetchall()
+        return [self._row_to_subscriber(r) for r in rows]
+
+    def list_by_tier(self, tier: str) -> List[Subscriber]:
+        with self._lock, connect_tuned(self._db_path) as conn:
+            rows = conn.execute(
+                f"SELECT {self._ALL_COLS} FROM subscribers WHERE tier = ?",
+                (tier,),
+            ).fetchall()
+        return [self._row_to_subscriber(r) for r in rows]
 
     def mark_delivered(self, lxmf_hash: str) -> None:
+        """Record a successful fan-out: timestamp + reset failure counter.
+
+        Also drops the row back to `healthy` from any prior degraded state —
+        a successful delivery is the strongest possible health signal. S3's
+        automatic state transitions still respect this reset.
+        """
         lxmf_hash = lxmf_hash.lower()
         now = datetime.utcnow().isoformat()
         with self._lock, connect_tuned(self._db_path) as conn:
             conn.execute(
-                "UPDATE subscribers SET last_delivery = ? WHERE lxmf_hash = ?",
-                (now, lxmf_hash),
+                "UPDATE subscribers "
+                "SET last_delivery = ?, consecutive_failures = 0, state = ? "
+                "WHERE lxmf_hash = ?",
+                (now, STATE_HEALTHY, lxmf_hash),
             )
             conn.commit()
+
+    @staticmethod
+    def desired_state(sub: "Subscriber", now: datetime) -> str:
+        """Pure function: target state for a subscriber based on row data.
+
+        Three rules, evaluated in order from "worst" outward so the most
+        severe degradation wins:
+          1. 7+ days without a success while currently failing → dead.
+          2. 24+ hours without a success while currently failing → stale.
+          3. 3+ consecutive failures (recent) → degraded.
+          4. otherwise → healthy.
+
+        `mark_delivered` resets failures to 0 and state to healthy directly,
+        so this function only needs to handle the failure side.
+        """
+        if sub.consecutive_failures == 0:
+            return STATE_HEALTHY
+        last_success = sub.last_delivery or sub.added_at
+        if last_success is None:
+            # No reference point — fall back to "since failures started".
+            last_success = sub.last_failure_at or now
+        since_success = (now - last_success).total_seconds()
+        if since_success >= _DEAD_SINCE_SUCCESS_SEC:
+            return STATE_DEAD
+        if since_success >= _STALE_SINCE_SUCCESS_SEC:
+            return STATE_STALE
+        if sub.consecutive_failures >= _DEGRADED_FAIL_THRESHOLD:
+            return STATE_DEGRADED
+        return STATE_HEALTHY
+
+    @staticmethod
+    def backoff_seconds(sub: "Subscriber") -> float:
+        """Seconds to wait between attempts for this subscriber. 0 = no wait."""
+        if sub.consecutive_failures == 0:
+            return 0.0
+        floor, cap = _BACKOFF_BY_TIER.get(
+            sub.tier, _BACKOFF_BY_TIER[TIER_EXTERNAL]
+        )
+        # 2**(N-1) so fails=1 → floor (not floor*2)
+        return min(floor * (2 ** (sub.consecutive_failures - 1)), cap)
+
+    def should_attempt(
+        self, sub: "Subscriber", now: Optional[datetime] = None,
+    ) -> bool:
+        """Return True if the next broadcast should be attempted for `sub`.
+
+        Healthy subscribers always pass. Failing subscribers must wait their
+        tier's backoff window since the last failure; in-window attempts are
+        skipped and counted as `stats["skipped_backoff"]` by the bridge.
+        """
+        if sub.consecutive_failures == 0:
+            return True
+        if sub.last_failure_at is None:
+            return True
+        window = self.backoff_seconds(sub)
+        elapsed = ((now or datetime.utcnow()) - sub.last_failure_at).total_seconds()
+        return elapsed >= window
+
+    def mark_failed(self, lxmf_hash: str, reason: str) -> None:
+        """Record a failed fan-out: timestamp + counter + auto-state.
+
+        After the counter increments, this method calls `desired_state` to
+        decide whether to transition healthy → degraded → stale → dead.
+        State transitions log at INFO; the per-failure debug log stays.
+        """
+        lxmf_hash = lxmf_hash.lower()
+        now = datetime.utcnow()
+        now_iso = now.isoformat()
+        new_state: Optional[str] = None
+        new_fails: int = 0
+        with self._lock, connect_tuned(self._db_path) as conn:
+            cur = conn.execute(
+                "UPDATE subscribers "
+                "SET last_failure_at = ?, "
+                "    consecutive_failures = consecutive_failures + 1 "
+                "WHERE lxmf_hash = ?",
+                (now_iso, lxmf_hash),
+            )
+            if cur.rowcount == 0:
+                # Ephemeral subscriber (e.g. _reply path) — nothing to track.
+                conn.commit()
+                return
+            row = conn.execute(
+                f"SELECT {self._ALL_COLS} FROM subscribers "
+                f"WHERE lxmf_hash = ?",
+                (lxmf_hash,),
+            ).fetchone()
+            sub = self._row_to_subscriber(row)
+            new_fails = sub.consecutive_failures
+            target = self.desired_state(sub, now)
+            if target != sub.state:
+                conn.execute(
+                    "UPDATE subscribers SET state = ? WHERE lxmf_hash = ?",
+                    (target, lxmf_hash),
+                )
+                new_state = target
+            conn.commit()
+        logger.debug(
+            "LXMF subscriber %s fan-out failed: %s", lxmf_hash[:8], reason
+        )
+        if new_state:
+            logger.info(
+                "LXMF subscriber %s → state=%s (fail #%d, reason=%s)",
+                lxmf_hash[:8], new_state, new_fails, reason,
+            )
+
+    def transition_state(self, lxmf_hash: str, new_state: str) -> bool:
+        """Explicit state setter for S3+. Returns True if a row was updated.
+
+        Logs at INFO so state changes leave an audit trail without callers
+        needing to remember to log.
+        """
+        lxmf_hash = lxmf_hash.lower()
+        with self._lock, connect_tuned(self._db_path) as conn:
+            cur = conn.execute(
+                "UPDATE subscribers SET state = ? WHERE lxmf_hash = ?",
+                (new_state, lxmf_hash),
+            )
+            conn.commit()
+            updated = cur.rowcount > 0
+        if updated:
+            logger.info(
+                "LXMF subscriber %s → state=%s", lxmf_hash[:8], new_state
+            )
+        return updated
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
@@ -266,6 +490,7 @@ class LXMFBroadcastBridge:
         self._destination_hash: Optional[bytes] = None
 
         self._running = False
+        self._started_at: Optional[datetime] = None
         self._stop_event = threading.Event()
         self._announce_thread: Optional[threading.Thread] = None
 
@@ -277,6 +502,8 @@ class LXMFBroadcastBridge:
             "filtered_channel": 0,  # MeshCore msgs dropped by channel filter
             "filtered_non_meshcore": 0,
             "errors": 0,
+            "skipped_backoff": 0,   # fan-outs skipped because subscriber in
+                                    # backoff cooldown after consecutive fails
         }
 
     # ------------------------------------------------------------------
@@ -356,6 +583,7 @@ class LXMFBroadcastBridge:
             self._safe_announce()
 
             self._running = True
+            self._started_at = datetime.utcnow()
             self._stop_event.clear()
             if self._config.announce_interval_sec > 0:
                 self._announce_thread = threading.Thread(
@@ -364,6 +592,7 @@ class LXMFBroadcastBridge:
                     daemon=True,
                 )
                 self._announce_thread.start()
+            _set_active_bridge(self)
             return True
         except Exception as e:
             logger.error("LXMF broadcast bridge failed to start: %s", e)
@@ -385,6 +614,8 @@ class LXMFBroadcastBridge:
         self._router = None
         self._lxmf_source = None
         self._destination_hash = None
+        self._started_at = None
+        _clear_active_bridge(self)
 
     def _load_or_create_identity(self):
         path = self._identity_path
@@ -450,8 +681,16 @@ class LXMFBroadcastBridge:
         if not subscribers:
             return
 
+        now = datetime.utcnow()
+        skipped = 0
         for sub in subscribers:
+            if not self._subs.should_attempt(sub, now=now):
+                skipped += 1
+                continue
             self._send_to_subscriber(sub, body, title)
+        if skipped:
+            with self._stats_lock:
+                self.stats["skipped_backoff"] += skipped
 
     def _on_lxmf_delivery(self, lxmf_message: Any) -> None:
         """LXMRouter delivery callback.
@@ -529,6 +768,7 @@ class LXMFBroadcastBridge:
             dest_hash = bytes.fromhex(sub.lxmf_hash)
         except ValueError:
             logger.warning("Invalid subscriber hash %r — skipping", sub.lxmf_hash)
+            self._subs.mark_failed(sub.lxmf_hash, "invalid_hash")
             return False
 
         hash_short = sub.lxmf_hash[:8]
@@ -555,6 +795,7 @@ class LXMFBroadcastBridge:
             )
             if dest_identity is None:
                 logger.debug("No identity recalled for %s — dropping fanout", sub.lxmf_hash)
+                self._subs.mark_failed(sub.lxmf_hash, "identity_recall_null")
                 return False
 
             destination = RNS.Destination(
@@ -574,6 +815,7 @@ class LXMFBroadcastBridge:
             return True
         except Exception as e:
             logger.debug("Fanout to %s failed: %s", sub.lxmf_hash, e)
+            self._subs.mark_failed(sub.lxmf_hash, f"outbound_error:{type(e).__name__}")
             with self._stats_lock:
                 self.stats["errors"] += 1
             return False
@@ -590,12 +832,34 @@ class LXMFBroadcastBridge:
     def get_status(self) -> Dict[str, Any]:
         with self._stats_lock:
             stats_copy = dict(self.stats)
+        subs = self._subs.list_all()
         return {
             "running": self._running,
             "destination_hash": self.destination_hash_hex,
             "display_name": self._config.display_name,
             "channels": list(self._config.channels),
-            "subscribers": len(self._subs.list_all()),
+            "announce_interval_sec": int(self._config.announce_interval_sec),
+            "autosubscribe": bool(self._config.autosubscribe),
+            "started_at_iso": (
+                self._started_at.isoformat() if self._started_at else None
+            ),
+            "subscribers": [
+                {
+                    "lxmf_hash": s.lxmf_hash,
+                    "added_at": s.added_at.isoformat() if s.added_at else None,
+                    "last_delivery": (
+                        s.last_delivery.isoformat() if s.last_delivery else None
+                    ),
+                    "tier": s.tier,
+                    "state": s.state,
+                    "consecutive_failures": s.consecutive_failures,
+                    "last_failure_at": (
+                        s.last_failure_at.isoformat() if s.last_failure_at else None
+                    ),
+                }
+                for s in subs
+            ],
+            "subscriber_count": len(subs),
             "stats": stats_copy,
         }
 
@@ -617,3 +881,40 @@ def create_from_gateway_config(
         broadcast_config=cfg,
         propagation_node=propagation,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Module-level active-bridge accessor.
+#
+# Same pattern as gateway.meshcore_handler.get_active_handler — at most
+# one broadcast bridge is active per daemon process. config_api needs
+# read/write access (status + add-subscriber) without import-cycle
+# tangles, so the bridge registers itself on start() and clears on stop().
+# ─────────────────────────────────────────────────────────────────────
+
+_active_bridge: Optional["LXMFBroadcastBridge"] = None
+_active_bridge_lock = threading.Lock()
+
+
+def _set_active_bridge(bridge: "LXMFBroadcastBridge") -> None:
+    global _active_bridge
+    with _active_bridge_lock:
+        _active_bridge = bridge
+
+
+def _clear_active_bridge(bridge: "LXMFBroadcastBridge") -> None:
+    """Clear only if the caller is the currently-registered bridge.
+
+    Identity-guarded so a stale stop() from a previous bridge can't
+    clobber a freshly-started replacement.
+    """
+    global _active_bridge
+    with _active_bridge_lock:
+        if _active_bridge is bridge:
+            _active_bridge = None
+
+
+def get_active_broadcast_bridge() -> Optional["LXMFBroadcastBridge"]:
+    """Return the currently-running LXMFBroadcastBridge, or None."""
+    with _active_bridge_lock:
+        return _active_bridge
