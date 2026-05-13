@@ -714,6 +714,7 @@ class MeshAnchorLauncher:
             "chat_pane",
             "nomadnet",
             "meshchatx",
+            "lxmf_broadcast",
             "channels",
             "optional_gateways",
         ]
