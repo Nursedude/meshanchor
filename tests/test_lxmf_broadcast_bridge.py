@@ -1018,3 +1018,186 @@ class TestFanoutSkipsBackoffSubscribers:
             assert b.stats["fanouts"] == 1
         finally:
             b.stop()
+
+
+# ---------------------------------------------------------------------------
+# S4 — metrics + structured logs
+# ---------------------------------------------------------------------------
+
+
+class TestS4MetricsWiring:
+    """Bridge invokes lxmf_broadcast_metrics helpers at the right points.
+
+    Mocks the helpers to avoid hard dependency on prometheus_client in the
+    test environment; the metrics module itself is tested separately."""
+
+    def test_start_registers_status_provider(self, tmp_path, fake_rns_lxmf):
+        with patch(
+            "gateway.lxmf_broadcast_bridge.register_status_provider"
+        ) as reg:
+            b = _make_bridge(tmp_path, fake_rns_lxmf)
+            b.start()
+            try:
+                reg.assert_called_once()
+                # The arg should be the bridge's get_status method.
+                assert reg.call_args.args[0] == b.get_status
+            finally:
+                b.stop()
+
+    def test_stop_unregisters_status_provider(self, tmp_path, fake_rns_lxmf):
+        with patch(
+            "gateway.lxmf_broadcast_bridge.unregister_status_provider"
+        ) as unreg:
+            b = _make_bridge(tmp_path, fake_rns_lxmf)
+            b.start()
+            b.stop()
+            unreg.assert_called_once()
+
+    def test_successful_fanout_records_metric(self, tmp_path, fake_rns_lxmf):
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_fanout"
+        ) as rf:
+            b = _make_bridge(tmp_path, fake_rns_lxmf)
+            b.start()
+            try:
+                b._subs.add("deadbeef00112233", tier=TIER_LOCAL)
+                b.on_meshcore_message(_make_canonical(text="m1", sender="a"))
+                # At least one record_fanout with outcome=success
+                outcomes = [c.args for c in rf.call_args_list]
+                assert any(
+                    args[0] == TIER_LOCAL and args[1] == "success"
+                    for args in outcomes
+                )
+                # Duration was captured
+                kwargs = [c.kwargs for c in rf.call_args_list]
+                assert any(
+                    "duration_s" in kw and kw["duration_s"] >= 0
+                    for kw in kwargs
+                )
+            finally:
+                b.stop()
+
+    def test_invalid_hash_records_metric(self, tmp_path, fake_rns_lxmf):
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_fanout"
+        ) as rf:
+            b = _make_bridge(tmp_path, fake_rns_lxmf)
+            b.start()
+            try:
+                # Inject a syntactically-bad hash directly
+                import sqlite3
+                with sqlite3.connect(str(b._subs._db_path)) as conn:
+                    conn.execute(
+                        "INSERT INTO subscribers("
+                        "lxmf_hash, added_at, tier, state, consecutive_failures"
+                        ") VALUES (?, ?, ?, ?, 0)",
+                        ("zzznothex", "2026-05-12T00:00:00",
+                         TIER_EXTERNAL, STATE_HEALTHY),
+                    )
+                    conn.commit()
+                b.on_meshcore_message(_make_canonical(text="ping", sender="a"))
+                outcomes = [c.args for c in rf.call_args_list]
+                assert any(args[1] == "invalid_hash" for args in outcomes)
+            finally:
+                b.stop()
+
+    def test_identity_recall_null_records_metric(self, tmp_path, fake_rns_lxmf):
+        rns, _lxmf, _router = fake_rns_lxmf
+        rns.Identity.recall = MagicMock(return_value=None)
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_fanout"
+        ) as rf:
+            b = _make_bridge(tmp_path, fake_rns_lxmf)
+            b.start()
+            try:
+                b._subs.add("deadbeef00112233", tier=TIER_FEDERATION)
+                b.on_meshcore_message(_make_canonical(text="ping", sender="a"))
+                outcomes = [c.args for c in rf.call_args_list]
+                assert any(
+                    args[0] == TIER_FEDERATION
+                    and args[1] == "identity_recall_null"
+                    for args in outcomes
+                )
+            finally:
+                b.stop()
+
+
+class TestS4StateTransitionMetric:
+    """mark_failed + mark_delivered must call record_state_transition only
+    when state actually changes."""
+
+    def test_three_failures_records_transition(self, tmp_path):
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_state_transition"
+        ) as rt:
+            store = SubscriberStore(tmp_path / "subs.db")
+            store.add("deadbeef00112233")
+            for _ in range(3):
+                store.mark_failed("deadbeef00112233", "reason")
+            # Exactly one transition: healthy -> degraded
+            calls = [c.args for c in rt.call_args_list]
+            assert calls == [(STATE_HEALTHY, STATE_DEGRADED)]
+
+    def test_no_transition_no_metric_call(self, tmp_path):
+        """One or two failures don't transition — no metric call."""
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_state_transition"
+        ) as rt:
+            store = SubscriberStore(tmp_path / "subs.db")
+            store.add("deadbeef00112233")
+            store.mark_failed("deadbeef00112233", "reason")
+            store.mark_failed("deadbeef00112233", "reason")
+            rt.assert_not_called()
+
+    def test_recovery_records_transition(self, tmp_path):
+        """mark_delivered after degraded must record the recovery."""
+        store = SubscriberStore(tmp_path / "subs.db")
+        store.add("deadbeef00112233")
+        for _ in range(3):
+            store.mark_failed("deadbeef00112233", "reason")
+        # Reset the mock to only see the recovery call
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_state_transition"
+        ) as rt:
+            store.mark_delivered("deadbeef00112233")
+            calls = [c.args for c in rt.call_args_list]
+            assert calls == [(STATE_DEGRADED, STATE_HEALTHY)]
+
+    def test_redelivery_to_healthy_no_transition(self, tmp_path):
+        """Already-healthy subscriber: mark_delivered must NOT record."""
+        store = SubscriberStore(tmp_path / "subs.db")
+        store.add("deadbeef00112233")
+        with patch(
+            "gateway.lxmf_broadcast_bridge.record_state_transition"
+        ) as rt:
+            store.mark_delivered("deadbeef00112233")
+            rt.assert_not_called()
+
+
+class TestS4StructuredLogEvents:
+    """State transitions emit JSON one-liners that log scrapers can parse."""
+
+    def test_transition_log_is_valid_json(self, tmp_path, caplog):
+        import json as _json
+        store = SubscriberStore(tmp_path / "subs.db")
+        store.add("deadbeef00112233")
+        with caplog.at_level("INFO", logger="gateway.lxmf_broadcast_bridge"):
+            for _ in range(3):
+                store.mark_failed("deadbeef00112233", "test_reason")
+        info_messages = [r.message for r in caplog.records if r.levelname == "INFO"]
+        assert info_messages, "expected at least one INFO line"
+        # Find the structured event
+        parsed = None
+        for line in info_messages:
+            try:
+                data = _json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if data.get("event") == "lxmf_broadcast_state_transition":
+                parsed = data
+                break
+        assert parsed is not None, f"no state-transition event in {info_messages}"
+        assert parsed["from"] == STATE_HEALTHY
+        assert parsed["to"] == STATE_DEGRADED
+        assert parsed["hash"] == "deadbeef"  # first 8 chars
+        assert parsed["reason"] == "test_reason"

@@ -95,6 +95,7 @@ class FleetHealthHandler(BaseHandler):
             self._probe_rns_hub_peers,
             self._probe_nomadnet,
             self._probe_lxmf_queue,
+            self._probe_lxmf_broadcast,
             self._probe_meshanchor_daemon,
             self._probe_peer_gateways,
             self._probe_map_db,
@@ -306,6 +307,90 @@ class FleetHealthHandler(BaseHandler):
             status="warn",
             headline=f"{pending} pending (in flight)",
             hint="Normal mid-send; check again in a minute",
+        )
+
+    def _probe_lxmf_broadcast(self) -> ProbeResult:
+        """Hit the daemon's /lxmf-broadcast/status via HTTP loopback.
+
+        Reports subscriber counts by state. WARN when any subscriber is in
+        the stale/dead bucket (operator should review via the Stale
+        Subscribers menu); INFO when the bridge isn't running.
+        """
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = "http://127.0.0.1:8081/lxmf-broadcast/status"
+        try:
+            req = urllib.request.Request(
+                url, headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                status = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as e:
+            if e.code == 503:
+                return ProbeResult(
+                    label="LXMF broadcast bridge",
+                    status="info",
+                    headline="bridge not active (lxmf_broadcast.enabled?)",
+                )
+            return ProbeResult(
+                label="LXMF broadcast bridge",
+                status="warn",
+                headline=f"daemon returned HTTP {e.code}",
+            )
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
+            return ProbeResult(
+                label="LXMF broadcast bridge",
+                status="info",
+                headline=f"daemon unreachable: {type(e).__name__}",
+            )
+
+        if not status.get("running"):
+            return ProbeResult(
+                label="LXMF broadcast bridge",
+                status="info",
+                headline="bridge present but not yet running",
+            )
+
+        subs = status.get("subscribers") or []
+        counts: dict = {"healthy": 0, "degraded": 0, "stale": 0, "dead": 0}
+        for s in subs:
+            st = s.get("state", "healthy")
+            if st in counts:
+                counts[st] += 1
+        n = len(subs)
+        if n == 0:
+            return ProbeResult(
+                label="LXMF broadcast bridge",
+                status="warn",
+                headline="running, 0 subscribers (no fan-out happening)",
+                hint="Use 'Subscribe Local Client' under MeshCore > "
+                     "LXMF Broadcast Bridge to add NomadNet",
+            )
+        breakdown = ", ".join(
+            f"{c} {st}" for st, c in counts.items() if c > 0
+        )
+        if counts["dead"] or counts["stale"]:
+            return ProbeResult(
+                label="LXMF broadcast bridge",
+                status="warn",
+                headline=f"running, {n} subscribers ({breakdown})",
+                hint="Review via MeshCore > LXMF Broadcast Bridge > "
+                     "Stale Subscribers",
+            )
+        if counts["degraded"]:
+            return ProbeResult(
+                label="LXMF broadcast bridge",
+                status="warn",
+                headline=f"running, {n} subscribers ({breakdown})",
+                hint="Degraded subscribers are in retry backoff; "
+                     "auto-recover on next successful delivery",
+            )
+        return ProbeResult(
+            label="LXMF broadcast bridge",
+            status="ok",
+            headline=f"running, {n} subscribers ({breakdown})",
         )
 
     def _probe_meshanchor_daemon(self) -> ProbeResult:

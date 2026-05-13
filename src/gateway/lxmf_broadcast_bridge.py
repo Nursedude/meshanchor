@@ -36,9 +36,11 @@ Persistence:
 
 from __future__ import annotations
 
+import json
 import logging
 import signal as _signal_mod
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -47,6 +49,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from utils.boundary_timing import call_boundary
 from utils.db_helpers import connect_tuned
+from utils.lxmf_broadcast_metrics import (
+    record_fanout,
+    record_state_transition,
+    register_status_provider,
+    unregister_status_provider,
+)
 from utils.paths import get_real_user_home
 from utils.safe_import import safe_import
 
@@ -271,7 +279,14 @@ class SubscriberStore:
         """
         lxmf_hash = lxmf_hash.lower()
         now = datetime.utcnow().isoformat()
+        prior_state: Optional[str] = None
         with self._lock, connect_tuned(self._db_path) as conn:
+            row = conn.execute(
+                "SELECT state FROM subscribers WHERE lxmf_hash = ?",
+                (lxmf_hash,),
+            ).fetchone()
+            if row:
+                prior_state = row[0]
             conn.execute(
                 "UPDATE subscribers "
                 "SET last_delivery = ?, consecutive_failures = 0, state = ? "
@@ -279,6 +294,17 @@ class SubscriberStore:
                 (now, STATE_HEALTHY, lxmf_hash),
             )
             conn.commit()
+        # Recovery transition: only emit when state actually changed.
+        if prior_state and prior_state != STATE_HEALTHY:
+            record_state_transition(prior_state, STATE_HEALTHY)
+            logger.info(json.dumps({
+                "event": "lxmf_broadcast_state_transition",
+                "hash": lxmf_hash[:8],
+                "from": prior_state,
+                "to": STATE_HEALTHY,
+                "fails": 0,
+                "reason": "delivery_succeeded",
+            }))
 
     @staticmethod
     def desired_state(sub: "Subscriber", now: datetime) -> str:
@@ -347,6 +373,7 @@ class SubscriberStore:
         lxmf_hash = lxmf_hash.lower()
         now = datetime.utcnow()
         now_iso = now.isoformat()
+        prior_state: Optional[str] = None
         new_state: Optional[str] = None
         new_fails: int = 0
         with self._lock, connect_tuned(self._db_path) as conn:
@@ -374,16 +401,23 @@ class SubscriberStore:
                     "UPDATE subscribers SET state = ? WHERE lxmf_hash = ?",
                     (target, lxmf_hash),
                 )
+                prior_state = sub.state
                 new_state = target
             conn.commit()
         logger.debug(
             "LXMF subscriber %s fan-out failed: %s", lxmf_hash[:8], reason
         )
-        if new_state:
-            logger.info(
-                "LXMF subscriber %s → state=%s (fail #%d, reason=%s)",
-                lxmf_hash[:8], new_state, new_fails, reason,
-            )
+        if new_state and prior_state:
+            record_state_transition(prior_state, new_state)
+            # Structured event for log scrapers — short hash for privacy.
+            logger.info(json.dumps({
+                "event": "lxmf_broadcast_state_transition",
+                "hash": lxmf_hash[:8],
+                "from": prior_state,
+                "to": new_state,
+                "fails": new_fails,
+                "reason": reason,
+            }))
 
     def transition_state(self, lxmf_hash: str, new_state: str) -> bool:
         """Explicit state setter for S3+. Returns True if a row was updated.
@@ -593,6 +627,7 @@ class LXMFBroadcastBridge:
                 )
                 self._announce_thread.start()
             _set_active_bridge(self)
+            register_status_provider(self.get_status)
             return True
         except Exception as e:
             logger.error("LXMF broadcast bridge failed to start: %s", e)
@@ -616,6 +651,7 @@ class LXMFBroadcastBridge:
         self._destination_hash = None
         self._started_at = None
         _clear_active_bridge(self)
+        unregister_status_provider()
 
     def _load_or_create_identity(self):
         path = self._identity_path
@@ -764,14 +800,17 @@ class LXMFBroadcastBridge:
             return False
         RNS = self._rns
         LXMF = self._lxmf
+        tier = sub.tier
         try:
             dest_hash = bytes.fromhex(sub.lxmf_hash)
         except ValueError:
             logger.warning("Invalid subscriber hash %r — skipping", sub.lxmf_hash)
             self._subs.mark_failed(sub.lxmf_hash, "invalid_hash")
+            record_fanout(tier, "invalid_hash")
             return False
 
         hash_short = sub.lxmf_hash[:8]
+        start_t = time.monotonic()
         try:
             if not call_boundary("rnsd.has_path",
                                  RNS.Transport.has_path, dest_hash,
@@ -786,6 +825,8 @@ class LXMFBroadcastBridge:
                     if RNS.Transport.has_path(dest_hash):
                         break
                     if self._stop_event.wait(0.1):
+                        record_fanout(tier, "aborted",
+                                      duration_s=time.monotonic() - start_t)
                         return False
 
             dest_identity = call_boundary(
@@ -796,6 +837,8 @@ class LXMFBroadcastBridge:
             if dest_identity is None:
                 logger.debug("No identity recalled for %s — dropping fanout", sub.lxmf_hash)
                 self._subs.mark_failed(sub.lxmf_hash, "identity_recall_null")
+                record_fanout(tier, "identity_recall_null",
+                              duration_s=time.monotonic() - start_t)
                 return False
 
             destination = RNS.Destination(
@@ -812,12 +855,16 @@ class LXMFBroadcastBridge:
             self._subs.mark_delivered(sub.lxmf_hash)
             with self._stats_lock:
                 self.stats["fanouts"] += 1
+            record_fanout(tier, "success",
+                          duration_s=time.monotonic() - start_t)
             return True
         except Exception as e:
             logger.debug("Fanout to %s failed: %s", sub.lxmf_hash, e)
             self._subs.mark_failed(sub.lxmf_hash, f"outbound_error:{type(e).__name__}")
             with self._stats_lock:
                 self.stats["errors"] += 1
+            record_fanout(tier, "outbound_error",
+                          duration_s=time.monotonic() - start_t)
             return False
 
     def _reply(self, source_hex: str, body: str) -> bool:

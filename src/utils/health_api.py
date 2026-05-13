@@ -20,7 +20,7 @@ returns `overall_status="ready"` because both services are
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 
 
 def handle_get(handler: Any) -> None:
@@ -54,4 +54,29 @@ def handle_get(handler: Any) -> None:
         handler._send_error_json(500, f"Health check failed: {e}")
         return
 
-    handler._send_json({"health": get_health_dict(summary)})
+    payload: Dict[str, Any] = {"health": get_health_dict(summary)}
+
+    # LXMF broadcast bridge state — added in S4 for a quick "is the bridge
+    # alive + how many dead subscribers" probe. Full surface stays at
+    # /lxmf-broadcast/status and /metrics; this is just the digest.
+    try:
+        from gateway.lxmf_broadcast_bridge import get_active_broadcast_bridge
+        bridge = get_active_broadcast_bridge()
+        if bridge is not None:
+            status = bridge.get_status()
+            subs = status.get("subscribers", [])
+            payload["lxmf_broadcast"] = {
+                "running": bool(status.get("running")),
+                "subscriber_count": len(subs),
+                "dead_count": sum(1 for s in subs if s.get("state") == "dead"),
+                "stale_count": sum(1 for s in subs if s.get("state") == "stale"),
+            }
+        else:
+            payload["lxmf_broadcast"] = {"running": False}
+    except Exception:
+        # Bridge introspection is best-effort. /health must not 500
+        # because the bridge module failed to load on a profile that
+        # doesn't run it.
+        pass
+
+    handler._send_json(payload)

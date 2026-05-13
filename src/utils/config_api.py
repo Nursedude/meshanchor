@@ -1037,6 +1037,25 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             _lxmfb_get(self)
             return
 
+        # Prometheus exposition — localhost-only because the bridge surface
+        # includes the destination hash and subscriber count, which are
+        # passive-attacker assets when exposed on the LAN. Map service
+        # has its own /metrics on a different port; this one covers the
+        # daemon process (bridge state machine, fan-out outcomes).
+        if self.path == "/metrics":
+            if not self._check_localhost():
+                self._send_error_json(403, "Forbidden — localhost only")
+                return
+            from utils import lxmf_broadcast_metrics
+            body, content_type = lxmf_broadcast_metrics.render()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # Fleet federation — daemon-side RNS announce registry. The
         # map service has its own /fleet/federation that proxies this
         # one (issue #102: the map's directory cache doesn't persist
