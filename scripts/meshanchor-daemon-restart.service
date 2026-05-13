@@ -1,0 +1,8 @@
+[Unit]
+Description=Weekly restart of meshanchor-daemon.service to clear accumulated threads
+Documentation=https://github.com/Nursedude/meshanchor/issues/123
+After=meshanchor-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart meshanchor-daemon.service

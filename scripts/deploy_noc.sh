@@ -47,14 +47,19 @@ CRON_PATH="/etc/cron.d/meshanchor-soak"
 UNITS=(
     "meshanchor.service"
     "meshanchor-daemon.service"
+    "meshanchor-daemon-restart.service"
+    "meshanchor-daemon-restart.timer"
     "meshanchor-map.service"
 )
 
 # Units that should be started by systemd at boot. meshanchor.service is
 # the TUI launcher and doesn't make sense as a background service — it's
 # left available for `systemctl start` on demand but never auto-enabled.
+# meshanchor-daemon-restart.service is a oneshot triggered by its sibling
+# timer; never enable the service directly.
 ENABLE_UNITS=(
     "meshanchor-daemon.service"
+    "meshanchor-daemon-restart.timer"
     "meshanchor-map.service"
 )
 

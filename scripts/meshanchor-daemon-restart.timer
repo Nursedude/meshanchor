@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly restart of meshanchor-daemon.service
+Documentation=https://github.com/Nursedude/meshanchor/issues/123
+
+[Timer]
+# Sun 03:30 HST — 30 min before MeshForge's meshforge-map-restart.timer
+# (Sun 04:00) to avoid colliding service starts on a shared box.
+# Workaround for issue #123 (thread leak); remove once root cause is fixed.
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+Unit=meshanchor-daemon-restart.service
+
+[Install]
+WantedBy=timers.target
