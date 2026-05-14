@@ -239,6 +239,40 @@
         }
 
         /* ── Federation peers ─────────────────────────────── */
+        /* ── Federation Round-Trip leaderboard (lab traffic) ────── */
+        .lab-rollup-meta {
+            font-size: 11px;
+            color: #6a7886;
+            margin-bottom: 8px;
+        }
+        .lab-rollup-meta strong { color: #b0c0d0; }
+        .lab-leaderboard {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .lab-leaderboard th, .lab-leaderboard td {
+            padding: 4px 8px;
+            border-bottom: 1px solid #1f2933;
+            font-size: 12px;
+            text-align: left;
+        }
+        .lab-leaderboard th { color: #6a7886; font-weight: normal; }
+        .lab-leaderboard td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        /* Fail % heat ramp — visual leaderboard cue (worst-first) */
+        .lab-leaderboard .fail-cell { font-variant-numeric: tabular-nums; }
+        .lab-leaderboard .fail-cell.high   { color: #ff5555; font-weight: 600; }
+        .lab-leaderboard .fail-cell.mid    { color: #f5b441; }
+        .lab-leaderboard .fail-cell.low    { color: #4caf50; }
+        .lab-rollup-hint {
+            font-size: 12px;
+            color: #6a7886;
+            background: #181f26;
+            padding: 8px 10px;
+            border-left: 3px solid #f5b441;
+            white-space: pre-wrap;
+            font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        }
+
         .fed-summary {
             padding: 6px 16px 0;
             font-size: 11px;
@@ -385,6 +419,13 @@
             <div class="card">
                 <h2>Fleet Rollup</h2>
                 <div class="peer-grid" id="peer-grid"></div>
+            </div>
+
+            <!-- Federation Round-Trip leaderboard (lab traffic) -->
+            <div class="card" id="lab-rollup-card">
+                <h2>Federation Round-Trip <span style="font-size:11px; color:#6a7886; font-weight:normal;">(lab tracer · worst-fail-first)</span></h2>
+                <div class="lab-rollup-meta" id="lab-rollup-meta">…</div>
+                <div id="lab-rollup-content"></div>
             </div>
 
             <!-- Federation peers -->
@@ -854,6 +895,118 @@
             }
         }
 
+        // ── Federation Round-Trip leaderboard ──────────────────
+        //
+        // Markdown rollup arrives as text from MF's /lab/rollup endpoint
+        // (sorted SORT_BY=fail = worst-fail-%-first). We parse the
+        // markdown table client-side so the panel can apply heat-ramp
+        // styling to the fail % column and render real <table> markup
+        // (not just a <pre> blob).
+        //
+        // If the upstream rollup is a fix-hint markdown body (404 from
+        // MF when meshforge-lab-rollup.timer isn't installed on the
+        // tester box), we render it as a styled hint block instead.
+        function _parseRollupMd(md) {
+            // Return { hint: null, rows: [...] } or { hint: <text>, rows: [] }.
+            if (!md) return { hint: null, rows: [] };
+            // Heuristic: a fix-hint starts with "# " (h1), the real
+            // rollup starts with "## Lab traffic rollup".
+            const trimmed = md.trim();
+            if (trimmed.startsWith('# ') && !trimmed.startsWith('## ')) {
+                return { hint: trimmed, rows: [] };
+            }
+            const lines = trimmed.split('\n');
+            const rows = [];
+            let inTable = false;
+            for (const line of lines) {
+                if (line.startsWith('| pair ')) { inTable = true; continue; }
+                if (line.startsWith('|---')) continue;
+                if (inTable && line.startsWith('|')) {
+                    const cells = line.split('|').slice(1, -1).map(c => c.trim());
+                    if (cells.length === 6) {
+                        rows.push({
+                            pair: cells[0],
+                            samples: cells[1],
+                            mean_ms: cells[2],
+                            p95_ms: cells[3],
+                            fail_pct: parseFloat(cells[4]),
+                            breakdown: cells[5],
+                        });
+                    }
+                } else if (inTable && !line.startsWith('|')) {
+                    inTable = false;  // table ended
+                }
+            }
+            return { hint: null, rows };
+        }
+        function _failClass(pct) {
+            if (pct >= 25) return 'high';
+            if (pct >= 1) return 'mid';
+            return 'low';
+        }
+        function renderLabRollup(data) {
+            const meta = $('lab-rollup-meta');
+            const content = $('lab-rollup-content');
+            content.innerHTML = '';
+
+            if (!data || data.enabled === false) {
+                meta.innerHTML = `<strong>disabled</strong> — set <code>MESHANCHOR_LAB_ROLLUP_URL</code> to enable`;
+                return;
+            }
+
+            const fetched = data.fetched_at
+                ? new Date(data.fetched_at * 1000).toLocaleTimeString()
+                : '—';
+            const errorPart = data.error
+                ? ` · <span style="color:#ff5555;">error: ${data.error}</span>`
+                : '';
+            meta.innerHTML =
+                `source <strong>${data.source_url || 'n/a'}</strong> · ` +
+                `fetched <strong>${fetched}</strong>${errorPart}`;
+
+            const parsed = _parseRollupMd(data.rollup_md);
+            if (parsed.hint) {
+                const hint = el('div', { class: 'lab-rollup-hint', text: parsed.hint });
+                content.appendChild(hint);
+                return;
+            }
+            if (parsed.rows.length === 0) {
+                content.appendChild(el('div', { class: 'empty', text:
+                    'no rollup rows yet — tester box may not have fired its tracer'
+                }));
+                return;
+            }
+            const table = el('table', { class: 'lab-leaderboard' });
+            const thead = el('thead', {}, el('tr', {}, [
+                el('th', { text: 'pair' }),
+                el('th', { class: 'num', text: 'samples' }),
+                el('th', { class: 'num', text: 'mean ms' }),
+                el('th', { class: 'num', text: 'p95 ms' }),
+                el('th', { class: 'num', text: 'fail %' }),
+                el('th', { text: 'breakdown' }),
+            ]));
+            table.appendChild(thead);
+            const tbody = el('tbody', {});
+            // Cap at 20 rows. Fleet typically produces 5-10 pairs;
+            // a wider cap protects against malformed input.
+            for (const r of parsed.rows.slice(0, 20)) {
+                const tr = el('tr', {}, [
+                    el('td', { text: r.pair }),
+                    el('td', { class: 'num', text: r.samples }),
+                    el('td', { class: 'num', text: r.mean_ms }),
+                    el('td', { class: 'num', text: r.p95_ms }),
+                    el('td', {
+                        class: 'num fail-cell ' + _failClass(r.fail_pct),
+                        text: r.fail_pct.toFixed(1),
+                    }),
+                    el('td', { text: r.breakdown }),
+                ]);
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+            content.appendChild(table);
+        }
+
         function renderErrors(errors) {
             const card = $('error-card');
             const list = $('error-list');
@@ -917,6 +1070,10 @@
             // and avoids the overlap-with-itself thrash on rollup.
             pollEndpoint('rollup', '/fleet/rollup', renderRollup);
             pollEndpoint('federation', '/fleet/federation', renderFederation);
+            // Lab rollup updates every 10min on the tester box, so 15s
+            // dashboard polling is generous. It cross-host-HTTPs to the
+            // MF tester box; failure surfaces as `error` in the payload.
+            pollEndpoint('labRollup', '/fleet/lab-rollup', renderLabRollup);
         }
         function staleTick() {
             const indicator = $('indicator');

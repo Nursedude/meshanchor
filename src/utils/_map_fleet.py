@@ -110,6 +110,109 @@ class FleetEndpointsMixin:
             return
         self._serve_json(rollup.to_dict())
 
+    def _serve_fleet_lab_rollup(self) -> None:
+        """Federation round-trip rollup — fetches MeshForge's /lab/rollup
+        from the tester box and exposes the markdown for the NOC panel.
+
+        The data path is:
+
+          tracer (every 10 min on tester boxes) -> journalctl lines
+            -> meshforge-lab-rollup.service (every 10 min, offset)
+            -> ~/.local/state/meshforge/lab-traffic-rollup-leaderboard.md
+            -> MF /lab/rollup HTTP endpoint
+            -> THIS endpoint
+            -> fleet.html "Federation Round-Trip" panel
+
+        Configurable via env var ``MESHANCHOR_LAB_ROLLUP_URL`` (default:
+        ``http://VolcanoAI:5000/lab/rollup``). Set to empty string to
+        disable the panel cleanly without 500-ing.
+
+        Response shape (JSON):
+          {
+            "enabled": true,
+            "source_url": "http://VolcanoAI:5000/lab/rollup",
+            "fetched_at": <unix ts>,
+            "rollup_md": "## Lab traffic rollup\\n...",
+            "synth_md": "..." or null,
+            "error": null or "<reason>"
+          }
+
+        The fix-hint pattern (from the MF side) is preserved end-to-end:
+        when no tester box has the rollup timer installed, the upstream
+        404 emits markdown explaining how to install it. The dashboard
+        renders that hint verbatim — the operator sees actionable
+        instructions, not a silent empty panel.
+        """
+        import os
+        import time as _time
+        import urllib.error
+        import urllib.request
+
+        source_url = os.environ.get(
+            "MESHANCHOR_LAB_ROLLUP_URL",
+            "http://VolcanoAI:5000/lab/rollup",
+        ).strip()
+
+        if not source_url:
+            self._serve_json({
+                "enabled": False,
+                "source_url": "",
+                "fetched_at": _time.time(),
+                "rollup_md": None,
+                "synth_md": None,
+                "error": "MESHANCHOR_LAB_ROLLUP_URL is empty (panel disabled)",
+            })
+            return
+
+        result: Dict[str, Any] = {
+            "enabled": True,
+            "source_url": source_url,
+            "fetched_at": _time.time(),
+            "rollup_md": None,
+            "synth_md": None,
+            "error": None,
+        }
+
+        # Fetch the primary traffic rollup. Treat 404 as a soft case: the
+        # MF side returns a markdown fix-hint there, and the dashboard
+        # surfaces it. Treat connect errors as the "tester box is offline"
+        # case — error string goes into the response so the panel can
+        # show "could not reach tester box at <url>" instead of empty.
+        for label, url_key in (("rollup_md", source_url),
+                               ("synth_md", source_url.replace("/lab/rollup",
+                                                               "/lab/synth-rollup"))):
+            try:
+                req = urllib.request.Request(
+                    url_key, headers={"Accept": "text/markdown, text/plain"},
+                )
+                with urllib.request.urlopen(req, timeout=4.0) as resp:
+                    body = resp.read().decode("utf-8", errors="replace")
+                result[label] = body
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # Read the body — MF returns a markdown fix-hint here.
+                    try:
+                        result[label] = e.read().decode("utf-8", errors="replace")
+                    except Exception:
+                        result[label] = (
+                            f"# {label} unavailable\n\n"
+                            f"`{url_key}` returned 404 with no body.\n"
+                        )
+                else:
+                    msg = f"http {e.code}: {e.reason}"
+                    if label == "rollup_md":
+                        # Primary failure — surface in `error` so dashboard
+                        # paints the panel red.
+                        result["error"] = f"{url_key}: {msg}"
+                    logger.warning("lab rollup fetch failed: %s: %s", url_key, msg)
+            except Exception as e:
+                msg = f"{type(e).__name__}: {e}"
+                if label == "rollup_md":
+                    result["error"] = f"{url_key}: {msg}"
+                logger.warning("lab rollup fetch failed: %s: %s", url_key, msg)
+
+        self._serve_json(result)
+
     def _serve_fleet_blackouts(self) -> None:
         """Active + recent blackout intervals.
 
