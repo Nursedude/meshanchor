@@ -315,6 +315,8 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             self._serve_fleet_activity()
         elif self.path == '/fleet/rollup' or self.path == '/fleet/rollup/':
             self._serve_fleet_rollup()
+        elif self.path == '/fleet/lab-rollup' or self.path == '/fleet/lab-rollup/':
+            self._serve_fleet_lab_rollup()
         elif self.path == '/fleet/federation' or self.path == '/fleet/federation/':
             self._serve_fleet_federation()
         elif self.path == '/fleet/history' or self.path.startswith('/fleet/history?'):
