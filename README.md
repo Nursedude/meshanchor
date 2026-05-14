@@ -9,7 +9,7 @@
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-3226%20passing-blue.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-4335%20passing-blue.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -27,17 +27,23 @@
 
 Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the architecture: **MeshCore is primary, Meshtastic and RNS are optional gateways.** Same TUI framework. Same gateway bridge pattern. Same RF tools. Different home radio.
 
-> **ALPHA SOFTWARE — Field validation has begun. We need your help testing.**
+> **ALPHA SOFTWARE — Field-deployed and accumulating mileage. More testers wanted.**
 >
-> MeshAnchor has **3,226 tests passing** against mocks. As of 2026-05-02 the
-> first field deployment (Pi 4B + RAK Heltec V3 in Serial Companion mode) is
-> running an end-to-end MeshCore stack: bidirectional channel messaging on
-> Public + private channels via the daemon's chat API, daemon-managed gateway,
-> RNS announce reception. Gateway-bridge end-to-end (MeshCore ↔ RNS LXMF
-> delivery), coverage maps with live position data, and 3-way routing remain
-> unvalidated. If you have a MeshCore companion radio (RAK4631, Heltec V3,
-> T-Deck, T-Echo), your testing and feedback is the single most valuable
-> contribution right now. See [Contributing](#contributing).
+> MeshAnchor has **4,335 tests passing** against mocks. The canonical NOC
+> (`meshanchor-server`, Pi 4B + RAK Heltec V3 in Serial Companion mode) has
+> been running as a continuous deployment since 2026-05-02 and is currently
+> the source of truth for field validation. As of 2026-05-13 it carries:
+> bidirectional MeshCore channel messaging, MeshCore↔RNS LXMF broadcast
+> bridge (same-host + cross-federation fan-out validated 2026-05-09),
+> LXMF subscriber reliability tier engine with Prometheus metrics, a fleet
+> observability stack (collector + watchdog + 24h clean-soak passed
+> 2026-05-11), MeshCore map population from `map.meshcore.dev` plus operator
+> pin placement, and a `meshcore-cli` TUI passthrough with daemon hand-off.
+> Coverage maps with live GPS position data and full 3-way (MeshCore ↔
+> Meshtastic ↔ RNS) concurrent traffic remain unvalidated. If you have a
+> MeshCore companion radio (RAK4631, Heltec V3, T-Deck, T-Echo), your
+> independent field testing on different hardware is the single most
+> valuable contribution right now. See [Contributing](#contributing).
 
 Plug in a MeshCore companion radio, run the installer, and you get:
 
@@ -45,7 +51,7 @@ Plug in a MeshCore companion radio, run the installer, and you get:
 - **MeshCore CLI passthrough** — TUI surface that drops the operator into [meshcore-cli](https://github.com/meshcore-dev/meshcore-cli) (common verbs, send DM/channel, remote-admin `cmd` bridge to [docs.meshcore.io/cli_commands/](https://docs.meshcore.io/cli_commands/), interactive REPL) with the daemon's radio ownership handed off cleanly so the bridge resumes when the CLI exits
 - **Gateway bridge** — bidirectional MeshCore to Meshtastic/RNS message routing via CanonicalMessage
 - **RF engineering tools** — link budget, Fresnel zone, FSPL, coverage maps, space weather (NOAA)
-- **TUI interface** — 60 handler files, MeshCore-primary menu with Optional Gateways submenu, raspi-config style (whiptail/dialog), SSH-friendly
+- **TUI interface** — 85 handler files, MeshCore-primary menu with Optional Gateways submenu, raspi-config style (whiptail/dialog), SSH-friendly
 - **Live NOC maps** — Leaflet.js browser view with WebSocket updates
 - **meshforge-maps integration** — discovery, browser launch, configurable endpoint, bidirectional data fusion, and double-confirmed lifecycle control for the sister-project mapping service on `:8808`
 - **MQTT monitoring** — nodeless mesh observation, protobuf decode, traffic inspector
@@ -275,16 +281,31 @@ sudo python3 src/launcher_tui/main.py
 |---------|-------|-------|
 | Meshtastic MQTT bridge | 140 | Zero-interference gateway (v0.5.4 architecture) |
 | RNS/LXMF gateway | 97 | rnsd shared instance client |
+| LXMF broadcast bridge plug-in | -- | **Field-validated 2026-05-09**: same-host + cross-federation subscribe/fan-out. Fleet floor: RNS ≥ 1.1.9. |
+| LXMF subscriber reliability | 187 | **Field-live 2026-05-12**: state machine, tier engine, auto-transitions, tier-aware backoff, Stale Subscribers TUI prune, Prometheus metrics on `/metrics`, structured JSON state-transition logs, `/health` digest, Stack Health probe |
 | Message queue (SQLite) | 72 | Persistent queue, retry policy, circuit breaker |
 | Reconnect engine | 45 | Exponential backoff (1s -> 30s max), jitter, slow start |
 | MQTT robustness | 66 | Reconnection, message loss recovery, broker failover |
 
-### RF & Maps (Inherited)
+### Fleet Observability (Field-Validated 2026-05-09 → 2026-05-11)
+
+| Feature | Tests | Notes |
+|---------|-------|-------|
+| Fleet collector + watchdog | -- | Local cron-style systemd units writing heartbeat / blackout state. 24h clean-soak passed 2026-05-11 (NRestarts=0, history matches expected events). |
+| Blackout kinds | -- | `no_data`, `http_dead`, `frozen`, `daemon_dead` — 4-kind silence detection with 2-cycle hysteresis. End-to-end smoke: 43s detect, 13s recover. |
+| `/fleet/slo` + `/fleet/federation` + `/fleet/activity` | -- | Daemon HTTP endpoints; required/optional service split (1+ required up = degraded, all required down = error, optional doesn't gate). |
+| Cross-fleet web view (`/fleet`) | -- | `web/fleet.html` BIARC demo surface with sparklines, decoupled polling, active/stale federation styling. |
+| Prometheus exposition | -- | `/metrics` + `/healthz` on daemon and map processes. Map's `/fleet/*` polls auto-instrumented as `meshanchor_map_http_requests_total`. |
+
+### RF & Maps (Inherited + MeshCore population shipped 2026-05-07)
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
 | Link budget calculator | 107 | FSPL, Fresnel zone, earth bulge, signal classification |
 | Coverage maps (Folium) | -- | Static HTML, SNR-based link coloring, offline tiles |
+| Live NOC map (Leaflet) | -- | Force-clustering across all networks (>1k features), gzipped JSON+HTML (28MB→3.4MB on meshanchor-server), reticulum→rns alias |
+| `map.meshcore.dev` fetcher | -- | Direct fetch of ~42k positioned MeshCore nodes (MessagePack) into the live NOC map |
+| Operator pin placement (TUI) | -- | "MeshCore Map Pins" handler for local pubkeys; daemon `PUT /radio/coords` writes radio identity |
 | Space weather (NOAA) | -- | Solar flux, K-index, band conditions |
 | Site planner | -- | Range estimation with terrain |
 | Cython fast path | -- | Optional 5-10x RF calculation speedup |
@@ -293,10 +314,13 @@ sudo python3 src/launcher_tui/main.py
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| Handler registry | 70 | 60 handler files, Protocol + BaseHandler pattern |
+| Handler registry | 70 | 85 handler files, Protocol + BaseHandler pattern |
 | whiptail/dialog backend | -- | raspi-config style, SSH-friendly |
 | Deployment profile selector | 76 | 5 profiles, MeshCore-first ordering, auto-detect, full matrix pinned |
 | Startup health checks | 38 | Profile-aware classification (required / optional / not_applicable) |
+| Fleet monitor panel | -- | TUI handler reads daemon `/fleet/slo` with required-only semantics ("ready · 2/2 required") |
+| Identity & Position submenu | -- | `set_radio_name` / `set_radio_coords` / send advert; pushes to daemon HTTP `/radio/{name,coords,advert}` |
+| `meshcore-cli` passthrough | -- | TUI surface drops operator into [meshcore-cli](https://github.com/meshcore-dev/meshcore-cli) with daemon hand-off; bridge resumes on exit |
 
 ### Monitoring & Telemetry (Inherited)
 
@@ -310,27 +334,40 @@ sudo python3 src/launcher_tui/main.py
 
 ### Testing Reality Check
 
-MeshAnchor has **3,226 automated tests** across 95 test files. However, automated tests
+MeshAnchor has **4,335 automated tests** across 145 test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.
 
-**What has been validated with real hardware (first field deployment, 2026-05-02):**
-- MeshCore companion radio connection (RAK Heltec V3, Serial Companion firmware via USB)
+**What has been validated with real hardware on `meshanchor-server` (Pi 4B + RAK Heltec V3, continuous deployment since 2026-05-02):**
+- MeshCore companion radio connection (Serial Companion firmware via USB)
 - Bidirectional channel messaging on Public (slot 0) and private channels (`meshanchor`
   on slot 1/2) — RX from a paired BLE Companion + iOS, TX from the daemon's chat API
   through the TUI, both directions confirmed
-- Daemon stability under restart cycles (5 boot/restart-loop fixes landed during
-  bring-up; full restart now produces a clean 5/5 services, no watchdog churn)
+- **MeshCore↔RNS LXMF broadcast bridge (2026-05-09)** — same-host subscribe + fan-out,
+  then cross-host fan-out across the MeshForge Hawaii federation; "Got to test Claude"
+  message round-tripped from `p3` to `meshanchor-server` and broadcast to subscribers
+- **LXMF subscriber reliability stack (2026-05-12)** — state machine, tier engine,
+  Prometheus metrics on daemon `/metrics` (4 metric families), `/health` digest,
+  Stack Health probe; live sample shows 3 healthy/external subscribers
+- **Fleet observability (2026-05-11)** — collector + watchdog ran a 24-hour clean
+  soak with `NRestarts=0` on both units, exactly the expected closed blackout history,
+  and all required services available
+- **MeshCore map population (2026-05-07)** — first appearance of MeshCore data on the
+  meshanchor-server live map (`map.meshcore.dev` fetcher + operator pin placement)
+- **`meshcore-cli` TUI passthrough (2026-05-07)** — daemon hand-off + restart wrapper
+  validated against meshcore-cli v1.5.7 on meshanchor-server
+- Daemon stability under restart cycles (no watchdog churn, NRestarts=0 over the
+  most recent 24h window)
 - Chat HTTP API + TUI Chat menu (since-id polling, channel + DM send paths)
 - TUI daemon control (status / start / stop / restart / journal / live tail)
 - RNS announce reception (gateway sees external `MeshForge Gateway (moc)` etc.)
 
 **What has not yet been tested with real hardware in MeshAnchor:**
-- Gateway bridge end-to-end message delivery (MeshCore → RNS LXMF and back)
 - Coverage maps with real GPS position data
-- Live NOC map with live node data
-- 3-way routing (MeshCore <> Meshtastic <> RNS) with concurrent traffic
+- 3-way routing (MeshCore ↔ Meshtastic ↔ RNS) with concurrent traffic on a single host
+- Independent confirmation on hardware other than `meshanchor-server` (this is the gap
+  external testers can close — see [Contributing](#contributing))
 
 **What was field-tested in MeshForge** (inherited, likely works): TUI, meshtasticd config,
 RF tools, RNS/rnsd integration, NomadNet, service management, standalone tools.
@@ -429,7 +466,7 @@ sequenceDiagram
 | meshtasticd required? | No (optional gateway) | Yes (primary) |
 | meshcore package | Primary dependency | Optional |
 | Python version | 3.10+ | 3.9+ |
-| Field-tested | First field deployment 2026-05-02 (MeshCore-only path) | Yes (beta) |
+| Field-tested | Continuous deployment on `meshanchor-server` since 2026-05-02; 24h clean fleet soak 2026-05-11; LXMF bridge cross-federation 2026-05-09 | Yes (beta) |
 
 ### Design Principles
 
@@ -606,7 +643,7 @@ src/
 │   ├── backend.py           # whiptail/dialog abstraction
 │   ├── startup_checks.py   # Environment checks + conflict resolution
 │   ├── status_bar.py       # Service status bar
-│   └── handlers/            # 60 registered command handlers
+│   └── handlers/            # 85 registered command handlers
 ├── gateway/               # Multi-protocol bridge engine
 │   ├── meshcore_handler.py   # MeshCore companion radio (meshcore_py) — PRIMARY
 │   ├── rns_bridge.py        # RNS/LXMF gateway (optional)
@@ -652,7 +689,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # 95 test files, 3,226 tests
+tests/                     # 145 test files, 4,335 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
@@ -706,7 +743,7 @@ Gateway-specific templates in `config_templates/`:
 
 ### Test Coverage
 
-**3,226 tests** across 95 test files. Top suites by depth:
+**4,335 tests** across 145 test files. Top suites by depth:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
