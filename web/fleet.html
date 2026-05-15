@@ -350,6 +350,31 @@
         .sched-empty { padding: 4px 0; color: #6a7a8a; font-size: 11px; font-style: italic; }
         .card.card-bad { border-color: #ef5350; box-shadow: 0 0 12px rgba(239,83,80,0.18); }
 
+        /* ── Subsystem Health panel (T1.5) ────────────────────
+           Surfaces "daemon green, sub-component dead" — radio
+           errors, required-service down, explicit errors[].
+           When everything is healthy this panel goes quiet
+           ("all systems nominal"). When anything is wrong it
+           goes loud with red chips per peer.
+        */
+        .subsys-row {
+            display: grid; grid-template-columns: 100px 1fr;
+            gap: 10px; align-items: start;
+            padding: 6px 14px; border-bottom: 1px solid #1a2638;
+        }
+        .subsys-row:last-child { border-bottom: none; }
+        .subsys-host { color: #b0c0d0; font-size: 12px; font-weight: 600; padding-top: 2px; }
+        .subsys-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .subsys-chip {
+            font-size: 10px; padding: 2px 8px; border-radius: 8px;
+            font-weight: 600; letter-spacing: 0.3px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        .subsys-chip.ok   { background: #1b3a25; color: #66bb6a; }
+        .subsys-chip.warn { background: #3d2c10; color: #ffa726; }
+        .subsys-chip.err  { background: #3a1a1a; color: #ef5350; font-weight: 700; }
+        .subsys-empty { padding: 12px 14px; color: #66bb6a; font-size: 11px; text-align: center; font-style: italic; }
+
         /* ── Run Tests panel (T1.5) ───────────────────────────
            Operator-triggered lab fires. Buttons map to allowlisted
            units server-side; the panel just renders the list returned
@@ -516,6 +541,15 @@
             <div class="card">
                 <h2>Fleet Rollup</h2>
                 <div class="peer-grid" id="peer-grid"></div>
+            </div>
+
+            <!-- Subsystem Health — silent failure surface (T1.5).
+                 Catches "daemon green but sub-component dead" — the
+                 class that hid the meshcore-handler death for 24h
+                 and moc1's tracer freeze for 18h. -->
+            <div class="card" id="subsystem-card">
+                <h2>Subsystem Health <span id="subsystem-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
+                <div id="subsystem-content"></div>
             </div>
 
             <!-- Schedules / Timer health (T0 of fleet dashboard roadmap) -->
@@ -979,6 +1013,119 @@
                 }
                 grid.appendChild(div);
             }
+        }
+
+        // ── Subsystem Health panel (T1.5) ───────────────────────
+        //
+        // Surfaces silent sub-component failures from each peer's
+        // SLO snapshot. The data is already in /fleet/rollup but
+        // gets buried under the "overall_status: ready" rollup
+        // signal — this panel raises it. Anything that should be
+        // ticking but isn't gets a red chip.
+        //
+        // Anomaly heuristics (in order of severity):
+        //   ERR:  required service running=false
+        //   ERR:  errors[] entry matching radio/chat/meshcore
+        //   WARN: radio.connected=false
+        //   WARN: schedules.stale_count > 0 (already in Schedules panel
+        //         but mirrored here for at-a-glance scan)
+        //   WARN: network.nodes_visible == 0 (where signal exists)
+        function renderSubsystem(rollup) {
+            const container = $('subsystem-content');
+            const meta = $('subsystem-meta');
+            container.innerHTML = '';
+
+            const rows = [
+                { name: rollup.self_host || 'self',
+                  snapshot: rollup.self_snapshot, error: null, is_self: true },
+                ...((rollup.peers || []).map(p => ({ ...p, is_self: false }))),
+            ];
+
+            let totalAnomalies = 0;
+            let totalPeers = 0;
+            const anomalyRows = [];
+
+            for (const row of rows) {
+                const snap = row.snapshot || {};
+                const chips = [];
+
+                if (row.error && !row.is_self) {
+                    // Peer fetch failed outright — that itself is an
+                    // anomaly. We render it but it's likely transient.
+                    chips.push({ cls: 'err', label: `peer fetch: ${row.error.slice(0, 30)}` });
+                }
+
+                // Required services that aren't running.
+                const services = snap.services || {};
+                const requiredDetail = (services.required && services.required.by_state) || {};
+                for (const [state, n] of Object.entries(requiredDetail)) {
+                    if (state !== 'available' && n > 0) {
+                        chips.push({ cls: 'err', label: `${n} req svc ${state}` });
+                    }
+                }
+
+                // Explicit errors from the snapshot — this is where
+                // MA's daemon reports "radio: url error: Service Unavailable"
+                // (the meshcore-handler-dead fingerprint).
+                const errors = snap.errors || [];
+                for (const e of errors) {
+                    const src = e.source || 'unknown';
+                    const txt = (e.error || e.message || '').slice(0, 50);
+                    chips.push({ cls: 'err', label: `${src}: ${txt}` });
+                }
+
+                // Radio disconnected — bad on radio hosts, ignorable on
+                // pure NOC hosts. We show as warn (yellow) by default; if
+                // the snapshot has an explicit radio error in errors[]
+                // that already promoted to ERR above.
+                const radio = snap.radio || {};
+                if (!radio.connected && errors.length === 0 && !row.error) {
+                    chips.push({ cls: 'warn', label: 'radio offline' });
+                }
+
+                // Stale timers — mirror from Schedules panel so the
+                // "is anything wrong on this host" answer lives here too.
+                const sched = snap.schedules || {};
+                if ((sched.stale_count || 0) > 0) {
+                    chips.push({
+                        cls: 'err',
+                        label: `${sched.stale_count} timer stale`,
+                    });
+                }
+
+                totalPeers += 1;
+                if (chips.length > 0) {
+                    totalAnomalies += chips.length;
+                    anomalyRows.push({ name: row.name, chips });
+                }
+            }
+
+            if (anomalyRows.length === 0) {
+                container.appendChild(el('div', {
+                    class: 'subsys-empty',
+                    text: '✓ all subsystems nominal across the fleet',
+                }));
+                meta.textContent = `${totalPeers} hosts checked`;
+                $('subsystem-card').classList.remove('card-bad');
+                return;
+            }
+
+            for (const row of anomalyRows) {
+                const tr = el('div', { class: 'subsys-row' });
+                tr.appendChild(el('div', { class: 'subsys-host', text: row.name }));
+                const chips = el('div', { class: 'subsys-chips' });
+                for (const c of row.chips) {
+                    chips.appendChild(el('span', {
+                        class: `subsys-chip ${c.cls}`,
+                        text: c.label,
+                    }));
+                }
+                tr.appendChild(chips);
+                container.appendChild(tr);
+            }
+            meta.textContent =
+                `⚠ ${anomalyRows.length}/${totalPeers} hosts have anomalies`;
+            $('subsystem-card').classList.add('card-bad');
         }
 
         // ── Schedules panel (T0: per-host systemd timer health) ──
@@ -1543,6 +1690,7 @@
             // and avoids the overlap-with-itself thrash on rollup.
             pollEndpoint('rollup', '/fleet/rollup', (data) => {
                 renderRollup(data);
+                renderSubsystem(data);
                 renderSchedules(data);
                 populateLogsHosts(data);
                 populateRunTestsHosts(data);
