@@ -350,6 +350,41 @@
         .sched-empty { padding: 4px 0; color: #6a7a8a; font-size: 11px; font-style: italic; }
         .card.card-bad { border-color: #ef5350; box-shadow: 0 0 12px rgba(239,83,80,0.18); }
 
+        /* ── Run Tests panel (T1.5) ───────────────────────────
+           Operator-triggered lab fires. Buttons map to allowlisted
+           units server-side; the panel just renders the list returned
+           by /fleet/tests and POSTs to /fleet/run-test on click.
+        */
+        #run-tests-card h2 select {
+            margin-left: 4px;
+            background: #0f1622; color: #b0c0d0;
+            border: 1px solid #2a3a4a; border-radius: 4px;
+            font-size: 10px; padding: 2px 6px; font-family: inherit;
+        }
+        #run-tests-content { padding: 8px 14px; }
+        .rt-row {
+            display: grid; grid-template-columns: 1fr auto auto;
+            gap: 10px; align-items: center;
+            padding: 6px 0; border-bottom: 1px solid #1a2638;
+        }
+        .rt-row:last-child { border-bottom: none; }
+        .rt-label { color: #d0d8e0; font-size: 12px; font-weight: 600; }
+        .rt-desc  { color: #6a7a8a; font-size: 10px; margin-top: 2px; }
+        .rt-meta  { color: #6a7a8a; font-size: 10px; font-variant-numeric: tabular-nums; }
+        .rt-btn {
+            background: #1b3a25; color: #66bb6a;
+            border: 1px solid #2c5a3a; border-radius: 4px;
+            font-size: 10px; padding: 4px 10px; cursor: pointer;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+            font-family: inherit;
+        }
+        .rt-btn:hover  { background: #245a30; }
+        .rt-btn:active { background: #1b3a25; }
+        .rt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .rt-result { padding: 6px 0; font-size: 10px; }
+        .rt-result.ok { color: #66bb6a; }
+        .rt-result.err { color: #ef5350; }
+
         /* ── Logs panel (T1) ──────────────────────────────────
            Tail recent journalctl from a chosen unit on a chosen
            host. Host dropdown sources from the rollup payload;
@@ -487,6 +522,16 @@
             <div class="card" id="schedules-card">
                 <h2>Schedules <span id="schedules-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
                 <div id="schedules-content"></div>
+            </div>
+
+            <!-- Run Tests (T1.5 — operator-triggered lab fires) -->
+            <div class="card" id="run-tests-card">
+                <h2>Run Tests
+                    <span style="font-size:11px; color:#6a7886; font-weight:normal;">
+                        on <select id="runtests-host"></select>
+                    </span>
+                </h2>
+                <div id="run-tests-content"></div>
             </div>
 
             <!-- Logs tail (T1 of fleet dashboard roadmap) -->
@@ -1034,6 +1079,124 @@
             $('schedules-card').classList.toggle('card-bad', totalStale > 0);
         }
 
+        // ── Run Tests panel (T1.5) ──────────────────────────────
+        //
+        // Fetches the allowlist from `<peer>/fleet/tests` on host
+        // change, renders one button per test, POSTs `/fleet/run-test`
+        // when clicked. No polling — the operator drives.
+        async function refreshRunTests() {
+            const content = $('run-tests-content');
+            const hostName = $('runtests-host').value;
+            const host = LOGS_HOSTS[hostName];  // reuses the same host map
+            content.innerHTML = '';
+
+            if (!host) {
+                content.appendChild(el('div', { class: 'rt-result err',
+                                                text: 'no host selected' }));
+                return;
+            }
+
+            const base = host.host === 'localhost'
+                ? '' : `http://${host.host}:${host.port}`;
+            try {
+                const resp = await fetch(`${base}/fleet/tests`,
+                    { headers: { 'Accept': 'application/json' } });
+                if (!resp.ok) {
+                    content.appendChild(el('div', { class: 'rt-result err',
+                                                    text: `HTTP ${resp.status}` }));
+                    return;
+                }
+                const body = await resp.json();
+                for (const t of (body.tests || [])) {
+                    const row = el('div', { class: 'rt-row' });
+                    const left = el('div');
+                    left.appendChild(el('div', { class: 'rt-label', text: t.label }));
+                    left.appendChild(el('div', { class: 'rt-desc',  text: t.description }));
+                    row.appendChild(left);
+
+                    row.appendChild(el('div', {
+                        class: 'rt-meta',
+                        text: t.last_fire_unix
+                            ? `last ${fmtAge((Date.now()/1000) - t.last_fire_unix)} ago`
+                            : 'never fired',
+                    }));
+
+                    const btn = el('button', { class: 'rt-btn', text: 'Run' });
+                    btn.addEventListener('click', () => fireTest(host, base, t, row, btn));
+                    row.appendChild(btn);
+                    content.appendChild(row);
+                }
+            } catch (e) {
+                content.appendChild(el('div', { class: 'rt-result err',
+                                                text: `fetch failed: ${e}` }));
+            }
+        }
+
+        async function fireTest(host, base, test, row, btn) {
+            btn.disabled = true;
+            btn.textContent = 'firing…';
+            let result;
+            try {
+                const resp = await fetch(`${base}/fleet/run-test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json',
+                               'Accept': 'application/json' },
+                    body: JSON.stringify({ test: test.id }),
+                });
+                result = await resp.json();
+            } catch (e) {
+                result = { ok: false, error: String(e) };
+            }
+            const r = el('div', {
+                class: 'rt-result ' + (result.ok ? 'ok' : 'err'),
+                text: result.ok
+                    ? `✓ fired ${result.unit} at ${fmtClock(result.started_at_unix)}`
+                    : `✗ ${result.error || 'failed'}`,
+            });
+            // Place the result chip on a fresh row below the button so
+            // the buttons themselves don't reflow.
+            const cell = el('div', {});
+            cell.style.gridColumn = '1 / -1';
+            cell.appendChild(r);
+            row.parentNode.insertBefore(cell, row.nextSibling);
+
+            btn.disabled = false;
+            btn.textContent = 'Run';
+
+            // After a moment, refresh the tests list so the "last fire"
+            // chip updates.
+            setTimeout(() => {
+                if (cell.parentNode) cell.parentNode.removeChild(cell);
+                refreshRunTests();
+            }, 8000);
+        }
+
+        function populateRunTestsHosts(rollup) {
+            // Mirror populateLogsHosts but for the run-tests host picker.
+            const select = $('runtests-host');
+            const prev = select.value;
+            select.innerHTML = '';
+            const opts = [
+                { name: rollup.self_host || 'self', host: 'localhost', port: 5000 },
+                ...((rollup.peers || []).filter(p => p.snapshot).map(p => ({
+                    name: p.name, host: p.host || '', port: p.port || 5000,
+                }))),
+            ];
+            for (const o of opts) {
+                LOGS_HOSTS[o.name] = o;  // share the index
+                const opt = document.createElement('option');
+                opt.value = o.name;
+                opt.textContent = o.name;
+                select.appendChild(opt);
+            }
+            if (prev && LOGS_HOSTS[prev]) select.value = prev;
+            // Auto-refresh on initial population only (not every rollup).
+            if (!select.dataset.initialized) {
+                select.dataset.initialized = '1';
+                refreshRunTests();
+            }
+        }
+
         // ── Logs panel (T1) ─────────────────────────────────────
         //
         // On-demand refresh — operator clicks refresh OR changes a
@@ -1148,6 +1311,7 @@
             $('logs-host').addEventListener('change', renderLogs);
             $('logs-unit').addEventListener('change', renderLogs);
             $('logs-priority').addEventListener('change', renderLogs);
+            $('runtests-host').addEventListener('change', refreshRunTests);
         });
 
         // Active = re-announced inside this window. moc/moc3 typically
@@ -1381,6 +1545,7 @@
                 renderRollup(data);
                 renderSchedules(data);
                 populateLogsHosts(data);
+                populateRunTestsHosts(data);
             });
             pollEndpoint('federation', '/fleet/federation', renderFederation);
             // Lab rollup updates every 10min on the tester box, so 15s
