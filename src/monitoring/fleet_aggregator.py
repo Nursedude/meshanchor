@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -494,6 +496,85 @@ def _derive_overall_status(snapshot: FleetSnapshot) -> str:
     return "degraded" if available > 0 else "error"
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Schedules block — mirrors meshforge/src/utils/fleet_snapshot.py
+# (commits a44d2ef + 2dfca78). Surfaces fleet timer health so the
+# dashboard's "self" row shows MA's own timer state alongside MF peers.
+# ──────────────────────────────────────────────────────────────────────
+
+SCHEDULE_UNIT_PREFIXES = ("meshforge", "meshanchor", "moc-")
+SCHEDULE_STALE_MULTIPLIER = 2.0
+
+
+def _list_timers_scope(scope: str) -> List[Dict[str, Any]]:
+    """Return systemctl timers in the given scope. Same env-injection
+    fix as MF's fleet_snapshot for daemon-context `--user` calls."""
+    cmd = ["systemctl"]
+    env = None
+    if scope == "user":
+        cmd.append("--user")
+        if "XDG_RUNTIME_DIR" not in os.environ:
+            env = os.environ.copy()
+            env["XDG_RUNTIME_DIR"] = f"/run/user/{os.geteuid()}"
+    cmd.extend(["list-timers", "--all", "--output=json"])
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, env=env)
+        if r.returncode != 0 or not r.stdout.strip():
+            return []
+        return json.loads(r.stdout)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, json.JSONDecodeError):
+        return []
+
+
+def _normalize_timer(raw: Dict[str, Any], scope: str,
+                     now_unix: float) -> Optional[Dict[str, Any]]:
+    name = raw.get("unit")
+    if not name:
+        return None
+
+    def _us_to_unix(us: Any) -> Optional[float]:
+        try:
+            us = int(us)
+        except (TypeError, ValueError):
+            return None
+        return (us / 1_000_000.0) if us > 0 else None
+
+    next_unix = _us_to_unix(raw.get("next"))
+    last_unix = _us_to_unix(raw.get("last"))
+    age_s = (now_unix - last_unix) if last_unix is not None else None
+    stale = next_unix is None
+    if not stale and last_unix is not None and next_unix is not None:
+        interval = next_unix - last_unix
+        if interval > 0 and age_s is not None:
+            stale = age_s > SCHEDULE_STALE_MULTIPLIER * interval
+    return {
+        "name": name, "scope": scope,
+        "next_fire_unix": next_unix, "last_fire_unix": last_unix,
+        "age_s": round(age_s, 1) if age_s is not None else None,
+        "stale": stale,
+    }
+
+
+def _schedules_block() -> Dict[str, Any]:
+    now = time.time()
+    units: List[Dict[str, Any]] = []
+    for scope in ("system", "user"):
+        for raw in _list_timers_scope(scope):
+            entry = _normalize_timer(raw, scope, now)
+            if entry is None:
+                continue
+            if not any(entry["name"].startswith(p) for p in SCHEDULE_UNIT_PREFIXES):
+                continue
+            units.append(entry)
+    units.sort(key=lambda u: (not u["stale"], u["name"]))
+    stale_count = sum(1 for u in units if u["stale"])
+    return {
+        "healthy": stale_count == 0,
+        "stale_count": stale_count,
+        "units": units,
+    }
+
+
 def slo_view(snapshot: FleetSnapshot) -> Dict[str, Any]:
     """Top-line health rollup. The web dashboard renders this above the
     fold; the TUI panel uses identical fields."""
@@ -516,6 +597,7 @@ def slo_view(snapshot: FleetSnapshot) -> Dict[str, Any]:
             "battery_pct": radio.get("battery_pct") if radio else None,
         },
         "errors": snapshot.errors,
+        "schedules": _schedules_block(),
     }
 
 

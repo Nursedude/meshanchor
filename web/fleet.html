@@ -350,6 +350,37 @@
         .sched-empty { padding: 4px 0; color: #6a7a8a; font-size: 11px; font-style: italic; }
         .card.card-bad { border-color: #ef5350; box-shadow: 0 0 12px rgba(239,83,80,0.18); }
 
+        /* ── Logs panel (T1) ──────────────────────────────────
+           Tail recent journalctl from a chosen unit on a chosen
+           host. Host dropdown sources from the rollup payload;
+           unit dropdown is fixed (matches MF allowlist). Refresh
+           is on-demand to avoid spamming the daemon — operator
+           expectation is "I'm reading", not "watch a feed".
+        */
+        #logs-card h2 select, #logs-card h2 button {
+            margin-left: 4px;
+            background: #0f1622; color: #b0c0d0;
+            border: 1px solid #2a3a4a; border-radius: 4px;
+            font-size: 10px; padding: 2px 6px; font-family: inherit;
+        }
+        #logs-content { max-height: 320px; overflow-y: auto; padding: 8px 14px; font-size: 11px; }
+        .log-line { display: grid; grid-template-columns: 70px 50px 1fr;
+                    gap: 8px; padding: 2px 0;
+                    border-bottom: 1px solid #1a2638;
+                    font-family: 'SF Mono', Monaco, monospace; }
+        .log-line:last-child { border-bottom: none; }
+        .log-line .log-ts   { color: #6a7a8a; font-variant-numeric: tabular-nums; }
+        .log-line .log-lvl  { font-weight: 600; text-transform: uppercase; font-size: 10px; }
+        .log-line.lvl-error .log-lvl, .log-line.lvl-err .log-lvl { color: #ef5350; }
+        .log-line.lvl-warn .log-lvl, .log-line.lvl-warning .log-lvl { color: #ffa726; }
+        .log-line.lvl-info .log-lvl   { color: #66bb6a; }
+        .log-line.lvl-debug .log-lvl  { color: #4fc3f7; }
+        .log-line.lvl-raw .log-lvl    { color: #6a7a8a; }
+        .log-line .log-msg  { color: #d0d8e0; word-break: break-word; }
+        .log-meta { padding: 4px 14px; color: #6a7a8a; font-size: 10px; }
+        .log-meta.log-err { color: #ef5350; }
+        .log-meta.log-stale { color: #ffa726; }
+
         /* ── BLACKOUT banner ──────────────────────────────────
            Red strip across the top when the watchdog has open
            blackout rows. The banner is the operator's "things have
@@ -456,6 +487,33 @@
             <div class="card" id="schedules-card">
                 <h2>Schedules <span id="schedules-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
                 <div id="schedules-content"></div>
+            </div>
+
+            <!-- Logs tail (T1 of fleet dashboard roadmap) -->
+            <div class="card" id="logs-card">
+                <h2>Logs
+                    <span style="font-size:11px; color:#6a7886; font-weight:normal;">
+                        <select id="logs-host"></select>
+                        <select id="logs-unit">
+                            <option value="meshforge-tracer">meshforge-tracer</option>
+                            <option value="meshforge-echo">meshforge-echo</option>
+                            <option value="meshforge-synth-soak">meshforge-synth-soak</option>
+                            <option value="meshforge-map">meshforge-map</option>
+                            <option value="meshforge">meshforge</option>
+                            <option value="rnsd">rnsd</option>
+                            <option value="meshtasticd">meshtasticd</option>
+                            <option value="nomadnet">nomadnet</option>
+                        </select>
+                        <select id="logs-priority">
+                            <option value="warning">warn+</option>
+                            <option value="err">err+</option>
+                            <option value="info" selected>info+</option>
+                            <option value="debug">debug+</option>
+                        </select>
+                        <button id="logs-refresh" style="background:#2a3a4a;border:1px solid #3a4a5a;color:#b0c0d0;font-size:11px;padding:2px 8px;border-radius:4px;cursor:pointer;">refresh</button>
+                    </span>
+                </h2>
+                <div id="logs-content"></div>
             </div>
 
             <!-- Federation Round-Trip leaderboard (lab traffic) -->
@@ -976,6 +1034,122 @@
             $('schedules-card').classList.toggle('card-bad', totalStale > 0);
         }
 
+        // ── Logs panel (T1) ─────────────────────────────────────
+        //
+        // On-demand refresh — operator clicks refresh OR changes a
+        // dropdown. No polling: journalctl is the heaviest call in
+        // the dashboard and the operator's normal cadence is "I'm
+        // reading right now," not "stream forever."
+        //
+        // Per-peer base URL derives from the rollup payload's
+        // `peers[].host`/`port` fields (already used by /fleet/rollup
+        // to fetch each peer's /fleet/slo). MF and MA both serve
+        // /fleet/logs once their respective backends ship; failing
+        // peers render an error chip in the panel header.
+
+        // Host map populated from each rollup poll: name → {host, port, kind}.
+        const LOGS_HOSTS = {};
+
+        function populateLogsHosts(rollup) {
+            const select = $('logs-host');
+            const prev = select.value;
+            select.innerHTML = '';
+            const opts = [
+                { name: rollup.self_host || 'self', host: 'localhost', port: 5000 },
+                ...((rollup.peers || []).filter(p => p.snapshot).map(p => ({
+                    name: p.name, host: p.host || '', port: p.port || 5000,
+                }))),
+            ];
+            for (const o of opts) {
+                LOGS_HOSTS[o.name] = o;
+                const opt = document.createElement('option');
+                opt.value = o.name;
+                opt.textContent = o.name;
+                select.appendChild(opt);
+            }
+            if (prev && LOGS_HOSTS[prev]) select.value = prev;
+        }
+
+        async function renderLogs() {
+            const content = $('logs-content');
+            const hostName = $('logs-host').value;
+            const unit     = $('logs-unit').value;
+            const priority = $('logs-priority').value;
+            const host = LOGS_HOSTS[hostName];
+
+            content.innerHTML = '';
+            const placeholder = el('div', { class: 'log-meta',
+                                            text: `fetching ${unit} on ${hostName}…` });
+            content.appendChild(placeholder);
+
+            if (!host) {
+                placeholder.textContent = 'no host selected';
+                placeholder.classList.add('log-err');
+                return;
+            }
+
+            const base = host.host === 'localhost'
+                ? '' : `http://${host.host}:${host.port}`;
+            const url = `${base}/fleet/logs?unit=${encodeURIComponent(unit)}&n=50&priority=${priority}`;
+
+            try {
+                const resp = await fetch(url, {
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (!resp.ok) {
+                    placeholder.textContent =
+                        `HTTP ${resp.status} (peer doesn't serve /fleet/logs yet?)`;
+                    placeholder.classList.add('log-err');
+                    return;
+                }
+                const body = await resp.json();
+                content.innerHTML = '';
+                const meta = el('div', { class: 'log-meta' });
+                meta.textContent =
+                    `${body.unit} (${body.scope}) on ${body.host} — `
+                    + `${body.lines.length} lines, priority=${body.priority}`
+                    + (body.from_cache ? ' [cached]' : '')
+                    + (body.error ? ` — ERROR: ${body.error}` : '');
+                if (body.error) meta.classList.add('log-err');
+                content.appendChild(meta);
+
+                if (!body.lines.length) {
+                    content.appendChild(el('div', {
+                        class: 'log-meta log-stale',
+                        text: '(no lines — unit may not have logged at this level recently)',
+                    }));
+                    return;
+                }
+
+                for (const ln of body.lines) {
+                    const tr = el('div', { class: `log-line lvl-${(ln.level||'').toLowerCase()}` });
+                    tr.appendChild(el('div', {
+                        class: 'log-ts',
+                        text: ln.ts ? fmtClock(ln.ts) : '—',
+                    }));
+                    tr.appendChild(el('div', {
+                        class: 'log-lvl',
+                        text: ln.level || '?',
+                    }));
+                    tr.appendChild(el('div', {
+                        class: 'log-msg',
+                        text: ln.msg || '',
+                    }));
+                    content.appendChild(tr);
+                }
+            } catch (e) {
+                placeholder.textContent = `fetch failed: ${e}`;
+                placeholder.classList.add('log-err');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            $('logs-refresh').addEventListener('click', renderLogs);
+            $('logs-host').addEventListener('change', renderLogs);
+            $('logs-unit').addEventListener('change', renderLogs);
+            $('logs-priority').addEventListener('change', renderLogs);
+        });
+
         // Active = re-announced inside this window. moc/moc3 typically
         // announce every 5-15 min; the threshold is generous (20 min)
         // so transient gaps don't flap a peer to "stale".
@@ -1206,6 +1380,7 @@
             pollEndpoint('rollup', '/fleet/rollup', (data) => {
                 renderRollup(data);
                 renderSchedules(data);
+                populateLogsHosts(data);
             });
             pollEndpoint('federation', '/fleet/federation', renderFederation);
             // Lab rollup updates every 10min on the tester box, so 15s
