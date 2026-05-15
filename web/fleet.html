@@ -1102,8 +1102,18 @@
                 // pure NOC hosts. We show as warn (yellow) by default; if
                 // the snapshot has an explicit radio error in errors[]
                 // that already promoted to ERR above.
+                //
+                // Suppression: pure-NOC daemons (e.g. MA on VolcanoAI
+                // with no MeshCore radio attached) never populate name
+                // or preset, while a radio host that disconnects keeps
+                // the daemon's cached config (see _radio_slo_shape in
+                // MA's fleet_aggregator). MF radio hosts that lose
+                // meshtasticd still chip via "1 req svc not_running"
+                // (meshtasticd is required there).
                 const radio = snap.radio || {};
-                if (!radio.connected && errors.length === 0 && !row.error) {
+                const radioConfigured = !!(radio.name || radio.preset);
+                if (!radio.connected && radioConfigured
+                        && errors.length === 0 && !row.error) {
                     chips.push({ cls: 'warn', label: 'radio offline' });
                 }
 
