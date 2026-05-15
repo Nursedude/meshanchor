@@ -319,6 +319,37 @@
         .err-list { padding: 8px 16px; font-size: 11px; color: #ffa726; }
         .err-list .err { padding: 2px 0; }
 
+        /* ── Schedules panel (T0) ─────────────────────────────
+           Per-host timer health. Red stripe + STALE badge on
+           any unit whose systemd next-fire went `-` or whose
+           age > 2× interval. The dashboard signal that would
+           have caught moc1's 18h tracer freeze instantly.
+        */
+        .sched-host-block { padding: 8px 16px; border-bottom: 1px solid #1a2638; }
+        .sched-host-block:last-child { border-bottom: none; }
+        .sched-host {
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 12px; font-weight: 600; color: #b0c0d0;
+            padding: 4px 0 6px;
+        }
+        .sched-host-ok  { font-size: 10px; padding: 2px 8px; border-radius: 8px;
+                          background: #1b3a25; color: #66bb6a; text-transform: uppercase; }
+        .sched-host-bad { font-size: 10px; padding: 2px 8px; border-radius: 8px;
+                          background: #3a1a1a; color: #ef5350; text-transform: uppercase;
+                          font-weight: 700; letter-spacing: 0.5px; }
+        .sched-host-noinfo { font-size: 10px; padding: 2px 8px; border-radius: 8px;
+                             background: #1a2030; color: #6a7a8a; text-transform: uppercase; }
+        .sched-table { font-size: 11px; }
+        .sched-table td { padding: 3px 8px; border-bottom: none; }
+        .sched-table .sched-name { color: #a0b0c0; font-family: monospace; }
+        .sched-table .sched-age, .sched-table .sched-next {
+            color: #6a7a8a; font-variant-numeric: tabular-nums; text-align: right;
+        }
+        .sched-row.sched-stale .sched-name { color: #ef5350; font-weight: 600; }
+        .sched-row.sched-stale .sched-next { color: #ef5350; }
+        .sched-empty { padding: 4px 0; color: #6a7a8a; font-size: 11px; font-style: italic; }
+        .card.card-bad { border-color: #ef5350; box-shadow: 0 0 12px rgba(239,83,80,0.18); }
+
         /* ── BLACKOUT banner ──────────────────────────────────
            Red strip across the top when the watchdog has open
            blackout rows. The banner is the operator's "things have
@@ -419,6 +450,12 @@
             <div class="card">
                 <h2>Fleet Rollup</h2>
                 <div class="peer-grid" id="peer-grid"></div>
+            </div>
+
+            <!-- Schedules / Timer health (T0 of fleet dashboard roadmap) -->
+            <div class="card" id="schedules-card">
+                <h2>Schedules <span id="schedules-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
+                <div id="schedules-content"></div>
             </div>
 
             <!-- Federation Round-Trip leaderboard (lab traffic) -->
@@ -841,6 +878,104 @@
             }
         }
 
+        // ── Schedules panel (T0: per-host systemd timer health) ──
+        //
+        // Consumes `peer.snapshot.schedules` from the same /fleet/rollup
+        // payload that drives the peer-status grid — no extra HTTP call.
+        // The data shape is defined by MeshForge's fleet_snapshot.py
+        // (see docs/fleet_dashboard_architecture.md). Hosts whose feed
+        // doesn't include schedules yet render as "no timer feed" rather
+        // than vanishing — MA's own self_snapshot lands here today;
+        // adding it on the MA side is a follow-up.
+        function renderSchedules(rollup) {
+            const container = $('schedules-content');
+            const meta = $('schedules-meta');
+            container.innerHTML = '';
+
+            const rows = [
+                { name: rollup.self_host || 'self',
+                  snapshot: rollup.self_snapshot, is_self: true },
+                ...((rollup.peers || []).map(p => ({ ...p, is_self: false }))),
+            ];
+
+            let totalStale = 0;
+            let totalUnits = 0;
+
+            for (const row of rows) {
+                const snap = row.snapshot || {};
+                const sched = snap.schedules;
+                const hostDiv = el('div', { class: 'sched-host-block' });
+                const header = el('div', { class: 'sched-host' });
+                const left = el('span', { text: row.name });
+                header.appendChild(left);
+
+                if (!sched) {
+                    header.appendChild(el('span', {
+                        class: 'sched-host-noinfo',
+                        text: 'no feed',
+                    }));
+                    hostDiv.appendChild(header);
+                    container.appendChild(hostDiv);
+                    continue;
+                }
+
+                const staleCount = sched.stale_count || 0;
+                const units = sched.units || [];
+                totalStale += staleCount;
+                totalUnits += units.length;
+
+                header.appendChild(el('span', {
+                    class: staleCount > 0 ? 'sched-host-bad' : 'sched-host-ok',
+                    text: staleCount > 0 ? `${staleCount} stale` : 'ok',
+                }));
+                hostDiv.appendChild(header);
+
+                if (units.length === 0) {
+                    hostDiv.appendChild(el('div', {
+                        class: 'sched-empty',
+                        text: '(no fleet timers on this host)',
+                    }));
+                    container.appendChild(hostDiv);
+                    continue;
+                }
+
+                const tbl = el('table', { class: 'sched-table' });
+                const tbody = el('tbody');
+                for (const u of units) {
+                    const tr = el('tr', {
+                        class: u.stale ? 'sched-row sched-stale' : 'sched-row',
+                    });
+                    // Strip ".timer" suffix for readability; full name is
+                    // still in the data attribute for operator copy-paste.
+                    const displayName = (u.name || '').replace(/\.timer$/, '');
+                    tr.appendChild(el('td', {
+                        class: 'sched-name',
+                        text: displayName,
+                        title: u.name,
+                    }));
+                    tr.appendChild(el('td', {
+                        class: 'sched-age',
+                        text: u.age_s != null ? `${fmtAge(u.age_s)} ago` : '—',
+                    }));
+                    tr.appendChild(el('td', {
+                        class: 'sched-next',
+                        text: u.next_fire_unix
+                            ? `→ ${fmtClock(u.next_fire_unix)}`
+                            : 'NEXT —',
+                    }));
+                    tbody.appendChild(tr);
+                }
+                tbl.appendChild(tbody);
+                hostDiv.appendChild(tbl);
+                container.appendChild(hostDiv);
+            }
+
+            meta.textContent = totalStale > 0
+                ? `⚠ ${totalStale}/${totalUnits} stale`
+                : `${totalUnits} timers · all healthy`;
+            $('schedules-card').classList.toggle('card-bad', totalStale > 0);
+        }
+
         // Active = re-announced inside this window. moc/moc3 typically
         // announce every 5-15 min; the threshold is generous (20 min)
         // so transient gaps don't flap a peer to "stale".
@@ -1068,7 +1203,10 @@
             // Rollup is ~5s on this host (SSH peer polling); federation
             // is steadier. Both change slowly enough that 15s is plenty
             // and avoids the overlap-with-itself thrash on rollup.
-            pollEndpoint('rollup', '/fleet/rollup', renderRollup);
+            pollEndpoint('rollup', '/fleet/rollup', (data) => {
+                renderRollup(data);
+                renderSchedules(data);
+            });
             pollEndpoint('federation', '/fleet/federation', renderFederation);
             // Lab rollup updates every 10min on the tester box, so 15s
             // dashboard polling is generous. It cross-host-HTTPs to the
