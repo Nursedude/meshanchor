@@ -54,12 +54,16 @@
         }
 
         /* ── Layout grid ───────────────────────────────────── */
+        /* 3-column layout at wide widths: self-stats | fleet | tools.
+           The 4th panel (silent failures) lives at the top of the
+           middle column where the operator's eye naturally lands
+           first. */
         .grid {
             display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 16px;
+            grid-template-columns: 1.4fr 1.2fr 1fr;
+            gap: 14px;
         }
-        .col { display: flex; flex-direction: column; gap: 16px; }
+        .col { display: flex; flex-direction: column; gap: 14px; }
 
         /* ── Cards ─────────────────────────────────────────── */
         .card {
@@ -480,8 +484,16 @@
             letter-spacing: 0.5px;
         }
 
+        /* Responsive: 3 cols → 2 cols at tablet → 1 col at phone. */
+        @media (max-width: 1400px) {
+            .grid { grid-template-columns: 1.4fr 1fr; }
+            .col.col-tools { grid-column: 1 / -1; }
+            .col.col-tools { flex-direction: row; flex-wrap: wrap; }
+            .col.col-tools > .card { flex: 1 1 320px; }
+        }
         @media (max-width: 900px) {
             .grid { grid-template-columns: 1fr; }
+            .col.col-tools { flex-direction: column; }
         }
     </style>
 </head>
@@ -536,13 +548,13 @@
             </div>
         </div>
 
-        <div class="col">
-            <!-- Peer rollup -->
-            <div class="card">
-                <h2>Fleet Rollup</h2>
-                <div class="peer-grid" id="peer-grid"></div>
-            </div>
-
+        <!-- Middle column: at-a-glance fleet health. Operator's eye
+             lands here after the left column's self stats. Order is
+             deliberate: Subsystem Health surfaces silent failures
+             FIRST (the meshcore-handler-dead class), then Schedules
+             (timer freezes), then the peer rollup, then soft
+             failures. -->
+        <div class="col col-monitor">
             <!-- Subsystem Health — silent failure surface (T1.5).
                  Catches "daemon green but sub-component dead" — the
                  class that hid the meshcore-handler death for 24h
@@ -558,6 +570,24 @@
                 <div id="schedules-content"></div>
             </div>
 
+            <!-- Peer rollup -->
+            <div class="card">
+                <h2>Fleet Rollup</h2>
+                <div class="peer-grid" id="peer-grid"></div>
+            </div>
+
+            <!-- Errors -->
+            <div class="card" id="error-card" style="display:none;">
+                <h2>Soft Failures</h2>
+                <div class="err-list" id="error-list"></div>
+            </div>
+        </div>
+
+        <!-- Right column: tools + drill-downs. Operator turns to
+             this column WHEN something in the middle column lights
+             up red. Run Tests for re-firing, Logs for investigation,
+             Federation panels for context. -->
+        <div class="col col-tools">
             <!-- Run Tests (T1.5 — operator-triggered lab fires) -->
             <div class="card" id="run-tests-card">
                 <h2>Run Tests
@@ -612,12 +642,6 @@
                     </thead>
                     <tbody id="federation-tbody"></tbody>
                 </table>
-            </div>
-
-            <!-- Errors -->
-            <div class="card" id="error-card" style="display:none;">
-                <h2>Soft Failures</h2>
-                <div class="err-list" id="error-list"></div>
             </div>
         </div>
     </div>
