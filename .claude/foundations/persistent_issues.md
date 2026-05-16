@@ -500,30 +500,23 @@ ssh meshanchor-server 'sudo systemctl restart meshanchor-map.service'
 ```
 Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
 
-**Open follow-ups (separate PRs)**:
-1. **Concurrent peer fetches in `collect_fleet_rollup`** — replace the
-   serial loop at `src/monitoring/fleet_rollup.py:320` with
-   `concurrent.futures.ThreadPoolExecutor(max_workers=len(peers))` +
-   `as_completed`. Worst-case latency goes from `N × timeout` to
-   `timeout`. Bounded by the fleet.json size (typically 5-10 peers), no
-   resource explosion risk.
-2. **Tighter outbound peer urllib timeouts** — current 3 s is fine for
-   a healthy LAN; a wedged peer never recovers within 3 s, so 1.5 s
-   would halve the worst-case handler hold without losing real signals.
-3. **Handler-side bound on concurrent rollup requests** — gate
-   `_serve_fleet_rollup` (and `_serve_fleet_slo` / `_serve_fleet_health`)
-   behind a small semaphore (e.g. 4 in flight max). Excess requests get
-   429 with `Retry-After: 2` — protects the server from dashboard
-   over-polling during a peer outage.
-4. **Cascade detector port** — MeshForge's `cascade_detector` +
-   `tracer_stale_fire` fingerprint (MF commit `368e591`, 2026-05-16)
-   surfaces the pre-failure shape one cadence after the threshold.
-   Porting to MA would let MA-server alarm on a wedged peer *before*
-   its rollup-handler threads start accumulating. The MF design uses
-   in-memory state + 30 s cadence; cheap to adopt. If ported, audit
-   the wiring in BOTH `MapServer.start()` and `start_background()` —
-   MF shipped 79f5d7b with the call only in `start_background()`,
-   leaving the systemd `--daemon` path dead until 368e591 fixed it.
+**Open follow-ups** (tracked as GitHub issues 2026-05-16):
+1. [#126](https://github.com/Nursedude/meshanchor/issues/126) — concurrent
+   peer fetches in `collect_fleet_rollup`. Worst-case latency goes from
+   `N × timeout` to `timeout`.
+2. [#127](https://github.com/Nursedude/meshanchor/issues/127) — tighten
+   `PEER_HTTP_TIMEOUT_S` from 3.0 s to 1.5 s. Healthy peers respond in
+   sub-200 ms; a wedged peer never recovers within the 1.5-3 s window.
+3. [#128](https://github.com/Nursedude/meshanchor/issues/128) — bound
+   concurrent `/fleet/*` handlers behind a small semaphore. Excess
+   requests get 429 + `Retry-After: 2`. Caps handler-thread accumulation
+   under sustained peer outage.
+4. [#129](https://github.com/Nursedude/meshanchor/issues/129) — port
+   MeshForge's `cascade_detector` to MA. Surfaces the pre-failure shape
+   one cadence after the threshold so MA-server alarms *before* its
+   rollup-handler threads start piling up. Audit `MapServer.start()` +
+   `start_background()` BOTH — MF shipped 79f5d7b with the call only
+   in `start_background()` (commit 368e591 caught it).
 
 **Cross-refs**: MF `project_rnsd_rpc_listener_wedge.md` (the upstream
 cause class — recurrent on moc1).
