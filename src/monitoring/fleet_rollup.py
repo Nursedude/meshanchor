@@ -210,6 +210,59 @@ def _collect_federation_peers(collector, fresh_window_s: int) -> List[Federation
 # ──────────────────────────────────────────────────────────────────────
 
 
+MESHFORGE_LOCAL_SLO_URL = "http://localhost:5000/fleet/slo"
+"""When MeshAnchor and MeshForge are co-installed on the same box
+(typical for the operator's primary NOC), MA's dashboard should
+surface MF's observability blocks (`path_table`, `interfaces`,
+`cascade`) so the operator gets a single view across both stacks
+without having to add MF peers to MA's fleet.json. We fetch MF's
+own `/fleet/slo` on a tight timeout — the data is already local;
+this is just a cross-stack pass-through.
+
+Defined here rather than in fleet_aggregator so the merge stays
+co-located with the rollup that consumes it (Track 2.6 of the
+we-have-a-cycle-jolly-wadler stability arc)."""
+
+_MF_PASSTHROUGH_BLOCKS = ("path_table", "interfaces", "cascade")
+"""Blocks MA pulls from a co-installed MF's /fleet/slo and merges
+into MA's self_snapshot. Additive — never overwrites a key MA
+already populated. New blocks land here when shipped by MF."""
+
+
+def _merge_mesh_forge_blocks(
+    self_snapshot: Dict[str, Any],
+    timeout: float = 0.5,
+    fetch: Optional[Any] = None,
+) -> None:
+    """Best-effort merge of MeshForge's /fleet/slo observability blocks
+    into MA's self_snapshot.
+
+    Never raises. Silent miss if MF isn't co-installed or its map service
+    isn't reachable on localhost:5000 — MA's slo just won't carry the
+    blocks for self (peers still do via the normal /fleet/slo poll).
+
+    `fetch` is injectable for tests so we don't have to bind a real port.
+    """
+    if not isinstance(self_snapshot, dict):
+        return
+    try:
+        if fetch is None:
+            from monitoring.fleet_aggregator import _http_get_json
+            fetch = _http_get_json
+        body, _err = fetch(MESHFORGE_LOCAL_SLO_URL, timeout=timeout)
+    except Exception:
+        return
+    if not isinstance(body, dict):
+        return
+    for key in _MF_PASSTHROUGH_BLOCKS:
+        if key in self_snapshot:
+            # MA already populated this key locally — don't clobber.
+            continue
+        val = body.get(key)
+        if val is not None:
+            self_snapshot[key] = val
+
+
 def collect_fleet_rollup(
     config,
     *,
@@ -258,6 +311,11 @@ def collect_fleet_rollup(
             rollup.self_snapshot = slo_view(snap)
         except Exception as e:
             rollup.errors.append({"source": "self", "error": str(e)})
+
+    # Cross-stack merge: if MeshForge is co-installed on this box, pull
+    # its observability blocks into self_snapshot so MA's dashboard shows
+    # them without operators having to add MF peers to fleet.json.
+    _merge_mesh_forge_blocks(rollup.self_snapshot)
 
     for peer in config.non_self_peers(hostname=rollup.self_host):
         body, err, duration = _fetch_peer_snapshot(peer, timeout=timeout)

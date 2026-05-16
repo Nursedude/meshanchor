@@ -368,3 +368,117 @@ def test_to_dict_is_json_safe():
     payload = json.dumps(rollup.to_dict())
     assert "self_host" in payload
     assert "peers" in payload
+
+
+# ──────────────────────────────────────────────────────────────────────
+# MeshForge co-install pass-through (Track 2.6)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestMeshForgeBlockMerge:
+    """When MF is co-installed on the same box, MA's self_snapshot
+    surfaces MF's observability blocks (path_table, interfaces,
+    cascade) — so the operator's existing MA dashboard shows the
+    answer to 'where did this go + why did it fail' for this box
+    without having to add MF peers to MA's fleet.json."""
+
+    def test_merge_populates_missing_keys_from_mf_slo(self):
+        self_snap = {"host": "self", "uptime_s": 100.0}
+        mf_body = {
+            "host": "self",
+            "path_table": {"available": True, "count": 4, "ts": 1.0},
+            "interfaces": {"available": True, "count": 2, "online_count": 2,
+                           "ts": 1.0},
+            "cascade": {"total": 1, "clean": 1, "suspected": 0,
+                        "pre_fail": 0, "wedged": 0, "degraded": 0},
+            "ci_status": {"available": True},  # MA owns this key — must NOT clobber
+        }
+        fr._merge_mesh_forge_blocks(
+            self_snap, fetch=lambda url, timeout: (mf_body, None),
+        )
+        assert self_snap["path_table"] == mf_body["path_table"]
+        assert self_snap["interfaces"] == mf_body["interfaces"]
+        assert self_snap["cascade"] == mf_body["cascade"]
+
+    def test_merge_never_clobbers_existing_keys(self):
+        """MA's slo already populates `host`, `uptime_s`, `ci_status`
+        etc. from MA's own collectors. The merge must NEVER overwrite
+        a key MA already owns — additive only."""
+        ma_ci_status = {"available": True, "source": "ma"}
+        self_snap = {"host": "ma", "ci_status": ma_ci_status,
+                     "path_table": {"sentinel": "ma_existing"}}
+        mf_body = {
+            "ci_status": {"available": True, "source": "mf_should_be_ignored"},
+            "path_table": {"sentinel": "mf_should_be_ignored"},
+            "interfaces": {"available": True, "count": 0, "online_count": 0,
+                           "ts": 1.0},
+        }
+        fr._merge_mesh_forge_blocks(
+            self_snap, fetch=lambda url, timeout: (mf_body, None),
+        )
+        # MA-owned keys unchanged.
+        assert self_snap["ci_status"] == ma_ci_status
+        assert self_snap["path_table"]["sentinel"] == "ma_existing"
+        # New key populated.
+        assert self_snap["interfaces"]["count"] == 0
+
+    def test_merge_silent_on_fetch_error(self):
+        """MF isn't co-installed — fetch returns (None, error_str). Must
+        not raise; self_snapshot stays unmodified."""
+        self_snap = {"host": "self"}
+        fr._merge_mesh_forge_blocks(
+            self_snap, fetch=lambda url, timeout: (None, "connection refused"),
+        )
+        assert self_snap == {"host": "self"}
+
+    def test_merge_silent_on_fetch_exception(self):
+        """Fetch raises (e.g. socket error). Must not propagate."""
+        def boom(url, timeout):
+            raise OSError("network down")
+        self_snap = {"host": "self"}
+        fr._merge_mesh_forge_blocks(self_snap, fetch=boom)
+        assert self_snap == {"host": "self"}
+
+    def test_merge_silent_on_non_dict_body(self):
+        """MF returns something weird (HTML error page parsed as None).
+        Must skip silently."""
+        self_snap = {"host": "self"}
+        fr._merge_mesh_forge_blocks(
+            self_snap, fetch=lambda url, timeout: ("not a dict", None),
+        )
+        assert self_snap == {"host": "self"}
+
+    def test_merge_does_nothing_when_self_snapshot_invalid(self):
+        """Defensive: caller passes None or a non-dict — must not raise."""
+        fr._merge_mesh_forge_blocks(
+            None, fetch=lambda url, timeout: ({}, None),
+        )
+        fr._merge_mesh_forge_blocks(
+            "not a dict", fetch=lambda url, timeout: ({}, None),
+        )
+        # No assertion needed — would have raised on bug.
+
+    def test_passthrough_blocks_lock_in(self):
+        """Lock the set of blocks MA pass-through-merges. Adding a new
+        MF block should be a deliberate co-change, not a silent diff."""
+        assert fr._MF_PASSTHROUGH_BLOCKS == (
+            "path_table", "interfaces", "cascade",
+        )
+
+    def test_collect_fleet_rollup_calls_merge(self):
+        """End-to-end: collect_fleet_rollup runs the merge after building
+        self_snapshot. We patch the local _http_get_json so the merge
+        sees a populated MF body."""
+        mf_body = {
+            "path_table": {"available": True, "count": 7, "ts": 1.0},
+        }
+
+        def _fake_fetch(url, timeout):
+            if url == fr.MESHFORGE_LOCAL_SLO_URL:
+                return mf_body, None
+            return None, "down"
+
+        with patch("monitoring.fleet_aggregator._http_get_json",
+                   side_effect=_fake_fetch):
+            rollup = fr.collect_fleet_rollup(_make_config())
+        assert rollup.self_snapshot.get("path_table", {}).get("count") == 7
