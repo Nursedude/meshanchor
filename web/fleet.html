@@ -402,6 +402,42 @@
         .sched-empty { padding: 4px 0; color: #6a7a8a; font-size: 11px; font-style: italic; }
         .card.card-bad { border-color: #ef5350; box-shadow: 0 0 12px rgba(239,83,80,0.18); }
 
+        /* ── Path-of-Record panel (Track 2.6) ─────────────────
+           Per-host single-row answer to "where did this message
+           go and why did it fail." Three signal pills:
+             • paths — RNS path_table entry count (drill into
+               /api/network/rns/paths for hops + next_hop +
+               via_interface)
+             • interfaces — N/N online (drill into
+               /api/network/interfaces for RX/TX bytes)
+             • cascade — fingerprint state (drill into
+               /fleet/cascade for evidence)
+           See plan: we-have-a-cycle-jolly-wadler.md.
+        */
+        .por-row {
+            display: grid; grid-template-columns: 110px repeat(3, 1fr);
+            gap: 8px; align-items: center;
+            padding: 6px 14px; border-bottom: 1px solid #1a2638;
+            font-size: 12px;
+        }
+        .por-row:last-child { border-bottom: none; }
+        .por-host { color: #b0c0d0; font-weight: 600; font-family: monospace; }
+        .por-cell { font-size: 11px; color: #a0b0c0; }
+        .por-cell-label { color: #6a7a8a; font-size: 10px;
+                          text-transform: uppercase; letter-spacing: 0.4px; }
+        .por-cell-num { font-variant-numeric: tabular-nums; }
+        .por-pill {
+            display: inline-block; font-size: 10px; padding: 1px 6px;
+            border-radius: 8px; text-transform: uppercase; letter-spacing: 0.3px;
+            margin-left: 4px;
+        }
+        .por-pill-ok    { background: #1b3a25; color: #66bb6a; }
+        .por-pill-warn  { background: #3a2a14; color: #ffa726; }
+        .por-pill-bad   { background: #3a1a1a; color: #ef5350; font-weight: 700; }
+        .por-pill-empty { background: #1a2030; color: #6a7a8a; }
+        .por-empty { padding: 6px 14px; color: #6a7a8a; font-size: 11px;
+                     font-style: italic; }
+
         /* ── Subsystem Health panel (T1.5) ────────────────────
            Surfaces "daemon green, sub-component dead" — radio
            errors, required-service down, explicit errors[].
@@ -651,6 +687,16 @@
             <div class="card" id="schedules-card">
                 <h2>Schedules <span id="schedules-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
                 <div id="schedules-content"></div>
+            </div>
+
+            <!-- Path-of-Record (Track 2.6 of we-have-a-cycle plan).
+                 Per-host RNS path_table count + interface count + cascade
+                 fingerprint state. The three drill-down endpoints are
+                 listed in the title attribute of each pill so an operator
+                 can copy them out without leaving the dashboard. -->
+            <div class="card" id="path-of-record-card">
+                <h2>Path-of-Record <span id="path-of-record-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
+                <div id="path-of-record-content"></div>
             </div>
 
             <!-- Peer rollup -->
@@ -1442,6 +1488,176 @@
             $('schedules-card').classList.toggle('card-bad', totalStale > 0);
         }
 
+        // ── Path-of-Record panel (Track 2.6 of we-have-a-cycle plan) ──
+        //
+        // Consumes `peer.snapshot.path_table` + `.interfaces` + `.cascade`
+        // — the three observability blocks MeshForge ships on /fleet/slo
+        // (commits 79f5d7b, debf6fe, 7ec467e). Per-host single-row
+        // answer: how many RNS destinations are known, how many
+        // interfaces are online, what cascade fingerprint state is.
+        //
+        // Drill paths (operator hovers a pill to see the URL):
+        //   /api/network/rns/paths   — per-destination hops + next_hop
+        //   /api/network/interfaces  — per-interface RX/TX bytes
+        //   /fleet/cascade           — evidence + metric per fingerprint
+        function renderPathOfRecord(rollup) {
+            const container = $('path-of-record-content');
+            const meta = $('path-of-record-meta');
+            container.innerHTML = '';
+
+            const rows = [
+                { name: rollup.self_host || 'self',
+                  snapshot: rollup.self_snapshot, is_self: true },
+                ...((rollup.peers || []).map(p => ({ ...p, is_self: false }))),
+            ];
+
+            let totalHosts = 0;
+            let hostsWithIssue = 0;
+            let hostsWithAnyData = 0;
+
+            for (const row of rows) {
+                const snap = row.snapshot || {};
+                const pt = snap.path_table;
+                const ifaces = snap.interfaces;
+                const cascade = snap.cascade;
+                totalHosts += 1;
+
+                const hasAny = pt || ifaces || cascade;
+                if (hasAny) hostsWithAnyData += 1;
+
+                const rDiv = el('div', { class: 'por-row' });
+                rDiv.appendChild(el('span', {
+                    class: 'por-host', text: row.name,
+                }));
+
+                // Paths cell.
+                const pathsCell = el('div', { class: 'por-cell' });
+                pathsCell.appendChild(el('span', {
+                    class: 'por-cell-label', text: 'paths ',
+                }));
+                if (!pt) {
+                    pathsCell.appendChild(el('span', {
+                        class: 'por-pill por-pill-empty', text: 'no feed',
+                        title: 'host /fleet/slo did not include path_table — older MeshForge?',
+                    }));
+                } else if (!pt.available) {
+                    pathsCell.appendChild(el('span', {
+                        class: 'por-pill por-pill-warn',
+                        text: pt.reason || 'unavailable',
+                        title: '/api/network/rns/paths returned available=false',
+                    }));
+                } else {
+                    pathsCell.appendChild(el('span', {
+                        class: 'por-cell-num', text: String(pt.count ?? 0),
+                    }));
+                    pathsCell.appendChild(el('span', {
+                        class: 'por-pill por-pill-ok', text: 'ok',
+                        title: 'GET /api/network/rns/paths for per-destination hops + next_hop',
+                    }));
+                }
+                rDiv.appendChild(pathsCell);
+
+                // Interfaces cell.
+                const ifaceCell = el('div', { class: 'por-cell' });
+                ifaceCell.appendChild(el('span', {
+                    class: 'por-cell-label', text: 'ifaces ',
+                }));
+                if (!ifaces) {
+                    ifaceCell.appendChild(el('span', {
+                        class: 'por-pill por-pill-empty', text: 'no feed',
+                        title: 'host /fleet/slo did not include interfaces',
+                    }));
+                } else if (!ifaces.available) {
+                    ifaceCell.appendChild(el('span', {
+                        class: 'por-pill por-pill-warn',
+                        text: ifaces.reason || 'unavailable',
+                        title: '/api/network/interfaces returned available=false',
+                    }));
+                } else {
+                    const online = ifaces.online_count ?? 0;
+                    const total = ifaces.count ?? 0;
+                    const allOnline = online === total && total > 0;
+                    const pillClass = allOnline ? 'por-pill-ok' :
+                                      total > 0 ? 'por-pill-warn' : 'por-pill-empty';
+                    ifaceCell.appendChild(el('span', {
+                        class: 'por-cell-num', text: `${online}/${total}`,
+                    }));
+                    ifaceCell.appendChild(el('span', {
+                        class: `por-pill ${pillClass}`, text: 'online',
+                        title: 'GET /api/network/interfaces for per-interface RX/TX bytes',
+                    }));
+                }
+                rDiv.appendChild(ifaceCell);
+
+                // Cascade cell. Most operator-relevant: any pre_fail/wedged
+                // is the "this box is degraded" signal, mirroring the
+                // overall_status demotion the SLO snapshot already applies.
+                const cascadeCell = el('div', { class: 'por-cell' });
+                cascadeCell.appendChild(el('span', {
+                    class: 'por-cell-label', text: 'cascade ',
+                }));
+                if (!cascade) {
+                    cascadeCell.appendChild(el('span', {
+                        class: 'por-pill por-pill-empty', text: 'no feed',
+                        title: 'host /fleet/slo did not include cascade — older MeshForge?',
+                    }));
+                } else {
+                    const wedged = cascade.wedged ?? 0;
+                    const preFail = cascade.pre_fail ?? 0;
+                    const suspected = cascade.suspected ?? 0;
+                    const total = cascade.total ?? 0;
+                    const drillTitle = 'GET /fleet/cascade for evidence + coupled_to consequence';
+                    if (wedged > 0) {
+                        hostsWithIssue += 1;
+                        cascadeCell.appendChild(el('span', {
+                            class: 'por-pill por-pill-bad',
+                            text: `WEDGED ${wedged}`, title: drillTitle,
+                        }));
+                    } else if (preFail > 0) {
+                        hostsWithIssue += 1;
+                        cascadeCell.appendChild(el('span', {
+                            class: 'por-pill por-pill-bad',
+                            text: `PRE-FAIL ${preFail}`, title: drillTitle,
+                        }));
+                    } else if (suspected > 0) {
+                        cascadeCell.appendChild(el('span', {
+                            class: 'por-pill por-pill-warn',
+                            text: `SUSPECTED ${suspected}`, title: drillTitle,
+                        }));
+                    } else if (total > 0) {
+                        cascadeCell.appendChild(el('span', {
+                            class: 'por-cell-num', text: `${cascade.clean ?? 0}/${total}`,
+                        }));
+                        cascadeCell.appendChild(el('span', {
+                            class: 'por-pill por-pill-ok', text: 'clean',
+                            title: drillTitle,
+                        }));
+                    } else {
+                        cascadeCell.appendChild(el('span', {
+                            class: 'por-pill por-pill-empty', text: 'no fps',
+                            title: drillTitle,
+                        }));
+                    }
+                }
+                rDiv.appendChild(cascadeCell);
+
+                container.appendChild(rDiv);
+            }
+
+            if (hostsWithAnyData === 0) {
+                container.appendChild(el('div', {
+                    class: 'por-empty',
+                    text: 'No host has shipped the path_table/interfaces/cascade blocks yet — operator may be running pre-79f5d7b MeshForge.',
+                }));
+            }
+
+            // Meta line: counters mirror the Schedules panel pattern.
+            meta.textContent = hostsWithIssue > 0
+                ? `⚠ ${hostsWithIssue}/${totalHosts} hosts have cascade alerts`
+                : `${hostsWithAnyData}/${totalHosts} hosts reporting · all clean`;
+            $('path-of-record-card').classList.toggle('card-bad', hostsWithIssue > 0);
+        }
+
         // ── Run Tests panel (T1.5) ──────────────────────────────
         //
         // Fetches the allowlist from `<peer>/fleet/tests` on host
@@ -2128,6 +2344,7 @@
         registerPanel({ id: 'rollup',      source: 'rollup',     render: renderRollup });
         registerPanel({ id: 'subsystem',   source: 'rollup',     render: renderSubsystem });
         registerPanel({ id: 'schedules',   source: 'rollup',     render: renderSchedules });
+        registerPanel({ id: 'path_of_record', source: 'rollup',  render: renderPathOfRecord });
         registerPanel({ id: 'ci_pill',     source: 'rollup',     render: renderCiPill });
         registerPanel({ id: 'logs_hosts',  source: 'rollup',     render: populateLogsHosts });
         registerPanel({ id: 'runtests_hosts', source: 'rollup',  render: populateRunTestsHosts });
