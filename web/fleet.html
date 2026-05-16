@@ -450,16 +450,44 @@
            blackout rows. The banner is the operator's "things have
            fallen silent" signal — keep it loud and unambiguous.
         */
+        /* Severity scale — the banner reflects how alarmed the
+           operator should be. Default (no sev-* class) keeps the
+           original red so unknown kinds still surface loudly:
+             daemon_dead / http_dead → CRITICAL (red — daemon is gone)
+             no_data                 → WARNING  (amber — feed stopped)
+             frozen                  → INFO     (green — daemon alive,
+                                       a single field went missing —
+                                       typical of a restart cycle).
+           Multiple active kinds → highest-severity wins.
+        */
         .blackout-banner {
             display: none;
-            background: linear-gradient(90deg, #b71c1c 0%, #d32f2f 100%);
-            color: #ffeeee;
             padding: 14px 20px;
             border-radius: 10px;
             margin-bottom: 16px;
             font-weight: 600;
+            background: linear-gradient(90deg, #b71c1c 0%, #d32f2f 100%);
+            color: #ffeeee;
             box-shadow: 0 0 16px rgba(239, 83, 80, 0.4);
             border: 1px solid #ef5350;
+        }
+        .blackout-banner.sev-critical {
+            background: linear-gradient(90deg, #b71c1c 0%, #d32f2f 100%);
+            color: #ffeeee;
+            box-shadow: 0 0 16px rgba(239, 83, 80, 0.4);
+            border: 1px solid #ef5350;
+        }
+        .blackout-banner.sev-warning {
+            background: linear-gradient(90deg, #b26a00 0%, #e08e00 100%);
+            color: #fff4e0;
+            box-shadow: 0 0 12px rgba(255, 167, 38, 0.3);
+            border: 1px solid #ffa726;
+        }
+        .blackout-banner.sev-info {
+            background: linear-gradient(90deg, #1b5e20 0%, #2e7d32 100%);
+            color: #e8f5e9;
+            box-shadow: 0 0 12px rgba(76, 175, 80, 0.25);
+            border: 1px solid #66bb6a;
         }
         .blackout-banner.show { display: block; }
         .blackout-banner h3 {
@@ -823,6 +851,16 @@
             if (dur < 3600) return `${Math.round(dur / 60)}m`;
             return `${(dur / 3600).toFixed(1)}h`;
         }
+        // Banner severity tier per blackout kind. Highest-severity
+        // active kind wins (critical > warning > info). See the
+        // ALL_KINDS list in fleet_watchdog.py for the canonical set.
+        const BLACKOUT_SEVERITY = {
+            daemon_dead: 'critical',
+            http_dead:   'critical',
+            no_data:     'warning',
+            frozen:      'info',
+        };
+        const SEVERITY_RANK = { critical: 3, warning: 2, info: 1 };
         async function pollBlackouts() {
             const banner = $('blackout-banner');
             const list = $('blackout-list');
@@ -830,10 +868,23 @@
                 const body = await fetchJson('/fleet/blackouts?active_only=1');
                 const active = body.active || [];
                 if (active.length === 0) {
-                    banner.classList.remove('show');
+                    banner.classList.remove('show', 'sev-critical',
+                                            'sev-warning', 'sev-info');
                     return;
                 }
-                banner.classList.add('show');
+                // Pick the highest-severity tier among the active
+                // kinds. Unknown kinds fall through to 'critical' so
+                // they still surface as alarm-grade — unknown == loud.
+                let topSev = 'info';
+                for (const b of active) {
+                    const sev = BLACKOUT_SEVERITY[b.kind] || 'critical';
+                    if ((SEVERITY_RANK[sev] || 0) >
+                        (SEVERITY_RANK[topSev] || 0)) {
+                        topSev = sev;
+                    }
+                }
+                banner.classList.remove('sev-critical', 'sev-warning', 'sev-info');
+                banner.classList.add('show', `sev-${topSev}`);
                 list.innerHTML = '';
                 for (const b of active) {
                     const dur = fmtBlackoutDuration(b.ts_started);
