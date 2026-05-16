@@ -1103,17 +1103,16 @@
                 // the snapshot has an explicit radio error in errors[]
                 // that already promoted to ERR above.
                 //
-                // Suppression: pure-NOC daemons (e.g. MA on VolcanoAI
-                // with no MeshCore radio attached) never populate name
-                // or preset, while a radio host that disconnects keeps
-                // the daemon's cached config (see _radio_slo_shape in
-                // MA's fleet_aggregator). MF radio hosts that lose
-                // meshtasticd still chip via "1 req svc not_running"
-                // (meshtasticd is required there).
+                // The "is this box radioless or just blind?" question
+                // is answered upstream by `_collect_radio` in MA's
+                // fleet_aggregator (and `_probe_radio` in MF's
+                // fleet_snapshot): both fall back to a :4403 / TTY
+                // probe so a Meshtastic-only box reports
+                // `name="meshtasticd"` instead of all-null. By the
+                // time the snapshot reaches the dashboard, radio.connected
+                // is the right signal — no need to guess from name/preset.
                 const radio = snap.radio || {};
-                const radioConfigured = !!(radio.name || radio.preset);
-                if (!radio.connected && radioConfigured
-                        && errors.length === 0 && !row.error) {
+                if (!radio.connected && errors.length === 0 && !row.error) {
                     chips.push({ cls: 'warn', label: 'radio offline' });
                 }
 

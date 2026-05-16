@@ -211,16 +211,84 @@ def _collect_daemon_health(daemon_url: str, timeout: float):
     return body.get("health"), None
 
 
+MESHTASTICD_API_PORT = 4403
+"""meshtasticd's TCP API. A live listener here is sufficient evidence
+that the box has a working Meshtastic radio stack — the firmware only
+opens this socket after the radio handshake completes."""
+
+MESHCORE_TTY = "/dev/ttyMeshCore"
+"""Symlink installed by meshcore_radio.rules when a MeshCore radio is
+plugged in. Used as a presence signal when the MA daemon hasn't yet
+handshook with the radio (e.g. daemon just started, or the operator
+runs MA on a host where the MeshCore radio is owned by another process)."""
+
+
+def _tcp_listener_alive(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Lightweight TCP-connect probe. Returns True if `host:port` accepts
+    a connection within `timeout`. Used as the meshtasticd presence
+    signal — the firmware opens :4403 only after the radio handshake,
+    so a successful connect is reliable evidence of a working stack."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            return sock.connect_ex((host, port)) == 0
+    except (OSError, socket.timeout):
+        return False
+
+
 def _collect_radio(daemon_url: str, timeout: float):
+    """Collect radio status with multi-stack fallback.
+
+    Order of evidence (first match wins):
+    1. MA daemon's `/radio` reports a populated MeshCore body
+       (`radio_freq_mhz` set, or explicit `connected=True`).
+    2. Local meshtasticd answers on :4403 — MF radio stack is alive on
+       this box even though MA's `/radio` is MeshCore-only.
+    3. `/dev/ttyMeshCore` symlink exists — a MeshCore radio is plugged
+       in but the daemon hasn't handshook with it yet.
+
+    Without (2) and (3), a Meshtastic-only host (e.g. VolcanoAI) was
+    falsely reporting `connected=False` because MA's `/radio` endpoint
+    only knows MeshCore. The Subsystem Health panel then warn-chipped
+    "radio offline" on a box with a healthy meshtasticd stack. Mirrors
+    MF's `_probe_radio()` in `meshforge/src/utils/fleet_snapshot.py`.
+    """
     body, err = _http_get_json(f"{daemon_url}/radio", timeout=timeout)
     if err is not None:
-        return None, {"source": "radio", "error": err}
-    if not isinstance(body, dict):
-        return None, {"source": "radio", "error": "non-dict body"}
-    raw = body.get("radio")
-    if not isinstance(raw, dict):
-        return None, None
-    return _radio_slo_shape(raw), None
+        meshcore_view = None
+        radio_err: Optional[Dict[str, str]] = {"source": "radio", "error": err}
+    elif not isinstance(body, dict):
+        meshcore_view = None
+        radio_err = {"source": "radio", "error": "non-dict body"}
+    else:
+        raw = body.get("radio")
+        meshcore_view = (
+            _radio_slo_shape(raw) if isinstance(raw, dict) else None
+        )
+        radio_err = None
+
+    if meshcore_view is not None and meshcore_view.get("connected"):
+        return meshcore_view, None
+
+    if _tcp_listener_alive("127.0.0.1", MESHTASTICD_API_PORT):
+        return {
+            "connected": True,
+            "name": "meshtasticd",
+            "preset": None,
+            "battery_pct": None,
+        }, None
+
+    if os.path.exists(MESHCORE_TTY):
+        return {
+            "connected": True,
+            "name": "meshcore",
+            "preset": None,
+            "battery_pct": None,
+        }, None
+
+    if meshcore_view is not None:
+        return meshcore_view, None
+    return None, radio_err
 
 
 def _radio_slo_shape(raw: Dict[str, Any]) -> Dict[str, Any]:

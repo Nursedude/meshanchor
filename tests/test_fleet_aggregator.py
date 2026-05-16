@@ -346,6 +346,135 @@ def test_radio_slo_shape_battery_pct_passed_through():
     assert view["battery_pct"] == 87
 
 
+# ──────────────────────────────────────────────────────────────────────
+# _collect_radio — multi-stack fallback for MA-on-Meshtastic hosts
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_collect_radio_prefers_meshcore_when_daemon_populated():
+    """MeshCore handshake wins over the meshtasticd fallback. A real
+    MeshCore-equipped MA box must not be reported as 'meshtasticd' just
+    because :4403 happens to also be alive."""
+    daemon_body = {"radio": {
+        "radio_freq_mhz": 910.525, "radio_bw_khz": 62.5, "radio_sf": 7,
+        "node_name": "meshanchorRAK1",
+    }}
+    with patch.object(fa, "_http_get_json", return_value=(daemon_body, None)), \
+         patch.object(fa, "_tcp_listener_alive", return_value=True), \
+         patch("os.path.exists", return_value=False):
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is None
+    assert view["connected"] is True
+    assert view["name"] == "meshanchorRAK1"
+
+
+def test_collect_radio_falls_back_to_meshtasticd_when_daemon_empty():
+    """The VolcanoAI case. MA daemon's /radio body has no MeshCore data
+    (all-null fields, no live handshake), but local meshtasticd is
+    answering on :4403. Report the Meshtastic stack instead of
+    falsely flagging the box as radioless."""
+    daemon_body = {"radio": {
+        "radio_freq_mhz": None, "radio_bw_khz": None, "radio_sf": None,
+        "node_name": None,
+    }}
+    with patch.object(fa, "_http_get_json", return_value=(daemon_body, None)), \
+         patch.object(fa, "_tcp_listener_alive", return_value=True), \
+         patch("os.path.exists", return_value=False):
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is None
+    assert view == {
+        "connected": True, "name": "meshtasticd",
+        "preset": None, "battery_pct": None,
+    }
+
+
+def test_collect_radio_falls_back_to_meshcore_tty_when_only_symlink():
+    """MeshCore radio plugged in but daemon hasn't yet handshook. The
+    /dev/ttyMeshCore symlink is sufficient evidence the box owns a radio."""
+    daemon_body = {"radio": {"radio_freq_mhz": None, "node_name": None}}
+    with patch.object(fa, "_http_get_json", return_value=(daemon_body, None)), \
+         patch.object(fa, "_tcp_listener_alive", return_value=False), \
+         patch("os.path.exists", return_value=True) as mock_exists:
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is None
+    assert view["connected"] is True
+    assert view["name"] == "meshcore"
+    mock_exists.assert_any_call(fa.MESHCORE_TTY)
+
+
+def test_collect_radio_disconnected_when_no_stack_responds():
+    """Pure-NOC daemon: no MeshCore handshake, :4403 silent, no symlink.
+    The chip-firing case — report connected=False so the dashboard can
+    raise a real anomaly."""
+    daemon_body = {"radio": {"radio_freq_mhz": None, "node_name": None}}
+    with patch.object(fa, "_http_get_json", return_value=(daemon_body, None)), \
+         patch.object(fa, "_tcp_listener_alive", return_value=False), \
+         patch("os.path.exists", return_value=False):
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is None
+    assert view["connected"] is False
+    assert view["name"] is None
+
+
+def test_collect_radio_daemon_error_still_probes_fallbacks():
+    """When MA's /radio HTTP fetch fails outright (daemon down, timeout)
+    the fallback probes still run — the operator's box may still have
+    a working Meshtastic stack. If :4403 answers, that wins; otherwise
+    the original daemon error surfaces."""
+    with patch.object(fa, "_http_get_json", return_value=(None, "url error: refused")), \
+         patch.object(fa, "_tcp_listener_alive", return_value=True), \
+         patch("os.path.exists", return_value=False):
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is None
+    assert view["name"] == "meshtasticd"
+
+    with patch.object(fa, "_http_get_json", return_value=(None, "url error: refused")), \
+         patch.object(fa, "_tcp_listener_alive", return_value=False), \
+         patch("os.path.exists", return_value=False):
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is not None
+    assert err["source"] == "radio"
+
+
+def test_collect_radio_explicit_connected_skips_fallback():
+    """Forward-compat: if a future MA daemon sets radio.connected=True
+    even without filled config (e.g. an early-handshake state), trust it
+    and don't shadow the name by jumping to the meshtasticd fallback."""
+    daemon_body = {"radio": {"connected": True, "name": "early-state"}}
+    with patch.object(fa, "_http_get_json", return_value=(daemon_body, None)), \
+         patch.object(fa, "_tcp_listener_alive", return_value=True), \
+         patch("os.path.exists", return_value=True):
+        view, err = fa._collect_radio("http://x", timeout=1.0)
+    assert err is None
+    assert view["name"] == "early-state"
+
+
+def test_tcp_listener_alive_handles_timeout_and_refusal(monkeypatch):
+    """Refused / timeout / OSError all return False without raising."""
+    class FakeSock:
+        def __init__(self, *args, **kwargs):
+            self._behavior = FakeSock.behavior
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def settimeout(self, _): pass
+        def connect_ex(self, _):
+            if self._behavior == "refused":
+                return 111  # ECONNREFUSED
+            if self._behavior == "ok":
+                return 0
+            raise socket.timeout("read timed out")
+
+    FakeSock.behavior = "ok"
+    monkeypatch.setattr(socket, "socket", FakeSock)
+    assert fa._tcp_listener_alive("127.0.0.1", 4403) is True
+
+    FakeSock.behavior = "refused"
+    assert fa._tcp_listener_alive("127.0.0.1", 4403) is False
+
+    FakeSock.behavior = "timeout"
+    assert fa._tcp_listener_alive("127.0.0.1", 4403) is False
+
+
 def test_slo_view_uses_daemon_overall_status():
     snap = fa.FleetSnapshot(generated_at=0, host="x", uptime_s=0)
     snap.daemon_health = {"overall_status": "degraded", "services": []}
