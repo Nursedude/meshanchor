@@ -176,6 +176,7 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             "/fleet/rollup", "/fleet/federation",
             "/fleet/history", "/fleet/blackouts",
             "/fleet/logs", "/fleet/tests", "/fleet/run-test",
+            "/fleet/tracer-fires",
         )
         if path_only in STABLE:
             return path_only or "/"
@@ -337,6 +338,8 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             self._serve_fleet_blackouts()
         elif self.path == '/fleet/logs' or self.path.startswith('/fleet/logs?'):
             self._serve_fleet_logs()
+        elif self.path == '/fleet/tracer-fires' or self.path.startswith('/fleet/tracer-fires?'):
+            self._serve_fleet_tracer_fires()
         elif self.path == '/fleet/tests' or self.path == '/fleet/tests/':
             self._serve_fleet_tests_list()
         # ─────────────────────────────────────────────────────────────

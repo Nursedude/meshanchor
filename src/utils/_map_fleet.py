@@ -591,6 +591,27 @@ class FleetEndpointsMixin:
         )
         self._serve_json(payload)
 
+    def _serve_fleet_tracer_fires(self) -> None:
+        """GET /fleet/tracer-fires?peer=<short>&since=<unix>&limit=<int>
+
+        T1 drilldown: returns this host's per-fire tracer entries
+        targeting one peer. Same shape as MF's endpoint. Dashboard's
+        Federation Round-Trip click handler fetches from each peer
+        (or self) at ``http://<src>:5000/fleet/tracer-fires?...``.
+        """
+        from urllib.parse import urlparse, parse_qs
+        from utils.tracer_fires import parse_query, get_recent_fires
+
+        qs = parse_qs(urlparse(self.path).query)
+        peer, since_unix, limit, err = parse_query(qs)
+        if err is not None:
+            self._serve_json({"error": err}, status=400)
+            return
+        payload = get_recent_fires(
+            peer=peer, since_unix=since_unix, limit=limit,
+        )
+        self._serve_json(payload)
+
     # ─────────────────────────────────────────────────────────────────
     # /fleet/tests + /fleet/run-test — T1.5 manual lab fires.
     # GET /fleet/tests          → list available tests + last-fire info
