@@ -146,6 +146,24 @@
         .pill.not_installed { background: #1a1a1a; color: #555; }
         .pill.unknown       { background: #1a2030; color: #6a7a8a; }
 
+        /* ── CI status pill (topbar) ───────────────────────── */
+        .ci-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: help;
+            vertical-align: middle;
+        }
+        .ci-pill-ok       { background: #1b3a25; color: #66bb6a; }
+        .ci-pill-running  { background: #1a2a3a; color: #4fc3f7; }
+        .ci-pill-warn     { background: #3d2c10; color: #ffa726; }
+        .ci-pill-err      { background: #3a1a1a; color: #ef5350; }
+        .ci-pill-unknown  { background: #1a2030; color: #6a7a8a; }
+
         /* ── Tables ────────────────────────────────────────── */
         table { width: 100%; border-collapse: collapse; font-size: 12px; }
         th, td {
@@ -533,6 +551,7 @@
             <strong id="self-host">…</strong>
             &middot; updated <strong id="updated">never</strong>
             &middot; refresh every <strong id="refresh-int">5</strong>s
+            &middot; <span id="ci-pill" class="ci-pill ci-pill-unknown" title="ecosystem CI status — no data yet">CI ?</span>
         </div>
     </div>
 
@@ -1221,6 +1240,83 @@
         // doesn't include schedules yet render as "no timer feed" rather
         // than vanishing — MA's own self_snapshot lands here today;
         // adding it on the MA side is a follow-up.
+        // Ecosystem CI status — surfaces the meshforge-ci-status timer
+        // output as a single pill in the topbar. Only one box runs the
+        // timer today; the pill picks the freshest `ci_status` block
+        // across self + peers, so adding the timer on a second host
+        // doesn't break anything (newest wins).
+        function renderCiPill(rollup) {
+            const pill = $('ci-pill');
+            if (!pill) return;
+
+            const rows = [
+                { name: rollup.self_host || 'self',
+                  snapshot: rollup.self_snapshot },
+                ...(rollup.peers || []).map(p => ({ name: p.name, snapshot: p.snapshot })),
+            ];
+
+            let best = null;
+            let bestHost = null;
+            for (const row of rows) {
+                const ci = row.snapshot && row.snapshot.ci_status;
+                if (!ci || !ci.available) continue;
+                const ts = ci.generated_unix || 0;
+                if (best === null || ts > (best.generated_unix || 0)) {
+                    best = ci;
+                    bestHost = row.name;
+                }
+            }
+
+            // Reset classes (keep `.ci-pill`).
+            pill.className = 'ci-pill';
+            if (!best) {
+                pill.classList.add('ci-pill-unknown');
+                pill.textContent = 'CI ?';
+                pill.title = 'ecosystem CI status — no peer reports the file yet';
+                return;
+            }
+
+            // Class + text from overall state. Stale wins amber over the
+            // underlying state so a frozen-good timer doesn't fake green.
+            const overall = best.overall || 'unknown';
+            const stale = !!best.stale;
+            let cls = 'ci-pill-unknown';
+            let text = 'CI ?';
+            if (stale) {
+                cls = 'ci-pill-warn';
+                text = 'CI stale';
+            } else if (overall === 'success') {
+                cls = 'ci-pill-ok';
+                text = 'CI ✓';
+            } else if (overall === 'failure') {
+                cls = 'ci-pill-err';
+                text = `CI ✗ ${best.red_count || ''}`.trim();
+            } else if (overall === 'in_progress') {
+                cls = 'ci-pill-running';
+                text = `CI … ${best.in_progress_count || ''}`.trim();
+            } else if (overall === 'degraded') {
+                cls = 'ci-pill-warn';
+                text = 'CI ~';
+            }
+            pill.classList.add(cls);
+            pill.textContent = text;
+
+            // Title: per-repo state lines + source host + age.
+            const lines = [`ecosystem CI from ${bestHost || '?'}`];
+            if (best.generated_at) lines.push(`generated ${best.generated_at}`);
+            if (best.age_s != null) {
+                const ageH = Math.round(best.age_s / 3600 * 10) / 10;
+                lines.push(`age ${ageH}h${stale ? ' (STALE)' : ''}`);
+            }
+            lines.push('—');
+            for (const r of (best.repos || [])) {
+                const sha = r.sha ? ` (${r.sha})` : '';
+                lines.push(`${r.name}: ${r.state}${sha}`);
+            }
+            pill.title = lines.join('\n');
+        }
+
+
         function renderSchedules(rollup) {
             const container = $('schedules-content');
             const meta = $('schedules-meta');
@@ -1811,6 +1907,7 @@
                 renderRollup(data);
                 renderSubsystem(data);
                 renderSchedules(data);
+                renderCiPill(data);
                 populateLogsHosts(data);
                 populateRunTestsHosts(data);
             });

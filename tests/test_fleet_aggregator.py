@@ -732,3 +732,122 @@ def test_list_timers_root_user_scope_no_operator_returns_empty(monkeypatch):
         "monitoring.fleet_aggregator.subprocess.run", _should_not_be_called,
     )
     assert fa._list_timers_scope("user") == []
+
+
+# ─── CI status block ────────────────────────────────────────────────────
+#
+# Mirror of MF fleet_snapshot CI status tests. The block flows to the
+# dashboard pill via slo_view → MA's rollup → fleet.html.
+
+
+_CI_FILE_SAMPLE = (
+    "# MeshForge ecosystem CI status — generated 2026-05-15T08:04:36-10:00\n"
+    "  meshforge                            in_progress  a11095c  feat(fleet): T1.5\n"
+    "  meshanchor                           in_progress  3fbf241  feat(fleet): panel\n"
+    "  meshforge-maps                       success      0ec25c8  fix(tests): foo\n"
+    "  meshing_around_meshforge             success      3d1c97b  github_actions\n"
+    "  RNS-Management-Tool                  success      dc1b109  Merge pull request\n"
+    "  RNS-Meshtastic-Gateway-Tool          success      cd2748a  fix(ci): drop -x\n"
+)
+
+
+def test_parse_ci_status_file_extracts_repos_and_overall():
+    block = fa._parse_ci_status_file(_CI_FILE_SAMPLE)
+    assert block["available"] is True
+    assert block["generated_at"] == "2026-05-15T08:04:36-10:00"
+    assert isinstance(block["generated_unix"], float)
+    assert len(block["repos"]) == 6
+    assert block["overall"] == "in_progress"
+    assert block["in_progress_count"] == 2
+    assert block["red_count"] == 0
+
+
+def test_parse_ci_status_file_ignores_overdue_pr_section():
+    sample = (
+        _CI_FILE_SAMPLE
+        + "\n# Overdue open PRs (>14 days)\n"
+        + "  meshforge#1234  20d  user — Some title\n"
+    )
+    block = fa._parse_ci_status_file(sample)
+    assert len(block["repos"]) == 6
+
+
+def test_parse_ci_status_file_handles_no_runs_state():
+    sample = (
+        "# generated 2026-05-15T08:04:36-10:00\n"
+        "  newrepo  no-runs\n"
+    )
+    block = fa._parse_ci_status_file(sample)
+    assert len(block["repos"]) == 1
+    assert block["repos"][0]["state"] == "no-runs"
+    assert block["repos"][0]["sha"] == ""
+
+
+def test_ci_overall_failure_dominates():
+    repos = [
+        {"name": "a", "state": "success", "sha": "1234567"},
+        {"name": "b", "state": "failure", "sha": "1234567"},
+    ]
+    assert fa._ci_overall(repos) == "failure"
+
+
+def test_ci_overall_in_progress_when_no_failure():
+    repos = [
+        {"name": "a", "state": "success", "sha": "1234567"},
+        {"name": "b", "state": "in_progress", "sha": "1234567"},
+    ]
+    assert fa._ci_overall(repos) == "in_progress"
+
+
+def test_ci_overall_success_when_all_clean():
+    repos = [{"name": "a", "state": "success", "sha": "1234567"}]
+    assert fa._ci_overall(repos) == "success"
+
+
+def test_ci_overall_unknown_when_no_repos():
+    assert fa._ci_overall([]) == "unknown"
+
+
+def test_ci_status_block_unavailable_when_file_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    block = fa._ci_status_block()
+    assert block["available"] is False
+    assert block["reason"] == "no_file"
+
+
+def test_ci_status_block_unavailable_when_no_operator_home(monkeypatch):
+    monkeypatch.setattr(fa, "_operator_home", lambda: None)
+    block = fa._ci_status_block()
+    assert block["available"] is False
+    assert block["reason"] == "no_operator_home"
+
+
+def test_ci_status_block_parses_real_file(tmp_path, monkeypatch):
+    (tmp_path / ".meshforge-ci-status").write_text(_CI_FILE_SAMPLE)
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    block = fa._ci_status_block()
+    assert block["available"] is True
+    assert block["overall"] == "in_progress"
+    assert len(block["repos"]) == 6
+
+
+def test_ci_status_block_marks_stale_when_old(tmp_path, monkeypatch):
+    sample = (
+        "# MeshForge ecosystem CI status — generated 2020-01-01T00:00:00-10:00\n"
+        "  meshforge  success  abc1234  ok\n"
+    )
+    (tmp_path / ".meshforge-ci-status").write_text(sample)
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    block = fa._ci_status_block()
+    assert block["available"] is True
+    assert block["stale"] is True
+
+
+def test_slo_view_includes_ci_status_block():
+    """Contract: slo_view's output must carry ci_status so MA's rollup
+    poller threads the data through to the dashboard pill."""
+    snap = fa.FleetSnapshot(generated_at=0, host="x", uptime_s=0)
+    view = fa.slo_view(snap)
+    assert "ci_status" in view
+    assert isinstance(view["ci_status"], dict)
+    assert "available" in view["ci_status"]
