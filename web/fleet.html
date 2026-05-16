@@ -458,6 +458,12 @@
         .rt-btn:hover  { background: #245a30; }
         .rt-btn:active { background: #1b3a25; }
         .rt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        /* not_installed: dim the row so the operator scans past it
+           but still sees the unit exists in the catalog. The button
+           is disabled with a "not installed" title attr explaining why. */
+        .rt-row.not-installed .rt-label,
+        .rt-row.not-installed .rt-desc { opacity: 0.45; }
+        .rt-row.not-installed .rt-meta { color: #555; font-style: italic; }
         .rt-result { padding: 6px 0; font-size: 10px; }
         .rt-result.ok { color: #66bb6a; }
         .rt-result.err { color: #ef5350; }
@@ -1465,21 +1471,39 @@
                 }
                 const body = await resp.json();
                 for (const t of (body.tests || [])) {
-                    const row = el('div', { class: 'rt-row' });
+                    // `not_installed` (MF /fleet/tests, 6648678) means
+                    // LoadState != "loaded" — e.g. synth-soak on a
+                    // host where the user unit isn't deployed. Without
+                    // this check the button silently fails with
+                    // systemctl exit=5 on click.
+                    const rowClass = t.not_installed
+                        ? 'rt-row not-installed' : 'rt-row';
+                    const row = el('div', { class: rowClass });
                     const left = el('div');
                     left.appendChild(el('div', { class: 'rt-label', text: t.label }));
                     left.appendChild(el('div', { class: 'rt-desc',  text: t.description }));
                     row.appendChild(left);
 
-                    row.appendChild(el('div', {
-                        class: 'rt-meta',
-                        text: t.last_fire_unix
-                            ? `last ${fmtAge((Date.now()/1000) - t.last_fire_unix)} ago`
-                            : 'never fired',
-                    }));
+                    let metaText;
+                    if (t.not_installed) {
+                        metaText = 'not installed on this host';
+                    } else if (t.last_fire_unix) {
+                        metaText = `last ${fmtAge((Date.now()/1000) - t.last_fire_unix)} ago`;
+                    } else {
+                        metaText = 'never fired';
+                    }
+                    row.appendChild(el('div', { class: 'rt-meta', text: metaText }));
 
                     const btn = el('button', { class: 'rt-btn', text: 'Run' });
-                    btn.addEventListener('click', () => fireTest(host, base, t, row, btn));
+                    if (t.not_installed) {
+                        btn.disabled = true;
+                        btn.title =
+                            `${t.unit} is not installed on this host — ` +
+                            `install the user unit and reload to enable.`;
+                    } else {
+                        btn.addEventListener('click',
+                            () => fireTest(host, base, t, row, btn));
+                    }
                     row.appendChild(btn);
                     content.appendChild(row);
                 }
