@@ -465,10 +465,12 @@ class TestMeshForgeBlockMerge:
             "path_table", "interfaces", "cascade",
         )
 
-    def test_collect_fleet_rollup_calls_merge(self):
-        """End-to-end: collect_fleet_rollup runs the merge after building
-        self_snapshot. We patch the local _http_get_json so the merge
-        sees a populated MF body."""
+    def test_slo_view_calls_merge(self):
+        """End-to-end: slo_view runs the merge so peers polling
+        /fleet/slo see the same blocks self does (peer rendering
+        depends on this — peer.snapshot IS the peer's slo, not
+        their rollup)."""
+        from monitoring import fleet_aggregator as fa
         mf_body = {
             "path_table": {"available": True, "count": 7, "ts": 1.0},
         }
@@ -478,7 +480,15 @@ class TestMeshForgeBlockMerge:
                 return mf_body, None
             return None, "down"
 
+        # Minimal FleetSnapshot — slo_view tolerates empty. `boundaries`
+        # is dict, not list — `_boundary_top` calls .items().
+        snap = fa.FleetSnapshot(
+            generated_at=1.0, host="testbox", uptime_s=1.0,
+            services={}, radio={}, errors=[],
+            chat_total=0, chat_recent=[], boundaries={},
+            daemon_health=None,
+        )
         with patch("monitoring.fleet_aggregator._http_get_json",
                    side_effect=_fake_fetch):
-            rollup = fr.collect_fleet_rollup(_make_config())
-        assert rollup.self_snapshot.get("path_table", {}).get("count") == 7
+            slo = fa.slo_view(snap)
+        assert slo.get("path_table", {}).get("count") == 7

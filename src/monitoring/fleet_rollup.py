@@ -311,11 +311,11 @@ def collect_fleet_rollup(
             rollup.self_snapshot = slo_view(snap)
         except Exception as e:
             rollup.errors.append({"source": "self", "error": str(e)})
-
-    # Cross-stack merge: if MeshForge is co-installed on this box, pull
-    # its observability blocks into self_snapshot so MA's dashboard shows
-    # them without operators having to add MF peers to fleet.json.
-    _merge_mesh_forge_blocks(rollup.self_snapshot)
+    # Cross-stack pass-through happens inside `slo_view` itself
+    # (see fleet_aggregator.slo_view), so this rollup's self_snapshot
+    # already has MF's observability blocks merged when slo_view is
+    # the source. self_url paths skip the merge — caller is responsible
+    # for serving an already-merged slo.
 
     for peer in config.non_self_peers(hostname=rollup.self_host):
         body, err, duration = _fetch_peer_snapshot(peer, timeout=timeout)

@@ -813,7 +813,7 @@ def slo_view(snapshot: FleetSnapshot) -> Dict[str, Any]:
     overall = daemon_health.get("overall_status") if daemon_health else None
     if overall is None:
         overall = _derive_overall_status(snapshot)
-    return {
+    out = {
         "generated_at": snapshot.generated_at,
         "host": snapshot.host,
         "uptime_s": snapshot.uptime_s,
@@ -830,6 +830,18 @@ def slo_view(snapshot: FleetSnapshot) -> Dict[str, Any]:
         "schedules": _schedules_block(),
         "ci_status": _ci_status_block(),
     }
+    # Cross-stack pass-through (Track 2.6): if MeshForge is co-installed
+    # on this box, fold its observability blocks into our slo so MA peers
+    # polling /fleet/slo see the operator's path-of-record data without
+    # configuring MF as a separate peer.
+    try:
+        from monitoring.fleet_rollup import _merge_mesh_forge_blocks
+        _merge_mesh_forge_blocks(out)
+    except Exception:
+        # Defensive — slo_view must NEVER fail because of a co-install
+        # probe. Worst case: the three new blocks don't appear.
+        pass
+    return out
 
 
 def activity_view(snapshot: FleetSnapshot) -> Dict[str, Any]:
