@@ -521,3 +521,171 @@ class FleetEndpointsMixin:
             )
             snap.errors.append({"source": "aggregator", "error": str(e)})
             return snap
+
+    # ─────────────────────────────────────────────────────────────────
+    # /fleet/logs — T1 of fleet dashboard roadmap (ported from MF
+    # 2026-05-15). Returns a recent slice of a systemd unit's journal
+    # so the operator can scan ERROR/WARN across the fleet from the
+    # dashboard. Unit allowlist bounds the surface; helper module
+    # `utils.fleet_logs` handles the journalctl mechanics + 60s cache.
+    #
+    # MA's allowlist mirrors MF's plus the MA-side daemons. Shared
+    # infra (rnsd, mosquitto, meshtasticd) is listed both places —
+    # whichever box the dashboard targets gets the right log feed.
+    # ─────────────────────────────────────────────────────────────────
+    _FLEET_LOG_UNITS = {
+        # MA-specific system units
+        "meshanchor":         ("system", "MeshAnchor entry service"),
+        "meshanchor-daemon":  ("system", "MeshAnchor headless daemon"),
+        "meshanchor-map":     ("system", "MeshAnchor map :5000 / :5002"),
+        # Shared infra
+        "rnsd":         ("system", "Reticulum daemon"),
+        "meshtasticd":  ("system", "Meshtastic radio daemon"),
+        "mosquitto":    ("system", "MQTT broker"),
+        # User-scope lab units (installed when the host is on the
+        # tracer/echo rotation — see project_tracer_durable_state_rollout)
+        "meshforge-tracer":     ("user", "Lab tracer (10-min fire)"),
+        "meshforge-echo":       ("user", "Lab echo responder"),
+        "meshforge-synth-soak": ("user", "Lab synth soak (hourly fire)"),
+        "meshforge-lab-rollup": ("user", "Lab rollup writer"),
+        "nomadnet":             ("user", "NomadNet TUI (tmux)"),
+    }
+
+    _FLEET_LOG_MAX_N = 200
+    _FLEET_LOG_DEFAULT_N = 50
+
+    def _serve_fleet_logs(self) -> None:
+        """GET /fleet/logs?unit=<id>&n=<int>&priority=<level>
+
+        Same shape as MF's endpoint — the dashboard's renderLogs() is
+        unit-aware but otherwise agnostic to which daemon answered.
+        """
+        from urllib.parse import urlparse, parse_qs
+
+        qs = parse_qs(urlparse(self.path).query)
+        unit = (qs.get("unit", [""])[0] or "").strip()
+        if unit not in self._FLEET_LOG_UNITS:
+            self._serve_json(
+                {"error": "unit not allowlisted",
+                 "allowed": sorted(self._FLEET_LOG_UNITS.keys())},
+                status=400,
+            )
+            return
+        scope, _desc = self._FLEET_LOG_UNITS[unit]
+
+        try:
+            n = int(qs.get("n", [self._FLEET_LOG_DEFAULT_N])[0])
+        except (ValueError, TypeError):
+            n = self._FLEET_LOG_DEFAULT_N
+        n = max(1, min(self._FLEET_LOG_MAX_N, n))
+
+        priority = (qs.get("priority", ["warn"])[0] or "warn").lower()
+        if priority not in ("err", "warning", "warn", "info", "debug",
+                            "notice", "crit", "alert", "emerg"):
+            priority = "warn"
+        journal_priority = "warning" if priority == "warn" else priority
+
+        from utils.fleet_logs import fetch_unit_logs
+        payload = fetch_unit_logs(
+            unit=unit, scope=scope, n=n, priority=journal_priority,
+        )
+        self._serve_json(payload)
+
+    # ─────────────────────────────────────────────────────────────────
+    # /fleet/tests + /fleet/run-test — T1.5 manual lab fires.
+    # GET /fleet/tests          → list available tests + last-fire info
+    # POST /fleet/run-test      → fire one (body: {"test": "<id>"})
+    #
+    # Same path/units as MF's allowlist so dashboard test buttons render
+    # consistently whether the targeted host is MF or MA.
+    # ─────────────────────────────────────────────────────────────────
+    _FLEET_TESTS = {
+        "tracer": (
+            "meshforge-tracer.service", "user",
+            "Tracer fire",
+            "Send one LXMF PING to each fleet peer and record ACK RTTs.",
+        ),
+        "synth-soak": (
+            "meshforge-synth-soak.service", "user",
+            "Synth soak fire",
+            "Multi-user LXMF load fire (~60s).",
+        ),
+        "lab-rollup": (
+            "meshforge-lab-rollup.service", "user",
+            "Refresh lab rollup",
+            "Re-aggregate tracer state files into the markdown panel.",
+        ),
+    }
+
+    def _serve_fleet_tests_list(self) -> None:
+        """Return the test allowlist + last-fire metadata per unit."""
+        from monitoring.fleet_aggregator import (
+            _list_timers_scope, _normalize_timer,
+        )
+        import socket as _socket
+        import time as _time
+
+        now = _time.time()
+        timer_index: Dict[str, Dict[str, Any]] = {}
+        for scope in ("system", "user"):
+            for raw in _list_timers_scope(scope):
+                entry = _normalize_timer(raw, scope, now)
+                if entry is None:
+                    continue
+                activates = raw.get("activates") or ""
+                if activates:
+                    timer_index[activates] = entry
+
+        tests = []
+        for test_id, (unit, scope, label, desc) in self._FLEET_TESTS.items():
+            paired = timer_index.get(unit)
+            tests.append({
+                "id": test_id,
+                "unit": unit,
+                "scope": scope,
+                "label": label,
+                "description": desc,
+                "last_fire_unix": paired["last_fire_unix"] if paired else None,
+                "next_fire_unix": paired["next_fire_unix"] if paired else None,
+                "age_s": paired["age_s"] if paired else None,
+            })
+
+        self._serve_json({"tests": tests, "host": _socket.gethostname()})
+
+    def _serve_fleet_run_test(self) -> None:
+        """POST /fleet/run-test — fire an allowlisted lab unit.
+
+        Body: {"test": "<id>"} where id ∈ self._FLEET_TESTS. No
+        localhost gate at this entry point — the allowlist is the
+        authorization surface, and the units are oneshots with no
+        write side-effects beyond their own logging.
+        """
+        import json as _json
+        import socket as _socket
+
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            body_raw = self.rfile.read(length) if length > 0 else b""
+            body = _json.loads(body_raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            self._serve_json(
+                {"ok": False, "error": "body must be valid JSON"},
+                status=400,
+            )
+            return
+
+        test_id = (body.get("test") or "").strip()
+        if test_id not in self._FLEET_TESTS:
+            self._serve_json(
+                {"ok": False, "error": "test not allowlisted",
+                 "allowed": sorted(self._FLEET_TESTS.keys())},
+                status=400,
+            )
+            return
+
+        unit, scope, _label, _desc = self._FLEET_TESTS[test_id]
+        from utils.fleet_test_runner import fire_unit
+        result = fire_unit(unit=unit, scope=scope)
+        result["test"] = test_id
+        result["host"] = _socket.gethostname()
+        self._serve_json(result, status=200 if result.get("ok") else 500)

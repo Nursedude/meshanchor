@@ -164,6 +164,7 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             "/fleet/health", "/fleet/slo", "/fleet/activity",
             "/fleet/rollup", "/fleet/federation",
             "/fleet/history", "/fleet/blackouts",
+            "/fleet/logs", "/fleet/tests", "/fleet/run-test",
         )
         if path_only in STABLE:
             return path_only or "/"
@@ -323,6 +324,10 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             self._serve_fleet_history()
         elif self.path == '/fleet/blackouts' or self.path.startswith('/fleet/blackouts?') or self.path == '/fleet/blackouts/':
             self._serve_fleet_blackouts()
+        elif self.path == '/fleet/logs' or self.path.startswith('/fleet/logs?'):
+            self._serve_fleet_logs()
+        elif self.path == '/fleet/tests' or self.path == '/fleet/tests/':
+            self._serve_fleet_tests_list()
         # ─────────────────────────────────────────────────────────────
         # Prometheus exposition — bare `/metrics` per Prom convention.
         # Localhost-only; gates on _is_localhost() inside the handler.
@@ -340,11 +345,25 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
                 super().do_GET()
 
     def do_POST(self):
-        """Handle POST requests for radio control and meshtastic API proxy.
+        """Handle POST requests for radio control, meshtastic API proxy,
+        and the fleet test runner.
 
-        All mutating endpoints are restricted to localhost via _is_localhost().
-        GET endpoints (node data, status, map tiles) remain open for LAN/AREDN access.
+        Authorization model:
+          - /fleet/run-test  → open to LAN; the request body's `test` id
+            must match the `_FLEET_TESTS` allowlist (operator-triggered
+            lab fires from the dashboard).
+          - Everything else  → localhost-only (mutating radio operations).
+
+        GET endpoints remain open for LAN/AREDN access.
         """
+        # Fleet test runner is allowlist-protected — open to LAN so the
+        # dashboard (which may be loaded from any /24 host) can fire the
+        # safe set of lab units. Safety is enforced by `_FLEET_TESTS`
+        # inside the handler, not by client IP.
+        if self.path == '/fleet/run-test' or self.path == '/fleet/run-test/':
+            self._serve_fleet_run_test()
+            return
+
         if not self._is_localhost():
             self.send_error(403, "Radio control only allowed from localhost")
             return
