@@ -483,7 +483,22 @@ Examples:
                         help="PID file location (default: /run/meshanchor/map-server.pid)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable verbose logging")
+    # CORS allowlist for cross-origin browser fetches. The fleet
+    # dashboard is hosted from whichever box runs MA at :5000 (typically
+    # meshanchor-server) and fetches /fleet/logs etc. from every peer
+    # in fleet.json — including MA dev surfaces on :5002. Without a
+    # LAN-permissive allowlist, the browser rejects every cross-origin
+    # response and the dashboard surfaces "TypeError: Failed to fetch".
+    # Prefix-matched (see MapRequestHandler._send_cors_header).
+    parser.add_argument("--cors-origins", type=str, default=None,
+                        help="Comma-separated CORS allowlist (prefix match). "
+                             "Default: localhost-only.")
     args = parser.parse_args()
+
+    cors_origins = None
+    if args.cors_origins:
+        cors_origins = [o.strip() for o in args.cors_origins.split(",")
+                        if o.strip()]
 
     # Configure logging — use canonical logging_config
     from utils.logging_config import setup_logging
@@ -524,6 +539,7 @@ Examples:
         port=args.port,
         host=args.host,
         websocket_port=args.websocket_port,
+        cors_origins=cors_origins,
     )
 
     # Signal handlers for graceful shutdown

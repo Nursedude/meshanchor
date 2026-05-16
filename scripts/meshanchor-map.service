@@ -20,11 +20,17 @@ RuntimeDirectory=meshanchor
 # the canonical :5000 + :5001 on the NOC during the 2-week side-by-side
 # field-test (per the boundary observability road map). On cutover, flip
 # these back to 5000 + 5001 — see the corresponding road map item.
+# --cors-origins set so the fleet dashboard (hosted from meshanchor-server
+# at :5000) can reach this box's /fleet/logs etc. cross-origin from a
+# browser. Prefix-matched (see _send_cors_header) so 192.168.86. covers
+# every host on the operator's /24 without per-box config. Add new LAN
+# prefixes here if the fleet expands (e.g. AREDN 10.x.y.z).
 ExecStart=/bin/bash -c '\
+    CORS="http://localhost,http://127.0.0.1,http://192.168.86."; \
     if [ -x /opt/meshanchor/venv/bin/python ]; then \
-        exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5002 --websocket-port 5003; \
+        exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5002 --websocket-port 5003 --cors-origins "$CORS"; \
     else \
-        exec python3 -m utils.map_data_service --daemon --port 5002 --websocket-port 5003; \
+        exec python3 -m utils.map_data_service --daemon --port 5002 --websocket-port 5003 --cors-origins "$CORS"; \
     fi'
 
 # Graceful shutdown

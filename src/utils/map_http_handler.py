@@ -118,15 +118,26 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
 
         When allowed_origins is None: restrict to localhost (secure default)
         When allowed_origins is a list: only allow those origins
+
+        If the request origin is not permitted, no Access-Control-Allow-Origin
+        header is sent at all. The previous fallback to
+        ``http://localhost:5000`` for any unknown origin was actively
+        misleading — the browser saw a mismatch between Origin and
+        Allow-Origin and rejected the response, but the rejection mode
+        was harder to diagnose than just dropping the header outright
+        (which produces the same outcome but doesn't leak an entry from
+        the allowlist regardless of who asked).
+
+        Mirrors MF's _send_cors_header in
+        meshforge/src/utils/map_http_handler.py.
         """
         origin = self.headers.get('Origin', '')
+        if not origin:
+            return
         origins = self.allowed_origins if self.allowed_origins is not None else self._DEFAULT_ORIGINS
-
-        if origin and any(origin.startswith(allowed) for allowed in origins):
+        if any(origin.startswith(allowed) for allowed in origins):
             self.send_header('Access-Control-Allow-Origin', origin)
-        else:
-            # Default fallback for localhost
-            self.send_header('Access-Control-Allow-Origin', 'http://localhost:5000')
+            self.send_header('Vary', 'Origin')
 
     def send_response(self, code, message=None):
         """Override to capture status code for HTTP-side instrumentation.
