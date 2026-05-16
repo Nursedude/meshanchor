@@ -517,6 +517,16 @@ Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
    rollup-handler threads start piling up. Audit `MapServer.start()` +
    `start_background()` BOTH — MF shipped 79f5d7b with the call only
    in `start_background()` (commit 368e591 caught it).
+5. [#130](https://github.com/Nursedude/meshanchor/issues/130) — fix
+   `non_self_peers()` to filter self by host+port, not just by name.
+   Discovered 2026-05-16 (post-restart recurrence of #34): MA-server's
+   fleet.json carried a `"name": "meshanchor-server-self"` self entry
+   that the filter missed, so every `/fleet/rollup` HTTP-polled its
+   own listener — doubling the thread arrival rate and recreating the
+   pile-up in ~8 min after each restart. Local mitigation: dropped the
+   self entry from `~/.config/meshanchor/fleet.json` on MA-server
+   (post-mitigation: /fleet/rollup 4s steady, 13 threads, blackout
+   banner cleared).
 
 **Cross-refs**: MF `project_rnsd_rpc_listener_wedge.md` (the upstream
 cause class — recurrent on moc1).
