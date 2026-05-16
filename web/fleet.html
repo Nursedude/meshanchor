@@ -1663,13 +1663,9 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            $('logs-refresh').addEventListener('click', renderLogs);
-            $('logs-host').addEventListener('change', renderLogs);
-            $('logs-unit').addEventListener('change', renderLogs);
-            $('logs-priority').addEventListener('change', renderLogs);
-            $('runtests-host').addEventListener('change', refreshRunTests);
-        });
+        // DOMContentLoaded wiring delegated to the panel registry —
+        // each on-demand panel carries its own init() that runs here.
+        document.addEventListener('DOMContentLoaded', initAllPanels);
 
         // Active = re-announced inside this window. moc/moc3 typically
         // announce every 5-15 min; the threshold is generous (20 min)
@@ -2026,32 +2022,116 @@
             const all = Object.values(aggregatedErrors).flat();
             renderErrors(all);
         }
-        function tickFast() {
-            // Live panel: SLO + activity. Sparklines refresh right
-            // after the SLO render lands so the boundaries table and
-            // its sparkline column stay in lockstep — eliminates the
-            // "graphs disappear between ticks" flicker.
-            pollEndpoint('slo', '/fleet/slo', renderSlo, () => pollSparklines());
-            pollEndpoint('activity', '/fleet/activity', renderActivity);
+        // ─── T2 plugin registry ─────────────────────────────────────
+        //
+        // Each panel registers with the dispatcher. Adding a new panel
+        // becomes a one-place edit (registerPanel(...) call) instead
+        // of three (tickSlow body + render fn + DOMContentLoaded wiring).
+        // The registry keeps existing render functions intact — they
+        // just gain a registration entry. Migration is mechanical;
+        // future panels only need the registration call.
+        //
+        // Panel spec:
+        //   id          — unique string, useful for debugging
+        //   source      — data feed key (matches POLL_SOURCES entry)
+        //                 OR 'on_demand' for event-driven panels that
+        //                 only need init wiring (Logs / RunTests pickers).
+        //   render(data) — called every tick of the source's poll cycle
+        //   init?()      — called once on DOMContentLoaded (event wiring)
+        //
+        // Source spec (POLL_SOURCES):
+        //   path        — /fleet/* endpoint
+        //   scope       — 'fast' (5s) or 'slow' (15s) tick group
+        //   onSuccess?  — post-fetch hook (e.g. sparkline refresh after SLO)
+        const FLEET_PANELS = [];
+        function registerPanel(spec) {
+            FLEET_PANELS.push(spec);
         }
-        function tickSlow() {
-            // Rollup is ~5s on this host (SSH peer polling); federation
-            // is steadier. Both change slowly enough that 15s is plenty
-            // and avoids the overlap-with-itself thrash on rollup.
-            pollEndpoint('rollup', '/fleet/rollup', (data) => {
-                renderRollup(data);
-                renderSubsystem(data);
-                renderSchedules(data);
-                renderCiPill(data);
-                populateLogsHosts(data);
-                populateRunTestsHosts(data);
-            });
-            pollEndpoint('federation', '/fleet/federation', renderFederation);
-            // Lab rollup updates every 10min on the tester box, so 15s
-            // dashboard polling is generous. It cross-host-HTTPs to the
-            // MF tester box; failure surfaces as `error` in the payload.
-            pollEndpoint('labRollup', '/fleet/lab-rollup', renderLabRollup);
+        function dispatchPanels(source, data) {
+            for (const p of FLEET_PANELS) {
+                if (p.source !== source) continue;
+                try {
+                    p.render(data);
+                } catch (e) {
+                    console.error(`fleet panel ${p.id} render failed:`, e);
+                }
+            }
         }
+        function initAllPanels() {
+            for (const p of FLEET_PANELS) {
+                if (!p.init) continue;
+                try {
+                    p.init();
+                } catch (e) {
+                    console.error(`fleet panel ${p.id} init failed:`, e);
+                }
+            }
+        }
+        const POLL_SOURCES = {
+            // Fast tick — live panel state. Sparklines refresh after
+            // SLO lands so the boundaries table + its sparkline column
+            // stay in lockstep ("graphs disappear between ticks" fix).
+            slo:        { path: '/fleet/slo',        scope: 'fast', onSuccess: () => pollSparklines() },
+            activity:   { path: '/fleet/activity',   scope: 'fast' },
+            // Slow tick — rollup is ~5s on the SSH peer poll, federation
+            // is steadier; 15s avoids overlap thrash on rollup. Lab
+            // rollup refreshes every 10min on the tester box, so the
+            // 15s dashboard cadence is generous.
+            rollup:     { path: '/fleet/rollup',     scope: 'slow' },
+            federation: { path: '/fleet/federation', scope: 'slow' },
+            lab_rollup: { path: '/fleet/lab-rollup', scope: 'slow' },
+        };
+        function runTickForScope(scope) {
+            for (const [src, spec] of Object.entries(POLL_SOURCES)) {
+                if (spec.scope !== scope) continue;
+                pollEndpoint(
+                    src, spec.path,
+                    (data) => dispatchPanels(src, data),
+                    spec.onSuccess,
+                );
+            }
+        }
+        function tickFast() { runTickForScope('fast'); }
+        function tickSlow() { runTickForScope('slow'); }
+
+        // ─── Panel registrations ────────────────────────────────────
+        //
+        // One block per panel. Order doesn't matter — the dispatcher
+        // iterates the whole list each tick. Keep entries grouped by
+        // source for readability.
+        registerPanel({ id: 'slo',         source: 'slo',        render: renderSlo });
+        registerPanel({ id: 'activity',    source: 'activity',   render: renderActivity });
+        registerPanel({ id: 'rollup',      source: 'rollup',     render: renderRollup });
+        registerPanel({ id: 'subsystem',   source: 'rollup',     render: renderSubsystem });
+        registerPanel({ id: 'schedules',   source: 'rollup',     render: renderSchedules });
+        registerPanel({ id: 'ci_pill',     source: 'rollup',     render: renderCiPill });
+        registerPanel({ id: 'logs_hosts',  source: 'rollup',     render: populateLogsHosts });
+        registerPanel({ id: 'runtests_hosts', source: 'rollup',  render: populateRunTestsHosts });
+        registerPanel({ id: 'federation',  source: 'federation', render: renderFederation });
+        registerPanel({ id: 'lab_rollup',  source: 'lab_rollup', render: renderLabRollup });
+
+        // On-demand panels — no source feed, just event wiring on init.
+        // Migrated from the old DOMContentLoaded listener so the same
+        // registration shape covers tick-driven AND event-driven panels.
+        registerPanel({
+            id: 'logs',
+            source: 'on_demand',
+            render: () => {},
+            init: () => {
+                $('logs-refresh').addEventListener('click', renderLogs);
+                $('logs-host').addEventListener('change', renderLogs);
+                $('logs-unit').addEventListener('change', renderLogs);
+                $('logs-priority').addEventListener('change', renderLogs);
+            },
+        });
+        registerPanel({
+            id: 'runtests',
+            source: 'on_demand',
+            render: () => {},
+            init: () => {
+                $('runtests-host').addEventListener('change', refreshRunTests);
+            },
+        });
         function staleTick() {
             const indicator = $('indicator');
             if (lastUpdateMs && (Date.now() - lastUpdateMs) > STALE_THRESHOLD_MS) {
