@@ -453,3 +453,77 @@ The contract is one-way for now: the bridge handler does NOT yet consume the
 supervisor — that's a follow-up PR. Until then, only one process should hold
 the radio at a time. The lint MF014 + persistent-owner check in
 `acquire_for_connect` prevent accidental dual ownership.
+
+
+---
+
+## Issue #34: meshanchor-map handler thread leakage under slow-peer rollup (2026-05-16)
+
+**Observed**: meshanchor-server's `meshanchor-map.service` ran for ~4 h
+(09:31 → 13:30 HST) and degraded into a state where:
+- Main thread saturated at ~110 % CPU continuously.
+- **526 sleeping handler threads** accumulated (against the design
+  one-thread-per-request shape of ThreadingHTTPServer + `daemon_threads=True`).
+- `/healthz` stayed fast (200 in ~2 ms; zero-work fast path) while
+  `/api/status`, `/fleet/health`, and `/fleet/slo` all timed out (5-15 s,
+  HTTP 000 / no response). RSS 760 MB.
+- BrokenPipeError visible in the journal — clients disconnect mid-response,
+  but the server's handler thread keeps running.
+
+**Trigger**: same wall-clock window as the moc1 rnsd-RPC wedge recurrence
+(MeshForge `project_rnsd_rpc_listener_wedge` #3, 2026-05-16). The
+fleet-rollup endpoint polls every peer in `~/.config/meshanchor/fleet.json`
+serially with `PEER_HTTP_TIMEOUT_S = 3.0` (`src/monitoring/fleet_rollup.py`).
+With ~7 peers in fleet.json and one peer wedged, each `/fleet/rollup` call
+holds a handler thread for 21 s worst-case. Dashboard polls at ~5 s; the
+arrival rate exceeds the drain rate, threads pile up indefinitely.
+
+**Why daemon_threads=True wasn't enough**: that flag only governs
+shutdown — daemon threads die when the server stops. While running,
+handlers stay alive until `do_GET` returns. A handler blocked in
+`urllib.request.urlopen()` against a wedged peer pins the thread for
+the full timeout window. Multiple endpoints (`/fleet/health`,
+`/fleet/slo`, `/fleet/rollup`) all share this pattern.
+
+**Symptom shape on the rollup itself**: per the operator's `/fleet`
+dashboard, peer rows show `peer fetch: timeout: timed out` — which is
+the *handler's* outbound urllib timeout against the wedged peer, NOT a
+connection-refused or DNS failure. Distinguishing this shape from the
+moc1 case (where moc1 itself was the wedged peer) matters: the moc1
+case is "this host is the cause," the MA-server case is "this host is
+downstream of the cause but its handlers are stuck upstream of
+recovery."
+
+**Immediate recovery** (verified 2026-05-16 13:30 HST):
+```bash
+ssh meshanchor-server 'sudo systemctl restart meshanchor-map.service'
+```
+Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
+
+**Open follow-ups (separate PRs)**:
+1. **Concurrent peer fetches in `collect_fleet_rollup`** — replace the
+   serial loop at `src/monitoring/fleet_rollup.py:320` with
+   `concurrent.futures.ThreadPoolExecutor(max_workers=len(peers))` +
+   `as_completed`. Worst-case latency goes from `N × timeout` to
+   `timeout`. Bounded by the fleet.json size (typically 5-10 peers), no
+   resource explosion risk.
+2. **Tighter outbound peer urllib timeouts** — current 3 s is fine for
+   a healthy LAN; a wedged peer never recovers within 3 s, so 1.5 s
+   would halve the worst-case handler hold without losing real signals.
+3. **Handler-side bound on concurrent rollup requests** — gate
+   `_serve_fleet_rollup` (and `_serve_fleet_slo` / `_serve_fleet_health`)
+   behind a small semaphore (e.g. 4 in flight max). Excess requests get
+   429 with `Retry-After: 2` — protects the server from dashboard
+   over-polling during a peer outage.
+4. **Cascade detector port** — MeshForge's `cascade_detector` +
+   `tracer_stale_fire` fingerprint (MF commit `368e591`, 2026-05-16)
+   surfaces the pre-failure shape one cadence after the threshold.
+   Porting to MA would let MA-server alarm on a wedged peer *before*
+   its rollup-handler threads start accumulating. The MF design uses
+   in-memory state + 30 s cadence; cheap to adopt. If ported, audit
+   the wiring in BOTH `MapServer.start()` and `start_background()` —
+   MF shipped 79f5d7b with the call only in `start_background()`,
+   leaving the systemd `--daemon` path dead until 368e591 fixed it.
+
+**Cross-refs**: MF `project_rnsd_rpc_listener_wedge.md` (the upstream
+cause class — recurrent on moc1).
