@@ -1556,28 +1556,44 @@
         // styling to the fail % column and render real <table> markup
         // (not just a <pre> blob).
         //
+        // Dual-window format (commit 3bbcb27, 2026-05-15): the rollup
+        // emits one table per window — "### Last 1h (right-now signal)"
+        // first, then "### Last 24h". Parser returns one section per
+        // heading. Single-window output (old format, or LOOKBACK_HOURS=1)
+        // is preserved as a single section with the H2 as heading.
+        //
         // If the upstream rollup is a fix-hint markdown body (404 from
         // MF when meshforge-lab-rollup.timer isn't installed on the
         // tester box), we render it as a styled hint block instead.
         function _parseRollupMd(md) {
-            // Return { hint: null, rows: [...] } or { hint: <text>, rows: [] }.
-            if (!md) return { hint: null, rows: [] };
+            // Return { hint: null, sections: [{heading, rows}, ...] }
+            // or { hint: <text>, sections: [] }.
+            if (!md) return { hint: null, sections: [] };
             // Heuristic: a fix-hint starts with "# " (h1), the real
             // rollup starts with "## Lab traffic rollup".
             const trimmed = md.trim();
             if (trimmed.startsWith('# ') && !trimmed.startsWith('## ')) {
-                return { hint: trimmed, rows: [] };
+                return { hint: trimmed, sections: [] };
             }
             const lines = trimmed.split('\n');
-            const rows = [];
+            const sections = [];
+            // Default current-section captures rows that appear before
+            // any "### " heading — handles the old single-window output.
+            let current = { heading: 'Lab traffic rollup', rows: [] };
             let inTable = false;
             for (const line of lines) {
+                if (line.startsWith('### ')) {
+                    if (current.rows.length > 0) sections.push(current);
+                    current = { heading: line.slice(4).trim(), rows: [] };
+                    inTable = false;
+                    continue;
+                }
                 if (line.startsWith('| pair ')) { inTable = true; continue; }
                 if (line.startsWith('|---')) continue;
                 if (inTable && line.startsWith('|')) {
                     const cells = line.split('|').slice(1, -1).map(c => c.trim());
                     if (cells.length === 6) {
-                        rows.push({
+                        current.rows.push({
                             pair: cells[0],
                             samples: cells[1],
                             mean_ms: cells[2],
@@ -1590,7 +1606,8 @@
                     inTable = false;  // table ended
                 }
             }
-            return { hint: null, rows };
+            if (current.rows.length > 0) sections.push(current);
+            return { hint: null, sections };
         }
         function _failClass(pct) {
             if (pct >= 25) return 'high';
@@ -1623,41 +1640,59 @@
                 content.appendChild(hint);
                 return;
             }
-            if (parsed.rows.length === 0) {
+            if (parsed.sections.length === 0) {
                 content.appendChild(el('div', { class: 'empty', text:
                     'no rollup rows yet — tester box may not have fired its tracer'
                 }));
                 return;
             }
-            const table = el('table', { class: 'lab-leaderboard' });
-            const thead = el('thead', {}, el('tr', {}, [
-                el('th', { text: 'pair' }),
-                el('th', { class: 'num', text: 'samples' }),
-                el('th', { class: 'num', text: 'mean ms' }),
-                el('th', { class: 'num', text: 'p95 ms' }),
-                el('th', { class: 'num', text: 'fail %' }),
-                el('th', { text: 'breakdown' }),
-            ]));
-            table.appendChild(thead);
-            const tbody = el('tbody', {});
-            // Cap at 20 rows. Fleet typically produces 5-10 pairs;
-            // a wider cap protects against malformed input.
-            for (const r of parsed.rows.slice(0, 20)) {
-                const tr = el('tr', {}, [
-                    el('td', { text: r.pair }),
-                    el('td', { class: 'num', text: r.samples }),
-                    el('td', { class: 'num', text: r.mean_ms }),
-                    el('td', { class: 'num', text: r.p95_ms }),
-                    el('td', {
-                        class: 'num fail-cell ' + _failClass(r.fail_pct),
-                        text: r.fail_pct.toFixed(1),
-                    }),
-                    el('td', { text: r.breakdown }),
-                ]);
-                tbody.appendChild(tr);
+            // One <table> per window section. Sub-headings reuse the
+            // markdown text ("Last 1h (right-now signal)" / "Last 24h").
+            // Fleet typically produces 30-40 pairs across 5-6 boxes;
+            // 50-row cap keeps the panel rendering even with custom
+            // WINDOWS sets that emit a third bucket.
+            for (const section of parsed.sections) {
+                const h = el('h3', {
+                    text: section.heading,
+                    style: 'margin: 14px 0 6px; font-size: 12px; ' +
+                           'color: #6a7886; font-weight: normal;',
+                });
+                content.appendChild(h);
+                if (section.rows.length === 0) {
+                    content.appendChild(el('div', {
+                        class: 'empty',
+                        text: 'no fires in this window',
+                    }));
+                    continue;
+                }
+                const table = el('table', { class: 'lab-leaderboard' });
+                const thead = el('thead', {}, el('tr', {}, [
+                    el('th', { text: 'pair' }),
+                    el('th', { class: 'num', text: 'samples' }),
+                    el('th', { class: 'num', text: 'mean ms' }),
+                    el('th', { class: 'num', text: 'p95 ms' }),
+                    el('th', { class: 'num', text: 'fail %' }),
+                    el('th', { text: 'breakdown' }),
+                ]));
+                table.appendChild(thead);
+                const tbody = el('tbody', {});
+                for (const r of section.rows.slice(0, 50)) {
+                    const tr = el('tr', {}, [
+                        el('td', { text: r.pair }),
+                        el('td', { class: 'num', text: r.samples }),
+                        el('td', { class: 'num', text: r.mean_ms }),
+                        el('td', { class: 'num', text: r.p95_ms }),
+                        el('td', {
+                            class: 'num fail-cell ' + _failClass(r.fail_pct),
+                            text: r.fail_pct.toFixed(1),
+                        }),
+                        el('td', { text: r.breakdown }),
+                    ]);
+                    tbody.appendChild(tr);
+                }
+                table.appendChild(tbody);
+                content.appendChild(table);
             }
-            table.appendChild(tbody);
-            content.appendChild(table);
         }
 
         function renderErrors(errors) {
