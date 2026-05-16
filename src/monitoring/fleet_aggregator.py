@@ -576,15 +576,39 @@ SCHEDULE_STALE_MULTIPLIER = 2.0
 
 def _list_timers_scope(scope: str) -> List[Dict[str, Any]]:
     """Return systemctl timers in the given scope. Same env-injection
-    fix as MF's fleet_snapshot for daemon-context `--user` calls."""
-    cmd = ["systemctl"]
-    env = None
-    if scope == "user":
-        cmd.append("--user")
-        if "XDG_RUNTIME_DIR" not in os.environ:
-            env = os.environ.copy()
-            env["XDG_RUNTIME_DIR"] = f"/run/user/{os.geteuid()}"
-    cmd.extend(["list-timers", "--all", "--output=json"])
+    fix as MF's fleet_snapshot for daemon-context `--user` calls.
+
+    Root-firing-operator case: when this process runs as root (the
+    meshanchor-map.service-on-meshanchor-server case) and
+    ``scope == "user"``, root's own /run/user/0 has no bus socket.
+    Drop privilege to the operator user via ``sudo -n -u <op>``
+    so the call lands on the operator's user systemd manager.
+    Mirrors the fire_unit pattern from MA c6d7609. Requires a
+    sudoers entry on root-daemon hosts.
+    """
+    cmd: List[str]
+    env: Optional[Dict[str, str]] = None
+
+    if scope == "user" and os.geteuid() == 0:
+        from utils.fleet_test_runner import _find_operator_user
+        op = _find_operator_user()
+        if op is None:
+            return []
+        op_uid, op_name = op
+        cmd = [
+            "sudo", "-n", "-u", op_name,
+            "env", f"XDG_RUNTIME_DIR=/run/user/{op_uid}",
+            "systemctl", "--user", "list-timers", "--all", "--output=json",
+        ]
+    else:
+        cmd = ["systemctl"]
+        if scope == "user":
+            cmd.append("--user")
+            if "XDG_RUNTIME_DIR" not in os.environ:
+                env = os.environ.copy()
+                env["XDG_RUNTIME_DIR"] = f"/run/user/{os.geteuid()}"
+        cmd.extend(["list-timers", "--all", "--output=json"])
+
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, env=env)
         if r.returncode != 0 or not r.stdout.strip():

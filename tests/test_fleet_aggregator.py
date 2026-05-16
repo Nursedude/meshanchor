@@ -645,3 +645,90 @@ def test_activity_view_drops_clean_boundaries():
     }
     view = fa.activity_view(snap)
     assert view["slow_boundaries"] == []
+
+
+# ─── _list_timers_scope: root→operator drop ─────────────────────────────
+#
+# meshanchor-map.service runs as User=root on meshanchor-server; root
+# has no /run/user/0/bus, so `systemctl --user list-timers` from root
+# only sees system timers. The drop mirrors fire_unit's c6d7609 fix —
+# `sudo -n -u <op> env XDG_RUNTIME_DIR=/run/user/<uid> systemctl --user
+# list-timers ...`. Closes the schedules-panel under-report on
+# meshanchor-server (only meshanchor-daemon-restart showed when
+# wh6gxz has 3+ active meshforge-* user timers).
+
+
+def _capture_subprocess_run(returncode: int = 0, stdout: str = "[]"):
+    captured = {}
+
+    def _fake(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs.get("env")
+        return MagicMock(returncode=returncode, stdout=stdout, stderr="")
+
+    return _fake, captured
+
+
+def test_list_timers_non_root_user_scope_injects_xdg(monkeypatch):
+    """Non-root daemon path: inject XDG_RUNTIME_DIR, plain systemctl."""
+    fake, cap = _capture_subprocess_run()
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 1000)
+    monkeypatch.setattr(
+        "monitoring.fleet_aggregator.os.environ",
+        {k: v for k, v in __import__("os").environ.items() if k != "XDG_RUNTIME_DIR"},
+    )
+    monkeypatch.setattr("monitoring.fleet_aggregator.subprocess.run", fake)
+    fa._list_timers_scope("user")
+    assert cap["cmd"][0] == "systemctl"
+    assert "--user" in cap["cmd"]
+    assert "sudo" not in cap["cmd"]
+    assert cap["env"]["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+
+def test_list_timers_root_user_scope_drops_to_operator(monkeypatch):
+    """Root + user scope: drop privilege to operator. The
+    meshanchor-server case — daemon User=root, operator wh6gxz."""
+    fake, cap = _capture_subprocess_run()
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 0)
+    monkeypatch.setattr(
+        "utils.fleet_test_runner._find_operator_user",
+        lambda: (1000, "wh6gxz"),
+    )
+    monkeypatch.setattr("monitoring.fleet_aggregator.subprocess.run", fake)
+    fa._list_timers_scope("user")
+    assert cap["cmd"][0] == "sudo"
+    assert "-n" in cap["cmd"]
+    assert cap["cmd"][cap["cmd"].index("-u") + 1] == "wh6gxz"
+    env_idx = cap["cmd"].index("env")
+    assert cap["cmd"][env_idx + 1] == "XDG_RUNTIME_DIR=/run/user/1000"
+    assert "systemctl" in cap["cmd"]
+    assert "--user" in cap["cmd"]
+    assert "list-timers" in cap["cmd"]
+
+
+def test_list_timers_root_system_scope_stays_plain(monkeypatch):
+    """Root + system scope: no drop, no --user, no sudo."""
+    fake, cap = _capture_subprocess_run()
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 0)
+    monkeypatch.setattr("monitoring.fleet_aggregator.subprocess.run", fake)
+    fa._list_timers_scope("system")
+    assert cap["cmd"][0] == "systemctl"
+    assert "--user" not in cap["cmd"]
+    assert "sudo" not in cap["cmd"]
+
+
+def test_list_timers_root_user_scope_no_operator_returns_empty(monkeypatch):
+    """No candidate UID in /run/user/ → return [] without invoking
+    subprocess. Avoids cryptic root-bus errors leaking into the panel."""
+
+    def _should_not_be_called(*args, **kwargs):
+        raise AssertionError("subprocess.run must not be invoked")
+
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 0)
+    monkeypatch.setattr(
+        "utils.fleet_test_runner._find_operator_user", lambda: None,
+    )
+    monkeypatch.setattr(
+        "monitoring.fleet_aggregator.subprocess.run", _should_not_be_called,
+    )
+    assert fa._list_timers_scope("user") == []
