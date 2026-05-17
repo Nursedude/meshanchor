@@ -527,6 +527,19 @@ Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
    self entry from `~/.config/meshanchor/fleet.json` on MA-server
    (post-mitigation: /fleet/rollup 4s steady, 13 threads, blackout
    banner cleared).
+6. [#131](https://github.com/Nursedude/meshanchor/issues/131) —
+   pile-up recurs even with healthy peers. Second post-restart
+   recurrence 2026-05-16 ~14:25 HST: 228 threads in 36 min with all 5
+   fleet peers responding in 91-260 ms (no wedged peer, no
+   self-loopback). Sustained dashboard polling alone is enough on
+   Pi-class hardware to saturate the GIL and starve handler threads.
+   Strengthens [#128](https://github.com/Nursedude/meshanchor/issues/128)
+   (in-flight semaphore) as the *gating* fix — #126 and #127 reduce
+   per-rollup latency but neither caps concurrent in-flight handlers.
+   Restart cadence today: 13:30 -> 13:50 (re-piled, fixed self-loop) ->
+   14:25 (re-piled w/ healthy peers). **Recurrence is expected until
+   #128 lands**; rely on `meshforge-map-restart.timer`-equivalent
+   weekly + ad-hoc operator restart in the meantime.
 
 **Cross-refs**: MF `project_rnsd_rpc_listener_wedge.md` (the upstream
 cause class — recurrent on moc1).
