@@ -44,12 +44,22 @@ logger = logging.getLogger(__name__)
 # next poll cycle, so the cap manifests as occasional grid cells
 # showing "busy" rather than a wedged server.
 #
-# Default cap 4: enough headroom for typical dashboard polling
-# (1-2 in flight at steady state) + a debug curl + one ad-hoc poll.
-# Override via MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX env var. A value of
-# 0 disables the gate entirely (escape hatch for diagnostic sessions).
+# Default cap 8: dashboard fires up to 3 gated endpoints simultaneously
+# on the every-15s tick overlap (/fleet/slo + /fleet/activity from the
+# fast tick, /fleet/rollup from the slow tick). Each handler can take
+# 100ms-3s on Pi-class hardware. Cap=4 left no headroom for ad-hoc
+# curls or a second browser tab and produced spurious 429s on normal
+# dashboard load (caught 2026-05-16 right after #128 shipped — the
+# Prom counter showed steady 429 accumulation under no synthetic
+# load). Cap=8 absorbs natural overlap + one debug curl + a brief
+# soak burst without 429ing the dashboard, while still bounding
+# runaway accumulation (the failure mode #128 was written to stop
+# produced 228 threads in 36 min under effectively unbounded
+# concurrency; cap=8 caps that absolutely). Override via
+# MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX env var. A value of 0 disables
+# the gate entirely (escape hatch for diagnostic sessions).
 
-_DEFAULT_HEAVY_INFLIGHT_MAX = 4
+_DEFAULT_HEAVY_INFLIGHT_MAX = 8
 _HEAVY_INFLIGHT_ENV = "MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX"
 
 

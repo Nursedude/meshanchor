@@ -69,7 +69,7 @@ class TestResolveInflightMax:
 
     def test_default_when_env_unset(self, monkeypatch):
         monkeypatch.delenv("MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX", raising=False)
-        assert _map_fleet._resolve_inflight_max() == 4
+        assert _map_fleet._resolve_inflight_max() == 8
 
     def test_env_integer_override(self, monkeypatch):
         monkeypatch.setenv("MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX", "12")
@@ -81,11 +81,11 @@ class TestResolveInflightMax:
 
     def test_env_invalid_falls_back_to_default(self, monkeypatch):
         monkeypatch.setenv("MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX", "not-a-number")
-        assert _map_fleet._resolve_inflight_max() == 4
+        assert _map_fleet._resolve_inflight_max() == 8
 
     def test_env_negative_falls_back_to_default(self, monkeypatch):
         monkeypatch.setenv("MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX", "-5")
-        assert _map_fleet._resolve_inflight_max() == 4
+        assert _map_fleet._resolve_inflight_max() == 8
 
 
 # ──────────────────────────────────────────────────────────────────────

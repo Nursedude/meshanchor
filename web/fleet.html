@@ -838,8 +838,16 @@
             });
             return e;
         }
+        // Sentinel returned by fetchJson when the server replies 429.
+        // The map daemon caps concurrent /fleet/* handlers (Issue #128);
+        // a 429 means "the server is busy, your next tick will succeed"
+        // — NOT a failure. pollEndpoint inspects this and skips both
+        // the render AND the error-card update, so transient cap-hits
+        // do not surface as user-facing errors.
+        const TRANSIENT_BUSY = Symbol('fetchJson:429');
         async function fetchJson(path) {
             const resp = await fetch(path, { headers: { 'Accept': 'application/json' } });
+            if (resp.status === 429) return TRANSIENT_BUSY;
             if (!resp.ok) throw new Error(`${path} ${resp.status}`);
             return resp.json();
         }
@@ -2247,6 +2255,15 @@
             inFlight[name] = true;
             try {
                 const body = await fetchJson(path);
+                if (body === TRANSIENT_BUSY) {
+                    // Server returned 429 — concurrent-cap protection
+                    // kicked in. This is normal under poll spikes /
+                    // restart warmup; the next tick will succeed. Skip
+                    // the render so panels keep the last good data, and
+                    // leave the existing error card alone (do NOT bump
+                    // a new error — that was the pre-fix UX bug).
+                    return;
+                }
                 render(body);
                 aggregatedErrors[name] = body.errors || [];
                 bumpUpdate();
