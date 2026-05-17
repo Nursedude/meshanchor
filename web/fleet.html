@@ -838,16 +838,25 @@
             });
             return e;
         }
-        // Sentinel returned by fetchJson when the server replies 429.
+        // Object returned by fetchJson when the server replies 429.
         // The map daemon caps concurrent /fleet/* handlers (Issue #128);
         // a 429 means "the server is busy, your next tick will succeed"
-        // — NOT a failure. pollEndpoint inspects this and skips both
-        // the render AND the error-card update, so transient cap-hits
-        // do not surface as user-facing errors.
-        const TRANSIENT_BUSY = Symbol('fetchJson:429');
+        // — NOT a failure. The retry_s field carries the server's
+        // Retry-After hint so pollEndpoint can reschedule sooner than
+        // the panel's natural tick interval. Without this, an early
+        // 429 would leave the panel empty for the full 15s slow-tick
+        // window — the operator-visible "no data" UX bug caught
+        // 2026-05-16 right after cap=8 deploy.
+        function isTransientBusy(x) {
+            return x && typeof x === 'object' && x.__transient_busy === true;
+        }
         async function fetchJson(path) {
             const resp = await fetch(path, { headers: { 'Accept': 'application/json' } });
-            if (resp.status === 429) return TRANSIENT_BUSY;
+            if (resp.status === 429) {
+                const retryHdr = resp.headers.get('Retry-After');
+                const retry_s = Math.max(1, parseInt(retryHdr || '2', 10) || 2);
+                return { __transient_busy: true, retry_s };
+            }
             if (!resp.ok) throw new Error(`${path} ${resp.status}`);
             return resp.json();
         }
@@ -2255,13 +2264,19 @@
             inFlight[name] = true;
             try {
                 const body = await fetchJson(path);
-                if (body === TRANSIENT_BUSY) {
+                if (isTransientBusy(body)) {
                     // Server returned 429 — concurrent-cap protection
-                    // kicked in. This is normal under poll spikes /
-                    // restart warmup; the next tick will succeed. Skip
-                    // the render so panels keep the last good data, and
-                    // leave the existing error card alone (do NOT bump
-                    // a new error — that was the pre-fix UX bug).
+                    // kicked in. Don't render (keep last good data) and
+                    // don't bump a new error card. Reschedule a retry
+                    // after the server's Retry-After hint so panels
+                    // recover within seconds rather than waiting for
+                    // the panel's natural 5-15s tick. Cap one retry
+                    // per cycle so a sustained over-cap event doesn't
+                    // turn into a tight retry loop — the natural tick
+                    // takes over after that.
+                    setTimeout(() => {
+                        pollEndpoint(name, path, render, onSuccess);
+                    }, body.retry_s * 1000);
                     return;
                 }
                 render(body);

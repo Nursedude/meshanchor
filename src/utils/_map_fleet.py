@@ -44,22 +44,25 @@ logger = logging.getLogger(__name__)
 # next poll cycle, so the cap manifests as occasional grid cells
 # showing "busy" rather than a wedged server.
 #
-# Default cap 8: dashboard fires up to 3 gated endpoints simultaneously
-# on the every-15s tick overlap (/fleet/slo + /fleet/activity from the
-# fast tick, /fleet/rollup from the slow tick). Each handler can take
-# 100ms-3s on Pi-class hardware. Cap=4 left no headroom for ad-hoc
-# curls or a second browser tab and produced spurious 429s on normal
-# dashboard load (caught 2026-05-16 right after #128 shipped — the
-# Prom counter showed steady 429 accumulation under no synthetic
-# load). Cap=8 absorbs natural overlap + one debug curl + a brief
-# soak burst without 429ing the dashboard, while still bounding
-# runaway accumulation (the failure mode #128 was written to stop
-# produced 228 threads in 36 min under effectively unbounded
-# concurrency; cap=8 caps that absolutely). Override via
-# MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX env var. A value of 0 disables
-# the gate entirely (escape hatch for diagnostic sessions).
+# Default cap 16: covers concurrent demand from
+#   * dashboard tab: up to 3 gated handlers in flight at the every-15s
+#     fast+slow tick overlap (/fleet/slo, /fleet/activity, /fleet/rollup)
+#   * meshanchor-fleet-collector.service: 2 gated handlers every 60s
+#     (/fleet/slo + /fleet/activity)
+#   * second dashboard tab (operator working from two devices): +3
+#   * ad-hoc curls and external monitoring: +2-4
+# Initial cap=4 then cap=8 both were calibrated against the dashboard
+# alone and missed the internal fleet-collector + multi-tab cases —
+# operator caught both in field testing 2026-05-16. Cap=16 absorbs
+# every observed legitimate load shape on Pi-class hardware (4 cores,
+# 4 GB RAM) with comfortable headroom. The failure mode #128 was
+# written to stop produced 228 threads in 36 min under effectively
+# unbounded concurrency; cap=16 still caps that hard absolute (~7%
+# of the broken case). Override via MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX
+# env var; 0 disables the gate entirely (escape hatch for diagnostic
+# sessions).
 
-_DEFAULT_HEAVY_INFLIGHT_MAX = 8
+_DEFAULT_HEAVY_INFLIGHT_MAX = 16
 _HEAVY_INFLIGHT_ENV = "MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX"
 
 
