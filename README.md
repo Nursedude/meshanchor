@@ -332,6 +332,14 @@ sudo python3 src/launcher_tui/main.py
 | Prometheus exporter | -- | 50+ metric families, Grafana-compatible |
 | Node tracker | 68 | Unified node inventory, 15m offline threshold, 24h stale purge |
 
+### Known Limitations
+
+| Feature | Limitation | Workaround / Status |
+|---|---|---|
+| **Fleet Monitor (multi-host)** | Handler-thread pile-up on Pi-class hardware under sustained dashboard polling. Single-tab steady-state works; multiple dashboard tabs / sustained over-polling can briefly trigger 429 (server_busy) responses. | In-flight semaphore caps concurrent `/fleet/*` handlers ([#128](https://github.com/Nursedude/meshanchor/issues/128)) + dashboard auto-retries on 429 honoring `Retry-After`. Daily `meshanchor-map-restart.timer` is in place as a workaround belt-and-suspenders until the supporting fixes ([#126](https://github.com/Nursedude/meshanchor/issues/126), [#127](https://github.com/Nursedude/meshanchor/issues/127)) land. **Single-box deployment is the most reliable mode today.** Full failure-mode log in [#131](https://github.com/Nursedude/meshanchor/issues/131). |
+| **`non_self_peers` filter** | Filters by peer name only, so a `fleet.json` self entry under a non-matching name slips through and the rollup HTTP-polls its own listener every cycle. | [#130](https://github.com/Nursedude/meshanchor/issues/130) tracks the fix; until then, don't include a self entry in `~/.config/meshanchor/fleet.json` (or name it exactly your hostname). |
+| **Cascade detector** | Not yet ported from MeshForge — pre-failure shapes (rnsd RPC wedge, stale tracer fires) won't alarm before the cross-fleet rollup shows their downstream effects. | [#129](https://github.com/Nursedude/meshanchor/issues/129) tracks the port. |
+
 ### Testing Reality Check
 
 MeshAnchor has **4,335 automated tests** across 145 test files. However, automated tests
@@ -368,6 +376,16 @@ be considered reliable.
 - 3-way routing (MeshCore ↔ Meshtastic ↔ RNS) with concurrent traffic on a single host
 - Independent confirmation on hardware other than `meshanchor-server` (this is the gap
   external testers can close — see [Contributing](#contributing))
+
+**Reliability ratio — single-box vs fleet monitor:**
+
+The fleet rollup / federation monitoring path has the **least field time** in
+the project and the most documented recurrence patterns ([#34](https://github.com/Nursedude/meshanchor/blob/main/.claude/foundations/persistent_issues.md), [#128](https://github.com/Nursedude/meshanchor/issues/128), [#130](https://github.com/Nursedude/meshanchor/issues/130), [#131](https://github.com/Nursedude/meshanchor/issues/131)).
+Single-box install (one host, one TUI, the local map at `:5000`) is
+significantly more reliable than the multi-host fleet monitor view. Operators
+who need steady-state observability should start with single-box, confirm the
+core flows, then layer in the cross-host dashboard once they've understood the
+restart cadence + known limitations above.
 
 **What was field-tested in MeshForge** (inherited, likely works): TUI, meshtasticd config,
 RF tools, RNS/rnsd integration, NomadNet, service management, standalone tools.
