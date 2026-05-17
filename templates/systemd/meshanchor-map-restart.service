@@ -1,0 +1,20 @@
+[Unit]
+Description=Daily restart of meshanchor-map to bound handler-thread pile-up
+Documentation=https://github.com/Nursedude/meshanchor/issues/131
+# WORKAROUND, not a fix. Tracks MeshAnchor Issue #131:
+# meshanchor-map.service accumulates handler threads under sustained
+# dashboard polling on Pi-class hardware (4 cores, 4 GB RAM). 30-60 min
+# after each restart, /fleet/slo and /fleet/rollup begin timing out
+# while /healthz stays fast — the GIL holder pins all worker threads.
+# Recurrence is independent of self-loopback (#130) and wedged peers
+# (#34).
+#
+# This timer caps the worst-case operator-visible outage to <24 h.
+# REMOVE IT once Issue #128 (in-flight semaphore) lands — that fix
+# bounds concurrent /fleet/* handlers at the source and turns this
+# from "runaway accumulation" into "graceful 429 + dashboard backoff".
+After=meshanchor-map.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart meshanchor-map.service

@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily restart of meshanchor-map (workaround for Issue #131)
+Documentation=https://github.com/Nursedude/meshanchor/issues/131
+
+[Timer]
+# Sun 04:30 HST + every 24 h thereafter. Stagger after the existing
+# Sun-only restart timers (meshtasticd 02:30, meshanchor-daemon 03:30,
+# meshforge-map 04:00) so the load stays gentle across the box. Cap on
+# operator-visible outage is now ~24 h; expected steady-state degraded
+# window is 30-60 min per cycle until #128 lands and this is retired.
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+Unit=meshanchor-map-restart.service
+
+[Install]
+WantedBy=timers.target
