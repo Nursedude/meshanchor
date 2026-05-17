@@ -508,12 +508,21 @@ Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
    `PEER_HTTP_TIMEOUT_S` from 3.0 s to 1.5 s. Healthy peers respond in
    sub-200 ms; a wedged peer never recovers within the 1.5-3 s window.
 3. ✅ [#128](https://github.com/Nursedude/meshanchor/issues/128)
-   **SHIPPED 2026-05-16 (commit `8fa73309`)** — in-flight semaphore
-   on `/fleet/{rollup,slo,health,activity}`. Default cap 4; excess
-   requests return 429 + `Retry-After: 2`. Synthetic 10-parallel
-   `/fleet/rollup` burst: 4 × 200 + 6 × 429. 4-minute 4-parallel-per-
-   second soak: thread count stable at 12-13 (previously climbed past
-   200 in minutes); `/fleet/slo` 200 in 300 ms under load.
+   **SHIPPED 2026-05-16 (commits `8fa73309` + `3787d977`)** —
+   in-flight semaphore on `/fleet/{rollup,slo,health,activity}`.
+   Default cap 8 (raised from initial 4 after the first deploy
+   produced visible 429 errors on natural dashboard load — the fast
+   tick polls 2 gated endpoints every 5 s, the slow tick polls 1
+   gated endpoint every 15 s, so 3 gated handlers can be in flight
+   simultaneously every 15 s when ticks align; cap=4 left no
+   headroom). Excess requests return 429 + `Retry-After: 2`.
+   Dashboard `fetchJson` treats 429 as a `TRANSIENT_BUSY` sentinel
+   and skips render-and-error-card update (`web/fleet.html`
+   commit `3787d977`) so transient cap-hits no longer surface as
+   user-facing errors. Synthetic 10-parallel `/fleet/rollup` burst:
+   8 × 200 + 2 × 429. 4-minute 4-parallel-per-second soak: thread
+   count stable at 12-13 (previously climbed past 200 in minutes);
+   `/fleet/slo` 200 in 300 ms under load.
    `meshanchor_map_fleet_heavy_busy_total` exposes the 429 counter
    for over-polling alerts. **This is the gating fix.** Daily restart
    timer (commit `c9cb1a5a`) can be retired once multi-day soak
