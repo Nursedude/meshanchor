@@ -507,10 +507,17 @@ Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
 2. [#127](https://github.com/Nursedude/meshanchor/issues/127) — tighten
    `PEER_HTTP_TIMEOUT_S` from 3.0 s to 1.5 s. Healthy peers respond in
    sub-200 ms; a wedged peer never recovers within the 1.5-3 s window.
-3. [#128](https://github.com/Nursedude/meshanchor/issues/128) — bound
-   concurrent `/fleet/*` handlers behind a small semaphore. Excess
-   requests get 429 + `Retry-After: 2`. Caps handler-thread accumulation
-   under sustained peer outage.
+3. ✅ [#128](https://github.com/Nursedude/meshanchor/issues/128)
+   **SHIPPED 2026-05-16 (commit `8fa73309`)** — in-flight semaphore
+   on `/fleet/{rollup,slo,health,activity}`. Default cap 4; excess
+   requests return 429 + `Retry-After: 2`. Synthetic 10-parallel
+   `/fleet/rollup` burst: 4 × 200 + 6 × 429. 4-minute 4-parallel-per-
+   second soak: thread count stable at 12-13 (previously climbed past
+   200 in minutes); `/fleet/slo` 200 in 300 ms under load.
+   `meshanchor_map_fleet_heavy_busy_total` exposes the 429 counter
+   for over-polling alerts. **This is the gating fix.** Daily restart
+   timer (commit `c9cb1a5a`) can be retired once multi-day soak
+   confirms steady-state stability.
 4. [#129](https://github.com/Nursedude/meshanchor/issues/129) — port
    MeshForge's `cascade_detector` to MA. Surfaces the pre-failure shape
    one cadence after the threshold so MA-server alarms *before* its
