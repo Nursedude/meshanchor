@@ -98,6 +98,18 @@ if _HAS_PROM:
         registry=REGISTRY,
     )
 
+    # ----- /fleet/* in-flight load shedding (Issue #128)
+    # Increments each time the heavy-fleet semaphore is at capacity
+    # and a request is rejected with 429. Steady-state value 0 on a
+    # healthy fleet; sustained non-zero deltas mean either the
+    # dashboard is over-polling or some handler is degrading.
+    FLEET_HEAVY_BUSY = Counter(
+        "meshanchor_map_fleet_heavy_busy_total",
+        "Times the /fleet/* in-flight semaphore was at cap and a "
+        "request was 429'd. See utils/_map_fleet.heavy_gate.",
+        registry=REGISTRY,
+    )
+
     # Set service up at module import — flipped to 0 only if the
     # handler explicitly de-registers (no current code path; placeholder
     # for a future warming-state pattern matching MeshForge's).
@@ -160,3 +172,15 @@ def set_service_up(up: bool) -> None:
     if not _HAS_PROM:
         return
     SERVICE_UP.set(1 if up else 0)
+
+
+def record_fleet_heavy_busy() -> None:
+    """Increment the /fleet/* in-flight overflow counter (Issue #128).
+
+    Called by `utils._map_fleet.heavy_gate` when the semaphore is at
+    cap and a request is rejected with 429. No-op without
+    prometheus_client.
+    """
+    if not _HAS_PROM:
+        return
+    FLEET_HEAVY_BUSY.inc()

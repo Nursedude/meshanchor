@@ -15,10 +15,125 @@ Expects the following attributes/methods on the host class:
 """
 from __future__ import annotations
 
+import functools
 import logging
-from typing import Any, Dict
+import os
+import threading
+from typing import Any, Callable, Dict
 
 logger = logging.getLogger(__name__)
+
+
+# ─── In-flight semaphore on heavy /fleet/* endpoints (Issue #128) ──────
+#
+# ThreadingHTTPServer with `daemon_threads=True` spawns one handler thread
+# per request and lets it run to completion. The dashboard polls
+# /fleet/rollup + /fleet/slo + /fleet/activity + /fleet/health on
+# overlapping 5 s intervals; each handler does real work (JSON
+# serialization, subprocess.run for systemctl probes, serial peer
+# fetches in the rollup case). On Pi-class hardware the GIL holder
+# pins all other handler threads, so under sustained polling the
+# arrival rate of new requests exceeds the drain rate of in-flight
+# work. Threads accumulate linearly (~5-10/min observed on
+# meshanchor-server 2026-05-16); 30-60 min after restart, every heavy
+# endpoint times out while /healthz stays fast.
+#
+# The semaphore caps concurrent in-flight heavy handlers. Excess
+# requests get 429 + Retry-After: 2 immediately — the dashboard's
+# fetchJson already handles non-200 responses by re-attempting on the
+# next poll cycle, so the cap manifests as occasional grid cells
+# showing "busy" rather than a wedged server.
+#
+# Default cap 4: enough headroom for typical dashboard polling
+# (1-2 in flight at steady state) + a debug curl + one ad-hoc poll.
+# Override via MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX env var. A value of
+# 0 disables the gate entirely (escape hatch for diagnostic sessions).
+
+_DEFAULT_HEAVY_INFLIGHT_MAX = 4
+_HEAVY_INFLIGHT_ENV = "MESHANCHOR_FLEET_HEAVY_INFLIGHT_MAX"
+
+
+def _resolve_inflight_max() -> int:
+    raw = os.environ.get(_HEAVY_INFLIGHT_ENV)
+    if raw is None:
+        return _DEFAULT_HEAVY_INFLIGHT_MAX
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_HEAVY_INFLIGHT_MAX
+    return value if value >= 0 else _DEFAULT_HEAVY_INFLIGHT_MAX
+
+
+_HEAVY_INFLIGHT_MAX = _resolve_inflight_max()
+_HEAVY_SEMAPHORE = threading.BoundedSemaphore(_HEAVY_INFLIGHT_MAX) \
+    if _HEAVY_INFLIGHT_MAX > 0 else None
+
+
+def heavy_gate(method: Callable) -> Callable:
+    """Decorator: gate a heavy /fleet/* handler behind the in-flight semaphore.
+
+    On overflow: emit HTTP 429 + Retry-After: 2 + small JSON body, bump
+    the busy counter, return without calling the wrapped handler. Always
+    releases the semaphore in `finally` so a handler exception cannot
+    leak a slot.
+
+    When the semaphore is disabled (cap=0), this decorator becomes a
+    transparent passthrough — useful for diagnostic sessions where the
+    operator wants the raw unguarded handler behavior.
+    """
+    @functools.wraps(method)
+    def _wrapped(self, *args, **kwargs):
+        if _HEAVY_SEMAPHORE is None:
+            return method(self, *args, **kwargs)
+        # Non-blocking acquire. We do NOT wait for a slot — the whole
+        # point is to shed load fast, not queue more pressure behind
+        # the saturated handler pool.
+        if not _HEAVY_SEMAPHORE.acquire(blocking=False):
+            _record_busy()
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Retry-After", "2")
+            self.send_header("Cache-Control", "no-store")
+            try:
+                self._send_cors_header()
+            except Exception:
+                pass
+            self.end_headers()
+            body = (
+                b'{"error":"server_busy","retry_after_s":2,'
+                b'"in_flight_max":' + str(_HEAVY_INFLIGHT_MAX).encode() + b'}'
+            )
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
+            return None
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            try:
+                _HEAVY_SEMAPHORE.release()
+            except ValueError:
+                # BoundedSemaphore raises on over-release. Shouldn't
+                # happen given acquire/release pair, but defend against
+                # a future refactor that decorates a method twice.
+                logger.warning("heavy_gate: semaphore over-release (likely double-decoration)")
+    return _wrapped
+
+
+def _record_busy() -> None:
+    """Increment the Prometheus counter for in-flight overflow events.
+
+    Pulled out so tests can monkeypatch it without importing
+    map_metrics. No-op when prometheus_client is unavailable.
+    """
+    try:
+        from utils import map_metrics
+        map_metrics.record_fleet_heavy_busy()
+    except Exception:
+        # Metric module is optional; never let observability failure
+        # turn into a request failure.
+        pass
 
 
 class FleetEndpointsMixin:
@@ -59,6 +174,7 @@ class FleetEndpointsMixin:
         self.end_headers()
         self.wfile.write(data)
 
+    @heavy_gate
     def _serve_fleet_health(self) -> None:
         """Full snapshot — services + boundaries + daemon health + radio
         + recent chat + collector stats. This is the diagnostic deep
@@ -68,6 +184,7 @@ class FleetEndpointsMixin:
         snap = self._collect_fleet_snapshot(include_daemon_health=True)
         self._serve_json(snap.to_dict())
 
+    @heavy_gate
     def _serve_fleet_slo(self) -> None:
         """Top-line SLO rollup for the dashboard's upper panel.
 
@@ -88,12 +205,14 @@ class FleetEndpointsMixin:
         snap = self._collect_fleet_snapshot(include_daemon_health=False)
         self._serve_json(slo_view(snap))
 
+    @heavy_gate
     def _serve_fleet_activity(self) -> None:
         """Live-feed surface for the dashboard's lower panel."""
         from monitoring.fleet_aggregator import activity_view
         snap = self._collect_fleet_snapshot(include_daemon_health=False)
         self._serve_json(activity_view(snap))
 
+    @heavy_gate
     def _serve_fleet_rollup(self) -> None:
         """Multi-host rollup — self + every peer in `~/.config/meshanchor/
         fleet.json` + RNS federation peers from the directory cache.
