@@ -491,6 +491,46 @@ class LXMFBroadcastConfig:
 
 
 @dataclass
+class MeshtasticReemitConfig:
+    """LXMF → MeshCore re-emit bridge.
+
+    Closes the Meshtastic→MeshCore asymmetry left open by the 2026-05-18
+    MeshtasticBroadcastBridge (which delivers Meshtastic broadcasts as LXMF
+    DMs to subscribed peers like meshanchor-server). The DM lands in the
+    gateway's primary LXMRouter and gets stored in messages.db but
+    previously did not re-broadcast onto the MeshCore "meshanchor" channel.
+
+    This re-emit bridge listens on the gateway's existing LXMF RX hook,
+    filters by source identity (only DMs from known MeshtasticBroadcastBridge
+    identities trigger re-emit), strips the wire prefix, and dispatches the
+    body to the active MeshCoreHandler on the configured channel.
+    """
+    enabled: bool = False
+    # Hex identity hashes of known MeshtasticBroadcastBridge instances
+    # whose DMs should trigger re-emit. Anything from any other LXMF
+    # source is ignored — no auto-trust. moc's and moc3's identities at
+    # time of writing: 32ee84c3e0d18def4dee1ab39c02db2a,
+    # aaa2365f799cc28aa7697df943096074.
+    source_identities: List[str] = field(default_factory=list)
+    # MeshCore channel slot to re-emit on (0 = Public).
+    target_channel: int = 0
+    # Regex applied to the start of the LXMF body. Default matches the
+    # MeshtasticBroadcastBridge.prefix_format default
+    # "[meshtastic ch{channel}:{sender}] {text}".
+    strip_pattern: str = r"^\[meshtastic ch(?P<channel>\d+):(?P<sender>[^\]]+)\]\s*"
+    # How to format the re-emitted body. Fields: sender, text, channel.
+    # Defaults to the same convention as _process_mesh_to_rns so MeshCore
+    # users see consistent provenance.
+    output_format: str = "[Mesh:{sender}] {text}"
+    # Content prefixes that should NEVER be re-emitted — Issue #66 synth
+    # ACKs round-trip through LoRa and lose their in-process flag, so a
+    # text-level guard at the bridge entry is the right layer.
+    drop_prefixes: List[str] = field(default_factory=lambda: [
+        "[delivered:", "[timeout:", "[failed:",
+    ])
+
+
+@dataclass
 class RoutingRule:
     """Message routing rule between networks"""
     name: str
@@ -548,6 +588,13 @@ class GatewayConfig:
 
     # LXMF broadcast bridge plug-in — opt-in MeshCore→LXMF fan-out
     lxmf_broadcast: LXMFBroadcastConfig = field(default_factory=LXMFBroadcastConfig)
+
+    # LXMF→MeshCore re-emit bridge plug-in — opt-in inbound LXMF DM
+    # from known MeshtasticBroadcastBridge identities re-broadcast on
+    # a MeshCore channel. Closes the Meshtastic→MeshCore asymmetry.
+    meshtastic_reemit: MeshtasticReemitConfig = field(
+        default_factory=MeshtasticReemitConfig
+    )
 
     # Routing (used when bridge_mode="message_bridge")
     routing_rules: List[RoutingRule] = field(default_factory=list)
@@ -682,6 +729,28 @@ class GatewayConfig:
                 ack_required=lxmf_broadcast_data.get('ack_required', False),
             )
 
+            # Handle MeshtasticReemitConfig (list fields — explicit copy).
+            reemit_data = data.get('meshtastic_reemit', {}) or {}
+            default_drop_prefixes = ["[delivered:", "[timeout:", "[failed:"]
+            meshtastic_reemit = MeshtasticReemitConfig(
+                enabled=reemit_data.get('enabled', False),
+                source_identities=[
+                    str(s).lower()
+                    for s in reemit_data.get('source_identities', [])
+                ],
+                target_channel=int(reemit_data.get('target_channel', 0)),
+                strip_pattern=reemit_data.get(
+                    'strip_pattern',
+                    r"^\[meshtastic ch(?P<channel>\d+):(?P<sender>[^\]]+)\]\s*",
+                ),
+                output_format=reemit_data.get(
+                    'output_format', "[Mesh:{sender}] {text}"
+                ),
+                drop_prefixes=list(reemit_data.get(
+                    'drop_prefixes', default_drop_prefixes
+                )),
+            )
+
             # Reconstruct nested dataclasses
             config = cls(
                 enabled=data.get('enabled', False),
@@ -694,6 +763,7 @@ class GatewayConfig:
                 mesh_bridge=mesh_bridge,
                 meshcore=meshcore,
                 lxmf_broadcast=lxmf_broadcast,
+                meshtastic_reemit=meshtastic_reemit,
                 routing_rules=[RoutingRule(**r) for r in data.get('routing_rules', [])],
                 default_route=data.get('default_route', 'bidirectional'),
                 telemetry=TelemetryConfig(**data.get('telemetry', {})),
@@ -756,6 +826,7 @@ class GatewayConfig:
                 'mesh_bridge': mesh_bridge_data,
                 'meshcore': asdict(self.meshcore),
                 'lxmf_broadcast': asdict(self.lxmf_broadcast),
+                'meshtastic_reemit': asdict(self.meshtastic_reemit),
                 'routing_rules': [asdict(r) for r in self.routing_rules],
                 'default_route': self.default_route,
                 'telemetry': asdict(self.telemetry),

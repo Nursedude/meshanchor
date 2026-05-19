@@ -235,6 +235,13 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         # in _on_lxmf_receive is needed.
         self._lxmf_broadcast = None
 
+        # LXMF → MeshCore re-emit bridge plug-in. Receives via the
+        # gateway's primary LXMRouter (the _on_lxmf_receive hook below)
+        # because the relevant DMs are addressed to the gateway identity,
+        # not the broadcast identity. Closes the Meshtastic→MeshCore
+        # asymmetry described in [[meshtastic-to-meshcore-bridge-gap]].
+        self._meshtastic_reemit = None
+
         # Statistics
         self.stats = {
             'messages_mesh_to_rns': 0,
@@ -670,6 +677,15 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 self._lxmf_broadcast.stop()
             except Exception as e:
                 logger.debug(f"LXMF broadcast stop error: {e}")
+
+        # Stop LXMF→MeshCore re-emit bridge — pure stateless hook, no
+        # threads to join, but flips its is_running flag so any in-flight
+        # _on_lxmf_receive call drops the message instead of dispatching.
+        if self._meshtastic_reemit:
+            try:
+                self._meshtastic_reemit.stop()
+            except Exception as e:
+                logger.debug(f"meshtastic_reemit stop error: {e}")
 
         # Close connections
         if self._mesh_handler:
@@ -1274,6 +1290,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         logger.info("RNS connection established")
                         # Start LXMF broadcast bridge plug-in (idempotent)
                         self._maybe_start_lxmf_broadcast()
+                        # Start LXMF→MeshCore re-emit bridge (idempotent)
+                        self._maybe_start_meshtastic_reemit()
                     else:
                         self._rns_reconnect.record_failure()
                         self._rns_reconnect.wait(self._stop_event)
@@ -1477,6 +1495,36 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         except Exception as e:
             logger.error("Failed to start LXMF broadcast bridge: %s", e)
 
+    def _maybe_start_meshtastic_reemit(self) -> None:
+        """Start the LXMF→MeshCore re-emit bridge if configured.
+
+        Idempotent. Safe to call from the RNS loop on every reconnect.
+        Stays a no-op when ``config.meshtastic_reemit.enabled = False``,
+        so unit tests that build a default GatewayConfig don't trigger
+        startup.
+        """
+        cfg = getattr(self.config, "meshtastic_reemit", None)
+        if cfg is None or getattr(cfg, "enabled", False) is not True:
+            return
+        if (self._meshtastic_reemit is not None
+                and self._meshtastic_reemit.is_running):
+            return
+        try:
+            from .meshtastic_reemit_bridge import create_from_gateway_config
+            if self._meshtastic_reemit is None:
+                self._meshtastic_reemit = create_from_gateway_config(self.config)
+                if self._meshtastic_reemit is None:
+                    return
+            if self._meshtastic_reemit.start():
+                logger.info(
+                    "Meshtastic re-emit bridge started — %d allowed "
+                    "identity(ies), target MeshCore ch%d",
+                    len(self._meshtastic_reemit._allowed_identities),
+                    cfg.target_channel,
+                )
+        except Exception as e:
+            logger.error("Failed to start meshtastic re-emit bridge: %s", e)
+
     def _on_lxmf_receive(self, message):
         """Handle incoming LXMF message"""
         try:
@@ -1550,6 +1598,20 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
             # Notify callbacks
             self._notify_message(msg)
+
+            # LXMF→MeshCore re-emit hook. Only acts when the operator
+            # opted in via meshtastic_reemit.enabled=True AND the LXMF
+            # source_hash matches one of the configured
+            # MeshtasticBroadcastBridge identities. Cheap no-op
+            # otherwise. Wrapped so a bridge bug can't take down the
+            # gateway's LXMF RX path.
+            if self._meshtastic_reemit:
+                try:
+                    self._meshtastic_reemit.on_lxmf_message(
+                        source_hash, message.content,
+                    )
+                except Exception as e:
+                    logger.debug(f"meshtastic_reemit hook error: {e}")
 
         except Exception as e:
             logger.error(f"Error processing LXMF message: {e}")
