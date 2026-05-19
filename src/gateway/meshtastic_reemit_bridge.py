@@ -110,7 +110,14 @@ class MeshtasticReemitBridge:
         self.stats: Dict[str, int] = {
             "received": 0,             # LXMF messages observed by the bridge
             "filtered_identity": 0,    # source_hash not in allowlist
-            "filtered_synth_ack": 0,   # content matched a drop_prefix
+            "filtered_synth_ack": 0,   # raw content matched a drop_prefix
+            "filtered_nested_bridge": 0,  # post-strip body matched a
+                                          # nested_drop_prefix (e.g. MeshCore
+                                          # content that round-tripped via
+                                          # _process_rns_to_mesh on a peer
+                                          # gateway → would re-emit a
+                                          # message that ORIGINATED on
+                                          # MeshCore back onto MeshCore)
             "filtered_empty": 0,       # post-decode content empty
             "reemitted": 0,            # send_text queued successfully
             "errors": 0,
@@ -227,6 +234,30 @@ class MeshtasticReemitBridge:
                 channel_str = "?"
                 stripped = text
 
+            # 3b) Nested-bridge loop guard (post-strip). The wire content
+            # we just stripped was added by the MeshtasticBroadcastBridge
+            # on a peer gateway when it picked up a Meshtastic RX. But
+            # that Meshtastic RX might itself have been a peer gateway's
+            # `_process_rns_to_mesh` re-broadcast of an LXMFBroadcastBridge
+            # fan-out — in which case the stripped body still carries the
+            # original protocol's bridge tag (e.g. `[MeshCore] ...`).
+            # Without this guard, we'd take a MeshCore broadcast that
+            # took a long detour through LXMF and Meshtastic and re-emit
+            # it back onto MeshCore — closing the loop. Field-detected
+            # 2026-05-18 23:02 HST: p3 broadcasts on MeshCore "meshanchor"
+            # appeared back on MeshCore Public after one full round
+            # through Meshtastic ch2.
+            for prefix in self._config.nested_drop_prefixes or ():
+                if stripped.startswith(prefix):
+                    with self._stats_lock:
+                        self.stats["filtered_nested_bridge"] += 1
+                    logger.debug(
+                        "meshtastic_reemit: dropping nested-bridge content "
+                        "from %s (prefix %r): %r",
+                        source_hex[:8], prefix, stripped[:48],
+                    )
+                    return False
+
             # 4) Reformat using operator's output_format. Bad templates
             # fall back to a safe default so a typo in config doesn't
             # take the bridge down.
@@ -316,6 +347,7 @@ class MeshtasticReemitBridge:
             "target_channel": int(self._config.target_channel),
             "output_format": self._config.output_format,
             "drop_prefixes": list(self._config.drop_prefixes or ()),
+            "nested_drop_prefixes": list(self._config.nested_drop_prefixes or ()),
             "started_at_iso": (
                 self._started_at.isoformat() if self._started_at else None
             ),

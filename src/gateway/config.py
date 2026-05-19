@@ -524,9 +524,20 @@ class MeshtasticReemitConfig:
     output_format: str = "[Mesh:{sender}] {text}"
     # Content prefixes that should NEVER be re-emitted — Issue #66 synth
     # ACKs round-trip through LoRa and lose their in-process flag, so a
-    # text-level guard at the bridge entry is the right layer.
+    # text-level guard at the bridge entry is the right layer. Checked
+    # against the RAW LXMF content (before wire-prefix strip).
     drop_prefixes: List[str] = field(default_factory=lambda: [
         "[delivered:", "[timeout:", "[failed:",
+    ])
+    # Content prefixes checked AFTER strip — catches nested-bridge
+    # loops where the wire-prefixed content wraps a message that itself
+    # came from another bridge (e.g. a MeshCore broadcast that
+    # round-tripped through LXMF fan-out → Meshtastic ch2 → back through
+    # MeshtasticBroadcastBridge on a peer gateway). Without this guard,
+    # the re-emit puts MeshCore-origin content back onto MeshCore,
+    # forming a runaway feedback loop. Field-detected 2026-05-18.
+    nested_drop_prefixes: List[str] = field(default_factory=lambda: [
+        "[MeshCore]",
     ])
 
 
@@ -732,6 +743,7 @@ class GatewayConfig:
             # Handle MeshtasticReemitConfig (list fields — explicit copy).
             reemit_data = data.get('meshtastic_reemit', {}) or {}
             default_drop_prefixes = ["[delivered:", "[timeout:", "[failed:"]
+            default_nested_drop_prefixes = ["[MeshCore]"]
             meshtastic_reemit = MeshtasticReemitConfig(
                 enabled=reemit_data.get('enabled', False),
                 source_identities=[
@@ -748,6 +760,9 @@ class GatewayConfig:
                 ),
                 drop_prefixes=list(reemit_data.get(
                     'drop_prefixes', default_drop_prefixes
+                )),
+                nested_drop_prefixes=list(reemit_data.get(
+                    'nested_drop_prefixes', default_nested_drop_prefixes
                 )),
             )
 

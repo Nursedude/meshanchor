@@ -270,6 +270,120 @@ class TestSynthAckLoopGuard:
 
 
 # ---------------------------------------------------------------------------
+# Nested-bridge loop guard (post-strip)
+# ---------------------------------------------------------------------------
+
+
+class TestNestedBridgeLoopGuard:
+    """The 2026-05-18 23:02 HST field-detected loop.
+
+    A MeshCore p3 broadcast on "meshanchor" channel → LXMFBroadcastBridge
+    fans out as LXMF DM to subscribers (moc, moc3) → moc's gateway
+    bridges to Meshtastic ch2 as ``[MeshCore] [ch0:?] meshanchor p3:
+    hello`` → moc3's Meshtastic radio RXs the broadcast →
+    MeshtasticBroadcastBridge wraps in ``[meshtastic ch2:!moc] [MeshCore]
+    ...`` and DMs to meshanchor-server → re-emit bridge picks it up.
+    Without the post-strip guard, the re-emit puts the MeshCore-origin
+    content back onto MeshCore Public, closing the loop.
+    """
+
+    def _round_tripped_content(self) -> bytes:
+        return (
+            b"[meshtastic ch2:!ebfa1b11] [MeshCore] [ch0:?] meshanchor p3: hello"
+        )
+
+    def test_field_detected_loop_dropped(self):
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        result = bridge.on_lxmf_message(
+            bytes.fromhex(MOC3_BROADCAST_HASH),
+            self._round_tripped_content(),
+        )
+        assert result is False
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+
+    def test_nested_guard_runs_AFTER_strip(self):
+        """The wire content `[meshtastic ch2:...] [MeshCore] ...` has the
+        Meshtastic prefix at index 0; without strip-first, the
+        [MeshCore] check would never match. This pins the order."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abc] [MeshCore] some body",
+        )
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+        # filtered_synth_ack should NOT have been bumped — the body
+        # doesn't start with [delivered: or [timeout: or [failed: at
+        # pre-strip time either.
+        assert bridge.stats["filtered_synth_ack"] == 0
+
+    def test_legitimate_meshtastic_broadcast_not_dropped(self):
+        """A Meshtastic device user sending text that happens to mention
+        '[MeshCore]' in the middle of their content (not at the start
+        of the stripped body) MUST still re-emit. The guard only fires
+        on prefix-match."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abc] talking about [MeshCore] vs Meshtastic",
+        )
+        handler.send_text.assert_called_once()
+        assert bridge.stats["filtered_nested_bridge"] == 0
+        assert bridge.stats["reemitted"] == 1
+
+    def test_nested_guard_disabled_by_empty_list(self):
+        """Operator can opt out by setting nested_drop_prefixes=[]."""
+        cfg = _make_config(nested_drop_prefixes=[])
+        handler = MagicMock()
+        bridge = _make_bridge(config=cfg, handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC3_BROADCAST_HASH),
+            self._round_tripped_content(),
+        )
+        # Now the message DOES re-emit (loop guard turned off).
+        handler.send_text.assert_called_once()
+        assert bridge.stats["filtered_nested_bridge"] == 0
+
+    def test_custom_nested_prefix_honored(self):
+        """Operator can add other bridge tags they want to never
+        re-emit (e.g. [MQTT], [AREDN] when those bridges land)."""
+        cfg = _make_config(nested_drop_prefixes=["[FUTURE]"])
+        handler = MagicMock()
+        bridge = _make_bridge(config=cfg, handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abc] [FUTURE] some body",
+        )
+        handler.send_text.assert_not_called()
+        # And [MeshCore] now passes since the operator overrode the list.
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abc] [MeshCore] hi",
+        )
+        handler.send_text.assert_called_once()
+
+    def test_nested_prefix_checked_on_unmatched_strip_too(self):
+        """When the strip regex doesn't match, `stripped` is the whole
+        body. The nested guard should still catch a leading bridge tag
+        in that body — defensive against future prefix-format changes."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        # No `[meshtastic ch...]` wrapper — body starts directly with
+        # [MeshCore]. Could happen if MeshtasticBroadcastBridge ever
+        # changes format. The guard MUST still catch it.
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[MeshCore] [ch0:?] meshanchor p3: raw body no prefix",
+        )
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Prefix stripping + output formatting
 # ---------------------------------------------------------------------------
 
@@ -456,12 +570,14 @@ class TestStatus:
             "received",
             "filtered_identity",
             "filtered_synth_ack",
+            "filtered_nested_bridge",
             "filtered_empty",
             "reemitted",
             "errors",
             "handler_unavailable",
         ):
             assert key in status["stats"]
+        assert "nested_drop_prefixes" in status
 
     def test_stats_increment_through_lifecycle(self):
         handler = MagicMock()
@@ -530,6 +646,7 @@ class TestConfigRoundTrip:
             target_channel=1,
             output_format="[X:{sender}] {text}",
             drop_prefixes=["[gone:"],
+            nested_drop_prefixes=["[OldBridge]"],
         )
         cfg.save()
 
@@ -540,6 +657,7 @@ class TestConfigRoundTrip:
         assert loaded.meshtastic_reemit.target_channel == 1
         assert loaded.meshtastic_reemit.output_format == "[X:{sender}] {text}"
         assert loaded.meshtastic_reemit.drop_prefixes == ["[gone:"]
+        assert loaded.meshtastic_reemit.nested_drop_prefixes == ["[OldBridge]"]
 
     def test_load_with_missing_block_uses_defaults(self, tmp_path, monkeypatch):
         # Older gateway.json files don't have meshtastic_reemit at all —
@@ -554,6 +672,9 @@ class TestConfigRoundTrip:
         loaded = GatewayConfig.load()
         assert loaded.meshtastic_reemit.enabled is False
         assert loaded.meshtastic_reemit.source_identities == []
+        # Default nested guard kicks in automatically — operators who
+        # don't know about the loop trap get it for free.
+        assert "[MeshCore]" in loaded.meshtastic_reemit.nested_drop_prefixes
 
     def test_load_lowercases_source_identities(self, tmp_path, monkeypatch):
         import json
