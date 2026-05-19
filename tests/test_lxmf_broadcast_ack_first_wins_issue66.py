@@ -166,6 +166,7 @@ class TestAckRequiredOn:
 
     def test_pending_ack_registered_once_per_fanout(self, tmp_path):
         pq = MagicMock()
+        pq.register_pending_ack.return_value = True
         emit = MagicMock(return_value=True)
         b, _, _, _ = _start_bridge(
             tmp_path,
@@ -182,10 +183,61 @@ class TestAckRequiredOn:
         assert kwargs["origin_network"] == "meshcore"
         assert kwargs["origin_address"] == "p3pubkeyhex"
         assert kwargs["timeout_seconds"] == 300
+        # Issue #66 first-caller: the broadcast bridge does its OWN LXMF
+        # send (not via enqueue()), so it MUST pass allow_orphan=True or
+        # the substrate's UPDATE WHERE id=? will silently find no rows.
+        assert kwargs["allow_orphan"] is True
         # msg_id has the bcast-<ts>-ch<channel> shape
         msg_id_arg = pq.register_pending_ack.call_args.args[0]
         assert msg_id_arg.startswith("bcast-")
         assert msg_id_arg.endswith("-ch1")
+
+    def test_real_queue_orphan_row_created_and_mark_acked_works(self, tmp_path):
+        """End-to-end with REAL PersistentMessageQueue — would have caught
+        the silent-no-op bug where my first revision called register_pending_ack
+        with the broadcast bridge's synthetic msg_id (no prior enqueue() row
+        in messages table). Pre-orphan-fix: UPDATE WHERE id=? returned 0
+        rows, register_pending_ack returned False, no synth ACK ever fired
+        even though everything looked wired correctly. Post-fix: allow_orphan
+        creates a synthetic bookkeeping row, mark_acked finds + transitions
+        it, _maybe_emit_ack_for_msgid emits."""
+        from gateway.message_queue import PersistentMessageQueue
+        pq = PersistentMessageQueue(db_path=str(tmp_path / "real_queue.db"))
+        emit = MagicMock(return_value=True)
+        b, _, _, _ = _start_bridge(
+            tmp_path,
+            ack_required=True,
+            persistent_queue=pq,
+            ack_emit_callback=emit,
+            pre_register_subs=["1122334455667788"],
+        )
+        try:
+            b.on_meshcore_message(_make_canonical(sender="p3pubkeyhex", channel=1))
+            # An orphan row was inserted with the bcast-<ts>-ch1 id
+            with pq._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, ack_required, ack_status, ack_origin_network, "
+                    "ack_origin_address, destination, status FROM messages "
+                    "WHERE destination='ack_bookkeeping'"
+                ).fetchall()
+            assert len(rows) == 1
+            row = rows[0]
+            assert row[0].startswith("bcast-")
+            assert row[1] == 1                        # ack_required
+            assert row[2] == 'pending'                # ack_status
+            assert row[3] == 'meshcore'               # ack_origin_network
+            assert row[4] == 'p3pubkeyhex'            # ack_origin_address
+            assert row[5] == 'ack_bookkeeping'        # destination
+            assert row[6] == 'delivered'              # status — not 'pending', so dispatch loops skip
+            # mark_acked transitions it cleanly
+            origin = pq.mark_acked(row[0])
+            assert origin is not None
+            assert origin["origin_network"] == "meshcore"
+            assert origin["origin_address"] == "p3pubkeyhex"
+            # Second call is idempotent (returns None)
+            assert pq.mark_acked(row[0]) is None
+        finally:
+            pq.stop_processing()
 
     def test_callbacks_registered_on_each_lxmessage(self, tmp_path):
         # Use a real list of created LXMessage instances to inspect.

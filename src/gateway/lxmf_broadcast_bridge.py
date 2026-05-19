@@ -745,12 +745,21 @@ class LXMFBroadcastBridge:
                 and not meta.get("meshforge_is_synth_ack")):
             ack_msg_id = f"bcast-{int(time.time() * 1000)}-ch{channel}"
             try:
-                self._persistent_queue.register_pending_ack(
+                ok = self._persistent_queue.register_pending_ack(
                     ack_msg_id,
                     origin_network="meshcore",
                     origin_address=msg.source_address,
                     timeout_seconds=300,
+                    allow_orphan=True,
                 )
+                if not ok:
+                    logger.error(
+                        "register_pending_ack returned False for %s "
+                        "(allow_orphan was True — this is a hard DB error, "
+                        "not a missing-row condition)",
+                        ack_msg_id[:16],
+                    )
+                    ack_msg_id = None
             except Exception as e:
                 # Don't let an ack-registration failure block fan-out.
                 logger.warning(
