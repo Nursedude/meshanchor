@@ -704,19 +704,6 @@ class LXMFBroadcastBridge:
         """Gateway message-callback hook. Filters and fans out."""
         if not self._running:
             return
-        # ISSUE66_DIAG2 (temporary): we want to see channel + src_net for
-        # every entry so we can disambiguate why slot-1 testing isn't
-        # producing ack_bookkeeping rows. Roll back after diagnosis.
-        logger.info(
-            "ISSUE66_DIAG2 on_meshcore_message: src_net=%r channel=%s "
-            "is_bcast=%s msg_type=%s allowlist=%s content_head=%r",
-            msg.source_network,
-            (msg.metadata or {}).get('channel'),
-            getattr(msg, 'is_broadcast', None),
-            getattr(msg, 'message_type', None),
-            list(self._config.channels) if self._config.channels else None,
-            (msg.content or '')[:40],
-        )
         if msg.source_network != Protocol.MESHCORE.value:
             with self._stats_lock:
                 self.stats["filtered_non_meshcore"] += 1
