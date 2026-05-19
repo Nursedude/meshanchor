@@ -105,6 +105,23 @@ except ImportError:
     HAS_WEBSOCKET = False
 
 
+def _coerce_metadata_for_json(obj):
+    """Recursively decode bytes inside dict/list payloads.
+
+    Issue #66: PersistentMessageQueue.enqueue computes a dedup hash via
+    json.dumps; raw bytes (LXMF title fields, sender_key, etc.) raise and
+    drop the message silently. errors='replace' so corrupt input never
+    crashes the requeue path.
+    """
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {k: _coerce_metadata_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_coerce_metadata_for_json(v) for v in obj]
+    return obj
+
+
 @dataclass
 class BridgedMessage:
     """Represents a message being bridged between networks"""
@@ -1614,12 +1631,23 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             # Handle both BridgedMessage (source_id) and CanonicalMessage (source_address)
             source_id = getattr(msg, 'source_id', None) or getattr(msg, 'source_address', '')
             dest_id = getattr(msg, 'destination_id', None) or getattr(msg, 'destination_address', '')
+            # BridgedMessage.__post_init__ does NOT centralize bytes→str on
+            # MeshAnchor; CanonicalMessage may arrive with bytes content, and
+            # LXMF metadata frequently carries bytes title/sender_key. Coerce
+            # both — json.dumps inside enqueue's dedup-hash step otherwise
+            # raises and drops the message (Issue #66 mirror gap).
+            content = msg.content
+            if isinstance(content, bytes):
+                content = content.decode("utf-8", errors="replace")
+            elif not isinstance(content, str):
+                content = ""
+            metadata = _coerce_metadata_for_json(msg.metadata or {})
             self._persistent_queue.enqueue(
                 payload={
-                    'message': msg.content,
+                    'message': content,
                     'source_id': source_id,
                     'destination_id': dest_id or "",
-                    'metadata': msg.metadata or {},
+                    'metadata': metadata,
                 },
                 destination=destination,
                 priority=MessagePriority.HIGH,
