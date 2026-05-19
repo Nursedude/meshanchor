@@ -480,6 +480,15 @@ class LXMFBroadcastConfig:
     identity_file: str = ""
     db_file: str = ""
 
+    # Issue #66 first-caller opt-in: when True, every broadcast fan-out
+    # registers ONE pending-ack record with the parent bridge's substrate
+    # and the first subscriber whose LXMF receipt confirms delivery causes
+    # a synthetic [delivered:<id>] to be emitted back to the originating
+    # MeshCore device. Default False — operator opts in deliberately on a
+    # gateway box for the first end-to-end smoke. See [[sync-ack-gateway-arc]]
+    # and project_issue_66_first_caller_2026_05_18.md.
+    ack_required: bool = False
+
 
 @dataclass
 class RoutingRule:
@@ -670,6 +679,7 @@ class GatewayConfig:
                 autosubscribe=lxmf_broadcast_data.get('autosubscribe', False),
                 identity_file=lxmf_broadcast_data.get('identity_file', ''),
                 db_file=lxmf_broadcast_data.get('db_file', ''),
+                ack_required=lxmf_broadcast_data.get('ack_required', False),
             )
 
             # Reconstruct nested dataclasses

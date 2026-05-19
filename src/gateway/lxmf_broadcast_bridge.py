@@ -497,11 +497,23 @@ class LXMFBroadcastBridge:
         db_path: Optional[Path] = None,
         storage_path: Optional[Path] = None,
         propagation_node: str = "",
+        persistent_queue: Any = None,
+        ack_emit_callback: Optional[Callable[[str, str], bool]] = None,
     ) -> None:
         self._config = broadcast_config
         self._rns = rns_module if rns_module is not None else _RNS_mod
         self._lxmf = lxmf_module if lxmf_module is not None else _LXMF_mod
         self._propagation_node = (propagation_node or "").strip()
+        # Issue #66 first-caller wiring. The parent RNSMeshtasticBridge
+        # owns the PersistentMessageQueue (where pending-ack records live)
+        # and the _maybe_emit_ack_for_msgid callable (which turns a
+        # winning LXMF delivery into a synthetic [delivered:<id>] back to
+        # the originating MeshCore device). Both are optional — when None,
+        # the bridge falls back to its pre-Issue-#66 behavior of pure
+        # fan-out with no ack tracking. Only used when the operator sets
+        # broadcast_config.ack_required = True.
+        self._persistent_queue = persistent_queue
+        self._ack_emit_callback = ack_emit_callback
 
         config_dir = get_real_user_home() / ".config" / "meshanchor"
         self._identity_path = identity_path or (
@@ -717,13 +729,43 @@ class LXMFBroadcastBridge:
         if not subscribers:
             return
 
+        # Issue #66 first-caller: mint ONE broadcast msg_id and register
+        # ONE pending-ack record per fan-out (not per subscriber). The
+        # first subscriber whose LXMF delivery callback fires wins —
+        # PersistentMessageQueue.mark_acked is idempotent (returns None
+        # on 2nd call) so only the first emits the synthetic ACK back to
+        # the originating MeshCore device. Recursion-guard: never track
+        # a message that's already tagged as a synth ACK.
+        ack_msg_id: Optional[str] = None
+        meta = msg.metadata or {}
+        if (self._config.ack_required
+                and self._persistent_queue is not None
+                and self._ack_emit_callback is not None
+                and msg.source_address
+                and not meta.get("meshforge_is_synth_ack")):
+            ack_msg_id = f"bcast-{int(time.time() * 1000)}-ch{channel}"
+            try:
+                self._persistent_queue.register_pending_ack(
+                    ack_msg_id,
+                    origin_network="meshcore",
+                    origin_address=msg.source_address,
+                    timeout_seconds=300,
+                )
+            except Exception as e:
+                # Don't let an ack-registration failure block fan-out.
+                logger.warning(
+                    "register_pending_ack failed for %s: %s",
+                    ack_msg_id[:16], e,
+                )
+                ack_msg_id = None
+
         now = datetime.utcnow()
         skipped = 0
         for sub in subscribers:
             if not self._subs.should_attempt(sub, now=now):
                 skipped += 1
                 continue
-            self._send_to_subscriber(sub, body, title)
+            self._send_to_subscriber(sub, body, title, ack_msg_id=ack_msg_id)
         if skipped:
             with self._stats_lock:
                 self.stats["skipped_backoff"] += skipped
@@ -795,7 +837,20 @@ class LXMFBroadcastBridge:
     # Outbound LXMF
     # ------------------------------------------------------------------
 
-    def _send_to_subscriber(self, sub: Subscriber, body: str, title: str) -> bool:
+    def _send_to_subscriber(self, sub: Subscriber, body: str, title: str,
+                            *, ack_msg_id: Optional[str] = None) -> bool:
+        """Fan a broadcast out to one subscriber.
+
+        ack_msg_id, when set, is the shared broadcast-level msg_id passed
+        from on_meshcore_message. We register on_delivered/on_failed on
+        the LXMessage; the first subscriber whose receipt confirms causes
+        _ack_emit_callback(msg_id, 'delivered') and the substrate emits
+        the synthetic ACK back to the MeshCore origin. Subsequent winners
+        are idempotent — mark_acked returns None on the 2nd call. We do
+        NOT call the emit callback with kind='failed' per subscriber;
+        per-subscriber failures don't mean overall failure, and the
+        substrate's timeout sweep handles "no subscriber acked" cleanly.
+        """
         if self._router is None or self._lxmf_source is None:
             return False
         RNS = self._rns
@@ -849,6 +904,43 @@ class LXMFBroadcastBridge:
                 "delivery",
             )
             lxm = LXMF.LXMessage(destination, self._lxmf_source, body, title)
+
+            # Issue #66 first-wins: wire LXMF delivery callbacks ONLY when
+            # the operator opted in (ack_msg_id is set) and the substrate
+            # is reachable. Captured-by-closure ack_msg_id ensures every
+            # subscriber's callback addresses the same pending-ack record.
+            if ack_msg_id and self._ack_emit_callback is not None:
+                msg_id_capture = ack_msg_id
+                emit = self._ack_emit_callback
+
+                def on_delivered(receipt):
+                    try:
+                        emit(msg_id_capture, "delivered")
+                    except Exception as e:
+                        logger.debug(
+                            "ack emit (delivered) failed for %s: %s",
+                            msg_id_capture[:16], e,
+                        )
+
+                def on_failed(receipt):
+                    # Per-subscriber failure is NOT overall failure — the
+                    # substrate's timeout sweep handles "no winner" via
+                    # synthetic [timeout:<id>]. We just log here.
+                    logger.debug(
+                        "LXMF delivery failed to %s for ack %s",
+                        hash_short, msg_id_capture[:16],
+                    )
+
+                try:
+                    lxm.register_delivery_callback(on_delivered)
+                    lxm.register_failed_callback(on_failed)
+                except (AttributeError, TypeError):
+                    logger.debug(
+                        "LXMF callbacks not available — fan-out to %s "
+                        "will not contribute to ack synthesis",
+                        hash_short,
+                    )
+
             call_boundary("rnsd.handle_outbound",
                           self._router.handle_outbound, lxm,
                           target=hash_short)
@@ -913,12 +1005,18 @@ class LXMFBroadcastBridge:
 
 def create_from_gateway_config(
     gateway_config: GatewayConfig,
+    persistent_queue: Any = None,
+    ack_emit_callback: Optional[Callable[[str, str], bool]] = None,
 ) -> Optional[LXMFBroadcastBridge]:
     """Convenience factory — returns None if the plug-in is disabled.
 
     Designed to be called from RNSMeshtasticBridge after LXMF setup.
     The bridge stands up its own LXMRouter (LXMF 0.9.4 caps a router
     at one delivery identity, so it can't share the gateway's).
+
+    persistent_queue + ack_emit_callback wire Issue #66 first-caller
+    behavior; both are optional and only consulted when
+    lxmf_broadcast.ack_required is True.
     """
     cfg = getattr(gateway_config, "lxmf_broadcast", None)
     if cfg is None or not cfg.enabled:
@@ -927,6 +1025,8 @@ def create_from_gateway_config(
     return LXMFBroadcastBridge(
         broadcast_config=cfg,
         propagation_node=propagation,
+        persistent_queue=persistent_queue,
+        ack_emit_callback=ack_emit_callback,
     )
 
 

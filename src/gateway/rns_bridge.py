@@ -1019,6 +1019,21 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
         See MeshForge sister-repo docstring for the per-protocol
         dispatch contract — this is the symmetric MeshAnchor side.
+
+        RECURSION INVARIANT (Issue #66 first-caller): synth ACKs MUST NOT
+        themselves acquire their own pending-ack record, or a default-on
+        deployment of ack_required=True would self-amplify into a feedback
+        loop. Today's structural safety: this function dispatches via
+        `_mesh_handler.send_text` / `_meshcore_handler.send_text` / direct
+        `send_to_rns(... destination_hash=...)`, all of which bypass
+        `enqueue_message` and `LXMFBroadcastBridge.on_meshcore_message`
+        (the two ack-registration sites). If a future refactor routes
+        synth ACKs through either of those paths, the outbound message
+        MUST set `metadata['meshforge_is_synth_ack'] = True` AND the
+        receiver-side guards in both ack-registration sites MUST consult
+        that marker (already wired in LXMFBroadcastBridge.on_meshcore_message
+        as of 2026-05-18). Verified by tests in
+        tests/test_lxmf_broadcast_ack_first_wins_issue66.py.
         """
         text = self._format_ack_text(msg_id, kind)
         try:
@@ -1417,7 +1432,17 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         try:
             from .lxmf_broadcast_bridge import create_from_gateway_config
             if self._lxmf_broadcast is None:
-                self._lxmf_broadcast = create_from_gateway_config(self.config)
+                # Issue #66 first-caller wiring: hand the broadcast bridge a
+                # reference to the persistent queue + our ack-emit callback
+                # so its per-subscriber LXMF delivery callbacks can drive
+                # synthetic [delivered:<id>] back to MeshCore via
+                # _maybe_emit_ack_for_msgid. No-op when
+                # lxmf_broadcast.ack_required is False (default).
+                self._lxmf_broadcast = create_from_gateway_config(
+                    self.config,
+                    persistent_queue=self._persistent_queue,
+                    ack_emit_callback=self._maybe_emit_ack_for_msgid,
+                )
                 if self._lxmf_broadcast is None:
                     return
                 # MeshCore RX hook only — LXMF RX is handled by the
