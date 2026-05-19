@@ -704,26 +704,6 @@ class LXMFBroadcastBridge:
         """Gateway message-callback hook. Filters and fans out."""
         if not self._running:
             return
-        # Issue #66 first-caller DIAGNOSTIC (temporary): log every entry
-        # with the guard-decision fields so we can see why ack-registration
-        # isn't firing in production. Roll back once the cause is confirmed.
-        logger.info(
-            "ISSUE66_DIAG on_meshcore_message entry: "
-            "src_net=%r src_addr=%r is_bcast=%s msg_type=%s "
-            "channel=%s content_head=%r "
-            "ack_required=%s have_pq=%s have_emit=%s "
-            "synth_marker=%s",
-            msg.source_network,
-            msg.source_address,
-            getattr(msg, 'is_broadcast', None),
-            getattr(msg, 'message_type', None),
-            (msg.metadata or {}).get('channel'),
-            (msg.content or '')[:40],
-            self._config.ack_required,
-            self._persistent_queue is not None,
-            self._ack_emit_callback is not None,
-            (msg.metadata or {}).get('meshforge_is_synth_ack'),
-        )
         if msg.source_network != Protocol.MESHCORE.value:
             with self._stats_lock:
                 self.stats["filtered_non_meshcore"] += 1
@@ -756,19 +736,34 @@ class LXMFBroadcastBridge:
         # on 2nd call) so only the first emits the synthetic ACK back to
         # the originating MeshCore device. Recursion-guard: never track
         # a message that's already tagged as a synth ACK.
+        #
+        # Origin-address routing:
+        # - If msg.source_address is set (DM or future-protocol sender
+        #   identity): route the synth ACK back to that pubkey directly.
+        # - If empty (MeshCore channel broadcasts don't carry sender
+        #   identity at the protocol level — the "p3:" name in the text
+        #   body is just a string prefix), use the placeholder address
+        #   "channel:<idx>" and the _emit_ack_to_origin dispatcher will
+        #   broadcast the ACK back on the originating channel. Everyone
+        #   on the channel sees it, which is the cleanest semantic given
+        #   the protocol constraint — matches the "did it land?" intent
+        #   without inventing identity that doesn't exist.
         ack_msg_id: Optional[str] = None
         meta = msg.metadata or {}
+        if msg.source_address:
+            ack_origin_address = msg.source_address
+        else:
+            ack_origin_address = f"channel:{channel}"
         if (self._config.ack_required
                 and self._persistent_queue is not None
                 and self._ack_emit_callback is not None
-                and msg.source_address
                 and not meta.get("meshforge_is_synth_ack")):
             ack_msg_id = f"bcast-{int(time.time() * 1000)}-ch{channel}"
             try:
                 ok = self._persistent_queue.register_pending_ack(
                     ack_msg_id,
                     origin_network="meshcore",
-                    origin_address=msg.source_address,
+                    origin_address=ack_origin_address,
                     timeout_seconds=300,
                     allow_orphan=True,
                 )

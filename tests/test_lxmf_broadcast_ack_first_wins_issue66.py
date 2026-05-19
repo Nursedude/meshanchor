@@ -420,16 +420,27 @@ class TestGuards:
         b.on_meshcore_message(_make_canonical())
         pq.register_pending_ack.assert_not_called()
 
-    def test_no_source_address_no_pending_ack(self, tmp_path):
+    def test_empty_source_address_uses_channel_placeholder(self, tmp_path):
+        # MeshCore channel broadcasts don't carry sender identity at the
+        # protocol level — the "p3:" prefix in the body is just a string.
+        # When source_address is empty AND the message is a channel
+        # broadcast, the bridge falls back to "channel:<idx>" placeholder
+        # so _emit_ack_to_origin can dispatch the synth ACK as a channel
+        # broadcast (everyone on the channel sees it).
         pq = MagicMock()
+        pq.register_pending_ack.return_value = True
         emit = MagicMock()
         b, _, _, _ = _start_bridge(
             tmp_path, ack_required=True,
             persistent_queue=pq, ack_emit_callback=emit,
             pre_register_subs=["1122334455667788"],
         )
-        b.on_meshcore_message(_make_canonical(sender=""))
-        pq.register_pending_ack.assert_not_called()
+        b.on_meshcore_message(_make_canonical(sender="", channel=1))
+        pq.register_pending_ack.assert_called_once()
+        kwargs = pq.register_pending_ack.call_args.kwargs
+        assert kwargs["origin_network"] == "meshcore"
+        assert kwargs["origin_address"] == "channel:1"
+        assert kwargs["allow_orphan"] is True
 
     def test_recursion_guard_synth_ack_marker_skips(self, tmp_path):
         pq = MagicMock()
@@ -478,3 +489,94 @@ class TestGuards:
         b.on_meshcore_message(_make_canonical())
         # Fan-out still happened despite registration failure
         assert b.stats["fanouts"] >= 1
+
+
+class TestChannelPlaceholderEmitDispatch:
+    """_emit_ack_to_origin must broadcast back on the originating channel
+    when origin_address is the placeholder "channel:<idx>". DM-style
+    dispatch (destination=origin_address) only when the address is a
+    real pubkey."""
+
+    def _build_parent_bridge_with_meshcore_handler(self, tmp_path):
+        """Build a minimally-wired RNSMeshtasticBridge whose only purpose
+        is exposing _emit_ack_to_origin with a mocked meshcore_handler.
+        The bridge's own LXMF/RNS surface is mocked out."""
+        from unittest.mock import patch, MagicMock
+        with patch("gateway.rns_bridge.GatewayConfig") as MockConfig, \
+             patch("gateway.rns_bridge.UnifiedNodeTracker"), \
+             patch("gateway.rns_bridge.BridgeHealthMonitor"), \
+             patch("gateway.rns_bridge.DeliveryTracker"), \
+             patch("gateway.rns_bridge.MeshtasticHandler") as MockHandler, \
+             patch("gateway.rns_bridge.ReconnectStrategy") as MockReconnect, \
+             patch("gateway.rns_bridge.HAS_CIRCUIT_BREAKER", False), \
+             patch("gateway.rns_bridge.CircuitBreakerRegistry", None), \
+             patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", False), \
+             patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
+             patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
+             patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
+             patch("gateway.rns_bridge.HAS_RNS_SNIFFER", False):
+            cfg = MagicMock()
+            cfg.enabled = True
+            cfg.auto_start = False
+            cfg.bridge_mode = "message_bridge"
+            cfg.default_route = "bidirectional"
+            cfg.routing_rules = []
+            cfg.log_level = "DEBUG"
+            cfg.log_messages = True
+            cfg.rns = MagicMock(); cfg.rns.config_dir = None
+            cfg.meshtastic = MagicMock(); cfg.meshtastic.channel = 0
+            cfg.meshtastic.connection_type = "tcp"
+            cfg.meshtastic.host = "localhost"; cfg.meshtastic.port = 4403
+            cfg.meshtastic.failover_enabled = False
+            cfg.meshtastic.load_balancer_enabled = False
+            cfg.meshtastic.gateway_heartbeat_enabled = False
+            MockConfig.load.return_value = cfg
+            MockHandler.return_value = MagicMock(is_connected=False)
+            MockReconnect.for_rns.return_value = MagicMock()
+            from gateway.rns_bridge import RNSMeshtasticBridge
+            bridge = RNSMeshtasticBridge(config=cfg)
+            bridge._meshcore_handler = MagicMock()
+            bridge._meshcore_handler.send_text.return_value = True
+            return bridge
+
+    def test_emit_ack_channel_placeholder_dispatches_as_broadcast(self, tmp_path):
+        bridge = self._build_parent_bridge_with_meshcore_handler(tmp_path)
+        ok = bridge._emit_ack_to_origin(
+            "bcast-1779170000-ch1",
+            origin_network="meshcore",
+            origin_address="channel:1",
+            kind="delivered",
+        )
+        assert ok is True
+        bridge._meshcore_handler.send_text.assert_called_once()
+        kwargs = bridge._meshcore_handler.send_text.call_args.kwargs
+        # destination=None means broadcast; channel=1 is the originating slot
+        assert kwargs["destination"] is None
+        assert kwargs["channel"] == 1
+        # The text is the standard [delivered: <id>] format
+        text = bridge._meshcore_handler.send_text.call_args.args[0]
+        # _format_ack_text truncates msg_id to 8 chars ("bcast-17")
+        assert "delivered" in text and "bcast" in text
+
+    def test_emit_ack_dm_address_dispatches_as_dm(self, tmp_path):
+        bridge = self._build_parent_bridge_with_meshcore_handler(tmp_path)
+        ok = bridge._emit_ack_to_origin(
+            "lxmf-1234",
+            origin_network="meshcore",
+            origin_address="abcdef1234567890",  # not a placeholder
+            kind="delivered",
+        )
+        assert ok is True
+        kwargs = bridge._meshcore_handler.send_text.call_args.kwargs
+        assert kwargs["destination"] == "abcdef1234567890"
+
+    def test_emit_ack_malformed_channel_placeholder_logs_warning(self, tmp_path):
+        bridge = self._build_parent_bridge_with_meshcore_handler(tmp_path)
+        ok = bridge._emit_ack_to_origin(
+            "bcast-bad",
+            origin_network="meshcore",
+            origin_address="channel:notanumber",
+            kind="delivered",
+        )
+        assert ok is False
+        bridge._meshcore_handler.send_text.assert_not_called()

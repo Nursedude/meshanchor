@@ -1054,6 +1054,29 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         f"(msg_id={msg_id[:8]} kind={kind})"
                     )
                     return False
+                # Issue #66 first-caller: MeshCore channel broadcasts
+                # don't carry sender identity, so LXMFBroadcastBridge
+                # uses the placeholder origin_address "channel:<idx>" to
+                # signal "broadcast the ACK back on the originating
+                # channel" rather than addressing a (nonexistent) DM
+                # destination. Parse the placeholder here and dispatch
+                # via destination=None + channel=N (broadcast). Falls
+                # back to the DM path for non-placeholder addresses
+                # (future protocol versions where channels DO carry
+                # sender pubkey, or DM-origin senders).
+                if origin_address.startswith("channel:"):
+                    try:
+                        ch_idx = int(origin_address.split(":", 1)[1])
+                    except (ValueError, IndexError):
+                        logger.warning(
+                            "ack synthesis: bad channel placeholder %r "
+                            "for msg_id=%s",
+                            origin_address, msg_id[:8],
+                        )
+                        return False
+                    return bool(self._meshcore_handler.send_text(
+                        text, destination=None, channel=ch_idx,
+                    ))
                 return bool(self._meshcore_handler.send_text(
                     text, destination=origin_address,
                 ))
