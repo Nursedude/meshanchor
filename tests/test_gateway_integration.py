@@ -53,8 +53,15 @@ def gateway_config():
 
 @pytest.fixture
 def message_queue(tmp_db):
-    """Create a PersistentMessageQueue with a temp database."""
+    """Create a PersistentMessageQueue with a temp database.
+
+    Issue #67: ``enqueue`` drops messages whose destination has no
+    registered sender. These tests exercise queue mechanics, not real
+    network send, so stub senders for the destinations under test.
+    """
     queue = PersistentMessageQueue(db_path=tmp_db)
+    queue.register_sender("meshtastic", lambda payload: True)
+    queue.register_sender("rns", lambda payload: True)
     yield queue
     queue.stop_processing()
 
@@ -64,6 +71,9 @@ def message_queue_with_policy(tmp_db):
     """Create a PersistentMessageQueue with retry policy."""
     policy = RetryPolicy(max_tries=3, timeout=30.0, base_delay=0.1, max_delay=1.0)
     queue = PersistentMessageQueue(db_path=tmp_db, retry_policy=policy)
+    # Issue #67: enqueue drops if no sender is registered.
+    queue.register_sender("meshtastic", lambda payload: True)
+    queue.register_sender("rns", lambda payload: True)
     yield queue
     queue.stop_processing()
 
@@ -267,6 +277,8 @@ class TestMessagePriority:
         """Test that queue overflow sheds lowest priority messages."""
         db_path = str(tmp_path / "overflow.db")
         queue = PersistentMessageQueue(db_path=db_path, max_queue_size=3)
+        # Issue #67: enqueue drops if no sender is registered.
+        queue.register_sender("rns", lambda payload: True)
 
         # Fill queue
         for i in range(3):
@@ -676,6 +688,8 @@ class TestQueuePersistence:
 
         # Phase 1: Enqueue before "restart"
         queue1 = PersistentMessageQueue(db_path=db_path)
+        # Issue #67: enqueue drops if no sender is registered.
+        queue1.register_sender("rns", lambda payload: True)
         msg_id = queue1.enqueue(
             {"from": "!a", "to": "!b", "text": "Survive restart", "type": "text"},
             destination="rns",
@@ -699,6 +713,8 @@ class TestQueuePersistence:
 
         # Phase 1: Enqueue and mark in_progress, then "crash"
         queue1 = PersistentMessageQueue(db_path=db_path)
+        # Issue #67: enqueue drops if no sender is registered.
+        queue1.register_sender("rns", lambda payload: True)
         # Override stale timeout for fast test
         queue1.STALE_TIMEOUT = 0  # Immediate expiry
         msg_id = queue1.enqueue(

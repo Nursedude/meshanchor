@@ -208,6 +208,8 @@ class TestMessageSummary:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path)
+            # Issue #67: enqueue drops if no sender is registered.
+            q.register_sender("meshtastic", lambda payload: True)
 
             # Enqueue a message
             msg_id = q.enqueue(
@@ -265,6 +267,8 @@ class TestFailedMessages:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path)
+            # Issue #67: enqueue drops if no sender is registered.
+            q.register_sender("rns", lambda payload: True)
 
             # Create a message with max_retries=1 so it fails faster
             msg_id = q.enqueue(
@@ -336,6 +340,9 @@ class TestLifecycleIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path)
+            # Issue #67: enqueue drops if no sender is registered.
+            q.register_sender("meshtastic", lambda payload: True)
+            q.register_sender("rns", lambda payload: True)
             yield q
 
     def test_full_message_lifecycle(self, queue):

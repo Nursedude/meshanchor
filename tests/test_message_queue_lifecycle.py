@@ -33,10 +33,18 @@ from gateway.message_queue import (
 
 @pytest.fixture
 def queue():
-    """Fresh message queue in a temp directory."""
+    """Fresh message queue in a temp directory.
+
+    Registers no-op senders for the destinations these tests enqueue
+    to. Post-Issue-#67, ``enqueue`` drops messages whose destination
+    has no registered sender; these tests only exercise queue
+    mechanics (not real network send), so stub senders are fine.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = str(Path(tmpdir) / "test_queue.db")
         q = PersistentMessageQueue(db_path=db_path)
+        q.register_sender("meshtastic", lambda payload: True)
+        q.register_sender("rns", lambda payload: True)
         yield q
 
 
