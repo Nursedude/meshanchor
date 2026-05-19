@@ -704,6 +704,26 @@ class LXMFBroadcastBridge:
         """Gateway message-callback hook. Filters and fans out."""
         if not self._running:
             return
+        # Issue #66 first-caller DIAGNOSTIC (temporary): log every entry
+        # with the guard-decision fields so we can see why ack-registration
+        # isn't firing in production. Roll back once the cause is confirmed.
+        logger.info(
+            "ISSUE66_DIAG on_meshcore_message entry: "
+            "src_net=%r src_addr=%r is_bcast=%s msg_type=%s "
+            "channel=%s content_head=%r "
+            "ack_required=%s have_pq=%s have_emit=%s "
+            "synth_marker=%s",
+            msg.source_network,
+            msg.source_address,
+            getattr(msg, 'is_broadcast', None),
+            getattr(msg, 'message_type', None),
+            (msg.metadata or {}).get('channel'),
+            (msg.content or '')[:40],
+            self._config.ack_required,
+            self._persistent_queue is not None,
+            self._ack_emit_callback is not None,
+            (msg.metadata or {}).get('meshforge_is_synth_ack'),
+        )
         if msg.source_network != Protocol.MESHCORE.value:
             with self._stats_lock:
                 self.stats["filtered_non_meshcore"] += 1
