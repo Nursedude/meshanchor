@@ -85,6 +85,12 @@ def bridge_with_real_queue(tmp_path):
         from gateway.message_queue import PersistentMessageQueue
         db_path = tmp_path / "requeue_bytes.db"
         b._persistent_queue = PersistentMessageQueue(db_path=str(db_path))
+        # Issue #67: enqueue() now refuses destinations without a
+        # registered sender. Wire a no-op sender so the bytes-coercion
+        # path under test reaches the DB row insert it's pinning.
+        b._persistent_queue.register_sender("meshtastic", lambda payload: True)
+        b._persistent_queue.register_sender("meshcore", lambda payload: True)
+        b._persistent_queue.register_sender("rns", lambda payload: True)
         try:
             yield b, db_path
         finally:

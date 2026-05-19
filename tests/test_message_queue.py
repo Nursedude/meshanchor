@@ -37,11 +37,25 @@ from gateway.message_queue import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _register_default_senders(q):
+    """Register no-op senders for the common bridge destinations.
+
+    Issue #67: enqueue() refuses destinations with no registered sender.
+    These unit tests are exercising queue mechanics (dedup, retry,
+    lifecycle, ack, dead-letter) — they don't need real delivery, but
+    they DO need enqueue() to succeed. Tests that specifically pin the
+    no-sender drop behavior live in test_no_sender_drop_issue67.py.
+    """
+    for dest in ("meshtastic", "meshcore", "rns", "mqtt"):
+        q.register_sender(dest, lambda payload: True)
+
+
 @pytest.fixture
 def queue(tmp_path):
     """Queue backed by temp file (each _get_connection shares the same DB)."""
     db_file = str(tmp_path / "test_queue.db")
     q = PersistentMessageQueue(db_path=db_file)
+    _register_default_senders(q)
     yield q
     q.stop_processing()
 
@@ -52,6 +66,7 @@ def queue_with_policy(tmp_path):
     db_file = str(tmp_path / "test_queue_policy.db")
     policy = RetryPolicy(max_tries=3, base_delay=0.01)
     q = PersistentMessageQueue(db_path=db_file, retry_policy=policy)
+    _register_default_senders(q)
     yield q
     q.stop_processing()
 
@@ -441,7 +456,13 @@ class TestProcessOnce:
         failure_cb.assert_called_once()
 
     def test_no_sender_registered(self, queue):
-        queue.enqueue({"text": "hello"}, "meshtastic")
+        # Issue #67: enqueue() now rejects destinations with no sender,
+        # so the original "process_once does nothing" assertion is
+        # superseded. Use an unregistered destination ('mqtt5') to keep
+        # the original intent honest — process_once still treats unknown
+        # destinations as no-ops.
+        result = queue.enqueue({"text": "hello"}, "mqtt5")
+        assert result is None  # enqueue rejected (Issue #67)
         processed = queue.process_once()
         assert processed == 0  # No sender for this destination
 
@@ -519,6 +540,7 @@ class TestOverflow:
     def test_queue_enforces_max_size(self, tmp_path):
         db_file = str(tmp_path / "overflow1.db")
         q = PersistentMessageQueue(db_path=db_file, max_queue_size=3)
+        _register_default_senders(q)
         q.enqueue({"text": "1", "id": 1}, "meshtastic", priority=MessagePriority.LOW, deduplicate=False)
         q.enqueue({"text": "2", "id": 2}, "meshtastic", priority=MessagePriority.LOW, deduplicate=False)
         q.enqueue({"text": "3", "id": 3}, "meshtastic", priority=MessagePriority.LOW, deduplicate=False)
@@ -531,6 +553,7 @@ class TestOverflow:
     def test_high_priority_not_shed(self, tmp_path):
         db_file = str(tmp_path / "overflow2.db")
         q = PersistentMessageQueue(db_path=db_file, max_queue_size=2)
+        _register_default_senders(q)
         q.enqueue({"text": "hi1"}, "meshtastic", priority=MessagePriority.HIGH, deduplicate=False)
         q.enqueue({"text": "hi2"}, "meshtastic", priority=MessagePriority.HIGH, deduplicate=False)
         # Can't shed high-priority, so next enqueue returns None

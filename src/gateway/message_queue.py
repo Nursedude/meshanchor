@@ -468,6 +468,13 @@ class PersistentMessageQueue:
         self._success_callbacks: List[Callable] = []
         self._failure_callbacks: List[Callable] = []
 
+        # Drop-log rate-limit state for the no-sender guard (Issue #67):
+        # destination -> (last_log_unix_ts, suppressed_count_since_last_log).
+        # Prevents log flooding when a bridge keeps enqueuing for a
+        # destination that has no registered sender (e.g. meshtastic-leg
+        # on a meshcore-only gateway box).
+        self._no_sender_log_state: Dict[str, "tuple[float, int]"] = {}
+
         # Initialize database
         self._init_db()
 
@@ -631,6 +638,11 @@ class PersistentMessageQueue:
             count = cursor.fetchone()[0]
             return count > 0
 
+    # Re-log a no-sender drop at most once per this many seconds per
+    # destination. The dropped-count since the last log is included in
+    # the next log line so operators don't have to grep counts.
+    NO_SENDER_LOG_INTERVAL = 600
+
     def enqueue(self, payload: Dict[str, Any], destination: str,
                 priority: MessagePriority = MessagePriority.NORMAL,
                 max_retries: int = 3, deduplicate: bool = True) -> Optional[str]:
@@ -645,8 +657,37 @@ class PersistentMessageQueue:
             deduplicate: Check for duplicates
 
         Returns:
-            Message ID if enqueued, None if duplicate
+            Message ID if enqueued, None if duplicate or if no sender is
+            registered for ``destination``. Issue #67: writing rows that
+            will never be processed (because no register_sender call ever
+            wired the destination — e.g. meshtastic-leg on a meshcore-only
+            gateway) accumulates pending rows indefinitely. Reject at
+            enqueue time and log INFO (rate-limited per destination).
         """
+        if not self.has_sender(destination):
+            now = time.time()
+            last_ts, suppressed = self._no_sender_log_state.get(destination, (0.0, 0))
+            if now - last_ts >= self.NO_SENDER_LOG_INTERVAL:
+                if suppressed > 0:
+                    logger.info(
+                        f"queue: no sender registered for destination "
+                        f"{destination!r}; dropping enqueue "
+                        f"({suppressed} additional drops suppressed in the "
+                        f"last {self.NO_SENDER_LOG_INTERVAL}s)"
+                    )
+                else:
+                    logger.info(
+                        f"queue: no sender registered for destination "
+                        f"{destination!r}; dropping enqueue"
+                    )
+                self._no_sender_log_state[destination] = (now, 0)
+            else:
+                self._no_sender_log_state[destination] = (last_ts, suppressed + 1)
+            with self._lock:
+                self._stats.setdefault("no_sender_dropped", 0)
+                self._stats["no_sender_dropped"] += 1
+            return None
+
         content_hash = self._compute_hash(payload)
 
         # Check for duplicates
@@ -1015,6 +1056,19 @@ class PersistentMessageQueue:
             send_fn: Function that takes payload dict, returns True if sent
         """
         self._send_callbacks[destination] = send_fn
+        # If we've been dropping for this destination and a sender just
+        # showed up (e.g. handler reconnected mid-run), clear the rate-
+        # limit state so the next drop (if any) logs immediately again.
+        self._no_sender_log_state.pop(destination, None)
+
+    def has_sender(self, destination: str) -> bool:
+        """Whether a sender is registered for ``destination``.
+
+        Used by enqueue() to short-circuit writes for destinations with no
+        consumer (Issue #67). External callers (the bridge) can also use
+        this to make routing decisions before constructing a payload.
+        """
+        return destination in self._send_callbacks
 
     def register_success_callback(self, callback: Callable[[QueuedMessage], None]) -> None:
         """Register callback for successful delivery."""

@@ -1642,7 +1642,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             elif not isinstance(content, str):
                 content = ""
             metadata = _coerce_metadata_for_json(msg.metadata or {})
-            self._persistent_queue.enqueue(
+            msg_id = self._persistent_queue.enqueue(
                 payload={
                     'message': content,
                     'source_id': source_id,
@@ -1652,6 +1652,12 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 destination=destination,
                 priority=MessagePriority.HIGH,
             )
+            if msg_id is None:
+                # Issue #67: enqueue() drops when no sender is registered
+                # for the destination (or when deduped, or queue-full).
+                # Don't lie about a successful requeue — health reporting
+                # uses this return value.
+                return False
             logger.debug(f"Failed message re-queued to persistent storage ({destination})")
             return True
         except Exception as e:

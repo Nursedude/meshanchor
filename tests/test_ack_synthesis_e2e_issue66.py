@@ -104,6 +104,12 @@ def integrated_bridge(tmp_path):
         b._persistent_queue = PersistentMessageQueue(
             db_path=str(tmp_path / "ack_e2e.db")
         )
+        # Issue #67: enqueue() now refuses destinations without a
+        # registered sender. Wire no-op senders so the ack-synthesis
+        # paths under test reach the queue rows they exercise.
+        b._persistent_queue.register_sender("meshtastic", lambda payload: True)
+        b._persistent_queue.register_sender("meshcore", lambda payload: True)
+        b._persistent_queue.register_sender("rns", lambda payload: True)
         try:
             yield b
         finally:
