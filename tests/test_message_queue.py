@@ -767,3 +767,186 @@ class TestMQTTRetryPolicy:
         processed = queue.process_once()
         assert processed == 1
         sender.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Issue #66: application-layer ack tracking substrate
+# ---------------------------------------------------------------------------
+
+class TestPendingAckTrackingIssue66:
+    """
+    register_pending_ack / mark_acked / mark_timeout / find_overdue_acks /
+    get_ack_status — the queue-side substrate that step 3b wires into
+    the LXMF delivery callback and the periodic overdue sweep.
+    """
+
+    def test_register_pending_ack_returns_true_for_existing_message(
+        self, queue,
+    ):
+        msg_id = queue.enqueue({"text": "weather pls"}, "rns")
+        assert queue.register_pending_ack(
+            msg_id,
+            origin_network="meshcore",
+            origin_address="abc123",
+            timeout_seconds=60,
+        ) is True
+        assert queue.get_ack_status(msg_id) == 'pending'
+
+    def test_register_pending_ack_returns_false_for_missing_message(
+        self, queue,
+    ):
+        assert queue.register_pending_ack(
+            "ghost-id",
+            origin_network="meshcore",
+            origin_address="abc123",
+        ) is False
+        assert queue.get_ack_status("ghost-id") is None
+
+    def test_mark_acked_returns_origin_for_correlation(self, queue):
+        msg_id = queue.enqueue({"text": "weather pls"}, "rns")
+        queue.register_pending_ack(
+            msg_id, origin_network="meshcore", origin_address="abc123",
+        )
+        result = queue.mark_acked(msg_id)
+        assert result is not None
+        assert result['message_id'] == msg_id
+        assert result['origin_network'] == "meshcore"
+        assert result['origin_address'] == "abc123"
+        assert queue.get_ack_status(msg_id) == 'acked'
+
+    def test_mark_acked_is_idempotent(self, queue):
+        msg_id = queue.enqueue({"text": "hi"}, "rns")
+        queue.register_pending_ack(
+            msg_id, origin_network="meshcore", origin_address="abc123",
+        )
+        first = queue.mark_acked(msg_id)
+        second = queue.mark_acked(msg_id)
+        assert first is not None
+        assert second is None
+
+    def test_mark_acked_on_untracked_message_returns_none(self, queue):
+        msg_id = queue.enqueue({"text": "hi"}, "rns")
+        assert queue.mark_acked(msg_id) is None
+
+    def test_mark_acked_on_ghost_id_returns_none(self, queue):
+        assert queue.mark_acked("ghost-id") is None
+
+    def test_find_overdue_acks_returns_only_past_deadline(self, queue):
+        now = datetime.now()
+        future_id = queue.enqueue({"text": "fresh"}, "rns")
+        past_id = queue.enqueue({"text": "stale"}, "rns")
+        queue.register_pending_ack(
+            future_id, origin_network="meshcore",
+            origin_address="abc", timeout_seconds=3600,
+        )
+        queue.register_pending_ack(
+            past_id, origin_network="meshtastic",
+            origin_address="!aabb", timeout_seconds=1,
+        )
+        overdue = queue.find_overdue_acks(now=now + timedelta(seconds=5))
+        ids = {r['message_id'] for r in overdue}
+        assert past_id in ids
+        assert future_id not in ids
+        past = next(r for r in overdue if r['message_id'] == past_id)
+        assert past['origin_network'] == "meshtastic"
+        assert past['origin_address'] == "!aabb"
+
+    def test_find_overdue_acks_excludes_already_acked(self, queue):
+        now = datetime.now()
+        msg_id = queue.enqueue({"text": "hi"}, "rns")
+        queue.register_pending_ack(
+            msg_id, origin_network="meshcore",
+            origin_address="abc", timeout_seconds=1,
+        )
+        queue.mark_acked(msg_id)
+        overdue = queue.find_overdue_acks(now=now + timedelta(seconds=5))
+        assert msg_id not in {r['message_id'] for r in overdue}
+
+    def test_find_overdue_acks_excludes_already_timed_out(self, queue):
+        now = datetime.now()
+        msg_id = queue.enqueue({"text": "hi"}, "rns")
+        queue.register_pending_ack(
+            msg_id, origin_network="meshcore",
+            origin_address="abc", timeout_seconds=1,
+        )
+        queue.mark_timeout(msg_id)
+        overdue = queue.find_overdue_acks(now=now + timedelta(seconds=5))
+        assert msg_id not in {r['message_id'] for r in overdue}
+
+    def test_mark_timeout_returns_false_after_ack(self, queue):
+        msg_id = queue.enqueue({"text": "hi"}, "rns")
+        queue.register_pending_ack(
+            msg_id, origin_network="meshcore", origin_address="abc",
+        )
+        queue.mark_acked(msg_id)
+        assert queue.mark_timeout(msg_id) is False
+        assert queue.get_ack_status(msg_id) == 'acked'
+
+    def test_get_ack_status_three_states(self, queue):
+        msg_id = queue.enqueue({"text": "hi"}, "rns")
+        assert queue.get_ack_status(msg_id) is None
+        queue.register_pending_ack(
+            msg_id, origin_network="meshcore", origin_address="abc",
+        )
+        assert queue.get_ack_status(msg_id) == 'pending'
+        queue.mark_timeout(msg_id)
+        assert queue.get_ack_status(msg_id) == 'timeout'
+
+    def test_default_timeout_is_300_seconds(self, queue):
+        import inspect
+        sig = inspect.signature(queue.register_pending_ack)
+        assert sig.parameters['timeout_seconds'].default == 300
+
+    def test_schema_migration_is_additive(self, tmp_path):
+        """
+        Issue #66 columns are ALTER'd in on first open. Pre-Issue-#66 rows
+        survive untouched (so dedup windows + in-flight retries don't
+        reset on upgrade).
+        """
+        import sqlite3
+        db_file = str(tmp_path / "legacy.db")
+        legacy = sqlite3.connect(db_file)
+        legacy.execute("""
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                priority INTEGER DEFAULT 2,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 3,
+                retry_after TEXT,
+                error_message TEXT DEFAULT '',
+                content_hash TEXT DEFAULT ''
+            )
+        """)
+        legacy.execute("""
+            INSERT INTO messages
+            (id, payload, destination, status, created_at, updated_at,
+             content_hash)
+            VALUES ('legacy-1', '{}', 'rns', 'delivered',
+                    '2026-05-01T00:00:00', '2026-05-01T00:00:00', 'legacyhash')
+        """)
+        legacy.commit()
+        legacy.close()
+
+        q = PersistentMessageQueue(db_path=db_file)
+        try:
+            with q._get_connection() as conn:
+                cursor = conn.execute("PRAGMA table_info(messages)")
+                cols = {row[1] for row in cursor.fetchall()}
+                for col in ('ack_required', 'ack_of', 'ack_status',
+                            'ack_timeout_at', 'ack_at',
+                            'ack_origin_network', 'ack_origin_address'):
+                    assert col in cols, f"migration missed {col}"
+                row = conn.execute(
+                    "SELECT status, ack_required, ack_status "
+                    "FROM messages WHERE id = 'legacy-1'"
+                ).fetchone()
+                assert row['status'] == 'delivered'
+                assert row['ack_required'] == 0
+                assert row['ack_status'] is None
+        finally:
+            q.stop_processing()
