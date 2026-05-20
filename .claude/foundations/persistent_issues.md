@@ -749,15 +749,38 @@ slot the operator's mesh uses) in `gateway.json`.
 
 **Operator detection recipes**:
 
+Counters live on the in-process `RNSMeshtasticBridge.stats` dict and
+are NOT currently HTTP-exposed (no `/api/stats` endpoint exists in
+`config_api.py` as of 2026-05-20 — adding one is a separate follow-
+up). Use the journal for live observation:
+
 ```bash
-ssh meshanchor-server "curl -s http://localhost:8081/api/stats \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); \
-      print(\"dm_dropped:\", d.get(\"meshcore_dm_dropped_contact_not_found\", 0)); \
-      print(\"bridge_dropped:\", d.get(\"meshcore_bridge_default_channel_drop\", 0))'"
+# Successful bridge dispatch (with explicit channel):
+ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
+  --no-pager | grep -E 'Bridge (Mesh|RNS)→MC ch[0-9]'"
+
+# Drops (privacy-class refusal at the wrapper):
+ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
+  --no-pager | grep -E 'no channel resolved|send_to_meshcore: broadcast with no channel'"
+
+# Issue #35 DM-drop counter (still in-process only):
+ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
+  --no-pager | grep 'MeshCore DM dropped — contact not found'"
 ```
-Both counters surface privacy-class drops. Non-zero `bridge_dropped`
-means cross-protocol bridge cargo is being dropped — operator
-should set `bridge_target_channel` to enable the bridge.
+
+Live config + resolver smoke test (verifies the field loaded and the
+helper returns the expected slot):
+```bash
+ssh meshanchor-server 'python3 -c "
+import sys; sys.path.insert(0, \"/opt/meshanchor/src\")
+from gateway.config import GatewayConfig
+print(\"bridge_target_channel:\", GatewayConfig.load().meshcore.bridge_target_channel)
+"'
+```
+
+A non-zero drop rate in the journal means cross-protocol bridge
+cargo is being refused — operator should set
+`bridge_target_channel` to the intended private slot.
 
 **Tests** (11 new in `tests/test_rns_bridge.py::TestBridgeToMeshcoreChannelLeak`
 + 3 in `TestRequeueFailedMessage::test_channel_lifted_*` + 2 in
