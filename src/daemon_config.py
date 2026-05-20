@@ -23,6 +23,7 @@ from typing import Optional
 
 from utils.safe_import import safe_import
 from utils.paths import get_real_user_home
+from utils.global_config import load_global_overrides
 
 _yaml, _HAS_YAML = safe_import('yaml')
 
@@ -78,8 +79,9 @@ class DaemonConfig:
           1. Explicit config_path argument
           2. User config (~/.config/meshanchor/daemon.yaml)
           3. System config (/etc/meshanchor/daemon.yaml)
-          4. Deployment profile feature_flags
-          5. Dataclass defaults
+          4. Global ecosystem config (~/.config/meshforge/global.ini)
+          5. Deployment profile feature_flags
+          6. Dataclass defaults
 
         Args:
             config_path: Explicit YAML config file path.
@@ -93,6 +95,9 @@ class DaemonConfig:
         # Apply deployment profile defaults first (lowest priority)
         if profile is not None:
             config._apply_profile(profile)
+
+        # Seed from shared ecosystem fallback (after profile, before YAML)
+        config._apply_global_config()
 
         # Load YAML configs (system first, then user override)
         for path in cls._config_search_paths(config_path):
@@ -116,6 +121,17 @@ class DaemonConfig:
             paths.append(explicit)
 
         return paths
+
+    def _apply_global_config(self) -> None:
+        """Seed fields from the MeshForge ecosystem-wide fallback file.
+
+        Any per-app daemon.yaml loaded later overrides these — global is
+        a fallback layer, not an override.
+        """
+        overrides = load_global_overrides()
+        for key, value in overrides.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
 
     def _apply_profile(self, profile) -> None:
         """Apply deployment profile feature flags as defaults."""
