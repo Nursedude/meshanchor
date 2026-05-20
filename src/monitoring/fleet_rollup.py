@@ -21,9 +21,33 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+MESHFORGE_INSTALL_PATH = Path("/opt/meshforge")
+"""Canonical MeshForge install root. The `_merge_mesh_forge_blocks`
+co-install pass-through skips when this is absent — without the check,
+MA fetches its own ``localhost:5000/fleet/slo`` thinking it's MF's,
+producing a self-recursion storm. Verified 2026-05-20 on
+meshanchor-server: 7 req/s sustained + matching ``BrokenPipeError``
+rate, every external ``/fleet/slo`` request triggering a recursive
+cascade bounded only by the 0.5 s fetch timeout."""
+
+
+@lru_cache(maxsize=1)
+def _meshforge_co_installed() -> bool:
+    """Cached existence check for the MeshForge install root.
+
+    Module-level lru_cache(1) — the answer is a deployment fact, not
+    request state, so caching saves a stat() per /fleet/slo hit on
+    every fleet-collector/watchdog cycle. Tests that need to flip the
+    value can call ``_meshforge_co_installed.cache_clear()``.
+    """
+    return MESHFORGE_INSTALL_PATH.exists()
 
 
 PEER_HTTP_TIMEOUT_S = 3.0
@@ -244,6 +268,14 @@ def _merge_mesh_forge_blocks(
     `fetch` is injectable for tests so we don't have to bind a real port.
     """
     if not isinstance(self_snapshot, dict):
+        return
+    # Skip if MF isn't installed on this box. Without this guard, MA
+    # fetches its own /fleet/slo (port 5000 collision when only MA is
+    # installed) producing a recursion storm — every external slo
+    # request triggers a recursive fetch bounded only by the 0.5 s
+    # timeout. Verified 2026-05-20 on meshanchor-server: ~7 req/s
+    # sustained, 1:1 BrokenPipeError rate, 415 CPU min in 6 h 13 m wall.
+    if not _meshforge_co_installed():
         return
     try:
         if fetch is None:

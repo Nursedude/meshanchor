@@ -382,6 +382,17 @@ class TestMeshForgeBlockMerge:
     answer to 'where did this go + why did it fail' for this box
     without having to add MF peers to MA's fleet.json."""
 
+    @pytest.fixture(autouse=True)
+    def force_mf_co_installed(self, monkeypatch):
+        """Pretend MF is installed so the install-check guard added
+        2026-05-20 doesn't short-circuit these merge tests. Tests in
+        TestMeshForgeBlockMergeInstallCheck exercise the guard itself.
+        """
+        fr._meshforge_co_installed.cache_clear()
+        monkeypatch.setattr(
+            fr, "_meshforge_co_installed", lambda: True,
+        )
+
     def test_merge_populates_missing_keys_from_mf_slo(self):
         self_snap = {"host": "self", "uptime_s": 100.0}
         mf_body = {
@@ -492,3 +503,74 @@ class TestMeshForgeBlockMerge:
                    side_effect=_fake_fetch):
             slo = fa.slo_view(snap)
         assert slo.get("path_table", {}).get("count") == 7
+
+
+class TestMeshForgeBlockMergeInstallCheck:
+    """Pin the install-check guard added 2026-05-20 after a sustained
+    self-recursion storm on meshanchor-server.
+
+    Symptom: ~7 req/s of `GET /fleet/slo` with matching BrokenPipeError
+    rate, 415 CPU min in 6 h 13 m wall. Root cause:
+    `MESHFORGE_LOCAL_SLO_URL` hardcodes ``localhost:5000``; on an MA-only
+    box that's MA itself, so the merge fetched its own /fleet/slo
+    response. Each external trigger fanned out via the 0.5 s fetch
+    timeout. The function's docstring promised "silent miss if MF
+    isn't co-installed" but there was no actual check.
+    """
+
+    def setup_method(self):
+        # Clear cached install check between tests so each one starts
+        # fresh — the lru_cache is module-global.
+        fr._meshforge_co_installed.cache_clear()
+
+    def test_skips_fetch_when_mf_not_installed(self, monkeypatch):
+        monkeypatch.setattr(
+            fr, "_meshforge_co_installed", lambda: False,
+        )
+        fetch_calls = []
+        def fake_fetch(url, timeout):
+            fetch_calls.append(url)
+            return None, "should not be called"
+        self_snap = {"host": "ma-only"}
+        fr._merge_mesh_forge_blocks(self_snap, fetch=fake_fetch)
+        assert fetch_calls == [], (
+            "Install check failed: merge fetched localhost:5000 even "
+            "though MF isn't installed. This is the self-recursion "
+            "storm class. Got fetches: " + repr(fetch_calls)
+        )
+        assert self_snap == {"host": "ma-only"}, (
+            "self_snap mutated despite skipped merge"
+        )
+
+    def test_proceeds_with_fetch_when_mf_installed(self, monkeypatch):
+        monkeypatch.setattr(
+            fr, "_meshforge_co_installed", lambda: True,
+        )
+        fetch_calls = []
+        def fake_fetch(url, timeout):
+            fetch_calls.append(url)
+            return ({"path_table": {"count": 3}}, None)
+        self_snap = {"host": "co-install"}
+        fr._merge_mesh_forge_blocks(self_snap, fetch=fake_fetch)
+        assert fetch_calls == [fr.MESHFORGE_LOCAL_SLO_URL]
+        assert self_snap.get("path_table", {}).get("count") == 3
+
+    def test_install_check_uses_canonical_path(self):
+        """Lock the install-root constant so a future refactor doesn't
+        silently point at the wrong directory and let the recursion
+        come back."""
+        assert str(fr.MESHFORGE_INSTALL_PATH) == "/opt/meshforge"
+
+    def test_install_check_is_cached(self):
+        """The check runs on every /fleet/slo handler call — must not
+        stat() per request. lru_cache(1) makes it once-per-process."""
+        fr._meshforge_co_installed.cache_clear()
+        for _ in range(50):
+            fr._meshforge_co_installed()
+        info = fr._meshforge_co_installed.cache_info()
+        assert info.misses == 1, (
+            f"Install check ran filesystem stat {info.misses}x in 50 "
+            "invocations; lru_cache regression — would re-stat() on "
+            "every slo request and dilute the perf win of the guard."
+        )
+        assert info.hits == 49
