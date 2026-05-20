@@ -315,6 +315,90 @@ class TestMeshCoreFanout:
         assert b.stats["fanouts"] == 2
 
 
+class TestSynthAckLoopGuard:
+    """Issue #66 synth-ACK content-prefix filter at MeshCore→LXMF bridge entry.
+
+    Mirror of the symmetric MeshForge guard at
+    ``meshtastic_broadcast_bridge.py:_SYNTH_ACK_CONTENT_PREFIXES`` (commit
+    8b89347, 2026-05-18). Without this guard, a synth ACK that round-trips
+    through MeshCore LoRa (radio self-RX, or peer-MeshCore gateway re-emit
+    on the same slot) re-enters as a fresh broadcast and gets fanned out
+    again — minting another pending-ack id and triggering another ACK,
+    exponentially. The in-process ``meshforge_is_synth_ack`` meta flag only
+    catches same-process loops; over the wire only the textual content
+    remains.
+    """
+
+    def test_delivered_prefix_dropped(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("deadbeef00112233")
+        msg = _make_canonical(text="[delivered: abc12345]")
+        b.on_meshcore_message(msg)
+        _rns, lxmf, _router = fake_rns_lxmf
+        lxmf.LXMessage.assert_not_called()
+        assert b.stats["filtered_synth_ack"] == 1
+
+    def test_timeout_prefix_dropped(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("deadbeef00112233")
+        msg = _make_canonical(text="[timeout: deadbeef]")
+        b.on_meshcore_message(msg)
+        _rns, lxmf, _router = fake_rns_lxmf
+        lxmf.LXMessage.assert_not_called()
+        assert b.stats["filtered_synth_ack"] == 1
+
+    def test_failed_prefix_dropped(self, tmp_path, fake_rns_lxmf):
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("deadbeef00112233")
+        msg = _make_canonical(text="[failed: ff00ff00]")
+        b.on_meshcore_message(msg)
+        _rns, lxmf, _router = fake_rns_lxmf
+        lxmf.LXMessage.assert_not_called()
+        assert b.stats["filtered_synth_ack"] == 1
+
+    def test_leading_whitespace_still_dropped(self, tmp_path, fake_rns_lxmf):
+        """A radio retransmit can pad with whitespace — strip before matching
+        so the guard isn't bypassed by a stray space."""
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("deadbeef00112233")
+        msg = _make_canonical(text="   [delivered: abc]")
+        b.on_meshcore_message(msg)
+        _rns, lxmf, _router = fake_rns_lxmf
+        lxmf.LXMessage.assert_not_called()
+        assert b.stats["filtered_synth_ack"] == 1
+
+    def test_non_synth_ack_payloads_pass(self, tmp_path, fake_rns_lxmf):
+        """A regular message that happens to contain the prefix later in the
+        body must NOT be filtered — only leading-prefix matches count."""
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("aaaa000000000001")
+        msg = _make_canonical(text="status report [delivered: ok]")
+        b.on_meshcore_message(msg)
+        _rns, lxmf, _router = fake_rns_lxmf
+        assert lxmf.LXMessage.call_count == 1
+        assert b.stats["filtered_synth_ack"] == 0
+        assert b.stats["fanouts"] == 1
+
+    def test_counter_accumulates(self, tmp_path, fake_rns_lxmf):
+        """Loop scenario produces N ACKs in rapid succession; counter must
+        reflect the rate, not just whether it ever happened."""
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("deadbeef00112233")
+        for i in range(5):
+            b.on_meshcore_message(
+                _make_canonical(text=f"[delivered: {i:08x}]")
+            )
+        _rns, lxmf, _router = fake_rns_lxmf
+        lxmf.LXMessage.assert_not_called()
+        assert b.stats["filtered_synth_ack"] == 5
+
+
 # ---------------------------------------------------------------------------
 # LXMFBroadcastBridge — subscription protocol
 # ---------------------------------------------------------------------------

@@ -105,6 +105,25 @@ _VERB_CHANNELS = "channels"
 _VERB_HELP = "help"
 
 
+# Issue #66 synthetic ACK content prefixes. When the substrate emits a
+# synth ACK back on the originating MeshCore channel, the same packet
+# round-trips through LoRa (radio self-RX, or peer-MeshCore gateway
+# re-emission on the same slot) and re-enters `MeshCoreHandler` as a
+# fresh broadcast with `source_network="meshcore"`. Without this filter
+# the bridge re-fans-out the ACK, mints a new pending-ack id, and emits
+# another ACK back — exponential traffic on the slot until the operator
+# notices. Same shape as the MeshForge loop guard in
+# `meshtastic_broadcast_bridge.py:_SYNTH_ACK_CONTENT_PREFIXES`
+# (commit 8b89347, 2026-05-18). The in-process `meshforge_is_synth_ack`
+# metadata flag (checked later in on_meshcore_message) only catches
+# same-process loops; over the wire only the textual content remains.
+_SYNTH_ACK_CONTENT_PREFIXES = (
+    "[delivered:",
+    "[timeout:",
+    "[failed:",
+)
+
+
 # Tier categorises where a subscriber came from: local clients on this pi
 # (NomadNet, MeshChatX), federation peers (other NOCs), or external random
 # RNS peers that DMed `subscribe`. Drives tier-aware retry budgets (S3) and
@@ -547,6 +566,7 @@ class LXMFBroadcastBridge:
             "unsubscribes": 0,
             "filtered_channel": 0,  # MeshCore msgs dropped by channel filter
             "filtered_non_meshcore": 0,
+            "filtered_synth_ack": 0,  # Issue #66 ACK round-trip loop guard
             "errors": 0,
             "skipped_backoff": 0,   # fan-outs skipped because subscriber in
                                     # backoff cooldown after consecutive fails
@@ -714,6 +734,19 @@ class LXMFBroadcastBridge:
         if msg.message_type not in (MessageType.TEXT, MessageType.TACTICAL):
             return
         if not msg.content:
+            return
+
+        # Synth-ACK loop guard. Issue #66 ACK bodies round-trip through
+        # LoRa (MeshCore radio self-RX, or a peer-gateway re-emit on the
+        # same slot) and re-enter as a fresh broadcast — the in-process
+        # `meshforge_is_synth_ack` meta flag doesn't survive the wire.
+        # Without this filter the bridge re-fans out the ACK and mints
+        # another pending-ack id, looping. Mirrors the symmetric guard
+        # in MeshForge's `MeshtasticBroadcastBridge` (commit 8b89347).
+        stripped = msg.content.lstrip()
+        if any(stripped.startswith(p) for p in _SYNTH_ACK_CONTENT_PREFIXES):
+            with self._stats_lock:
+                self.stats["filtered_synth_ack"] += 1
             return
 
         channel = (msg.metadata or {}).get("channel", 0)
