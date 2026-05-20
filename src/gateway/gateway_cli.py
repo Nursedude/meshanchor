@@ -143,3 +143,23 @@ def is_gateway_running() -> bool:
     """Check if gateway bridge is currently running."""
     global _active_bridge
     return _active_bridge is not None and _active_bridge._running
+
+
+def get_active_bridge():
+    """Return the live RNSMeshtasticBridge instance, or None.
+
+    Module-level accessor so HTTP handlers in `utils.stats_api` etc.
+    can reach the in-process bridge without importing the module-
+    private ``_active_bridge`` name. Mirrors
+    ``gateway.meshcore_handler.get_active_handler``.
+
+    Returns None when the bridge has not been started, OR when it has
+    been stopped — callers must handle the None case (the bridge's
+    stats dict is gone with the instance).
+    """
+    global _active_bridge
+    if _active_bridge is None:
+        return None
+    if not getattr(_active_bridge, "_running", False):
+        return None
+    return _active_bridge

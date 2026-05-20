@@ -1065,6 +1065,14 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             _fleet_handle_get(self)
             return
 
+        # Bridge stats — privacy-class drop counters (Issues #35/#37)
+        # plus message totals + connection booleans. Localhost-only;
+        # see utils/stats_api.py for the gate rationale.
+        if self.path == "/api/stats" or self.path.startswith("/api/stats?"):
+            from utils.stats_api import handle_get as _stats_handle_get
+            _stats_handle_get(self)
+            return
+
         if self.api is None:
             self._send_error_json(503, "Configuration API not initialized")
             return
