@@ -559,3 +559,149 @@ Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
 
 **Cross-refs**: MF `project_rnsd_rpc_listener_wedge.md` (the upstream
 cause class — recurrent on moc1).
+
+---
+
+## Issue #35: Channel-0 Public leak — synth-ACK DM contact-not-found cascaded to MeshCore broadcast (2026-05-19)
+
+**Status**: SHIPPED `ead12c7b` + test fixture follow-up `959e7fff`.
+Live on meshanchor-server.
+
+**Class**: A DM call site that omits `channel=` defaults the kwarg to
+0 in the handler signature. The outbound queue's metadata fallback
+(`int(meta.get('channel', 0) or 0)`) silently coerces the missing
+value to 0. Contact resolution fails for a stale destination. The
+handler logs "falling back to channel {channel} broadcast" and calls
+`send_chan_msg(0, text)` — broadcasting the DM payload to MeshCore
+slot 0 = Public. Three default-to-zero traps stacking turn a
+misdirected DM into a public broadcast. Privacy bug independent of
+which channel.
+
+**Symptom**: Operator session on VolcanoAI 2026-05-19 — Meshtastic
+broadcast round-trip via Meshtastic → MeshtasticBroadcastBridge →
+LXMF → meshanchor-server's `meshtastic_reemit_bridge` → MeshCore
+slot 1 ("meshanchor" channel) worked, but data also appeared on
+MeshCore Public on both meshanchor-server's local device and the p1
+portable. Operator hypothesis "somewhere in the CODE there's a
+channel 0" was correct.
+
+**Root cause** — three stacked `channel=0` traps:
+
+1. `src/gateway/rns_bridge.py:1096-1098` — `_meshcore_handler.send_text(text, destination=origin_address)` with **no channel kwarg**.
+2. `src/gateway/meshcore_handler.py:865, 869` — double-default `int(meta.get('channel', 0) or 0)` silently coerced None / missing → 0.
+3. `src/gateway/meshcore_handler.py:925-934` — contact-not-found fallback called `send_chan_msg(channel, text)` with channel=0.
+
+Trap 1 + Trap 2 stacking on Trap 3 = leak.
+
+**Fix (Option B — recommended; principled)**:
+
+`_send_message` contact-not-found branch:
+- DROP the message instead of falling through to `send_chan_msg`.
+- Increment `stats['meshcore_dm_dropped_contact_not_found']` so the
+  drop rate is operator-observable.
+- Log at WARNING with the destination.
+- Return False (was True+leak).
+
+`_process_outbound` metadata visibility:
+- New `_resolve_channel(raw, source)` helper surfaces missing /
+  None / unparsable channel metadata at DEBUG without changing the
+  default value. Goal: make the call site detectable rather than
+  mask Trap 1.
+
+**Not touched (deliberate)**:
+- `rns_bridge.py:1064` Meshtastic-origin synth-ACK still passes
+  `channel=0` — Meshtastic primary channel = 0 by convention.
+- MeshCore firmware slot-0/slot-1 shared-key display behaviour
+  documented at the Meshtastic re-emit bridge work (2026-05-18) —
+  firmware UI quirk, not a code defect.
+
+**Tests** (4 new + 1 inverted in `tests/test_meshcore_handler.py`):
+- `test_send_message_dm_drops_when_contact_missing` — replaces the
+  inverted-contract `test_send_message_dm_falls_back_to_channel_when_contact_missing`
+  that had pinned the WRONG behaviour. The old test asserted
+  `send_chan_msg.assert_awaited_once_with(1, "ping")`; the new one
+  asserts `assert_not_awaited()` and counter == 1.
+- `test_send_message_dm_drop_counter_accumulates` — multiple drops
+  increment the same counter so operators can see rate over time.
+- `test_send_message_dm_no_leak_to_public_on_channel_zero_arg` —
+  pins the precise pre-fix leak shape (no channel kwarg → default 0 →
+  contact-not-found → must NOT call send_chan_msg).
+- `test_resolve_channel_*` (4 tests) — visibility helper contract.
+
+**Operator detection recipes**:
+
+```bash
+# Is the leak class currently firing?
+ssh meshanchor-server "curl -s http://localhost:8081/api/stats \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); \
+      print(d.get(\"meshcore_dm_dropped_contact_not_found\", 0))'"
+# 0 = no DM ACKs being misaddressed (or no traffic). Non-zero = visible.
+
+# Cross-check with the daemon journal:
+ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
+  --no-pager | grep -E 'MeshCore DM dropped — contact not found'"
+```
+
+**Closes**: the deferred plan at
+`~/.claude/plans/investagate-why-volcanoai-9443-message-elegant-book.md`.
+
+---
+
+## Issue #36: CI failure log truncated by `| head -500` (2026-05-19)
+
+**Status**: WORKAROUND DOCUMENTED. Same-session fixture fix
+`959e7fff` cleared the symptom; the underlying `head -500`
+truncation in `ci.yml` is still in place.
+
+**Symptom**: Two consecutive commits (`d10421c5`, `ead12c7b`)
+showed red Test Suite (3.10) / (3.11) with `##[error]Process
+completed with exit code 1` and no visible failing test name in
+the GitHub-rendered log. The displayed log stopped at ~10% test
+progress, then jumped 90 seconds later straight to the exit-code
+line. Without the actual test name, debugging looked like "did my
+commit break CI?" when in fact the same red was pre-existing.
+
+**Root cause**: `.github/workflows/ci.yml` Test Suite step:
+
+```yaml
+python -m pytest tests/ -v --tb=short --timeout=30 --timeout-method=thread \
+  --ignore=tests/test_bridge_integration.py 2>&1 | tee /tmp/pytest.log | head -500
+```
+
+`| head -500` truncates the displayed stream to the first 500 lines
+of pytest's verbose output — which at ~5,000 tests reaches ~10%.
+When pytest later prints its failure summary and exits non-zero, the
+display has already closed.
+
+**Detection recipe**: download the uploaded `pytest.log` artifact
+and tail it:
+
+```bash
+cd /opt/meshanchor
+gh run download <run-id> -n pytest-log-py3.11 -D /tmp/mesh-ci-log
+tail -50 /tmp/mesh-ci-log/pytest.log    # has the FAILED ... lines
+```
+
+The artifact captures the full `tee` output. The GitHub log just
+truncates the display.
+
+**Underlying issue actually fixed**: 14 failures in
+`tests/test_message_queue_overflow.py` from Issue #67's
+"no sender → drop enqueue" path. Fixture update in `f6b91527`
+missed this file; `959e7fff` applies the same
+`_register_default_senders` helper from `test_message_queue.py:40`
+to the 5 fixtures in the file. Mechanically identical to the prior
+fallout fix; just missed.
+
+**Going-forward**: when CI shows red but the displayed log stops at
+~10% progress with no test name, **always pull the artifact before
+assuming your commit caused it**. The `head -500` line in ci.yml
+should eventually be replaced with a tail-based display
+(`tail -300 /tmp/pytest.log` runs after pytest completes and
+captures the failure summary), but the artifact already has the
+full log so the urgency is low.
+
+**Cross-refs**: MeshForge memory
+`project_meshanchor_mirror_completeness.md` — same "trust journal
+evidence, not CI for sister-repo ports" lesson; this is the CI
+equivalent.
