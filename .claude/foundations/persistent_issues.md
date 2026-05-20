@@ -749,11 +749,21 @@ slot the operator's mesh uses) in `gateway.json`.
 
 **Operator detection recipes**:
 
-Counters live on the in-process `RNSMeshtasticBridge.stats` dict and
-are NOT currently HTTP-exposed (no `/api/stats` endpoint exists in
-`config_api.py` as of 2026-05-20 — adding one is a separate follow-
-up). Use the journal for live observation:
+Counters surface on `/api/stats` (shipped 2026-05-20 commit `90933c86`).
+Localhost-only — the daemon binds 127.0.0.1 plus an in-handler
+`_check_localhost` gate (defense in depth). Both Issue #35 and #37
+privacy counters appear under the `stats` sub-object:
 
+```bash
+# Both privacy counters in one ping:
+ssh meshanchor-server "curl -s http://localhost:8081/api/stats \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d[\"stats\"]; \
+      print(\"dm_dropped:\", s.get(\"meshcore_dm_dropped_contact_not_found\", 0)); \
+      print(\"bridge_dropped:\", s.get(\"meshcore_bridge_default_channel_drop\", 0))'"
+```
+
+Journal cross-check (each drop emits a WARNING — counter + log fire
+together):
 ```bash
 # Successful bridge dispatch (with explicit channel):
 ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
@@ -762,10 +772,6 @@ ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour a
 # Drops (privacy-class refusal at the wrapper):
 ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
   --no-pager | grep -E 'no channel resolved|send_to_meshcore: broadcast with no channel'"
-
-# Issue #35 DM-drop counter (still in-process only):
-ssh meshanchor-server "journalctl -u meshanchor-daemon.service --since '1 hour ago' \
-  --no-pager | grep 'MeshCore DM dropped — contact not found'"
 ```
 
 Live config + resolver smoke test (verifies the field loaded and the
@@ -778,9 +784,9 @@ print(\"bridge_target_channel:\", GatewayConfig.load().meshcore.bridge_target_ch
 "'
 ```
 
-A non-zero drop rate in the journal means cross-protocol bridge
-cargo is being refused — operator should set
-`bridge_target_channel` to the intended private slot.
+A non-zero `bridge_dropped` rate means cross-protocol bridge cargo
+is being refused — operator should set `bridge_target_channel` to
+the intended private slot.
 
 **Tests** (11 new in `tests/test_rns_bridge.py::TestBridgeToMeshcoreChannelLeak`
 + 3 in `TestRequeueFailedMessage::test_channel_lifted_*` + 2 in
