@@ -869,7 +869,19 @@ class MeshCoreHandler(BaseMessageHandler):
             elif isinstance(msg, dict):
                 text = msg.get('message', '')
                 dest = msg.get('destination')
+                # Top-level 'channel' is the preferred carrier (set by
+                # send_text → CanonicalMessage path), but persistent
+                # queue replays from _requeue_failed_message lift channel
+                # from metadata into the outer dict at enqueue time. For
+                # any future call site that forgets to lift, fall back
+                # to metadata.channel before letting _resolve_channel
+                # default-to-zero. Channel-0 Public leak follow-up
+                # (2026-05-20).
                 raw_channel = msg.get('channel')
+                if raw_channel is None or raw_channel == '':
+                    meta = msg.get('metadata') or {}
+                    if isinstance(meta, dict):
+                        raw_channel = meta.get('channel')
                 channel = self._resolve_channel(
                     raw_channel, source=f"dict dest={dest!r}"
                 )

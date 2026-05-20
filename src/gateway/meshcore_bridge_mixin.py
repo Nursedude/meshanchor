@@ -35,19 +35,38 @@ class MeshCoreBridgeMixin:
             self._meshcore_handler.run_loop()
 
     def send_to_meshcore(self, message: str, destination: str = None,
-                         channel: int = 0) -> bool:
+                         channel: int = -1) -> bool:
         """Send a message to MeshCore network.
 
         Args:
             message: Text content to send
             destination: Destination address (None for broadcast)
-            channel: Channel index
+            channel: Channel slot. ``-1`` (sentinel) means the caller did
+                not specify a slot — for broadcasts this is REJECTED
+                rather than silently routed to slot 0 (Public). DMs
+                ignore the channel arg (they go to the contact).
 
         Returns:
             True if queued successfully, False otherwise.
         """
         if not self._meshcore_handler:
             logger.warning("MeshCore handler not initialized")
+            return False
+        if destination is None and channel < 0:
+            # Privacy-class refusal — channel-0 Public leak follow-up
+            # (2026-05-20). The pre-fix kwarg-default routed every
+            # unspecified-channel broadcast to slot 0; closing that door
+            # at the wrapper too means a future caller that forgets
+            # ``channel=`` can never resurrect the leak.
+            with self._stats_lock:
+                self.stats.setdefault(
+                    'meshcore_bridge_default_channel_drop', 0)
+                self.stats['meshcore_bridge_default_channel_drop'] += 1
+            logger.warning(
+                "send_to_meshcore: broadcast with no channel specified; "
+                "dropping rather than defaulting to slot 0 (Public). "
+                "Caller must pass channel= explicitly."
+            )
             return False
         return self._meshcore_handler.send_text(message, destination, channel)
 
@@ -143,9 +162,34 @@ class MeshCoreBridgeMixin:
                 from .canonical_message import _truncate_utf8
                 bridged_content = _truncate_utf8(bridged_content, 160)
 
-            if self.send_to_meshcore(bridged_content):
+            # Channel resolution — channel-0 Public leak follow-up
+            # (2026-05-20). Previously this call site omitted ``channel=``
+            # which defaulted to 0 (Public), leaking every cross-protocol
+            # broadcast onto the public slot. Resolve order:
+            #   1. Per-message metadata (carries origin's channel intent)
+            #   2. config.meshcore.bridge_target_channel (operator-set)
+            #   3. Drop with counter — never silently broadcast on slot 0
+            target_channel = self._resolve_bridge_target_channel(msg)
+            if target_channel < 0:
+                with self._stats_lock:
+                    self.stats.setdefault(
+                        'meshcore_bridge_default_channel_drop', 0)
+                    self.stats['meshcore_bridge_default_channel_drop'] += 1
+                logger.warning(
+                    f"Bridge {net_prefix}→MC: no channel resolved "
+                    f"(metadata empty, config.meshcore.bridge_target_channel "
+                    f"unset); dropping rather than leaking to slot 0 (Public). "
+                    f"Set config.meshcore.bridge_target_channel to enable."
+                )
+                self.health.record_message_failed(
+                    f"mesh_to_meshcore" if src_net == "meshtastic" else "rns_to_meshcore",
+                    requeued=False,
+                )
+                return
+
+            if self.send_to_meshcore(bridged_content, channel=target_channel):
                 direction = f"{src_net[:4]}_to_meshcore"
-                logger.info(f"Bridge {net_prefix}→MC: {bridged_content[:50]}...")
+                logger.info(f"Bridge {net_prefix}→MC ch{target_channel}: {bridged_content[:50]}...")
                 with self._stats_lock:
                     key = f'messages_{src_net}_to_meshcore'
                     self.stats.setdefault(key, 0)
@@ -167,3 +211,36 @@ class MeshCoreBridgeMixin:
             logger.error(f"Error bridging →MeshCore: {e}")
             with self._stats_lock:
                 self.stats['errors'] += 1
+
+    def _resolve_bridge_target_channel(self, msg) -> int:
+        """Resolve the MeshCore slot for a cross-protocol bridge message.
+
+        Order:
+          1. ``msg.metadata['channel']`` if present and >= 0
+          2. ``config.meshcore.bridge_target_channel`` if >= 0
+          3. -1 (caller drops the message)
+
+        Never returns 0 unless an explicit source asked for slot 0 —
+        the pre-fix path returned 0 implicitly via ``int(None or 0)``
+        and ``send_to_meshcore(channel=0)`` defaults, leaking every
+        cross-protocol broadcast to MeshCore Public.
+        """
+        meta = getattr(msg, 'metadata', None) or {}
+        raw = meta.get('channel')
+        if raw is not None and raw != '':
+            try:
+                slot = int(raw)
+                if slot >= 0:
+                    return slot
+            except (TypeError, ValueError):
+                logger.debug(
+                    f"bridge_target_channel: unparsable metadata channel "
+                    f"{raw!r}, falling through to config default"
+                )
+        meshcore_cfg = getattr(self.config, 'meshcore', None)
+        cfg_slot = getattr(meshcore_cfg, 'bridge_target_channel', -1)
+        try:
+            cfg_slot = int(cfg_slot)
+        except (TypeError, ValueError):
+            cfg_slot = -1
+        return cfg_slot if cfg_slot >= 0 else -1

@@ -1774,13 +1774,27 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             elif not isinstance(content, str):
                 content = ""
             metadata = _coerce_metadata_for_json(msg.metadata or {})
+            # Lift channel into the top-level payload — channel-0 Public
+            # leak follow-up (2026-05-20). The persistent queue's MeshCore
+            # sender (meshcore_handler.queue_send → _process_outbound)
+            # reads ``msg.get('channel')`` from the outer dict; without
+            # this lift, a requeued message would have channel=None and
+            # `_resolve_channel` would default it to 0 (Public), leaking
+            # private-channel cargo on replay after a disconnect window.
+            payload = {
+                'message': content,
+                'source_id': source_id,
+                'destination_id': dest_id or "",
+                'metadata': metadata,
+            }
+            raw_channel = metadata.get('channel') if isinstance(metadata, dict) else None
+            if raw_channel is not None and raw_channel != '':
+                try:
+                    payload['channel'] = int(raw_channel)
+                except (TypeError, ValueError):
+                    pass
             msg_id = self._persistent_queue.enqueue(
-                payload={
-                    'message': content,
-                    'source_id': source_id,
-                    'destination_id': dest_id or "",
-                    'metadata': metadata,
-                },
+                payload=payload,
                 destination=destination,
                 priority=MessagePriority.HIGH,
             )

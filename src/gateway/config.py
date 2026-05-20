@@ -362,6 +362,19 @@ class MeshCoreConfig:
     # genuinely needs to be heard everywhere on the mesh.
     advert_heartbeat_flood: bool = False
 
+    # ── Cross-protocol bridge target channel ──
+    #
+    # MeshCore slot that cross-protocol broadcasts (Meshtastic→MeshCore,
+    # RNS→MeshCore via the generic bridge path) land on. -1 = unset; the
+    # bridge will DROP cargo rather than silently broadcast to slot 0
+    # (Public). Operators must set this explicitly — usually 1 for the
+    # "meshanchor" private channel. See channel-0 Public leak follow-up
+    # (2026-05-20): the original code defaulted `send_to_meshcore`'s
+    # ``channel`` kwarg to 0, so every cross-protocol broadcast leaked
+    # to Public. The cargo-on-Public behaviour is never the right
+    # default; the privacy class matches the DM-drop fix from #35.
+    bridge_target_channel: int = -1
+
     # ── Session 3 (config-ownership): operator's desired radio state ──
     #
     # ``region`` + ``preset`` is the high-level handle — pick a row in

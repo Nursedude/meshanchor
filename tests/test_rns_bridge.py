@@ -864,6 +864,239 @@ class TestRequeueFailedMessage:
         )
         assert bridge._requeue_failed_message(msg, "rns") is False
 
+    def test_channel_lifted_into_payload_top_level(self, bridge):
+        """Channel-0 Public leak follow-up (2026-05-20). The MeshCore
+        persistent-queue sender reads ``payload.get('channel')`` from the
+        OUTER dict; if we leave channel only in metadata, the replay path
+        falls through ``_resolve_channel(None)`` → slot 0 (Public). Lift
+        it into the payload at enqueue time so the slot survives a
+        disconnect/reconnect cycle."""
+        mock_queue = MagicMock()
+        mock_queue.enqueue.return_value = "msg-123"
+        bridge._persistent_queue = mock_queue
+
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="private chat",
+            metadata={"channel": 1, "other": "preserved"},
+        )
+        ok = bridge._requeue_failed_message(msg, "meshcore")
+        assert ok is True
+        call_kwargs = mock_queue.enqueue.call_args.kwargs
+        payload = call_kwargs["payload"]
+        # Top-level channel set from metadata.channel — the replay path
+        # consults this BEFORE _resolve_channel can default to 0.
+        assert payload["channel"] == 1
+        # Metadata still intact (other consumers may need it).
+        assert payload["metadata"]["channel"] == 1
+        assert payload["metadata"]["other"] == "preserved"
+
+    def test_channel_lift_skipped_when_metadata_missing(self, bridge):
+        """No channel info → no top-level 'channel' key. Don't fabricate
+        one — the downstream _resolve_channel will still default to 0
+        and log at DEBUG, surfacing the missing-info caller."""
+        mock_queue = MagicMock()
+        mock_queue.enqueue.return_value = "msg-x"
+        bridge._persistent_queue = mock_queue
+
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="no-channel",
+        )
+        bridge._requeue_failed_message(msg, "meshcore")
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert "channel" not in payload
+
+    def test_channel_lift_handles_unparsable_metadata(self, bridge):
+        """metadata['channel'] = 'oops' (non-int) → don't crash; skip the
+        lift. _resolve_channel handles the unparsable case downstream."""
+        mock_queue = MagicMock()
+        mock_queue.enqueue.return_value = "msg-y"
+        bridge._persistent_queue = mock_queue
+
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="bad-meta",
+            metadata={"channel": "not-an-int"},
+        )
+        ok = bridge._requeue_failed_message(msg, "meshcore")
+        assert ok is True
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert "channel" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Cross-protocol bridge → MeshCore channel resolution (channel-0 Public leak
+# follow-up, 2026-05-20). The bridge mixin lives on RNSMeshtasticBridge via
+# MRO; testing through the bridge fixture covers the real call shape.
+# ---------------------------------------------------------------------------
+
+class TestBridgeToMeshcoreChannelLeak:
+    """Regression coverage for the channel-leak shape that survived the
+    Issue #35 DM-drop fix: cross-protocol broadcasts (Meshtastic→MC,
+    RNS→MC) used to land on slot 0 (Public) because
+    ``send_to_meshcore(content)`` omitted ``channel=`` and the kwarg
+    defaulted to 0. Pre-fix audit (2026-05-20): every
+    ``_process_bridge_to_meshcore`` invocation leaked to Public; the new
+    behaviour resolves the slot from metadata → config → drop."""
+
+    def test_resolve_metadata_channel_takes_precedence(self, bridge):
+        """msg.metadata['channel']=2 outranks config.meshcore.bridge_target_channel=1."""
+        bridge.config.meshcore.bridge_target_channel = 1
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={"channel": 2},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == 2
+
+    def test_resolve_falls_through_to_config(self, bridge):
+        """Empty metadata + config.bridge_target_channel=1 → 1."""
+        bridge.config.meshcore.bridge_target_channel = 1
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == 1
+
+    def test_resolve_returns_negative_when_both_unset(self, bridge):
+        """Pre-fix path implicitly returned 0 here → leak. Now -1 → drop."""
+        bridge.config.meshcore.bridge_target_channel = -1
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == -1
+
+    def test_resolve_unparsable_metadata_falls_to_config(self, bridge):
+        bridge.config.meshcore.bridge_target_channel = 3
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={"channel": "not-an-int"},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == 3
+
+    def test_resolve_explicit_zero_in_metadata_is_preserved(self, bridge):
+        """Operator opt-in to slot 0 (a legitimate broadcast destination
+        on the Meshtastic side) survives the resolution — the fix
+        doesn't ban slot 0, it bans the *implicit* default."""
+        bridge.config.meshcore.bridge_target_channel = 5
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={"channel": 0},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == 0
+
+    def test_send_to_meshcore_broadcast_no_channel_drops(self, bridge):
+        """send_to_meshcore("hi") with no destination and no channel must
+        DROP rather than silently broadcast to slot 0. Mirrors the
+        Issue #35 DM-drop discipline at the wrapper level."""
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        ok = bridge.send_to_meshcore("hi")
+        assert ok is False
+        bridge._meshcore_handler.send_text.assert_not_called()
+        assert bridge.stats.get('meshcore_bridge_default_channel_drop') == 1
+
+    def test_send_to_meshcore_broadcast_explicit_channel_sends(self, bridge):
+        """Explicit channel=N reaches handler.send_text(msg, None, N)."""
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        ok = bridge.send_to_meshcore("hi", channel=2)
+        assert ok is True
+        bridge._meshcore_handler.send_text.assert_called_once_with("hi", None, 2)
+
+    def test_send_to_meshcore_dm_ignores_channel_default(self, bridge):
+        """DMs pass the destination; channel arg is irrelevant. The
+        sentinel default must NOT cause DMs to drop."""
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        ok = bridge.send_to_meshcore("hi", destination="contact-abc")
+        assert ok is True
+        bridge._meshcore_handler.send_text.assert_called_once_with(
+            "hi", "contact-abc", -1
+        )
+
+    def test_process_bridge_to_meshcore_uses_metadata_channel(self, bridge):
+        """End-to-end: metadata['channel']=2 → handler.send_text(_, None, 2)."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="hello",
+            metadata={"channel": 2},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        bridge._meshcore_handler.send_text.assert_called_once()
+        args, _ = bridge._meshcore_handler.send_text.call_args
+        # args = (bridged_content, destination, channel)
+        assert args[1] is None
+        assert args[2] == 2
+
+    def test_process_bridge_to_meshcore_drops_when_no_channel(self, bridge):
+        """Pre-fix leak shape: no metadata channel + no config target →
+        used to call send_to_meshcore(content) → slot 0 broadcast.
+        Now: drop + counter, handler never invoked."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = -1
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="leaky",
+            metadata={},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        bridge._meshcore_handler.send_text.assert_not_called()
+        assert bridge.stats.get('meshcore_bridge_default_channel_drop') == 1
+
+    def test_process_bridge_to_meshcore_uses_config_default(self, bridge):
+        """Config-set target_channel kicks in when metadata is empty."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="via-config",
+            metadata={},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        bridge._meshcore_handler.send_text.assert_called_once()
+        args, _ = bridge._meshcore_handler.send_text.call_args
+        assert args[2] == 1
+
 
 # ---------------------------------------------------------------------------
 # enqueue_message

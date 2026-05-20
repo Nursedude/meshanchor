@@ -705,3 +705,73 @@ full log so the urgency is low.
 `project_meshanchor_mirror_completeness.md` — same "trust journal
 evidence, not CI for sister-repo ports" lesson; this is the CI
 equivalent.
+
+---
+
+## Issue #37: Cross-protocol bridge → MeshCore Public leak (2026-05-20)
+
+**Class**: same privacy bug as Issue #35, different door. Issue #35
+closed the DM contact-not-found fallback that broadcast misdirected
+DMs on slot 0. The cross-protocol bridge path (`Meshtastic→MeshCore`,
+`RNS→MeshCore`) had the same default-to-zero shape but went
+unnoticed because the original audit focused on the synth-ACK call
+sites added that week. Operator-observed leak surface: traffic from
+a MeshCore *channel* (e.g. slot 1 "meshanchor") visibly landing on
+slot 0 Public on both the local NOC radio and portable nodes.
+
+**Status**: SHIPPED 2026-05-20.
+
+**Root cause** — three stacked defaults, all in the bridge path:
+
+1. `src/gateway/meshcore_bridge_mixin.py:146` — `_process_bridge_to_meshcore` called `self.send_to_meshcore(bridged_content)` with **no channel kwarg**.
+2. `src/gateway/meshcore_bridge_mixin.py:37-38` — `send_to_meshcore` defaulted `channel: int = 0`. The asymmetric MC→Meshtastic direction at :82 correctly passes `channel=self.config.meshtastic.channel`; the reverse direction was never wired.
+3. `src/gateway/rns_bridge.py:1777` — `_requeue_failed_message` persisted `{message, source_id, destination_id, metadata}` but no top-level `channel`. Replay via `meshcore_handler.queue_send` → `_process_outbound:872` read `msg.get('channel')` from the OUTER dict → None → `_resolve_channel` defaulted to 0.
+
+**Why Issue #35's counter missed it**: `meshcore_dm_dropped_contact_not_found` only fires on the DM-fallback path. Findings #1–#3 are broadcast paths — different code, zero observability before this fix.
+
+**Fix shape**:
+
+- Added `MeshCoreConfig.bridge_target_channel: int = -1` (sentinel "unset"). Operator must set it explicitly (typically `1` for the "meshanchor" private slot) for cross-protocol cargo to reach MeshCore.
+- `_process_bridge_to_meshcore` resolves the slot via new helper `_resolve_bridge_target_channel(msg)`:
+  1. `msg.metadata['channel']` if present and >= 0
+  2. `config.meshcore.bridge_target_channel` if >= 0
+  3. -1 → DROP with `meshcore_bridge_default_channel_drop` counter increment
+- `send_to_meshcore` signature changed: `channel: int = -1` (sentinel). Broadcasts without an explicit channel are REJECTED at the wrapper layer too — a future caller that forgets `channel=` cannot resurrect the leak.
+- `_requeue_failed_message` lifts `metadata['channel']` into the top-level payload at enqueue time.
+- `_process_outbound` dict-branch falls back to `metadata['channel']` if top-level `channel` is missing — belt-and-suspenders for any call site that forgets the lift.
+
+**Behaviour change**: deployments currently relying on the silent
+slot-0 broadcast (none should — every prior "delivery" to Public
+was a leak) will see the new counter increment and a WARNING log
+the first time the bridge tries to deliver. Operator action: set
+`config.meshcore.bridge_target_channel = 1` (or whichever private
+slot the operator's mesh uses) in `gateway.json`.
+
+**Operator detection recipes**:
+
+```bash
+ssh meshanchor-server "curl -s http://localhost:8081/api/stats \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); \
+      print(\"dm_dropped:\", d.get(\"meshcore_dm_dropped_contact_not_found\", 0)); \
+      print(\"bridge_dropped:\", d.get(\"meshcore_bridge_default_channel_drop\", 0))'"
+```
+Both counters surface privacy-class drops. Non-zero `bridge_dropped`
+means cross-protocol bridge cargo is being dropped — operator
+should set `bridge_target_channel` to enable the bridge.
+
+**Tests** (11 new in `tests/test_rns_bridge.py::TestBridgeToMeshcoreChannelLeak`
++ 3 in `TestRequeueFailedMessage::test_channel_lifted_*` + 2 in
+`tests/test_meshcore_handler.py::TestSendPath::test_process_outbound_dict_*`):
+
+- Channel resolution priority (metadata > config > drop)
+- Unparsable metadata falls through correctly
+- Explicit slot-0 in metadata preserved (operator opt-in to Public)
+- `send_to_meshcore` broadcast-without-channel drops + counter
+- DM path ignores channel sentinel
+- End-to-end `_process_bridge_to_meshcore` with metadata, config, and unset paths
+- Requeue payload carries channel at top-level
+- `_process_outbound` dict path falls back to metadata.channel
+
+All 33 targeted tests green; full pytest run 4547 passed (the one
+test_status_bar failure is pre-existing test-pollution from suite
+order, unrelated to this fix).

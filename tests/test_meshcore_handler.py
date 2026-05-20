@@ -897,3 +897,60 @@ class TestSendPath:
         assert ok is False
         # The exact pre-fix shape: send_chan_msg(0, "[delivered: ...]"). Must NOT fire.
         fake_commands.send_chan_msg.assert_not_awaited()
+
+    def test_process_outbound_dict_falls_back_to_metadata_channel(self, handler):
+        """Channel-0 Public leak follow-up (2026-05-20). The persistent
+        queue's replay path hands ``_process_outbound`` a dict payload.
+        Pre-fix lift in _requeue_failed_message left channel only in
+        ``metadata['channel']``; the dict branch read ``msg.get('channel')``
+        from the OUTER dict → None → defaulted to slot 0 (Public). Even
+        after the lift, fall back to metadata.channel for any caller that
+        forgets to lift, so the leak class can never resurrect via a
+        dict-shaped payload."""
+        fake_commands = MagicMock()
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        del fake_commands.send_channel_txt_msg
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+        # Dict payload with channel ONLY in metadata (no top-level lift).
+        payload = {
+            'message': 'private cargo',
+            'destination': None,
+            'metadata': {'channel': 1},
+        }
+        handler._send_queue.put_nowait(payload)
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._process_outbound())
+        finally:
+            loop.close()
+        # Slot 1, not slot 0 — the fallback found the channel in metadata.
+        fake_commands.send_chan_msg.assert_awaited_once_with(1, "private cargo")
+
+    def test_process_outbound_dict_top_level_channel_wins(self, handler):
+        """When both top-level and metadata channel are present, top-level
+        wins (it's the canonical carrier set by the lift in
+        _requeue_failed_message). Verifies the fallback only kicks in
+        when top-level is missing."""
+        fake_commands = MagicMock()
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        del fake_commands.send_channel_txt_msg
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+        payload = {
+            'message': 'cargo',
+            'destination': None,
+            'channel': 2,             # canonical carrier
+            'metadata': {'channel': 9},  # stale duplicate (should be ignored)
+        }
+        handler._send_queue.put_nowait(payload)
+
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._process_outbound())
+        finally:
+            loop.close()
+        fake_commands.send_chan_msg.assert_awaited_once_with(2, "cargo")
