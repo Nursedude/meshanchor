@@ -936,38 +936,56 @@ class TestRequeueFailedMessage:
 
 class TestBridgeToMeshcoreChannelLeak:
     """Regression coverage for the channel-leak shape that survived the
-    Issue #35 DM-drop fix: cross-protocol broadcasts (Meshtastic→MC,
-    RNS→MC) used to land on slot 0 (Public) because
-    ``send_to_meshcore(content)`` omitted ``channel=`` and the kwarg
-    defaulted to 0. Pre-fix audit (2026-05-20): every
-    ``_process_bridge_to_meshcore`` invocation leaked to Public; the new
-    behaviour resolves the slot from metadata → config → drop."""
+    Issue #35 DM-drop fix.
 
-    def test_resolve_metadata_channel_takes_precedence(self, bridge):
-        """msg.metadata['channel']=2 outranks config.meshcore.bridge_target_channel=1."""
+    Final resolution (post-verify discovery 2026-05-20): the resolver
+    is CONFIG-ONLY. msg.metadata['channel'] is the SOURCE protocol's
+    channel index (Meshtastic packet.channel always populates it, default
+    0); it has no semantic mapping to a MeshCore slot. Honoring metadata
+    preserved the leak — Meshtastic ch0 broadcasts kept landing on
+    MeshCore slot 0 (Public). Matches the symmetric MC→Mesh direction
+    in `_process_meshcore_to_bridge` which already uses
+    `config.meshtastic.channel` exclusively."""
+
+    def test_resolve_uses_config_target_channel(self, bridge):
+        """config.bridge_target_channel=1 → returns 1; metadata ignored."""
         bridge.config.meshcore.bridge_target_channel = 1
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!abc",
             destination_id=None, content="x",
-            metadata={"channel": 2},
-        )
-        assert bridge._resolve_bridge_target_channel(msg) == 2
-
-    def test_resolve_falls_through_to_config(self, bridge):
-        """Empty metadata + config.bridge_target_channel=1 → 1."""
-        bridge.config.meshcore.bridge_target_channel = 1
-        from gateway.rns_bridge import BridgedMessage
-        msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
-            destination_id=None, content="x",
-            metadata={},
+            metadata={"channel": 2},  # source channel ignored
         )
         assert bridge._resolve_bridge_target_channel(msg) == 1
 
-    def test_resolve_returns_negative_when_both_unset(self, bridge):
-        """Pre-fix path implicitly returned 0 here → leak. Now -1 → drop."""
+    def test_resolve_returns_negative_when_config_unset(self, bridge):
+        """Pre-fix path implicitly returned 0 here → leak. Now -1 → drop.
+        Metadata is irrelevant — config alone decides the slot."""
         bridge.config.meshcore.bridge_target_channel = -1
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={"channel": 5},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == -1
+
+    def test_resolve_meshtastic_channel_zero_does_not_leak(self, bridge):
+        """The exact pre-fix leak shape: Meshtastic packet on channel 0
+        bridges to MeshCore. The old resolver returned 0 (Public). The
+        config-only resolver returns 1 (the configured private slot)."""
+        bridge.config.meshcore.bridge_target_channel = 1
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="leaky on ch0",
+            metadata={"channel": 0, "snr": -120.0},
+        )
+        assert bridge._resolve_bridge_target_channel(msg) == 1
+
+    def test_resolve_unparsable_config_falls_to_drop(self, bridge):
+        """If config target_channel can't be int-coerced, treat as unset."""
+        bridge.config.meshcore.bridge_target_channel = "garbage"
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!abc",
@@ -976,26 +994,16 @@ class TestBridgeToMeshcoreChannelLeak:
         )
         assert bridge._resolve_bridge_target_channel(msg) == -1
 
-    def test_resolve_unparsable_metadata_falls_to_config(self, bridge):
-        bridge.config.meshcore.bridge_target_channel = 3
+    def test_resolve_config_zero_is_explicit_opt_in_to_public(self, bridge):
+        """Operator explicitly setting bridge_target_channel=0 is a
+        legitimate opt-in to broadcasting on slot 0 (the fix doesn't
+        ban slot 0, it bans the *implicit* default)."""
+        bridge.config.meshcore.bridge_target_channel = 0
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!abc",
             destination_id=None, content="x",
-            metadata={"channel": "not-an-int"},
-        )
-        assert bridge._resolve_bridge_target_channel(msg) == 3
-
-    def test_resolve_explicit_zero_in_metadata_is_preserved(self, bridge):
-        """Operator opt-in to slot 0 (a legitimate broadcast destination
-        on the Meshtastic side) survives the resolution — the fix
-        doesn't ban slot 0, it bans the *implicit* default."""
-        bridge.config.meshcore.bridge_target_channel = 5
-        from gateway.rns_bridge import BridgedMessage
-        msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
-            destination_id=None, content="x",
-            metadata={"channel": 0},
+            metadata={"channel": 7},
         )
         assert bridge._resolve_bridge_target_channel(msg) == 0
 
@@ -1029,11 +1037,15 @@ class TestBridgeToMeshcoreChannelLeak:
             "hi", "contact-abc", -1
         )
 
-    def test_process_bridge_to_meshcore_uses_metadata_channel(self, bridge):
-        """End-to-end: metadata['channel']=2 → handler.send_text(_, None, 2)."""
+    def test_process_bridge_to_meshcore_uses_config_not_metadata(self, bridge):
+        """End-to-end: Meshtastic packet on channel 2 lands on the
+        operator-configured slot 1, NOT the source channel index.
+        Pre-fix the resolver honored metadata first and re-introduced
+        the leak when packet.channel happened to be 0."""
         from gateway.bridge_health import SubsystemState
         from gateway.rns_bridge import BridgedMessage
 
+        bridge.config.meshcore.bridge_target_channel = 1
         bridge._meshcore_handler = MagicMock()
         bridge._meshcore_handler.send_text = MagicMock(return_value=True)
         bridge.health.get_subsystem_state = MagicMock(
@@ -1043,14 +1055,39 @@ class TestBridgeToMeshcoreChannelLeak:
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!abc",
             destination_id=None, content="hello",
-            metadata={"channel": 2},
+            metadata={"channel": 2},  # source channel; must NOT route to slot 2
         )
         bridge._process_bridge_to_meshcore(msg)
         bridge._meshcore_handler.send_text.assert_called_once()
         args, _ = bridge._meshcore_handler.send_text.call_args
         # args = (bridged_content, destination, channel)
         assert args[1] is None
-        assert args[2] == 2
+        # Config target 1, NOT source metadata 2.
+        assert args[2] == 1
+
+    def test_process_bridge_to_meshcore_meshtastic_ch0_does_not_leak(self, bridge):
+        """The EXACT pre-fix leak shape: Meshtastic packet on channel 0
+        (the default), bridged to MeshCore. Old behaviour: handler called
+        with channel=0 → MeshCore slot 0 = Public. New behaviour: handler
+        called with the configured private slot."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="HawaiiNet broadcast",
+            metadata={"channel": 0, "snr": -100.0},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        args, _ = bridge._meshcore_handler.send_text.call_args
+        assert args[2] == 1, "Meshtastic ch0 must land on configured slot, not slot 0"
 
     def test_process_bridge_to_meshcore_drops_when_no_channel(self, bridge):
         """Pre-fix leak shape: no metadata channel + no config target →

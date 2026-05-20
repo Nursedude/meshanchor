@@ -215,28 +215,21 @@ class MeshCoreBridgeMixin:
     def _resolve_bridge_target_channel(self, msg) -> int:
         """Resolve the MeshCore slot for a cross-protocol bridge message.
 
-        Order:
-          1. ``msg.metadata['channel']`` if present and >= 0
-          2. ``config.meshcore.bridge_target_channel`` if >= 0
-          3. -1 (caller drops the message)
+        Config-only. ``msg.metadata['channel']`` is IGNORED for cross-
+        protocol bridge cargo because it carries the SOURCE protocol's
+        channel index (Meshtastic channel index, or RNS context), which
+        has no meaningful mapping to a MeshCore slot. Honoring it
+        preserved the leak: every Meshtastic broadcast on Meshtastic
+        channel 0 ended up on MeshCore slot 0 (Public) — exactly the
+        privacy bug Issue #37 was meant to close. Matches the symmetric
+        MC→Meshtastic direction in `_process_meshcore_to_bridge`, which
+        also uses `config.meshtastic.channel` and never preserves the
+        MeshCore source slot.
 
-        Never returns 0 unless an explicit source asked for slot 0 —
-        the pre-fix path returned 0 implicitly via ``int(None or 0)``
-        and ``send_to_meshcore(channel=0)`` defaults, leaking every
-        cross-protocol broadcast to MeshCore Public.
+        Returns:
+          - ``config.meshcore.bridge_target_channel`` if >= 0
+          - -1 (caller drops the message) otherwise
         """
-        meta = getattr(msg, 'metadata', None) or {}
-        raw = meta.get('channel')
-        if raw is not None and raw != '':
-            try:
-                slot = int(raw)
-                if slot >= 0:
-                    return slot
-            except (TypeError, ValueError):
-                logger.debug(
-                    f"bridge_target_channel: unparsable metadata channel "
-                    f"{raw!r}, falling through to config default"
-                )
         meshcore_cfg = getattr(self.config, 'meshcore', None)
         cfg_slot = getattr(meshcore_cfg, 'bridge_target_channel', -1)
         try:
