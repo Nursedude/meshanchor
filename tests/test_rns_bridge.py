@@ -927,6 +927,51 @@ class TestRequeueFailedMessage:
         payload = mock_queue.enqueue.call_args.kwargs["payload"]
         assert "channel" not in payload
 
+    def test_channel_override_overrides_metadata_lift(self, bridge):
+        """channel_override kwarg (used by the cross-protocol bridge_loop
+        during disconnect-window requeue) wins over metadata.channel.
+        Without this, the replay path leaks the SOURCE protocol's channel
+        index into the destination slot — Issue #37 leak class via the
+        requeue path (live-discovered 2026-05-20)."""
+        mock_queue = MagicMock()
+        mock_queue.enqueue.return_value = "msg-z"
+        bridge._persistent_queue = mock_queue
+
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="hello",
+            metadata={"channel": 0},  # source channel — must be overridden
+        )
+        ok = bridge._requeue_failed_message(
+            msg, "meshcore", channel_override=1
+        )
+        assert ok is True
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        # Override wins.
+        assert payload["channel"] == 1
+
+    def test_channel_override_handles_unparsable(self, bridge):
+        """If channel_override is non-int, don't crash; just skip
+        writing the top-level channel. Belt-and-suspenders for callers
+        that pass a value from a stringly-typed config field."""
+        mock_queue = MagicMock()
+        mock_queue.enqueue.return_value = "msg-w"
+        bridge._persistent_queue = mock_queue
+
+        from gateway.rns_bridge import BridgedMessage
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="x",
+            metadata={},
+        )
+        ok = bridge._requeue_failed_message(
+            msg, "meshcore", channel_override="garbage"  # type: ignore[arg-type]
+        )
+        assert ok is True
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert "channel" not in payload
+
 
 # ---------------------------------------------------------------------------
 # Cross-protocol bridge → MeshCore channel resolution (channel-0 Public leak
@@ -1133,6 +1178,97 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge._meshcore_handler.send_text.assert_called_once()
         args, _ = bridge._meshcore_handler.send_text.call_args
         assert args[2] == 1
+
+    # ─── Bridge_loop disconnect-window requeue path (bug 2 fix 2026-05-20) ───
+
+    def test_bridge_loop_disconnect_requeues_with_resolved_channel(self, bridge):
+        """When mc_state is DISCONNECTED, the bridge_loop must resolve the
+        target channel BEFORE requeueing — otherwise the replay path lifts
+        the SOURCE metadata.channel and the leak shape returns. Pin: the
+        requeue payload's `channel` field comes from `config.bridge_target_channel`
+        (the resolver result), NOT from the source metadata."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.DISCONNECTED
+        )
+
+        # Track what _requeue_failed_message received.
+        captured = {}
+        def fake_requeue(m, dest, *, channel_override=None):
+            captured['msg'] = m
+            captured['destination'] = dest
+            captured['channel_override'] = channel_override
+            return True
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="should not leak on replay",
+            metadata={"channel": 0},  # source Meshtastic ch0
+        )
+        bridge._bridge_to_meshcore_queue.put(msg)
+        bridge._running = True
+
+        # Force the bridge_loop to run exactly one iteration by stopping
+        # after the queue is drained.
+        def stop_after(*args, **kwargs):
+            bridge._running = False
+            return MagicMock()
+
+        # Need the get_nowait to succeed once then Empty + stop
+        with patch.object(bridge, '_process_mesh_to_rns'), \
+             patch.object(bridge, '_process_rns_to_mesh'), \
+             patch.object(bridge, '_requeue_failed_message', side_effect=fake_requeue), \
+             patch.object(bridge, '_drain_persistent_queue', side_effect=stop_after):
+            bridge._bridge_loop()
+
+        assert captured.get('destination') == "meshcore"
+        # The KEY assertion: override is the CONFIG value (1), not the
+        # SOURCE metadata channel (0). Pre-fix the requeue would lift the
+        # 0 and the replay would land on Public.
+        assert captured.get('channel_override') == 1
+
+    def test_bridge_loop_disconnect_drops_when_no_channel_resolvable(self, bridge):
+        """When mc_state is DISCONNECTED AND the resolver returns -1
+        (no metadata channel, no config target), the bridge_loop must
+        DROP with the same counter the healthy path uses. Operators can
+        monitor a single counter on /api/stats for both leak paths."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = -1
+        bridge._meshcore_handler = MagicMock()
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.DISCONNECTED
+        )
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id=None, content="must be dropped",
+            metadata={},  # no channel info — resolver returns -1
+        )
+        bridge._bridge_to_meshcore_queue.put(msg)
+        bridge._running = True
+
+        def stop_after(*args, **kwargs):
+            bridge._running = False
+            return MagicMock()
+
+        with patch.object(bridge, '_process_mesh_to_rns'), \
+             patch.object(bridge, '_process_rns_to_mesh'), \
+             patch.object(bridge, '_requeue_failed_message') as mock_requeue, \
+             patch.object(bridge, '_drain_persistent_queue', side_effect=stop_after):
+            bridge._bridge_loop()
+
+        # Requeue NEVER called — drop path took over.
+        mock_requeue.assert_not_called()
+        # Counter shared with the healthy-path drop, so operators see one
+        # signal whether the leak attempted to fire from `_process_bridge_to_meshcore`
+        # or from this disconnect-window code.
+        assert bridge.stats.get('meshcore_bridge_default_channel_drop') == 1
 
 
 # ---------------------------------------------------------------------------

@@ -1406,10 +1406,46 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                     msg = self._bridge_to_meshcore_queue.get_nowait()
                     mc_state = self.health.get_subsystem_state("meshcore")
                     if mc_state in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
-                        requeued = self._requeue_failed_message(msg, "meshcore")
-                        if requeued:
-                            self.health.record_message_queued_degraded()
-                            logger.debug("→MeshCore: subsystem down, message queued")
+                        # MeshCore is down — requeue for retry. Apply the
+                        # SAME channel resolver as the healthy path
+                        # (`_process_bridge_to_meshcore` → `_resolve_bridge_target_channel`)
+                        # BEFORE persisting the message. Without this,
+                        # `_requeue_failed_message` lifts the SOURCE
+                        # protocol's `metadata.channel` into the payload,
+                        # and the replay (`meshcore_handler.queue_send`
+                        # → `_process_outbound`) sends to that slot —
+                        # re-introducing the Issue #37 leak shape via
+                        # the disconnect-window path (live-confirmed
+                        # 2026-05-20 before this fix). Drop with the
+                        # same counter the healthy-path uses so
+                        # operators can monitor both paths from one
+                        # signal on `/api/stats`.
+                        target_channel = self._resolve_bridge_target_channel(msg)
+                        if target_channel < 0:
+                            with self._stats_lock:
+                                self.stats.setdefault(
+                                    'meshcore_bridge_default_channel_drop', 0)
+                                self.stats['meshcore_bridge_default_channel_drop'] += 1
+                            logger.warning(
+                                "Bridge →MC (replay): no channel resolved "
+                                "(config.meshcore.bridge_target_channel unset); "
+                                "dropping rather than letting the replay path "
+                                "leak to slot 0 (Public)."
+                            )
+                            self.health.record_message_failed(
+                                "mesh_to_meshcore", requeued=False,
+                            )
+                        else:
+                            requeued = self._requeue_failed_message(
+                                msg, "meshcore",
+                                channel_override=target_channel,
+                            )
+                            if requeued:
+                                self.health.record_message_queued_degraded()
+                                logger.debug(
+                                    "→MeshCore: subsystem down, "
+                                    f"queued for replay on ch{target_channel}"
+                                )
                     else:
                         self._process_bridge_to_meshcore(msg)
                 except Empty:
@@ -1746,12 +1782,22 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 return node.rns_hash
         return None
 
-    def _requeue_failed_message(self, msg, destination: str) -> bool:
+    def _requeue_failed_message(self, msg, destination: str,
+                                *, channel_override: Optional[int] = None) -> bool:
         """Persist a failed message to the persistent queue for later retry.
 
         Args:
             msg: The message that failed to send (BridgedMessage or CanonicalMessage).
             destination: Target network ("meshtastic", "rns", or "meshcore").
+            channel_override: When set, this slot is written to the
+                payload's top-level ``channel`` field — overriding any
+                ``metadata['channel']`` lift. Cross-protocol bridge
+                cargo passes this (resolved via
+                ``_resolve_bridge_target_channel``) so the replay path
+                doesn't preserve the SOURCE protocol's channel index.
+                Without this override, Issue #37's privacy class was
+                still live via the replay path even after the resolver
+                fix — bug discovered live 2026-05-20.
 
         Returns:
             True if message was successfully persisted, False otherwise.
@@ -1787,12 +1833,22 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 'destination_id': dest_id or "",
                 'metadata': metadata,
             }
-            raw_channel = metadata.get('channel') if isinstance(metadata, dict) else None
-            if raw_channel is not None and raw_channel != '':
+            if channel_override is not None:
+                # Caller (cross-protocol bridge_to_meshcore path) already
+                # resolved the destination slot via the config-only
+                # resolver. Write it verbatim — do NOT fall through to
+                # metadata.channel, which would re-introduce the leak.
                 try:
-                    payload['channel'] = int(raw_channel)
+                    payload['channel'] = int(channel_override)
                 except (TypeError, ValueError):
                     pass
+            else:
+                raw_channel = metadata.get('channel') if isinstance(metadata, dict) else None
+                if raw_channel is not None and raw_channel != '':
+                    try:
+                        payload['channel'] = int(raw_channel)
+                    except (TypeError, ValueError):
+                        pass
             msg_id = self._persistent_queue.enqueue(
                 payload=payload,
                 destination=destination,
