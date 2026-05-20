@@ -804,3 +804,48 @@ the intended private slot.
 All 33 targeted tests green; full pytest run 4547 passed (the one
 test_status_bar failure is pre-existing test-pollution from suite
 order, unrelated to this fix).
+
+### Issue #37 follow-up (2026-05-20 PM) — BridgeHealthMonitor missing "meshcore"
+
+Discovered while live-monitoring for natural Mesh→MC bridge events.
+The Issue #37 drop counter never ticked even on traffic that should
+have hit `_process_bridge_to_meshcore` with empty channel metadata,
+because **`_process_bridge_to_meshcore` was never called**.
+
+Root cause: `BridgeHealthMonitor._subsystem_states` was initialized
+with only `{"meshtastic", "rns"}`. The guard at `bridge_health.py:280`
+silently rejects subsystems not in the initial dict (returns None),
+so every `set_subsystem_state("meshcore", HEALTHY)` from
+`_sync_subsystem_states` was a no-op. `get_subsystem_state("meshcore")`
+returned the `DISCONNECTED` default forever. The bridge loop then
+routed every Mesh→MC and RNS→MC message through
+`_requeue_failed_message("meshcore")` → persistent queue → `queue_send`
+replay → SIM/radio TX — BYPASSING the Issue #37 resolver entirely.
+
+The replay path carried the source metadata.channel verbatim into the
+top-level payload (via the channel-lift in `_requeue_failed_message`
+shipped earlier in this issue), so the privacy class was STILL live
+via the replay path — Meshtastic ch0 broadcasts still landed on
+MeshCore slot 0 (Public).
+
+Fix: register `"meshcore"` in the initial `_subsystem_states` dict
+(commit `7e864b0a`). Live confirmation on meshanchor-server post-deploy:
+
+```
+[gateway.bridge_health] INFO: Subsystem meshcore: disconnected → healthy
+```
+
+This log line had never been emitted for the meshcore subsystem before
+the fix — the silent-no-op behaviour at the guard meant the transition
+log was unreachable.
+
+Regression test in `tests/test_bridge_health.py::test_meshcore_subsystem_state_persists`
+pins the contract: `set_subsystem_state("meshcore", HEALTHY)` must
+return the prior state (not None) and persist for subsequent reads.
+
+**Still open as of this fix**: the requeue/replay path still bypasses
+`_resolve_bridge_target_channel`. With bug 1 fixed, normal traffic
+flows through `_process_bridge_to_meshcore` correctly, but during
+legitimate disconnect/reconnect windows the replay path can resurrect
+the leak class. Patching the replay path is the next iteration of
+the fix.
