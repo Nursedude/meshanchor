@@ -184,3 +184,86 @@ Added thin dark-themed scrollbar CSS to `web/node_map.html`.
 See `handler_protocol.py` (Protocol + BaseHandler + TUIContext) and
 `handler_registry.py` (register/lookup/dispatch). 60 handler files in
 `launcher_tui/handlers/`. `main.py` dropped from 1,947 to 1,148 lines.
+
+## Issue #33: MeshCore Connection Contract (2026-05-05)
+
+**Rule**: MeshCore radio is opened only via `utils.meshcore_connection`.
+
+MeshCore has no daemon (unlike Meshtastic's meshtasticd) — the first process
+to open `/dev/ttyMeshCore` (or the BLE/TCP equivalent) wins exclusive
+ownership. A second `MeshCore.create_serial(...)` or raw `serial.Serial(...)`
+races the gateway handler and silently breaks the running session.
+
+### The contract
+
+- **Long-running owner** (gateway bridge) wraps its connect bring-up in
+  `acquire_for_connect(owner=...)` (acquires `MESHCORE_CONNECTION_LOCK`,
+  honors any existing persistent owner) and calls
+  `register_persistent(meshcore, loop, ...)` BEFORE the lock context exits.
+- **Short-lived consumers** (TUI probes, CLI helpers) use
+  `MeshCoreConnection()` as a context manager — returns `None` if the
+  persistent owner is active, holds the lock for the duration otherwise.
+- **Sync callers wanting to talk to the live radio** call
+  `get_connection_manager().run_in_radio_loop(coro, timeout=...)` — schedules
+  the coroutine on the persistent owner's asyncio loop and blocks for the
+  result. No second connection ever opened.
+- **Probes** (`validate_meshcore_device`) skip the raw open entirely while a
+  persistent owner is registered — return synthetic OK with an
+  `error="persistent owner '...' active"` note. This stops `Detect Devices`
+  flows from racing the bridge.
+
+### Prevention
+
+- **Lint MF014**: `MeshCore.create_serial`/`create_tcp` and raw
+  `serial.Serial(...)` on MeshCore-class devices outside
+  `meshcore_connection.py` (or `meshcore_handler.py`, the persistent owner)
+  fail the lint.
+- **Regression guard**:
+  `tests/test_regression_guards.py::TestMeshCoreConnectionContract` —
+  ratchets direct opens at 0 and verifies the handler still calls
+  `acquire_for_connect` + `register_persistent` + `unregister_persistent`.
+
+### Why this matters
+
+Sessions 2-4 of the MeshCore integration depend on multiple consumers being
+able to share the link safely:
+
+- **Session 2** (`meshcore-radio` supervisor service): Lifecycle separation
+  between the radio and the bridge daemon. The supervisor is the persistent
+  owner, the bridge becomes a `run_in_radio_loop` consumer.
+- **Session 3** (config-ownership): Region/preset/firmware push needs
+  short-lived exclusive access (`MeshCoreConnection`) without fighting the
+  bridge.
+- **Session 4** (TUI radio control): Status panel reads share via
+  `get_meshcore()`; reset / preset switch / firmware update use
+  `MeshCoreConnection` for exclusive operations.
+
+### Session 2 extension: supervisor IPC contract (2026-05-05)
+
+When the operator enables `meshcore-radio.service`, the supervisor process
+becomes the persistent owner via `register_persistent(owner="meshcore-radio")`.
+Cross-process consumers (bridge daemon, TUI, future CLI) reach the radio via
+the Unix socket protocol in `src/supervisor/protocol.py`:
+
+- **Socket**: `/run/meshcore-radio/meshcore-radio.sock` (separate runtime
+  directory from `meshanchor-daemon`'s `/run/meshanchor` so the two units
+  don't fight for ownership).
+- **Wire format**: NDJSON. Hello frame on accept declares protocol version
+  and current radio state. Methods: `status`, `get_radio_info`,
+  `get_contacts`, `get_channels`, `send_message`, `ping`. Events broadcast
+  to every connected client: `contact_message`, `channel_message`,
+  `advertisement`, `ack`, `connection_state`.
+- **Client SDK**: `utils.meshcore_supervisor_client.MeshCoreSupervisorClient`
+  (sync facade with a background reader thread) and
+  `is_supervisor_running(socket_path)` for liveness probes.
+- **Schema lock**: `tests/test_meshcore_supervisor_protocol.py` ratchets the
+  method and event-kind sets so additions go through code review.
+
+The contract is one-way for now: the bridge handler does NOT yet consume the
+supervisor — that's a follow-up PR. Until then, only one process should hold
+the radio at a time. The lint MF014 + persistent-owner check in
+`acquire_for_connect` prevent accidental dual ownership.
+
+
+---
+

@@ -375,85 +375,16 @@ MeshAnchor status says "rnsd: RUNNING (shared instance available)" when rnsd is 
 
 ---
 
-## Issue #33: MeshCore Connection Contract (2026-05-05)
+## Issue #33: MeshCore Connection Contract — ARCHIVED (2026-05-05)
 
-**Rule**: MeshCore radio is opened only via `utils.meshcore_connection`.
-
-MeshCore has no daemon (unlike Meshtastic's meshtasticd) — the first process
-to open `/dev/ttyMeshCore` (or the BLE/TCP equivalent) wins exclusive
-ownership. A second `MeshCore.create_serial(...)` or raw `serial.Serial(...)`
-races the gateway handler and silently breaks the running session.
-
-### The contract
-
-- **Long-running owner** (gateway bridge) wraps its connect bring-up in
-  `acquire_for_connect(owner=...)` (acquires `MESHCORE_CONNECTION_LOCK`,
-  honors any existing persistent owner) and calls
-  `register_persistent(meshcore, loop, ...)` BEFORE the lock context exits.
-- **Short-lived consumers** (TUI probes, CLI helpers) use
-  `MeshCoreConnection()` as a context manager — returns `None` if the
-  persistent owner is active, holds the lock for the duration otherwise.
-- **Sync callers wanting to talk to the live radio** call
-  `get_connection_manager().run_in_radio_loop(coro, timeout=...)` — schedules
-  the coroutine on the persistent owner's asyncio loop and blocks for the
-  result. No second connection ever opened.
-- **Probes** (`validate_meshcore_device`) skip the raw open entirely while a
-  persistent owner is registered — return synthetic OK with an
-  `error="persistent owner '...' active"` note. This stops `Detect Devices`
-  flows from racing the bridge.
-
-### Prevention
-
-- **Lint MF014**: `MeshCore.create_serial`/`create_tcp` and raw
-  `serial.Serial(...)` on MeshCore-class devices outside
-  `meshcore_connection.py` (or `meshcore_handler.py`, the persistent owner)
-  fail the lint.
-- **Regression guard**:
-  `tests/test_regression_guards.py::TestMeshCoreConnectionContract` —
-  ratchets direct opens at 0 and verifies the handler still calls
-  `acquire_for_connect` + `register_persistent` + `unregister_persistent`.
-
-### Why this matters
-
-Sessions 2-4 of the MeshCore integration depend on multiple consumers being
-able to share the link safely:
-
-- **Session 2** (`meshcore-radio` supervisor service): Lifecycle separation
-  between the radio and the bridge daemon. The supervisor is the persistent
-  owner, the bridge becomes a `run_in_radio_loop` consumer.
-- **Session 3** (config-ownership): Region/preset/firmware push needs
-  short-lived exclusive access (`MeshCoreConnection`) without fighting the
-  bridge.
-- **Session 4** (TUI radio control): Status panel reads share via
-  `get_meshcore()`; reset / preset switch / firmware update use
-  `MeshCoreConnection` for exclusive operations.
-
-### Session 2 extension: supervisor IPC contract (2026-05-05)
-
-When the operator enables `meshcore-radio.service`, the supervisor process
-becomes the persistent owner via `register_persistent(owner="meshcore-radio")`.
-Cross-process consumers (bridge daemon, TUI, future CLI) reach the radio via
-the Unix socket protocol in `src/supervisor/protocol.py`:
-
-- **Socket**: `/run/meshcore-radio/meshcore-radio.sock` (separate runtime
-  directory from `meshanchor-daemon`'s `/run/meshanchor` so the two units
-  don't fight for ownership).
-- **Wire format**: NDJSON. Hello frame on accept declares protocol version
-  and current radio state. Methods: `status`, `get_radio_info`,
-  `get_contacts`, `get_channels`, `send_message`, `ping`. Events broadcast
-  to every connected client: `contact_message`, `channel_message`,
-  `advertisement`, `ack`, `connection_state`.
-- **Client SDK**: `utils.meshcore_supervisor_client.MeshCoreSupervisorClient`
-  (sync facade with a background reader thread) and
-  `is_supervisor_running(socket_path)` for liveness probes.
-- **Schema lock**: `tests/test_meshcore_supervisor_protocol.py` ratchets the
-  method and event-kind sets so additions go through code review.
-
-The contract is one-way for now: the bridge handler does NOT yet consume the
-supervisor — that's a follow-up PR. Until then, only one process should hold
-the radio at a time. The lint MF014 + persistent-owner check in
-`acquire_for_connect` prevent accidental dual ownership.
-
+MeshCore radio opened only via `utils.meshcore_connection`. Long-running
+owner uses `acquire_for_connect(owner=...)` + `register_persistent`;
+short-lived consumers use `MeshCoreConnection()` context manager. Lint
+MF014 + `tests/test_regression_guards.py::TestMeshCoreConnectionContract`
+keep raw `MeshCore.create_serial`/`serial.Serial(...)` out of the tree.
+Supervisor IPC contract in `src/supervisor/protocol.py` (NDJSON, Unix
+socket at `/run/meshcore-radio/meshcore-radio.sock`) for cross-process
+consumers. **Full writeup**: `persistent_issues_archive.md` Issue #33.
 
 ---
 
@@ -843,9 +774,47 @@ Regression test in `tests/test_bridge_health.py::test_meshcore_subsystem_state_p
 pins the contract: `set_subsystem_state("meshcore", HEALTHY)` must
 return the prior state (not None) and persist for subsequent reads.
 
-**Still open as of this fix**: the requeue/replay path still bypasses
-`_resolve_bridge_target_channel`. With bug 1 fixed, normal traffic
-flows through `_process_bridge_to_meshcore` correctly, but during
-legitimate disconnect/reconnect windows the replay path can resurrect
-the leak class. Patching the replay path is the next iteration of
-the fix.
+### Issue #37 follow-up (2026-05-20 PM) — bug 2: requeue/replay path
+
+With bug 1 fixed, normal traffic now goes through
+`_process_bridge_to_meshcore` and the resolver. But during legitimate
+MeshCore disconnect/reconnect windows, the bridge_loop's requeue path
+STILL bypassed the resolver — `_requeue_failed_message` lifted the
+SOURCE `metadata.channel` into the payload, and the persistent queue's
+replay (`meshcore_handler.queue_send` → `_process_outbound`) sent to
+that slot. Same Issue #37 leak class, just one queue replay later.
+
+Fix (commit `0a38f5b2`):
+
+- `_requeue_failed_message` gains a `channel_override` kwarg. When
+  set, the resolved value is written to the payload's top-level
+  `channel` instead of the metadata lift. Keeps the metadata-lift
+  path intact for same-protocol replays where the source channel IS
+  the destination slot.
+- The bridge_loop's disconnect/disabled branch now calls
+  `_resolve_bridge_target_channel(msg)` BEFORE requeueing:
+  - Unresolvable (-1) → DROP with the SAME
+    `meshcore_bridge_default_channel_drop` counter the healthy path
+    uses (one signal on `/api/stats` for both leak paths).
+  - Resolved → `_requeue_failed_message(msg, "meshcore",
+    channel_override=<resolved>)` so the replay lands on the
+    configured slot, not the source channel.
+
+4 new tests pin the contract: channel_override wins over metadata
+lift, unparsable override handled, bridge_loop disconnect requeues
+with resolved channel, bridge_loop disconnect drops with counter when
+unresolvable. All 422 broader tests green.
+
+After both bug 1 and bug 2 fixes, the Issue #37 leak class is closed
+end-to-end:
+- Healthy state: `_process_bridge_to_meshcore` resolves and routes.
+- Disconnect/disabled state: bridge_loop resolves first, then requeues
+  with the resolved channel (or drops).
+- Replay: `queue_send` reads the resolved channel from the top-level
+  payload field — no metadata fallback needed.
+
+Both hosts confirmed post-deploy:
+```
+[gateway.bridge_health] INFO: Subsystem meshcore: disconnected → healthy
+[gateway.meshcore_bridge_mixin] INFO: Bridge Mesh→MC ch1: [Mesh:!dd9fb42] ...
+```
