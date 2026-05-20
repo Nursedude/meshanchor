@@ -19,6 +19,18 @@ from gateway.message_queue import (
 )
 
 
+def _register_default_senders(q):
+    """Register no-op senders for the common bridge destinations.
+
+    Issue #67: enqueue() refuses destinations with no registered sender.
+    These overflow tests exercise queue mechanics (size limits, priority
+    shedding, cleanup) — they don't need real delivery, but they DO need
+    enqueue() to return non-None. Mirrors the helper in test_message_queue.py.
+    """
+    for dest in ("meshtastic", "meshcore", "rns", "mqtt"):
+        q.register_sender(dest, lambda payload: True)
+
+
 class TestQueueDepth:
     """Tests for queue depth monitoring."""
 
@@ -27,6 +39,7 @@ class TestQueueDepth:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path)
+            _register_default_senders(q)
             yield q
 
     def test_empty_queue_depth(self, queue):
@@ -72,6 +85,7 @@ class TestQueueOverflow:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path, max_queue_size=5)
+            _register_default_senders(q)
             yield q
 
     def test_enqueue_within_limit(self, small_queue):
@@ -212,6 +226,7 @@ class TestQueueOverflow:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path, max_queue_size=0)
+            _register_default_senders(q)
 
             # Should enqueue without limit
             for i in range(50):
@@ -240,6 +255,7 @@ class TestCleanupStale:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path)
+            _register_default_senders(q)
             yield q
 
     def test_cleanup_stale_resets_old_messages(self, queue):
@@ -287,6 +303,7 @@ class TestAutoCleanup:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path)
+            _register_default_senders(q)
             yield q
 
     def test_auto_cleanup_triggers_on_interval(self, queue):
@@ -347,6 +364,7 @@ class TestOverflowWithMixedPriority:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = str(Path(tmpdir) / "test_queue.db")
             q = PersistentMessageQueue(db_path=db_path, max_queue_size=5)
+            _register_default_senders(q)
             yield q
 
     def test_shed_prefers_low_over_normal(self, queue):
