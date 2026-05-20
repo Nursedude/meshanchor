@@ -17,7 +17,14 @@ RestartSec=10
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/log /tmp /home
+# MA017 audit-skip: launcher.py --no-services skips start_noc_services()
+# entirely; this entry path doesn't write to meshanchor data buckets.
+# Pattern-audit Finding #6 (2026-05-19) noted this unit's ProtectHome=
+# read-only + /home in ReadWritePaths is a known systemd no-op per the
+# companion meshanchor-daemon.service comment — investigating the real
+# /home / /root write behaviour is deferred until the next time this
+# unit is touched.
+ReadWritePaths=/var/log /tmp /home  # audit-skip: see comment above
 PrivateTmp=true
 
 # Environment

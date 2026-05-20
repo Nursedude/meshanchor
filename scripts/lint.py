@@ -18,6 +18,7 @@ Checks:
 - MF013: Bare sqlite3.connect() outside db_helpers.py (must use connect_tuned)
 - MF014: Direct MeshCore.create_serial / create_tcp / serial.Serial outside meshcore_connection.py
 - MF016: @patch('src.utils.paths.…') in tests — production imports via bare 'utils.paths', divergent class objects
+- MA017: hardened systemd unit (ProtectHome=read-only) ReadWritePaths drift vs the three meshanchor buckets (Issue #58 class, ported from MeshForge MF017)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -463,6 +464,100 @@ CONTEXT_DOC_LIMITS = {
 }
 
 
+# MA017: hardened systemd units (ProtectHome=read-only) must whitelist all
+# three canonical MeshAnchor data buckets in ReadWritePaths=. Ported from
+# MeshForge MF017 (commit 2026-05-18 reliability sprint). The taxonomy
+# matches db_inventory._meshanchor_*_dir() — the bucket-class contract.
+#
+# Drift between the code's data path (e.g. _meshanchor_data_dir() in
+# utils/db_inventory.py) and the unit's ReadWritePaths= is the Issue #58
+# class on the MeshForge side: a hardened service stays "active (running)"
+# while every write fails in a callback exception. MeshAnchor has the
+# same trap surface (meshanchor.service, meshcore-radio.service both
+# declare ProtectHome=read-only) but lacked the lint rule until now.
+#
+# Audit rule: every hardened unit (ProtectHome=read-only or yes) with a
+# ReadWritePaths= line must include all three meshanchor buckets. Use
+# an inline "# audit-skip: <reason>" comment on the ReadWritePaths line
+# to explicitly opt out for a service that genuinely needs less (the
+# marker is the signal that the omission is deliberate, not drift).
+MA017_REQUIRED_BUCKETS = (".config/meshanchor", ".local/share/meshanchor", ".cache/meshanchor")
+
+# Where MeshAnchor stores systemd unit templates. Unlike MeshForge
+# (which uses contrib/systemd/*.service.in), MeshAnchor keeps its
+# units under scripts/*.service (no .in suffix; installed by
+# install_noc.sh with operator-substituted values at install time).
+MA017_UNIT_DIRS = ("scripts",)
+MA017_UNIT_EXTENSIONS = (".service",)
+
+
+def _audit_one_systemd_unit(
+    rel_path: str,
+    content: str,
+    required_buckets: tuple,
+) -> List[LintIssue]:
+    """Audit one hardened systemd unit for ReadWritePaths bucket coverage.
+
+    Returns issues for this unit only. Caller iterates units. Factored
+    so a per-unit ``# audit-skip:`` marker doesn't suppress later units
+    in the same run — the MeshForge port of MF017 had a `return` here
+    that exited the whole audit function (pattern-audit Finding #4,
+    2026-05-19).
+    """
+    issues: List[LintIssue] = []
+    if 'ProtectHome=read-only' not in content and 'ProtectHome=yes' not in content:
+        return issues
+
+    whitelisted = []
+    rwp_lineno = 0
+    for lineno, line in enumerate(content.splitlines(), start=1):
+        stripped = line.split('#', 1)[0].strip()
+        if stripped.startswith('ReadWritePaths='):
+            if '# audit-skip:' in line:
+                return issues
+            if rwp_lineno == 0:
+                rwp_lineno = lineno
+            rest = stripped[len('ReadWritePaths='):]
+            whitelisted.extend(rest.split())
+
+    if not whitelisted:
+        return issues
+
+    for bucket in required_buckets:
+        if not any(bucket in p for p in whitelisted):
+            issues.append(LintIssue(
+                rel_path, rwp_lineno, Severity.ERROR, "MA017",
+                f"hardened systemd unit (ProtectHome=read-only) missing "
+                f"'{bucket}' in ReadWritePaths= — Issue #58 class. Add "
+                f"the bucket explicitly, OR mark the omission deliberate "
+                f"with an inline '# audit-skip: <reason>' comment.",
+            ))
+    return issues
+
+
+def check_systemd_sandbox_paths(repo_root: str = '.') -> List[LintIssue]:
+    """MA017: hardened systemd units must whitelist all three meshanchor data buckets."""
+    issues: List[LintIssue] = []
+    for unit_dir in MA017_UNIT_DIRS:
+        full_dir = os.path.join(repo_root, unit_dir)
+        if not os.path.isdir(full_dir):
+            continue
+        for fname in sorted(os.listdir(full_dir)):
+            if not any(fname.endswith(ext) for ext in MA017_UNIT_EXTENSIONS):
+                continue
+            full = os.path.join(full_dir, fname)
+            rel_path = os.path.relpath(full, repo_root)
+            try:
+                with open(full, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except OSError:
+                continue
+            issues.extend(_audit_one_systemd_unit(
+                rel_path, content, MA017_REQUIRED_BUCKETS,
+            ))
+    return issues
+
+
 def check_context_doc_sizes(repo_root: str = '.') -> List[LintIssue]:
     """MF012: enforce char-size caps on docs routinely loaded into model context."""
     issues: List[LintIssue] = []
@@ -516,6 +611,11 @@ def main():
     # MF012: doc-size cap (skip in --staged mode — only relevant to whole-repo checks)
     if not args.staged:
         issues.extend(check_context_doc_sizes())
+
+    # MA017: hardened-systemd-unit sandbox path audit (skip in --staged
+    # mode — only relevant when whole-repo state is being checked).
+    if not args.staged:
+        issues.extend(check_systemd_sandbox_paths())
 
     # Filter by severity
     severity_order = {'error': 0, 'warning': 1, 'info': 2}

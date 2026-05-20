@@ -35,7 +35,11 @@ ProtectSystem=strict
 ProtectHome=read-only
 # Read /home/wh6gxz/.config/meshanchor for gateway.json. ProtectHome=read-only
 # blocks writes; that's the intent — the supervisor never writes config.
-ReadWritePaths=/var/log /tmp /run/meshcore-radio
+# MA017 audit-skip: supervisor wraps the serial port and exposes a Unix
+# socket; runtime writes go to /run/meshcore-radio (socket dir) + /var/log,
+# never to ~/.{config,local,cache}/meshanchor. Read-only access to
+# ~/.config/meshanchor for gateway.json is sufficient per design.
+ReadWritePaths=/var/log /tmp /run/meshcore-radio  # audit-skip: see comment above
 PrivateTmp=true
 
 # Allow access to the serial device. /dev/ttyMeshCore is the persistent
