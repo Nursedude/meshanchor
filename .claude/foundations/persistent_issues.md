@@ -729,15 +729,15 @@ slot 0 Public on both the local NOC radio and portable nodes.
 
 **Why Issue #35's counter missed it**: `meshcore_dm_dropped_contact_not_found` only fires on the DM-fallback path. Findings #1–#3 are broadcast paths — different code, zero observability before this fix.
 
-**Fix shape**:
+**Fix shape** (final, post-verify correction):
 
 - Added `MeshCoreConfig.bridge_target_channel: int = -1` (sentinel "unset"). Operator must set it explicitly (typically `1` for the "meshanchor" private slot) for cross-protocol cargo to reach MeshCore.
-- `_process_bridge_to_meshcore` resolves the slot via new helper `_resolve_bridge_target_channel(msg)`:
-  1. `msg.metadata['channel']` if present and >= 0
-  2. `config.meshcore.bridge_target_channel` if >= 0
-  3. -1 → DROP with `meshcore_bridge_default_channel_drop` counter increment
+- `_process_bridge_to_meshcore` resolves the slot via helper `_resolve_bridge_target_channel(msg)` — **CONFIG-ONLY** (commit `2fdfdde2`, same-day correction):
+  1. `config.meshcore.bridge_target_channel` if >= 0 → that slot
+  2. -1 → DROP with `meshcore_bridge_default_channel_drop` counter increment
+- **`msg.metadata['channel']` is deliberately IGNORED.** The original commit `6d9bc395` honored metadata first; live verification revealed `meshtastic_handler.py:434` always populates `msg.metadata['channel']` from `packet.channel` (default 0), so Meshtastic broadcasts on channel 0 STILL leaked to MeshCore slot 0 (Public). Source channel index has no semantic mapping to a destination MeshCore slot — config-only matches the symmetric MC→Mesh direction in `_process_meshcore_to_bridge` which already uses `config.meshtastic.channel` exclusively.
 - `send_to_meshcore` signature changed: `channel: int = -1` (sentinel). Broadcasts without an explicit channel are REJECTED at the wrapper layer too — a future caller that forgets `channel=` cannot resurrect the leak.
-- `_requeue_failed_message` lifts `metadata['channel']` into the top-level payload at enqueue time.
+- `_requeue_failed_message` lifts `metadata['channel']` into the top-level payload at enqueue time (for the *MeshCore-originated* outbound replay path, which IS same-protocol and metadata-channel is semantically valid there).
 - `_process_outbound` dict-branch falls back to `metadata['channel']` if top-level `channel` is missing — belt-and-suspenders for any call site that forgets the lift.
 
 **Behaviour change**: deployments currently relying on the silent
