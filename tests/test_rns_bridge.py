@@ -1186,7 +1186,15 @@ class TestBridgeToMeshcoreChannelLeak:
         target channel BEFORE requeueing — otherwise the replay path lifts
         the SOURCE metadata.channel and the leak shape returns. Pin: the
         requeue payload's `channel` field comes from `config.bridge_target_channel`
-        (the resolver result), NOT from the source metadata."""
+        (the resolver result), NOT from the source metadata.
+
+        Test mechanics: the bridge_loop runs `while self._running:` and only
+        re-evaluates the flag at the top, so flipping `_running=False` has
+        to happen from inside a function the loop calls on EACH iteration.
+        `_drain_persistent_queue` runs only every 150 iters (~30s) — pinning
+        the flag there hangs under CI's 30s pytest-timeout (Issue #36 ate
+        an earlier debug attempt). Patch the resolver itself so the flag
+        flips on the SAME iteration that processes the msg."""
         from gateway.bridge_health import SubsystemState
         from gateway.rns_bridge import BridgedMessage
 
@@ -1196,8 +1204,13 @@ class TestBridgeToMeshcoreChannelLeak:
             return_value=SubsystemState.DISCONNECTED
         )
 
-        # Track what _requeue_failed_message received.
         captured = {}
+        def fake_resolve(m):
+            captured['msg_seen_by_resolver'] = m
+            # Stop AFTER this iteration completes (so the requeue still fires).
+            bridge._running = False
+            return 1  # The configured target slot.
+
         def fake_requeue(m, dest, *, channel_override=None):
             captured['msg'] = m
             captured['destination'] = dest
@@ -1212,23 +1225,16 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge._bridge_to_meshcore_queue.put(msg)
         bridge._running = True
 
-        # Force the bridge_loop to run exactly one iteration by stopping
-        # after the queue is drained.
-        def stop_after(*args, **kwargs):
-            bridge._running = False
-            return MagicMock()
-
-        # Need the get_nowait to succeed once then Empty + stop
         with patch.object(bridge, '_process_mesh_to_rns'), \
              patch.object(bridge, '_process_rns_to_mesh'), \
-             patch.object(bridge, '_requeue_failed_message', side_effect=fake_requeue), \
-             patch.object(bridge, '_drain_persistent_queue', side_effect=stop_after):
+             patch.object(bridge, '_resolve_bridge_target_channel', side_effect=fake_resolve), \
+             patch.object(bridge, '_requeue_failed_message', side_effect=fake_requeue):
             bridge._bridge_loop()
 
         assert captured.get('destination') == "meshcore"
-        # The KEY assertion: override is the CONFIG value (1), not the
-        # SOURCE metadata channel (0). Pre-fix the requeue would lift the
-        # 0 and the replay would land on Public.
+        # The KEY assertion: override is the CONFIG value (1, returned by
+        # the resolver), not the SOURCE metadata channel (0). Pre-fix the
+        # requeue would lift the 0 and the replay would land on Public.
         assert captured.get('channel_override') == 1
 
     def test_bridge_loop_disconnect_drops_when_no_channel_resolvable(self, bridge):
@@ -1245,6 +1251,11 @@ class TestBridgeToMeshcoreChannelLeak:
             return_value=SubsystemState.DISCONNECTED
         )
 
+        def fake_resolve(m):
+            # Drop path: return -1 AND stop the loop on the same iteration.
+            bridge._running = False
+            return -1
+
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!abc",
             destination_id=None, content="must be dropped",
@@ -1253,14 +1264,10 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge._bridge_to_meshcore_queue.put(msg)
         bridge._running = True
 
-        def stop_after(*args, **kwargs):
-            bridge._running = False
-            return MagicMock()
-
         with patch.object(bridge, '_process_mesh_to_rns'), \
              patch.object(bridge, '_process_rns_to_mesh'), \
-             patch.object(bridge, '_requeue_failed_message') as mock_requeue, \
-             patch.object(bridge, '_drain_persistent_queue', side_effect=stop_after):
+             patch.object(bridge, '_resolve_bridge_target_channel', side_effect=fake_resolve), \
+             patch.object(bridge, '_requeue_failed_message') as mock_requeue:
             bridge._bridge_loop()
 
         # Requeue NEVER called — drop path took over.
