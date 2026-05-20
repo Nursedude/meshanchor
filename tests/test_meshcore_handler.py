@@ -707,6 +707,31 @@ class TestSendPath:
        every send to slot 0 (Public) regardless of TUI/API choice.
     """
 
+    def test_resolve_channel_passes_int_through(self, handler):
+        assert handler._resolve_channel(1, source="test") == 1
+        assert handler._resolve_channel(0, source="test") == 0
+        assert handler._resolve_channel(7, source="test") == 7
+
+    def test_resolve_channel_missing_defaults_to_zero(self, handler, caplog):
+        """Channel-0 Public leak fix (2026-05-19): missing channel
+        metadata silently defaults to 0 (Public) but logs at DEBUG so
+        the caller can be tracked down and fixed. Don't change the
+        default value — that would mask the call site rather than
+        surface it."""
+        import logging
+        with caplog.at_level(logging.DEBUG, logger='gateway.meshcore_handler'):
+            assert handler._resolve_channel(None, source="missing-test") == 0
+        assert any("missing-test" in r.message for r in caplog.records)
+
+    def test_resolve_channel_empty_string_defaults_to_zero(self, handler):
+        assert handler._resolve_channel('', source="empty-test") == 0
+
+    def test_resolve_channel_unparsable_defaults_to_zero(self, handler, caplog):
+        import logging
+        with caplog.at_level(logging.DEBUG, logger='gateway.meshcore_handler'):
+            assert handler._resolve_channel("not-an-int", source="unparsable-test") == 0
+        assert any("unparsable channel" in r.message for r in caplog.records)
+
     def test_extract_contacts_from_event_payload_dict(self, handler):
         evt = SimpleNamespace(payload={
             "alpha": {"adv_name": "alpha", "public_key": b"\x01\x02"},
@@ -788,14 +813,19 @@ class TestSendPath:
         # Did NOT fall through to channel broadcast since contact resolved.
         fake_commands.send_chan_msg.assert_not_awaited()
 
-    def test_send_message_dm_falls_back_to_channel_when_contact_missing(self, handler):
-        """If contact resolution fails, fall back to broadcast on the
-        passed channel — not slot 0 unless that's the channel."""
+    def test_send_message_dm_drops_when_contact_missing(self, handler):
+        """Channel-0 Public leak fix (2026-05-19): when contact resolution
+        fails for a DM, the handler must DROP the message rather than
+        falling through to ``send_chan_msg``. The pre-fix behaviour aired
+        misdirected DMs on slot 0 (Public) — a privacy bug independent of
+        which channel was passed. Drop + log + counter is the principled
+        move."""
         contacts_evt = SimpleNamespace(payload={})  # empty contacts
 
         fake_commands = MagicMock()
         fake_commands.get_contacts = AsyncMock(return_value=contacts_evt)
         fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        fake_commands.send_msg = AsyncMock(return_value=None)
 
         handler._connected = True
         handler._meshcore = MagicMock(commands=fake_commands)
@@ -807,5 +837,63 @@ class TestSendPath:
             )
         finally:
             loop.close()
-        assert ok is True
-        fake_commands.send_chan_msg.assert_awaited_once_with(1, "ping")
+        # Drop returns False so upstream sees the failure (was True+leak).
+        assert ok is False
+        # Critically: broadcast NEVER fires, regardless of the channel arg.
+        fake_commands.send_chan_msg.assert_not_awaited()
+        fake_commands.send_msg.assert_not_awaited()
+        # Counter increments so operators can see the drop rate.
+        assert handler.stats.get('meshcore_dm_dropped_contact_not_found') == 1
+
+    def test_send_message_dm_drop_counter_accumulates(self, handler):
+        """Multiple drops increment the same counter — operator must be
+        able to see the drop rate over time, not just whether it ever
+        happened."""
+        contacts_evt = SimpleNamespace(payload={})
+
+        fake_commands = MagicMock()
+        fake_commands.get_contacts = AsyncMock(return_value=contacts_evt)
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        fake_commands.send_msg = AsyncMock(return_value=None)
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+
+        loop = asyncio.new_event_loop()
+        try:
+            for _ in range(3):
+                loop.run_until_complete(
+                    handler._send_message("ping", destination="missing-id", channel=1)
+                )
+        finally:
+            loop.close()
+        assert handler.stats.get('meshcore_dm_dropped_contact_not_found') == 3
+        fake_commands.send_chan_msg.assert_not_awaited()
+
+    def test_send_message_dm_no_leak_to_public_on_channel_zero_arg(self, handler):
+        """Explicit channel-0 ARG must NOT cause a slot-0 broadcast on
+        contact-not-found. This is the precise leak shape from 2026-05-19:
+        the synth-ACK call site at rns_bridge.py:1096-1098 omits the
+        channel kwarg, which defaults to 0 in the handler signature, which
+        used to cascade through to send_chan_msg(0, text)."""
+        contacts_evt = SimpleNamespace(payload={})
+
+        fake_commands = MagicMock()
+        fake_commands.get_contacts = AsyncMock(return_value=contacts_evt)
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        fake_commands.send_msg = AsyncMock(return_value=None)
+
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+
+        loop = asyncio.new_event_loop()
+        try:
+            ok = loop.run_until_complete(
+                handler._send_message("[delivered: abcd1234]",
+                                      destination="stale-pubkey")
+            )
+        finally:
+            loop.close()
+        assert ok is False
+        # The exact pre-fix shape: send_chan_msg(0, "[delivered: ...]"). Must NOT fire.
+        fake_commands.send_chan_msg.assert_not_awaited()

@@ -862,11 +862,17 @@ class MeshCoreHandler(BaseMessageHandler):
                 # MeshCore channel slot rides on metadata since
                 # CanonicalMessage is protocol-agnostic. send_text() stashes
                 # it; routing fallbacks default to slot 0 (Public).
-                channel = int(msg.metadata.get('channel', 0) or 0)
+                raw_channel = msg.metadata.get('channel')
+                channel = self._resolve_channel(
+                    raw_channel, source=f"CanonicalMessage dest={dest!r}"
+                )
             elif isinstance(msg, dict):
                 text = msg.get('message', '')
                 dest = msg.get('destination')
-                channel = int(msg.get('channel', 0) or 0)
+                raw_channel = msg.get('channel')
+                channel = self._resolve_channel(
+                    raw_channel, source=f"dict dest={dest!r}"
+                )
             else:
                 text = str(msg)
                 dest = None
@@ -923,16 +929,24 @@ class MeshCoreHandler(BaseMessageHandler):
                                             target=destination):
                             await self._meshcore.commands.send_msg(contact, text)
                         return True
-                    logger.warning(
-                        f"MeshCore contact not found for {destination}, "
-                        f"falling back to channel {channel} broadcast"
-                    )
-                # Fall through to broadcast — meshcore_py method is
-                # send_chan_msg(chan, msg), not send_channel_txt_msg.
-                with timed_boundary("meshcore.send_chan_msg",
-                                    target=str(channel)):
-                    await self._meshcore.commands.send_chan_msg(channel, text)
-                return True
+                # Contact resolution failed (advert aged out, peer never
+                # seen, etc.) — drop the DM rather than broadcasting it.
+                # See channel-0 Public leak (2026-05-19): a DM addressed
+                # to a specific recipient must never be aired to a
+                # channel audience on contact-not-found, because the
+                # default-channel cascade lands it on slot 0 (Public).
+                # Privacy bug independent of which channel; broadcast
+                # was never an intended fallback for a misdirected DM.
+                with self._stats_lock:
+                    self.stats.setdefault('meshcore_dm_dropped_contact_not_found', 0)
+                    self.stats['meshcore_dm_dropped_contact_not_found'] += 1
+                logger.warning(
+                    f"MeshCore DM dropped — contact not found for "
+                    f"{destination!r}. Pre-fix behavior was to broadcast "
+                    f"on slot {channel}, which leaked to Public; "
+                    f"see persistent_issues channel-0-leak-2026-05-19."
+                )
+                return False
             else:
                 # Channel broadcast
                 if hasattr(self._meshcore, 'commands'):
@@ -953,6 +967,35 @@ class MeshCoreHandler(BaseMessageHandler):
         except Exception as e:
             logger.error(f"Failed to send MeshCore message: {e}")
             return False
+
+    @staticmethod
+    def _resolve_channel(raw_value: Any, source: str) -> int:
+        """Normalize a channel metadata value, surfacing missing/unparsable
+        cases at DEBUG.
+
+        The pre-2026-05-19 pattern ``int(meta.get('channel', 0) or 0)``
+        silently coerced None / '' / missing-key / unparsable values to 0
+        (Public), which masked the call site that should have set the
+        channel explicitly. After the channel-0 Public leak fix, the DM
+        side no longer broadcasts on contact-not-found, but explicit
+        broadcasts still default to 0 when the caller forgets to set it.
+        Logging surfaces those callers at DEBUG so they can be fixed
+        without changing routing behaviour.
+        """
+        if raw_value is None or raw_value == '':
+            logger.debug(
+                f"_process_outbound: {source} missing channel metadata, "
+                f"defaulting to slot 0 (Public)"
+            )
+            return 0
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            logger.debug(
+                f"_process_outbound: {source} unparsable channel "
+                f"{raw_value!r}, defaulting to slot 0 (Public)"
+            )
+            return 0
 
     @staticmethod
     def _extract_contacts(contacts_evt: Any) -> List[Any]:
