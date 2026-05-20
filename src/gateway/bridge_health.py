@@ -224,10 +224,20 @@ class BridgeHealthMonitor:
             "rns": 0.0,
         }
 
-        # Subsystem states (Phase 2: Circuit Breakers)
+        # Subsystem states (Phase 2: Circuit Breakers). "meshcore" was
+        # added 2026-05-20 — discovered live that `_sync_subsystem_states`
+        # called `set_subsystem_state("meshcore", HEALTHY)` but the guard
+        # at line ~280 silently dropped the update because the key was
+        # never initialized. `get_subsystem_state("meshcore")` then
+        # returned the DISCONNECTED default forever, routing every
+        # cross-protocol bridge message through `_requeue_failed_message`
+        # instead of `_process_bridge_to_meshcore`. The Issue #37 drop
+        # counter could not fire from that path either, masking the live
+        # privacy class.
         self._subsystem_states: Dict[str, SubsystemState] = {
             "meshtastic": SubsystemState.DISCONNECTED,
             "rns": SubsystemState.DISCONNECTED,
+            "meshcore": SubsystemState.DISCONNECTED,
         }
         # Messages queued during degraded state
         self._messages_queued_degraded: int = 0

@@ -476,12 +476,35 @@ class TestSubsystemState:
         assert result is None
 
     def test_get_subsystem_states_dict(self):
-        """get_subsystem_states returns string-valued dict."""
+        """get_subsystem_states returns string-valued dict for all three
+        subsystems (meshtastic, rns, meshcore). meshcore was added to the
+        initial dict 2026-05-20 — see bridge_health.py for the reason."""
         health = BridgeHealthMonitor()
         health.set_subsystem_state("meshtastic", SubsystemState.HEALTHY)
         health.set_subsystem_state("rns", SubsystemState.DISCONNECTED)
         states = health.get_subsystem_states()
-        assert states == {"meshtastic": "healthy", "rns": "disconnected"}
+        assert states == {
+            "meshtastic": "healthy",
+            "rns": "disconnected",
+            "meshcore": "disconnected",
+        }
+
+    def test_meshcore_subsystem_state_persists(self):
+        """Bug fix 2026-05-20: previously `set_subsystem_state("meshcore", ...)`
+        silently no-op'd because the key wasn't in the initial dict, so the
+        guard at set_subsystem_state line ~280 returned None. The fix added
+        "meshcore" to the initial dict. Pin the contract so a future regression
+        (someone removing the key) gets caught."""
+        health = BridgeHealthMonitor()
+        # Initial state must be DISCONNECTED, not the silent-default fallback.
+        assert health.get_subsystem_state("meshcore") == SubsystemState.DISCONNECTED
+        # set_subsystem_state must accept "meshcore" and return the prior state.
+        prior = health.set_subsystem_state("meshcore", SubsystemState.HEALTHY)
+        assert prior == SubsystemState.DISCONNECTED
+        # Subsequent reads must reflect the new state — NOT the default fallback.
+        assert health.get_subsystem_state("meshcore") == SubsystemState.HEALTHY
+        # And the state appears in the bulk dict.
+        assert health.get_subsystem_states()["meshcore"] == "healthy"
 
     def test_subsystem_states_in_summary(self):
         """get_summary includes subsystem states."""
