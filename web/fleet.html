@@ -1260,11 +1260,24 @@
                 // Explicit errors from the snapshot — this is where
                 // MA's daemon reports "radio: url error: Service Unavailable"
                 // (the meshcore-handler-dead fingerprint).
+                //
+                // Two shapes flow through here: MA's fleet_aggregator emits
+                // {source, error} dicts; MeshForge's fleet_snapshot.py emits
+                // plain strings (see its docstring contract). The renderer is
+                // the union point — handle both rather than forcing one side
+                // to normalize. Previously dropped MF strings rendered as
+                // "unknown: " and masked the real signal (e.g. cascade pre_fail).
                 const errors = snap.errors || [];
                 for (const e of errors) {
-                    const src = e.source || 'unknown';
-                    const txt = (e.error || e.message || '').slice(0, 50);
-                    chips.push({ cls: 'err', label: `${src}: ${txt}` });
+                    let label;
+                    if (typeof e === 'string') {
+                        label = e.slice(0, 60);
+                    } else {
+                        const src = e.source || 'unknown';
+                        const txt = (e.error || e.message || '').slice(0, 50);
+                        label = `${src}: ${txt}`;
+                    }
+                    chips.push({ cls: 'err', label });
                 }
 
                 // Radio disconnected — bad on radio hosts, ignorable on
