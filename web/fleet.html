@@ -1255,17 +1255,23 @@
             const anomalyRows = [];
 
             for (const row of rows) {
+                // Gateway-kind peers (e.g. moc3) have no snapshot by
+                // design — rollup skips the HTTP fetch in fleet_rollup.py.
+                // Skip the whole anomaly loop rather than per-chip checks:
+                // every downstream chip generator reads snap.* and any new
+                // one we add later inherits the guard automatically. Count
+                // the row in totalPeers so the banner reads N/M correctly.
+                if (row.kind === 'gateway') {
+                    totalPeers += 1;
+                    continue;
+                }
+
                 const snap = row.snapshot || {};
                 const chips = [];
 
-                if (row.error && !row.is_self && row.kind !== 'gateway') {
+                if (row.error && !row.is_self) {
                     // Peer fetch failed outright — that itself is an
                     // anomaly. We render it but it's likely transient.
-                    // Gateway-kind peers (e.g. moc3) don't run a map
-                    // service on :5000 by design, so their HTTP probe
-                    // is always going to refuse; the rollup skips the
-                    // fetch for kind=gateway but we keep this clause
-                    // defensive in case a fetch slips through.
                     chips.push({ cls: 'err', label: `peer fetch: ${row.error.slice(0, 30)}` });
                 }
 
