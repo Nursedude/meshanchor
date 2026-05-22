@@ -109,6 +109,40 @@ def test_peer_fetch_failure_is_per_row():
     assert by_name["dead"].error == "timeout"
 
 
+def test_gateway_kind_peer_skips_http_fetch():
+    """Gateway-only peers (e.g. moc3) have no map service on :5000.
+    The rollup must include the row so the dashboard shows the box's
+    presence, but skip the HTTP fetch — no error chip, no wasted
+    round trip. Companion to the renderer-side suppression in
+    web/fleet.html and the kind=gateway entry in fleet.json."""
+    cfg = _make_config(peers=[
+        PeerConfig(name="gw-only", host="gw.example", port=5000, kind="gateway"),
+        PeerConfig(name="regular", host="regular.example", port=5001, kind="noc"),
+    ])
+
+    calls = []
+
+    def fake_http(url, timeout=3.0):
+        calls.append(url)
+        return {"host": "regular", "overall_status": "ready"}, None
+
+    with patch("monitoring.fleet_aggregator._http_get_json", side_effect=fake_http):
+        rollup = fr.collect_fleet_rollup(cfg)
+
+    by_name = {p.name: p for p in rollup.peers}
+    assert set(by_name) == {"gw-only", "regular"}
+
+    gw = by_name["gw-only"]
+    assert gw.kind == "gateway"
+    assert gw.snapshot is None
+    assert gw.error is None
+    assert gw.fetch_duration_s == 0.0
+
+    # The regular peer was fetched; the gateway peer was not.
+    assert any("regular.example" in c for c in calls)
+    assert not any("gw.example" in c for c in calls)
+
+
 def test_peer_skipped_when_host_matches_self():
     cfg = _make_config(peers=[
         PeerConfig(name="self", host="MyHost", port=5001),

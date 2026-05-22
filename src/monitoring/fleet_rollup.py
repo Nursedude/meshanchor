@@ -350,6 +350,25 @@ def collect_fleet_rollup(
     # for serving an already-merged slo.
 
     for peer in config.non_self_peers(hostname=rollup.self_host):
+        if peer.kind == "gateway":
+            # Gateway peers don't run a map service on :5000 (e.g. moc3
+            # is gateway-only — see persistent_issues.md and the MF
+            # project_moc3_hardware_constraint memory). Skip the HTTP
+            # fetch entirely: no error, no chip, no wasted round trip.
+            # The row still lands in the rollup so the dashboard can
+            # show the box's presence; the renderer treats gateway-kind
+            # rows as a distinct visual state instead of an error.
+            rollup.peers.append(PeerSnapshot(
+                name=peer.name,
+                host=peer.host,
+                port=peer.port,
+                kind=peer.kind,
+                snapshot=None,
+                error=None,
+                fetched_at=time.time(),
+                fetch_duration_s=0.0,
+            ))
+            continue
         body, err, duration = _fetch_peer_snapshot(peer, timeout=timeout)
         rollup.peers.append(PeerSnapshot(
             name=peer.name,

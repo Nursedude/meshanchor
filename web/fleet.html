@@ -242,6 +242,10 @@
         .peer-row.degraded { border-left: 3px solid #ffa726; }
         .peer-row.error    { border-left: 3px solid #ef5350; }
         .peer-row.unknown  { border-left: 3px solid #6a7a8a; }
+        /* Gateway-only peers (no map service on :5000). Muted blue so
+           the row reads as "by design, not down". */
+        .peer-row.peer-gateway { border-left: 3px solid #5b8dc9; }
+        .peer-row.peer-gateway .peer-stat { color: #5b8dc9; font-size: 11px; }
         .peer-name { font-weight: 600; color: #e0e0e0; }
         .peer-host { color: #6a7a8a; font-size: 11px; font-family: ui-monospace, monospace; }
         .peer-stat { color: #b0c0d0; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -1172,8 +1176,13 @@
                 // error treatment when we have neither fresh data nor a
                 // recent cached snapshot.
                 const isReplay = staleAge !== null;
-                const showError = row.error && !isReplay;
-                const cls = showError ? 'peer-row peer-error error' : `peer-row ${status}`;
+                const isGateway = row.kind === 'gateway';
+                const showError = row.error && !isReplay && !isGateway;
+                const cls = showError
+                    ? 'peer-row peer-error error'
+                    : isGateway
+                        ? 'peer-row peer-gateway'
+                        : `peer-row ${status}`;
                 const div = el('div', { class: cls });
                 const headerLines = [
                     el('div', { class: 'peer-name', text: row.name }),
@@ -1186,7 +1195,14 @@
                     }));
                 }
                 div.appendChild(el('div', {}, headerLines));
-                if (showError) {
+                if (isGateway) {
+                    // Gateway-only peers (e.g. moc3) have no map service;
+                    // surface their role explicitly so the row reads as
+                    // "expected, no snapshot" rather than "down".
+                    div.appendChild(el('div', { class: 'peer-stat', text: 'gateway-only' }));
+                    div.appendChild(el('div'));
+                    div.appendChild(el('div'));
+                } else if (showError) {
                     div.appendChild(el('div', { class: 'peer-stat', text: row.error.slice(0, 30) }));
                     div.appendChild(el('div'));
                     div.appendChild(el('div'));
@@ -1242,9 +1258,14 @@
                 const snap = row.snapshot || {};
                 const chips = [];
 
-                if (row.error && !row.is_self) {
+                if (row.error && !row.is_self && row.kind !== 'gateway') {
                     // Peer fetch failed outright — that itself is an
                     // anomaly. We render it but it's likely transient.
+                    // Gateway-kind peers (e.g. moc3) don't run a map
+                    // service on :5000 by design, so their HTTP probe
+                    // is always going to refuse; the rollup skips the
+                    // fetch for kind=gateway but we keep this clause
+                    // defensive in case a fetch slips through.
                     chips.push({ cls: 'err', label: `peer fetch: ${row.error.slice(0, 30)}` });
                 }
 
