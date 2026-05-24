@@ -1618,12 +1618,26 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 except Exception as e:
                     logger.debug(f"RNS sniffer LXMF capture error: {e}")
 
+            # Decode LXMF bytes->str up front so stored records and the
+            # BridgedMessage carry clean text, not Python bytes reprs.
+            # Without this, messages.db logs "[b'Meshtastic'] b'...'".
+            content_str = (
+                message.content.decode("utf-8", errors="replace")
+                if isinstance(message.content, (bytes, bytearray))
+                else (message.content or "")
+            )
+            title_str = (
+                message.title.decode("utf-8", errors="replace")
+                if isinstance(message.title, (bytes, bytearray))
+                else (message.title or "")
+            )
+
             msg = BridgedMessage(
                 source_network="rns",
                 source_id=source_hash.hex(),
                 destination_id=None,
-                content=message.content,
-                title=message.title,
+                content=content_str,
+                title=title_str,
                 metadata={
                     'lxmf_stamp': message.stamp,
                 }
@@ -1632,10 +1646,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             # Store incoming message for UI/history
             try:
                 from commands import messaging
-                # Combine title and content for RNS messages
-                content = message.content
-                if message.title:
-                    content = f"[{message.title}] {content}"
+                # Combine title and content for RNS messages (decoded)
+                content = content_str
+                if title_str:
+                    content = f"[{title_str}] {content}"
                 messaging.store_incoming(
                     from_id=source_hash.hex(),
                     content=content,
@@ -1666,7 +1680,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             if self._meshtastic_reemit:
                 try:
                     self._meshtastic_reemit.on_lxmf_message(
-                        source_hash, message.content,
+                        source_hash, content_str,
                     )
                 except Exception as e:
                     logger.debug(f"meshtastic_reemit hook error: {e}")
