@@ -287,3 +287,37 @@ regression when mosquitto wasn't detectable via systemctl.
 | rnsd | None | rnsd |
 | hamclock | 8080 | hamclock |
 | mosquitto | 1883 | mosquitto |
+
+## Issue #6: Large Files — ALL UNDER THRESHOLD (archived 2026-05-24)
+
+Only `knowledge_content.py` (1,993 lines) exceeds 1,500 — acceptable as content file.
+Monitor files approaching 1,400 lines. Split proactively at 1,000 lines when adding features.
+
+Top files: `meshtastic_protobuf_client.py` (1,433), `service_check.py` (1,410),
+`map_http_handler.py` (1,404), `prometheus_exporter.py` (1,399).
+
+## Issue #21: Meshtastic CLI Preset Bug (Upstream) (archived 2026-05-24)
+
+**Not a MeshAnchor bug.** The Python meshtastic CLI doesn't always apply modem preset
+changes correctly. Always verify in browser at `http://localhost:9443` after CLI changes.
+Consider direct meshtasticd API calls instead of CLI.
+
+## Issue #23: Post-Install Verification (archived 2026-05-24)
+
+**Rule**: Never mark install "complete" until verification passes.
+
+`scripts/verify_post_install.sh` checks: meshtasticd binary, config.yaml validity,
+Webserver section, port 9443, radio detection, config.d/, rnsd, udev rules.
+Also available via `meshanchor --verify-install`.
+
+## Issue #24: Python Environment Mismatch (rnsd + meshtastic module) (archived 2026-05-24)
+
+rnsd's `Meshtastic_Interface.py` plugin requires the `meshtastic` Python module.
+pipx isolation, different Python versions, or user vs system site-packages can
+make the module invisible to rnsd.
+
+**Fix**: `sudo pip3 install --break-system-packages --ignore-installed meshtastic`
+or install to the same Python that rnsd uses:
+`head -1 $(which rnsd)` then use that interpreter's pip.
+
+**Diagnose**: `sudo python3 -c "import meshtastic; print(meshtastic.__version__)"`

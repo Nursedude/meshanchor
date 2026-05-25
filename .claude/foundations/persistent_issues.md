@@ -22,6 +22,10 @@ Full history in `persistent_issues_archive.md`.
 | #10 Map Scrollbar Overlap | Thin dark-themed scrollbar CSS | — |
 | #25, #26, #28 | rnsd ratchets, ReticulumPaths copies, API proxy | — |
 | #3 Services Not Started/Verified | `check_service()` before connect; gateway checks ADVISORY (warn+continue), TUI BLOCKING. Body in archive | — |
+| #6 Large Files | All under 1,500 except `knowledge_content.py`; split at 1,000 when adding. Body in archive | — |
+| #21 Meshtastic CLI Preset Bug | Upstream, not ours; verify presets at `:9443` after CLI. Body in archive | — |
+| #23 Post-Install Verification | `scripts/verify_post_install.sh` / `meshanchor --verify-install`. Body in archive | — |
+| #24 Python Env Mismatch (rnsd) | Install `meshtastic` into rnsd's Python. Body in archive | — |
 | GTK Issues (#2, #11, #13–#15) | GTK4 removed in v0.5.x | — |
 
 ---
@@ -86,16 +90,6 @@ def test_rns(self): ...
 
 Use appropriate log levels — don't hide errors at DEBUG:
 - **ERROR**: Something broke | **WARNING**: Unusual | **INFO**: User-visible ops | **DEBUG**: Dev internals
-
----
-
-## Issue #6: Large Files — ALL UNDER THRESHOLD
-
-Only `knowledge_content.py` (1,993 lines) exceeds 1,500 — acceptable as content file.
-Monitor files approaching 1,400 lines. Split proactively at 1,000 lines when adding features.
-
-Top files: `meshtastic_protobuf_client.py` (1,433), `service_check.py` (1,410),
-`map_http_handler.py` (1,404), `prometheus_exporter.py` (1,399).
 
 ---
 
@@ -178,14 +172,6 @@ Use `check_rns_shared_instance()` (3-tier: Unix socket → TCP → UDP fallback)
 
 ---
 
-## Issue #21: Meshtastic CLI Preset Bug (Upstream)
-
-**Not a MeshAnchor bug.** The Python meshtastic CLI doesn't always apply modem preset
-changes correctly. Always verify in browser at `http://localhost:9443` after CLI changes.
-Consider direct meshtasticd API calls instead of CLI.
-
----
-
 ## Issue #22: Never Overwrite meshtasticd's config.yaml
 
 **Rule**: Check for existing valid config before touching it.
@@ -202,30 +188,6 @@ Radio parameters (Bandwidth, SpreadFactor, TXpower) are set via
 
 MeshAnchor's job: Help users SELECT HATs from meshtasticd's `available.d/`, COPY to
 `config.d/`. Never overwrite `config.yaml` if it has a `Webserver:` section.
-
----
-
-## Issue #23: Post-Install Verification
-
-**Rule**: Never mark install "complete" until verification passes.
-
-`scripts/verify_post_install.sh` checks: meshtasticd binary, config.yaml validity,
-Webserver section, port 9443, radio detection, config.d/, rnsd, udev rules.
-Also available via `meshanchor --verify-install`.
-
----
-
-## Issue #24: Python Environment Mismatch (rnsd + meshtastic module)
-
-rnsd's `Meshtastic_Interface.py` plugin requires the `meshtastic` Python module.
-pipx isolation, different Python versions, or user vs system site-packages can
-make the module invisible to rnsd.
-
-**Fix**: `sudo pip3 install --break-system-packages --ignore-installed meshtastic`
-or install to the same Python that rnsd uses:
-`head -1 $(which rnsd)` then use that interpreter's pip.
-
-**Diagnose**: `sudo python3 -c "import meshtastic; print(meshtastic.__version__)"`
 
 ---
 
@@ -800,39 +762,67 @@ Both hosts confirmed post-deploy:
 
 ---
 
-## Issue #38: Silent reemit send-failure (counted, not logged) — reverse-direction reliability (2026-05-24)
+## Issue #38: MeshCore channel commands ignored by the bot — index-0 header burial (2026-05-24)
 
-**Class**: silent-failure observability gap (same family as Issue #4),
-found while hardening the `MeshCore channel → Meshtastic mesh` reverse leg
-on the radio-less gateway. **Status**: SHIPPED + soak-verified 2026-05-24.
+**Class**: reverse-leg (`MeshCore channel → Meshtastic`) bridging.
+**Status**: SHIPPED + field-verified 2026-05-24 (`11bca216`).
 
-**The gap (`81189127`)**: `meshtastic_reemit_bridge.py` bumped
-`stats["errors"]` SILENTLY when `handler.send_text()` to MeshCore returned
-False — only the *exception* path logged, so a reemit send-failure left
-ZERO journal trace. Surfaced by a soak: 2 reemit errors had accrued over 4h
-with nothing in the log to explain them. Fix: WARNING on the send-False
-path mirroring the success INFO line's fields (target channel, source, orig
-channel, sender). Counter unchanged. Test `test_send_text_failure_logs_warning`.
+MeshCore channel broadcasts bake a `"<channel> <sender>: <text>"` header
+into the text body (`source_address` is empty for channel msgs → the bridge
+labelled them `[MC:unknown]`). The egress emitted `[MC:unknown] meshanchor
+p4: wx`; the downstream meshing-around bot strips the leading `[...]` tag,
+leaving `meshanchor p4: wx` — command no longer at index 0, so
+`explicitCmd=True` never fired and channel commands were silently ignored.
 
-**Why it matters / regression guard**: "counted but not logged" is
-undiagnosable after the fact. Any `stats["errors"] += 1` (or similar) MUST
-be paired with a log at the appropriate level. Audit reflex:
-`grep -n 'errors.*+= 1' src/gateway/*.py` → confirm each has a companion
-`logger.warning/error` on the same path.
+**Fix**: `parse_meshcore_channel_header()` in `meshcore_bridge_mixin.py`
+lifts the sender out (split on the FIRST `": "` so a `:` in the body
+survives; last header token = sender) → egress `[MC:p4] wx`: bare command
+at index 0 (bot activates), `[MC:` prefix kept so the re-emit loop guard
+`nested_drop_prefixes` still drops echoes. `is_broadcast` only — DM text is
+raw, must not be reparsed. Field-verified: cmd→command list, wx→6-chunk
+forecast round-trip, chat→correctly ignored.
 
-**Shipped alongside (same reverse-leg arc, 2026-05-24)**:
-- `11bca216` — bot activation: channel broadcasts bake `"<channel>
-  <sender>: <text>"` into the body (`source_address` empty → `[MC:unknown]`),
-  burying the command so the meshing-around bot (`explicitCmd=True`, index-0
-  only) ignored it. `parse_meshcore_channel_header()` (split on FIRST `": "`,
-  last header token = sender) re-forms the egress as `[MC:p4] wx`: bare cmd
-  at index 0, `[MC:` prefix kept for the loop guard. Broadcasts only (DMs
-  stay raw). Field-verified cmd→list, wx→forecast, chat→ignored.
-- `e04d0e5a` — delivery: egress `send_text_direct` was `want_ack=False`, so
-  the lossy moc→Borg LongFast hop dropped commands. New
-  `MeshtasticEgressConfig.want_ack: bool = True` engages meshtasticd
-  implicit-ACK rebroadcast; operator-tunable to False for airtime.
+---
 
-**Soak (25×60s, meshanchor-server)**: PID unchanged, NRestarts=0, 100%
-connectivity, egress `errors`=0 under load, loop guard no runaway,
-`reemit.errors` flat (the 2 were one-time transients).
+## Issue #39: Reverse-leg egress dropped commands — want_ack=False on lossy LongFast (2026-05-24)
+
+**Class**: delivery reliability on the radio-less gateway egress.
+**Status**: SHIPPED + soak-verified 2026-05-24 (`e04d0e5a`).
+
+The MeshCore→Meshtastic egress (`send_to_meshtastic` → `send_text_direct`
+to the peer meshtasticd, e.g. moc:9443) sent broadcasts `want_ack=False`,
+so the lossy LongFast hop (moc→Borg) dropped commands with no retransmit —
+observed live: of several egressed commands, only some reached the bot.
+
+**Fix**: new `MeshtasticEgressConfig.want_ack: bool = True` (auto-parsed via
+`**data`/`asdict`), wired into the `send_text_direct` call. True engages
+meshtasticd's implicit-ACK rebroadcast (peer radio retransmits ≤3× until it
+hears the packet relayed — same mechanism as the bot-reply `wantack=True`
+path). Operator-tunable to False for airtime. Tests: default-True +
+explicit-False-override. NOTE: not log-observable (`send_text_direct` INFO
+line omits want_ack) — deterministic from config+code.
+
+---
+
+## Issue #40: Silent reemit send-failure — counted, not logged (2026-05-24)
+
+**Class**: silent-failure observability gap (same family as Issue #4).
+**Status**: SHIPPED + soak-verified 2026-05-24 (`81189127`).
+
+`meshtastic_reemit_bridge.py` bumped `stats["errors"]` SILENTLY when
+`handler.send_text()` to MeshCore returned False — only the *exception* path
+logged, so a reemit send-failure left ZERO journal trace. Surfaced by a
+soak: 2 reemit errors had accrued over 4h with nothing in the log to explain
+them. **Fix**: WARNING on the send-False path mirroring the success INFO
+line's fields (target channel, source, orig channel, sender). Counter
+unchanged. Test `test_send_text_failure_logs_warning`.
+
+**Regression guard**: "counted but not logged" is undiagnosable after the
+fact. Any `stats["errors"] += 1` (or similar) MUST be paired with a log at
+the appropriate level. Audit reflex: `grep -n 'errors.*+= 1' src/gateway/*.py`
+→ confirm each has a companion `logger.warning/error` on the same path.
+
+**Soak (25×60s, meshanchor-server)** validating all three (#38–#40): daemon
+PID unchanged, NRestarts=0, 100% connectivity (moc:9443/rns/meshcore), egress
+`errors`=0 under load, loop guard no runaway, `reemit.errors` flat (the 2
+were one-time transients).
