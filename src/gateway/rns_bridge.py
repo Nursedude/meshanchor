@@ -775,7 +775,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                     port=int(eg.port),
                     tls=bool(eg.tls),
                     channel_index=int(eg.channel_index),
-                    want_ack=False,
+                    want_ack=bool(getattr(eg, 'want_ack', True)),
                 )
             except Exception as e:
                 logger.warning("Meshtastic remote egress failed: %s", e)

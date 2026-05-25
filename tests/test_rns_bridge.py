@@ -493,7 +493,23 @@ class TestSendToMeshtastic:
         assert kwargs["host"] == "10.0.0.5"
         # egress uses its OWN channel_index (peer gateway's), not the passed channel
         assert kwargs["channel_index"] == 2
-        assert kwargs["want_ack"] is False
+        # want_ack defaults True so the lossy LongFast egress hop engages
+        # meshtasticd's implicit-ACK rebroadcast (reliable command delivery).
+        assert kwargs["want_ack"] is True
+
+    def test_remote_egress_want_ack_override_honored(self, bridge):
+        """want_ack=False in the egress config is passed through verbatim
+        (airtime-conscious opt-out of the rebroadcast reliability)."""
+        from gateway.config import MeshtasticEgressConfig
+        bridge._mesh_handler = None
+        bridge.config.meshtastic_egress = MeshtasticEgressConfig(
+            enabled=True, host="10.0.0.5", port=9443, tls=True,
+            channel_index=2, want_ack=False,
+        )
+        with patch("gateway.meshtastic_protobuf_client.send_text_direct",
+                   return_value=True) as mock_send:
+            bridge.send_to_meshtastic("Hello", channel=0)
+        assert mock_send.call_args.kwargs["want_ack"] is False
 
     def test_remote_egress_skipped_when_disabled(self, bridge):
         from gateway.config import MeshtasticEgressConfig

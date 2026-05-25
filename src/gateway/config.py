@@ -572,6 +572,14 @@ class MeshtasticEgressConfig:
     port: int = 9443
     tls: bool = True
     channel_index: int = 0
+    # Request delivery ACK on egressed broadcasts. On a channel broadcast
+    # this engages meshtasticd's implicit-ACK retransmission (the peer radio
+    # rebroadcasts up to 3× until it hears the packet relayed), which the
+    # bot-reply path already relies on. Default True because this egress
+    # exists to deliver commands to a remote bot over a lossy LongFast hop
+    # (e.g. moc→Borg); flip to False to save airtime if reliability matters
+    # less than channel utilization.
+    want_ack: bool = True
 
 
 @dataclass
