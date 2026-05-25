@@ -479,12 +479,26 @@ def format_broadcast_text(
     """
     channel = msg.metadata.get("channel", 0) if msg.metadata else 0
     sender = msg.source_address or "?"
+    text = msg.content or ""
+    # MeshCore channel broadcasts bake a "<channel> <sender>: <text>" header
+    # into the body and arrive with an empty source_address (sender → "?").
+    # Lift the sender out so the LXMF body carries a bare command at index 0
+    # after the "[ch:sender]" prefix — without this, downstream Meshtastic
+    # gateways re-inject "[ch0:?] meshanchor p4: wx", whose buried command
+    # the meshing-around bot ignores (explicitCmd=True acts on index 0 only).
+    # Symmetric to the Meshtastic egress fix (Issue #38). Scoped to channel
+    # broadcasts with no resolved source — Meshtastic-origin broadcasts carry
+    # a real source_address and skip this.
+    if (not msg.source_address) and getattr(msg, "is_broadcast", False):
+        from .meshcore_bridge_mixin import parse_meshcore_channel_header
+        parsed_sender, parsed_text = parse_meshcore_channel_header(text)
+        if parsed_sender:
+            sender, text = parsed_sender, parsed_text
     # Trim long sender keys (MeshCore pubkeys are 12 hex chars; that's
     # already short enough, but Meshtastic node IDs can be 9 chars
     # including the "!" prefix — leave them alone)
     if len(sender) > 16:
         sender = sender[:16]
-    text = msg.content or ""
     try:
         return prefix_format.format(channel=channel, sender=sender, text=text)
     except (KeyError, IndexError, ValueError) as e:

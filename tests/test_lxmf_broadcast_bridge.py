@@ -137,6 +137,34 @@ class TestFormatBroadcastText:
         assert "ping" in out
         assert out.startswith("[ch1:abc]")
 
+    def test_channel_broadcast_lifts_baked_header(self):
+        """MeshCore channel broadcast with empty source_address: the
+        "<channel> <sender>: <text>" header baked into the body is lifted so
+        the bot sees a bare command at index 0 (Issue #38 symmetric fix)."""
+        msg = _make_canonical(
+            text="meshanchor p4: wx", channel=0, sender="", is_broadcast=True
+        )
+        out = format_broadcast_text(msg, "[ch{channel}:{sender}] {text}")
+        assert out == "[ch0:p4] wx"
+
+    def test_resolved_sender_not_reparsed(self):
+        """A broadcast with a real source_address (e.g. Meshtastic-origin)
+        must NOT be reparsed — body with ':' stays intact."""
+        msg = _make_canonical(
+            text="eta: 5 min", channel=2, sender="!deadbeef", is_broadcast=True
+        )
+        out = format_broadcast_text(msg, "[ch{channel}:{sender}] {text}")
+        assert out == "[ch2:!deadbeef] eta: 5 min"
+
+    def test_channel_broadcast_without_header_passthrough(self):
+        """Empty source_address but no baked header: body passes through,
+        sender stays '?'."""
+        msg = _make_canonical(
+            text="just talking", channel=0, sender="", is_broadcast=True
+        )
+        out = format_broadcast_text(msg, "[ch{channel}:{sender}] {text}")
+        assert out == "[ch0:?] just talking"
+
 
 # ---------------------------------------------------------------------------
 # LXMFBroadcastBridge — fixtures
