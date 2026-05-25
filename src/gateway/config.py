@@ -549,9 +549,29 @@ class MeshtasticReemitConfig:
     # MeshtasticBroadcastBridge on a peer gateway). Without this guard,
     # the re-emit puts MeshCore-origin content back onto MeshCore,
     # forming a runaway feedback loop. Field-detected 2026-05-18.
+    # "[MC:" is the MeshCore->Meshtastic egress prefix (see meshcore_bridge_mixin
+    # _process_meshcore_to_bridge). A MeshCore broadcast egressed to Meshtastic and
+    # round-tripped back via LXMF must NOT be re-emitted onto MeshCore (echo loop).
     nested_drop_prefixes: List[str] = field(default_factory=lambda: [
-        "[MeshCore]",
+        "[MeshCore]", "[MC:",
     ])
+
+
+@dataclass
+class MeshtasticEgressConfig:
+    """Remote Meshtastic TX egress (for gateways with no local radio).
+
+    When the gateway has no local meshtasticd (e.g. meshanchor-server),
+    outbound Meshtastic sends are routed to a peer meshtasticd's HTTP API
+    via send_text_direct (PUT /api/v1/toradio). TX-only — never reads
+    fromradio. Closes the MeshCore->Meshtastic reverse leg by injecting
+    onto a peer gateway's channel (e.g. moc 'meshforge', channel_index 2).
+    """
+    enabled: bool = False
+    host: str = ""
+    port: int = 9443
+    tls: bool = True
+    channel_index: int = 0
 
 
 @dataclass
@@ -618,6 +638,13 @@ class GatewayConfig:
     # a MeshCore channel. Closes the Meshtastic→MeshCore asymmetry.
     meshtastic_reemit: MeshtasticReemitConfig = field(
         default_factory=MeshtasticReemitConfig
+    )
+
+    # Remote Meshtastic TX egress — opt-in. When enabled, MeshCore/RNS->Meshtastic
+    # sends go to a peer meshtasticd HTTP API (send_text_direct) instead of a local
+    # radio. Closes the reverse leg on radio-less gateways (e.g. meshanchor-server).
+    meshtastic_egress: MeshtasticEgressConfig = field(
+        default_factory=MeshtasticEgressConfig
     )
 
     # Routing (used when bridge_mode="message_bridge")
@@ -756,7 +783,7 @@ class GatewayConfig:
             # Handle MeshtasticReemitConfig (list fields — explicit copy).
             reemit_data = data.get('meshtastic_reemit', {}) or {}
             default_drop_prefixes = ["[delivered:", "[timeout:", "[failed:"]
-            default_nested_drop_prefixes = ["[MeshCore]"]
+            default_nested_drop_prefixes = ["[MeshCore]", "[MC:"]
             meshtastic_reemit = MeshtasticReemitConfig(
                 enabled=reemit_data.get('enabled', False),
                 source_identities=[
@@ -792,6 +819,7 @@ class GatewayConfig:
                 meshcore=meshcore,
                 lxmf_broadcast=lxmf_broadcast,
                 meshtastic_reemit=meshtastic_reemit,
+                meshtastic_egress=MeshtasticEgressConfig(**data.get('meshtastic_egress', {})),
                 routing_rules=[RoutingRule(**r) for r in data.get('routing_rules', [])],
                 default_route=data.get('default_route', 'bidirectional'),
                 telemetry=TelemetryConfig(**data.get('telemetry', {})),
@@ -855,6 +883,7 @@ class GatewayConfig:
                 'meshcore': asdict(self.meshcore),
                 'lxmf_broadcast': asdict(self.lxmf_broadcast),
                 'meshtastic_reemit': asdict(self.meshtastic_reemit),
+                'meshtastic_egress': asdict(self.meshtastic_egress),
                 'routing_rules': [asdict(r) for r in self.routing_rules],
                 'default_route': self.default_route,
                 'telemetry': asdict(self.telemetry),

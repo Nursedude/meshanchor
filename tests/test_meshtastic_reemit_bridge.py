@@ -303,6 +303,21 @@ class TestNestedBridgeLoopGuard:
         handler.send_text.assert_not_called()
         assert bridge.stats["filtered_nested_bridge"] == 1
 
+    def test_meshcore_egress_loop_dropped(self):
+        """MeshCore->Meshtastic egress carries a `[MC:xxxx]` prefix. If that
+        message round-trips back via moc->LXMF, the re-emit MUST drop it
+        (default nested_drop_prefixes includes "[MC:") so a MeshCore broadcast
+        egressed to Meshtastic doesn't echo back onto MeshCore."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        result = bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!32962f10] [MC:abcd1234] hello from meshcore",
+        )
+        assert result is False
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+
     def test_nested_guard_runs_AFTER_strip(self):
         """The wire content `[meshtastic ch2:...] [MeshCore] ...` has the
         Meshtastic prefix at index 0; without strip-first, the

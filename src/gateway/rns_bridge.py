@@ -753,11 +753,38 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         }
 
     def send_to_meshtastic(self, message: str, destination: str = None, channel: int = 0) -> bool:
-        """Send a message to Meshtastic network."""
-        if not self._mesh_handler:
-            logger.warning("Meshtastic handler not initialized")
-            return False
-        return self._mesh_handler.send_text(message, destination, channel)
+        """Send a message to Meshtastic network.
+
+        Prefers a local Meshtastic handler. When there is no local radio
+        but ``meshtastic_egress`` is configured, falls back to a stateless
+        remote HTTP egress (send_text_direct → peer meshtasticd's
+        /api/v1/toradio, e.g. moc:9443). TX-only — never reads fromradio.
+        The egress's own channel_index is used (the peer gateway's channel,
+        e.g. meshforge=2), not the local-radio channel arg.
+        """
+        if self._mesh_handler:
+            return self._mesh_handler.send_text(message, destination, channel)
+
+        eg = getattr(self.config, 'meshtastic_egress', None)
+        if eg and getattr(eg, 'enabled', False) and eg.host:
+            try:
+                from .meshtastic_protobuf_client import send_text_direct
+                return send_text_direct(
+                    message,
+                    host=eg.host,
+                    port=int(eg.port),
+                    tls=bool(eg.tls),
+                    channel_index=int(eg.channel_index),
+                    want_ack=False,
+                )
+            except Exception as e:
+                logger.warning("Meshtastic remote egress failed: %s", e)
+                with self._stats_lock:
+                    self.stats['errors'] += 1
+                return False
+
+        logger.warning("Meshtastic handler not initialized")
+        return False
 
     def send_to_rns(self, message: str, destination_hash: bytes = None) -> bool:
         """Send a message to RNS network via LXMF"""

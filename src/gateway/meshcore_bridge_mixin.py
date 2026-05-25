@@ -94,9 +94,14 @@ class MeshCoreBridgeMixin:
             prefix = f"[MC:{src_label}] "
             bridged_content = prefix + content
 
-            # Route to Meshtastic
+            # Route to Meshtastic. Normally gated on a live local radio,
+            # but a radio-less gateway can still egress to a peer meshtasticd
+            # when meshtastic_egress is configured (send_to_meshtastic handles
+            # the remote send_text_direct fallback).
             mesh_state = self.health.get_subsystem_state("meshtastic")
-            if mesh_state not in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+            egress = getattr(self.config, "meshtastic_egress", None)
+            egress_on = bool(egress and getattr(egress, "enabled", False) and egress.host)
+            if egress_on or mesh_state not in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
                 if self.send_to_meshtastic(bridged_content,
                                            channel=self.config.meshtastic.channel):
                     logger.info(f"Bridge MC→Mesh: {bridged_content[:50]}...")

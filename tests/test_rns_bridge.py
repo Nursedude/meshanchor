@@ -474,7 +474,36 @@ class TestSendToMeshtastic:
 
     def test_returns_false_no_handler(self, bridge):
         bridge._mesh_handler = None
+        # default meshtastic_egress is disabled -> no remote fallback
         assert bridge.send_to_meshtastic("Hello") is False
+
+    def test_remote_egress_when_no_handler(self, bridge):
+        """No local radio + meshtastic_egress enabled -> send_text_direct."""
+        from gateway.config import MeshtasticEgressConfig
+        bridge._mesh_handler = None
+        bridge.config.meshtastic_egress = MeshtasticEgressConfig(
+            enabled=True, host="10.0.0.5", port=9443, tls=True, channel_index=2
+        )
+        with patch("gateway.meshtastic_protobuf_client.send_text_direct",
+                   return_value=True) as mock_send:
+            result = bridge.send_to_meshtastic("Hello", channel=0)
+        assert result is True
+        mock_send.assert_called_once()
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs["host"] == "10.0.0.5"
+        # egress uses its OWN channel_index (peer gateway's), not the passed channel
+        assert kwargs["channel_index"] == 2
+        assert kwargs["want_ack"] is False
+
+    def test_remote_egress_skipped_when_disabled(self, bridge):
+        from gateway.config import MeshtasticEgressConfig
+        bridge._mesh_handler = None
+        bridge.config.meshtastic_egress = MeshtasticEgressConfig(
+            enabled=False, host="10.0.0.5", channel_index=2
+        )
+        with patch("gateway.meshtastic_protobuf_client.send_text_direct") as mock_send:
+            assert bridge.send_to_meshtastic("Hello") is False
+        mock_send.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
