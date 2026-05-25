@@ -267,3 +267,23 @@ the radio at a time. The lint MF014 + persistent-owner check in
 
 ---
 
+
+## Issue #3: Services Not Started/Verified — MOSTLY RESOLVED (archived 2026-05-24)
+
+**Rule**: Always call `check_service()` before connecting to services.
+
+- **Advisory** (daemons): Warn + continue — service may run outside systemd
+- **Blocking** (TUI actions): Show error + fix hint, don't proceed
+
+**Note**: Gateway checks are ADVISORY. Blocking checks caused "waiting for delivery"
+regression when mosquitto wasn't detectable via systemctl.
+
+**Remaining** (acceptable): `system_tools_mixin.py` and `service_menu_mixin.py` use
+`systemctl status` for display only, not state decisions.
+
+| Service | Port | systemd name |
+|---------|------|--------------|
+| meshtasticd | 4403 | meshtasticd |
+| rnsd | None | rnsd |
+| hamclock | 8080 | hamclock |
+| mosquitto | 1883 | mosquitto |

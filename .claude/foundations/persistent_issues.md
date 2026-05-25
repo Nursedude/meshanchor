@@ -21,6 +21,7 @@ Full history in `persistent_issues_archive.md`.
 | #9 Broad Exception Swallowing | 28/30 fixed; 2 benign by design | `grep except.*:.*pass` |
 | #10 Map Scrollbar Overlap | Thin dark-themed scrollbar CSS | — |
 | #25, #26, #28 | rnsd ratchets, ReticulumPaths copies, API proxy | — |
+| #3 Services Not Started/Verified | `check_service()` before connect; gateway checks ADVISORY (warn+continue), TUI BLOCKING. Body in archive | — |
 | GTK Issues (#2, #11, #13–#15) | GTK4 removed in v0.5.x | — |
 
 ---
@@ -78,28 +79,6 @@ from gateway.rns_bridge import RNSMeshtasticBridge
 @patch('gateway.rns_bridge._HAS_RNS', True)  # CORRECT
 def test_rns(self): ...
 ```
-
----
-
-## Issue #3: Services Not Started/Verified — MOSTLY RESOLVED
-
-**Rule**: Always call `check_service()` before connecting to services.
-
-- **Advisory** (daemons): Warn + continue — service may run outside systemd
-- **Blocking** (TUI actions): Show error + fix hint, don't proceed
-
-**Note**: Gateway checks are ADVISORY. Blocking checks caused "waiting for delivery"
-regression when mosquitto wasn't detectable via systemctl.
-
-**Remaining** (acceptable): `system_tools_mixin.py` and `service_menu_mixin.py` use
-`systemctl status` for display only, not state decisions.
-
-| Service | Port | systemd name |
-|---------|------|--------------|
-| meshtasticd | 4403 | meshtasticd |
-| rnsd | None | rnsd |
-| hamclock | 8080 | hamclock |
-| mosquitto | 1883 | mosquitto |
 
 ---
 
@@ -818,3 +797,42 @@ Both hosts confirmed post-deploy:
 [gateway.bridge_health] INFO: Subsystem meshcore: disconnected → healthy
 [gateway.meshcore_bridge_mixin] INFO: Bridge Mesh→MC ch1: [Mesh:!dd9fb42] ...
 ```
+
+---
+
+## Issue #38: Silent reemit send-failure (counted, not logged) — reverse-direction reliability (2026-05-24)
+
+**Class**: silent-failure observability gap (same family as Issue #4),
+found while hardening the `MeshCore channel → Meshtastic mesh` reverse leg
+on the radio-less gateway. **Status**: SHIPPED + soak-verified 2026-05-24.
+
+**The gap (`81189127`)**: `meshtastic_reemit_bridge.py` bumped
+`stats["errors"]` SILENTLY when `handler.send_text()` to MeshCore returned
+False — only the *exception* path logged, so a reemit send-failure left
+ZERO journal trace. Surfaced by a soak: 2 reemit errors had accrued over 4h
+with nothing in the log to explain them. Fix: WARNING on the send-False
+path mirroring the success INFO line's fields (target channel, source, orig
+channel, sender). Counter unchanged. Test `test_send_text_failure_logs_warning`.
+
+**Why it matters / regression guard**: "counted but not logged" is
+undiagnosable after the fact. Any `stats["errors"] += 1` (or similar) MUST
+be paired with a log at the appropriate level. Audit reflex:
+`grep -n 'errors.*+= 1' src/gateway/*.py` → confirm each has a companion
+`logger.warning/error` on the same path.
+
+**Shipped alongside (same reverse-leg arc, 2026-05-24)**:
+- `11bca216` — bot activation: channel broadcasts bake `"<channel>
+  <sender>: <text>"` into the body (`source_address` empty → `[MC:unknown]`),
+  burying the command so the meshing-around bot (`explicitCmd=True`, index-0
+  only) ignored it. `parse_meshcore_channel_header()` (split on FIRST `": "`,
+  last header token = sender) re-forms the egress as `[MC:p4] wx`: bare cmd
+  at index 0, `[MC:` prefix kept for the loop guard. Broadcasts only (DMs
+  stay raw). Field-verified cmd→list, wx→forecast, chat→ignored.
+- `e04d0e5a` — delivery: egress `send_text_direct` was `want_ack=False`, so
+  the lossy moc→Borg LongFast hop dropped commands. New
+  `MeshtasticEgressConfig.want_ack: bool = True` engages meshtasticd
+  implicit-ACK rebroadcast; operator-tunable to False for airtime.
+
+**Soak (25×60s, meshanchor-server)**: PID unchanged, NRestarts=0, 100%
+connectivity, egress `errors`=0 under load, loop guard no runaway,
+`reemit.errors` flat (the 2 were one-time transients).
