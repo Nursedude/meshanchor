@@ -104,6 +104,23 @@ def handle_get(handler: Any) -> None:
     # the operator gets stats + state in one fetch.
     mesh_handler = getattr(bridge, "_mesh_handler", None)
     meshcore_handler = getattr(bridge, "_meshcore_handler", None)
+
+    # LXMF->MeshCore re-emit bridge stats — loop-guard visibility
+    # (filtered_nested_bridge counts dropped echoes). None when re-emit
+    # is not configured.
+    reemit = getattr(bridge, "_meshtastic_reemit", None)
+    reemit_stats = None
+    if reemit is not None:
+        try:
+            rlock = getattr(reemit, "_stats_lock", None)
+            if rlock is not None:
+                with rlock:
+                    reemit_stats = dict(reemit.stats)
+            else:
+                reemit_stats = dict(reemit.stats)
+        except Exception:
+            reemit_stats = None
+
     payload = {
         "running": bool(getattr(bridge, "_running", False)),
         "uptime_seconds": uptime_seconds,
@@ -116,5 +133,6 @@ def handle_get(handler: Any) -> None:
             meshcore_handler.is_connected if meshcore_handler is not None else False
         ),
         "stats": stats_snapshot,
+        "reemit": reemit_stats,
     }
     handler._send_json(payload)
