@@ -26,6 +26,9 @@ Full history in `persistent_issues_archive.md`.
 | #21 Meshtastic CLI Preset Bug | Upstream, not ours; verify presets at `:9443` after CLI. Body in archive | — |
 | #23 Post-Install Verification | `scripts/verify_post_install.sh` / `meshanchor --verify-install`. Body in archive | — |
 | #24 Python Env Mismatch (rnsd) | Install `meshtastic` into rnsd's Python. Body in archive | — |
+| #18 Auto-Reconnect | Health monitor + exp backoff in `rns_bridge.py`. Body in archive | — |
+| #19 RNS path_table discovery | `path_table` not `destinations`; delayed re-checks. Body in archive | — |
+| #27 rnsd is OPTIONAL | Two independent transports (MQTT, RNS); preset bridging needs only mosquitto. Body in archive | — |
 | GTK Issues (#2, #11, #13–#15) | GTK4 removed in v0.5.x | — |
 
 ---
@@ -135,24 +138,6 @@ directly to `/api/v1/toradio` without ever reading fromradio. All TX paths use t
 
 ---
 
-## Issue #18: Auto-Reconnect on Connection Drop
-
-Gateway uses health monitoring + exponential backoff (1s → 2s → 4s → ... → 30s max)
-in `rns_bridge.py`. All persistent connections should have health monitoring.
-Release connection manager resources on disconnect.
-
----
-
-## Issue #19: RNS Node Discovery from path_table
-
-Use `RNS.Transport.path_table` (not just `destinations`) for complete routing info.
-**path_table may be empty immediately after connect** — use delayed checks (5s) and
-periodic re-checks (30s).
-
-Location: `src/gateway/node_tracker.py`
-
----
-
 ## Issue #20: Service Detection & Status Display — ALL DONE
 
 All 3 components resolved:
@@ -188,19 +173,6 @@ Radio parameters (Bandwidth, SpreadFactor, TXpower) are set via
 
 MeshAnchor's job: Help users SELECT HATs from meshtasticd's `available.d/`, COPY to
 `config.d/`. Never overwrite `config.yaml` if it has a `Webserver:` section.
-
----
-
-## Issue #27: rnsd is OPTIONAL
-
-MeshAnchor supports two independent transports:
-- **MQTT** (mosquitto) — Meshtastic native. Used for preset bridging, monitoring.
-- **RNS** (rnsd) — Reticulum. Used for LXMF messaging, cross-protocol bridging.
-
-**Meshtastic preset bridging** (LF ↔ ST) needs only mosquitto — both radios MQTT
-uplink/downlink to the same broker with same channel/PSK. No gateway code needed.
-
-**Full NOC** (Meshtastic + RNS) uses both transports. They coexist independently.
 
 ---
 
@@ -781,6 +753,19 @@ at index 0 (bot activates), `[MC:` prefix kept so the re-emit loop guard
 `nested_drop_prefixes` still drops echoes. `is_broadcast` only — DM text is
 raw, must not be reparsed. Field-verified: cmd→command list, wx→6-chunk
 forecast round-trip, chat→correctly ignored.
+
+**Completion (`0b24b605`, 2026-05-24)**: the original fix missed the PARALLEL
+LXMF broadcast path. `format_broadcast_text` (`lxmf_broadcast_bridge.py`) has
+the same empty-`source_address` shape → rendered channel broadcasts as
+`[ch0:?] meshanchor p4: wx`; downstream Meshtastic gateways re-inject that to
+the mesh and the bot ignores the buried command (same bug). Symptom: `wx`
+failed whenever RF dropped the good `[MC:p4]` copy and only this copy arrived
+(`cmd`/`test` worked because their good copy survived). Same
+`parse_meshcore_channel_header` lift applied in `format_broadcast_text` (empty
+source + `is_broadcast` only) → `[ch0:p4] wx`. BOTH paths now actionable, so
+RF redundancy is a benefit. Field-verified wx→6-chunk forecast. 3 tests.
+LESSON: when fixing a bug, audit for PARALLEL code paths with the same shape
+— one bridge can reach a destination via multiple routes.
 
 ---
 

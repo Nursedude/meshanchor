@@ -321,3 +321,28 @@ or install to the same Python that rnsd uses:
 `head -1 $(which rnsd)` then use that interpreter's pip.
 
 **Diagnose**: `sudo python3 -c "import meshtastic; print(meshtastic.__version__)"`
+
+## Issue #18: Auto-Reconnect on Connection Drop (archived 2026-05-24)
+
+Gateway uses health monitoring + exponential backoff (1s → 2s → 4s → ... → 30s max)
+in `rns_bridge.py`. All persistent connections should have health monitoring.
+Release connection manager resources on disconnect.
+
+## Issue #19: RNS Node Discovery from path_table (archived 2026-05-24)
+
+Use `RNS.Transport.path_table` (not just `destinations`) for complete routing info.
+**path_table may be empty immediately after connect** — use delayed checks (5s) and
+periodic re-checks (30s).
+
+Location: `src/gateway/node_tracker.py`
+
+## Issue #27: rnsd is OPTIONAL (archived 2026-05-24)
+
+MeshAnchor supports two independent transports:
+- **MQTT** (mosquitto) — Meshtastic native. Used for preset bridging, monitoring.
+- **RNS** (rnsd) — Reticulum. Used for LXMF messaging, cross-protocol bridging.
+
+**Meshtastic preset bridging** (LF ↔ ST) needs only mosquitto — both radios MQTT
+uplink/downlink to the same broker with same channel/PSK. No gateway code needed.
+
+**Full NOC** (Meshtastic + RNS) uses both transports. They coexist independently.
