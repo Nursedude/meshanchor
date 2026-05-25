@@ -531,6 +531,24 @@ class TestHandlerResolution:
         assert bridge.stats["errors"] == 1
         assert bridge.stats["reemitted"] == 0
 
+    def test_send_text_failure_logs_warning(self, caplog):
+        """A send_text→False reemit drop must surface a WARNING, not be
+        counted silently (observability gap closed 2026-05-24)."""
+        import logging
+        handler = MagicMock()
+        handler.send_text = MagicMock(return_value=False)
+        cfg = _make_config()
+        bridge = MeshtasticReemitBridge(cfg, handler_getter=lambda: handler)
+        bridge.start()
+        with caplog.at_level(logging.WARNING,
+                             logger="gateway.meshtastic_reemit_bridge"):
+            bridge.on_lxmf_message(
+                bytes.fromhex(MOC_BROADCAST_HASH),
+                b"[meshtastic ch2:!abcd1234] hi",
+            )
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("returned False" in r.getMessage() for r in warnings)
+
     def test_send_text_exception_counted_as_error(self):
         handler = MagicMock()
         handler.send_text = MagicMock(side_effect=RuntimeError("boom"))

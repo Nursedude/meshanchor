@@ -303,8 +303,20 @@ class MeshtasticReemitBridge:
                     sender,
                 )
                 return True
+            # send_text returned False (MeshCore send refused/failed) — count
+            # AND log it. Previously this bumped stats["errors"] silently, so a
+            # reemit send-failure left no journal trace (only the exception
+            # path below logged). Mirrors the success INFO line's fields.
             with self._stats_lock:
                 self.stats["errors"] += 1
+            logger.warning(
+                "meshtastic_reemit: MeshCore send_text returned False — "
+                "re-emit dropped on ch%d from %s (orig ch%s sender %s)",
+                self._config.target_channel,
+                source_hex[:8],
+                channel_str,
+                sender,
+            )
             return False
 
         except Exception as e:
