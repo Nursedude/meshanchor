@@ -14,6 +14,38 @@ from .bridge_health import SubsystemState, MessageOrigin
 logger = logging.getLogger(__name__)
 
 
+def parse_meshcore_channel_header(content: str):
+    """Split a MeshCore channel broadcast's baked-in header from its body.
+
+    MeshCore firmware prepends a ``"<channel> <sender>: "`` header to channel
+    broadcast text. The gateway sees that header *inside* ``content`` because
+    ``source_address`` is empty for channel broadcasts (so the bridge would
+    otherwise label them ``[MC:unknown]`` and leave the header in the body).
+    Example: ``"meshanchor p4: wx"`` → ``("p4", "wx")``.
+
+    Splitting on the FIRST ``": "`` keeps a ``:`` inside the body intact
+    (URLs, clock times, ``"hey all: listen"``). The sender is the last
+    whitespace token of the header (the channel name precedes it). Returns
+    ``("", content)`` unchanged when no header separator is present, so
+    unprefixed text falls through to the caller's default labelling.
+
+    Phase 2 (2026-05-24): lifting the bare command to index 0 is what lets
+    the meshing-around bot (``explicitCmd=True``, only acts on index 0)
+    actually trigger on commands bridged in from the MeshCore channel.
+    """
+    sep = ": "
+    idx = content.find(sep)
+    if idx <= 0:
+        return "", content
+    header = content[:idx]
+    body = content[idx + len(sep):]
+    tokens = header.split()
+    sender = tokens[-1] if tokens else ""
+    if not sender or not body:
+        return "", content
+    return sender, body
+
+
 class MeshCoreBridgeMixin:
     """Mixin providing MeshCore-specific bridge processing methods.
 
@@ -91,8 +123,22 @@ class MeshCoreBridgeMixin:
                 is_broadcast = msg.is_broadcast
                 via_internet = getattr(msg, 'via_internet', False)
 
-            prefix = f"[MC:{src_label}] "
-            bridged_content = prefix + content
+            # MeshCore channel broadcasts bake a "<channel> <sender>: <text>"
+            # header into the text (source_address is empty → src_label
+            # 'unknown'). Lift the sender out and drop the header so the
+            # bridged form is "[MC:<sender>] <text>": the meshing-around bot on
+            # the Meshtastic side strips the leading "[...]" bridge tag,
+            # leaving a bare command at index 0 so wx/cmd/… actually trigger it
+            # (explicitCmd=True only acts on index 0). The "[MC:" prefix is
+            # preserved so the LXMF re-emit loop guard (nested_drop_prefixes)
+            # still drops echoes. (Phase 2, 2026-05-24.)
+            label, body = src_label, content
+            if is_broadcast:
+                parsed_sender, parsed_body = parse_meshcore_channel_header(content)
+                if parsed_sender:
+                    label, body = parsed_sender, parsed_body
+            prefix = f"[MC:{label}] "
+            bridged_content = prefix + body
 
             # Route to Meshtastic. Normally gated on a live local radio,
             # but a radio-less gateway can still egress to a peer meshtasticd

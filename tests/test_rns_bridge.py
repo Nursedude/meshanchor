@@ -2286,3 +2286,114 @@ class TestAckSynthesisIssue66:
             ack_origin_network="meshcore", ack_origin_address="abc",
         )
         assert msg_id == "msg-id-4"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (2026-05-24): MeshCore channel broadcasts → Meshtastic bot activation
+#
+# Inbound MeshCore channel text bakes a "<channel> <sender>: <text>" header
+# into the body (source_address empty → src_label 'unknown'). The old egress
+# produced "[MC:unknown] meshanchor p4: wx"; the meshing-around bot strips the
+# leading "[...]" tag and is left with "meshanchor p4: wx" — the command is no
+# longer at index 0, so explicitCmd=True never fires. The header lift makes
+# the egress "[MC:p4] wx" so the bare command lands at index 0 while the "[MC:"
+# prefix is preserved for the re-emit loop guard.
+# ---------------------------------------------------------------------------
+
+class TestMeshcoreChannelHeaderParse:
+    """parse_meshcore_channel_header — pure string helper."""
+
+    def _parse(self, content):
+        from gateway.meshcore_bridge_mixin import parse_meshcore_channel_header
+        return parse_meshcore_channel_header(content)
+
+    def test_channel_and_sender(self):
+        assert self._parse("meshanchor p4: wx") == ("p4", "wx")
+
+    def test_sender_only_header(self):
+        assert self._parse("p4: cmd") == ("p4", "cmd")
+
+    def test_colon_in_body_split_on_first(self):
+        # ':' inside the body (clock time) must survive — split on FIRST ': '
+        assert self._parse("meshanchor p4: meet at 5:30 sharp") == (
+            "p4", "meet at 5:30 sharp"
+        )
+
+    def test_no_header_passthrough(self):
+        assert self._parse("just talking story") == (
+            "", "just talking story"
+        )
+
+    def test_empty_body_passthrough(self):
+        # header present but empty body → don't mangle into "[MC:p4] "
+        assert self._parse("meshanchor p4: ") == ("", "meshanchor p4: ")
+
+    def test_leading_colon_passthrough(self):
+        assert self._parse(": orphan") == ("", ": orphan")
+
+    def test_multiword_sender_uses_last_token(self):
+        # channel + multi-token name → last token is the provenance label
+        assert self._parse("meshanchor John Doe: hi") == ("Doe", "hi")
+
+
+class TestMeshcoreEgressHeaderReformat:
+    """_process_meshcore_to_bridge reformats channel broadcasts so the
+    bridged Meshtastic text carries a bare command at index 0."""
+
+    def _broadcast(self, content, source_address=""):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            source_address=source_address,
+            content=content,
+            is_broadcast=True,
+            via_internet=False,
+        )
+
+    def _capture_egress(self, bridge):
+        captured = {}
+
+        def fake_send(text, channel=None):
+            captured["text"] = text
+            return True
+
+        bridge.send_to_meshtastic = fake_send
+        bridge.send_to_rns = MagicMock(return_value=False)
+        return captured
+
+    def test_broadcast_lifts_command_to_index_zero(self, bridge):
+        captured = self._capture_egress(bridge)
+        bridge._process_meshcore_to_bridge(self._broadcast("meshanchor p4: wx"))
+        assert captured["text"] == "[MC:p4] wx"
+        # loop-guard prefix preserved
+        assert captured["text"].startswith("[MC:")
+        # after the bot strips the leading "[...]" tag, the command is index 0
+        bare = captured["text"].split("] ", 1)[1]
+        assert bare.split()[0] == "wx"
+
+    def test_broadcast_without_header_keeps_unknown_label(self, bridge):
+        captured = self._capture_egress(bridge)
+        bridge._process_meshcore_to_bridge(
+            self._broadcast("just talking story")
+        )
+        assert captured["text"] == "[MC:unknown] just talking story"
+
+    def test_broadcast_colon_in_body_preserved(self, bridge):
+        captured = self._capture_egress(bridge)
+        bridge._process_meshcore_to_bridge(
+            self._broadcast("meshanchor p4: meet at 5:30")
+        )
+        assert captured["text"] == "[MC:p4] meet at 5:30"
+
+    def test_dm_not_reparsed(self, bridge):
+        # A non-broadcast (DM) whose body contains ': ' must NOT be reparsed —
+        # DM text is raw, with no firmware-prepended sender header.
+        from types import SimpleNamespace
+        captured = self._capture_egress(bridge)
+        dm = SimpleNamespace(
+            source_address="deadbeef12c0ffee",
+            content="eta: 5 min",
+            is_broadcast=False,
+            via_internet=False,
+        )
+        bridge._process_meshcore_to_bridge(dm)
+        assert captured["text"] == "[MC:deadbeef] eta: 5 min"
