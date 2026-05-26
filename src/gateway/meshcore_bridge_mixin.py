@@ -13,6 +13,14 @@ from .bridge_health import SubsystemState, MessageOrigin
 
 logger = logging.getLogger(__name__)
 
+# MeshCore-origin bridge markers. Content carrying any of these (possibly
+# nested after a wire prefix) originated on MeshCore and must never be
+# re-injected onto MeshCore (split-horizon — see _process_*_to_meshcore).
+# "[MC:" = MeshCore→Meshtastic egress; "[ch0:"/"[ch1:" = LXMFBroadcast
+# fan-out tags; "[MeshCore]" = legacy marker. Kept in sync with the
+# echo-loop invariant documented in gateway/config.py.
+_MESHCORE_ORIGIN_MARKERS = ("[MC:", "[ch0:", "[ch1:", "[MeshCore]")
+
 
 def parse_meshcore_channel_header(content: str):
     """Split a MeshCore channel broadcast's baked-in header from its body.
@@ -205,6 +213,30 @@ class MeshCoreBridgeMixin:
                 content = msg.content
 
             net_prefix = "Mesh" if src_net == "meshtastic" else "RNS"
+
+            # Split-horizon echo guard (p4 self-echo, 2026-05-26). Content
+            # carrying a MeshCore-origin marker ORIGINATED on MeshCore and
+            # round-tripped back via Meshtastic/RNS; re-injecting it onto
+            # MeshCore bounces it to the original sender (who, being on the
+            # channel, sees their own message returned tagged [RNS:..] —
+            # 2-3x, once per relaying gateway). Other nodes are unaffected,
+            # so this is purely the originator's echo. Markers may be nested
+            # after a wire prefix (e.g. "[meshtastic ch2:!x] [MC:p4] hi"),
+            # so we substring-search rather than startswith. Genuine
+            # Meshtastic/RNS-origin forward delivery carries no MeshCore
+            # marker and is unaffected. Sibling of the meshtastic_reemit
+            # nested_drop guard; mirrors MeshForge is_already_bridged.
+            if any(m in (content or "") for m in _MESHCORE_ORIGIN_MARKERS):
+                with self._stats_lock:
+                    self.stats.setdefault('meshcore_bridge_echo_loop_drop', 0)
+                    self.stats['meshcore_bridge_echo_loop_drop'] += 1
+                logger.debug(
+                    "Bridge %s→MC: dropping MeshCore-origin content "
+                    "(split-horizon echo guard): %r",
+                    net_prefix, (content or "")[:60],
+                )
+                return
+
             prefix = f"[{net_prefix}:{src_label}] "
             bridged_content = prefix + content
 

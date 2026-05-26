@@ -1224,6 +1224,59 @@ class TestBridgeToMeshcoreChannelLeak:
         args, _ = bridge._meshcore_handler.send_text.call_args
         assert args[2] == 1
 
+    def test_process_bridge_to_meshcore_drops_meshcore_origin_echo(self, bridge):
+        """Split-horizon (p4 self-echo, 2026-05-26): content carrying a
+        MeshCore-origin marker round-tripped from MeshCore and must NOT be
+        re-injected onto MeshCore. Two real echo shapes from the daemon
+        chat buffer: a bare [ch0:p4] tag and a [MC:p4] nested after a wire
+        prefix. Both must be dropped (no send) and counted."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        for content in (
+            "[ch0:p4] live love",                              # bare fan-out tag
+            "[meshtastic ch2:!32962f10] [MC:p4] live love",    # nested MC marker
+        ):
+            bridge.config.meshcore.bridge_target_channel = 1
+            bridge._meshcore_handler = MagicMock()
+            bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+            bridge.health.get_subsystem_state = MagicMock(
+                return_value=SubsystemState.HEALTHY
+            )
+            before = bridge.stats.get('meshcore_bridge_echo_loop_drop', 0)
+
+            msg = BridgedMessage(
+                source_network="rns", source_id="aaa2365f7990",
+                destination_id=None, content=content, metadata={},
+            )
+            bridge._process_bridge_to_meshcore(msg)
+
+            bridge._meshcore_handler.send_text.assert_not_called()
+            assert bridge.stats['meshcore_bridge_echo_loop_drop'] == before + 1, content
+
+    def test_process_bridge_to_meshcore_allows_non_meshcore_origin(self, bridge):
+        """Regression guard: genuine RNS/Meshtastic-origin content (no
+        MeshCore marker) still bridges to MeshCore — the echo guard must
+        not over-drop legitimate forward delivery."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="rns", source_id="deadbeef",
+            destination_id=None, content="genuine nomadnet message",
+            metadata={},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        bridge._meshcore_handler.send_text.assert_called_once()
+        assert bridge.stats.get('meshcore_bridge_echo_loop_drop', 0) == 0
+
     # ─── Bridge_loop disconnect-window requeue path (bug 2 fix 2026-05-20) ───
 
     def test_bridge_loop_disconnect_requeues_with_resolved_channel(self, bridge):
