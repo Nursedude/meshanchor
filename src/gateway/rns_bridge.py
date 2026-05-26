@@ -1079,6 +1079,31 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         tests/test_lxmf_broadcast_ack_first_wins_issue66.py.
         """
         text = self._format_ack_text(msg_id, kind)
+
+        # Issue #66 layer-2 (2026-05-26): suppress channel-origin receipts.
+        # A synth ACK whose origin is the bare placeholder "channel:<idx>"
+        # has no single addressee — MeshCore/Meshtastic channel broadcasts
+        # don't carry per-sender identity, so the only prior way to
+        # "deliver" the receipt was to re-broadcast it to the whole
+        # channel, putting machine [delivered:]/[failed:]/[timeout:] text
+        # on a human-facing channel (operator-observed on the meshanchor
+        # public channel). The pending-ack record is still registered and
+        # marked at the ack-registration sites, so ack accounting/metrics
+        # are unaffected — we only drop the VISIBLE channel-wide receipt.
+        # A real DM origin (source_address present) still gets its receipt
+        # below. Handled here once for both networks to avoid the
+        # asymmetric-handling bug class across the symmetric branches.
+        if origin_address.startswith("channel:"):
+            with self._stats_lock:
+                self.stats.setdefault('synth_ack_channel_origin_suppressed', 0)
+                self.stats['synth_ack_channel_origin_suppressed'] += 1
+            logger.debug(
+                "ack synthesis suppressed: channel-origin receipt (%s) not "
+                "broadcast — no single addressee (msg_id=%s kind=%s)",
+                origin_address, msg_id[:8], kind,
+            )
+            return True
+
         try:
             if origin_network == 'meshtastic':
                 if not self._mesh_handler:
@@ -1087,28 +1112,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         f"(msg_id={msg_id[:8]} kind={kind})"
                     )
                     return False
-                # Symmetric channel placeholder handling — mirrors the
-                # MeshCore branch below. MeshtasticBroadcastBridge mints
-                # the "channel:<idx>" origin_address when a broadcast
-                # arrives without a usable source_address/source_id
-                # (canonical_message synthesizes "!00000000" when fromId
-                # is missing, so this is a rare edge path today, but the
-                # asymmetry was a latent footgun — without parsing, the
-                # placeholder string was passed as destinationId to
-                # meshtastic-python, producing undefined behaviour).
-                if origin_address.startswith("channel:"):
-                    try:
-                        ch_idx = int(origin_address.split(":", 1)[1])
-                    except (ValueError, IndexError):
-                        logger.warning(
-                            "ack synthesis: bad channel placeholder %r "
-                            "for msg_id=%s",
-                            origin_address, msg_id[:8],
-                        )
-                        return False
-                    return bool(self._mesh_handler.send_text(
-                        text, destination=None, channel=ch_idx,
-                    ))
+                # channel:<idx> origins are suppressed above (no single
+                # addressee); only DM-origin receipts reach here.
                 return bool(self._mesh_handler.send_text(
                     text, destination=origin_address, channel=0,
                 ))
@@ -1119,29 +1124,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         f"(msg_id={msg_id[:8]} kind={kind})"
                     )
                     return False
-                # Issue #66 first-caller: MeshCore channel broadcasts
-                # don't carry sender identity, so LXMFBroadcastBridge
-                # uses the placeholder origin_address "channel:<idx>" to
-                # signal "broadcast the ACK back on the originating
-                # channel" rather than addressing a (nonexistent) DM
-                # destination. Parse the placeholder here and dispatch
-                # via destination=None + channel=N (broadcast). Falls
-                # back to the DM path for non-placeholder addresses
-                # (future protocol versions where channels DO carry
-                # sender pubkey, or DM-origin senders).
-                if origin_address.startswith("channel:"):
-                    try:
-                        ch_idx = int(origin_address.split(":", 1)[1])
-                    except (ValueError, IndexError):
-                        logger.warning(
-                            "ack synthesis: bad channel placeholder %r "
-                            "for msg_id=%s",
-                            origin_address, msg_id[:8],
-                        )
-                        return False
-                    return bool(self._meshcore_handler.send_text(
-                        text, destination=None, channel=ch_idx,
-                    ))
+                # channel:<idx> origins are suppressed above (no single
+                # addressee); only DM-origin receipts reach here.
                 return bool(self._meshcore_handler.send_text(
                     text, destination=origin_address,
                 ))

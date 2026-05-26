@@ -430,20 +430,21 @@ class TestAckSynthesisOpts:
 
 
 class TestMeshtasticChannelPlaceholderDispatch:
-    """Pattern audit (2026-05-19): the channel:<idx> placeholder that
-    ``MeshtasticBroadcastBridge`` mints for source-less broadcasts must
-    dispatch as a Meshtastic CHANNEL broadcast (destination=None,
-    channel=idx), not as a DM with destination="channel:N". Mirrors the
-    symmetric MeshCore branch — closes the asymmetric placeholder bug
-    that would have produced an invalid destinationId on send_text.
+    """Issue #66 layer-2 (2026-05-26): the channel:<idx> placeholder that
+    ``MeshtasticBroadcastBridge`` mints for source-less broadcasts is now
+    SUPPRESSED — a channel broadcast has no single addressee, so the
+    visible receipt is dropped (the prior channel-wide re-broadcast was
+    machine chatter on a human-facing channel). Tracked via the
+    ``synth_ack_channel_origin_suppressed`` counter. Symmetric with the
+    MeshCore branch — both handled by one early guard in
+    _emit_ack_to_origin. DM-origin receipts still dispatch normally.
     """
 
-    def test_meshtastic_origin_channel_placeholder_dispatches_as_broadcast(
+    def test_meshtastic_origin_channel_placeholder_suppressed(
         self, integrated_bridge,
     ):
-        """ack_origin_address="channel:2" → send_text called with
-        destination=None, channel=2 (broadcast on slot 2). NEVER as
-        destination="channel:2"."""
+        """ack_origin_address="channel:2" → no send_text (suppressed), but
+        still returns True and bumps the suppression counter."""
         bridge = integrated_bridge
         bridge._mesh_handler = MagicMock()
         bridge._mesh_handler.send_text.return_value = True
@@ -459,11 +460,8 @@ class TestMeshtasticChannelPlaceholderDispatch:
         emitted = bridge._maybe_emit_ack_for_msgid(msg_id, kind='delivered')
 
         assert emitted is True
-        bridge._mesh_handler.send_text.assert_called_once_with(
-            f"[delivered: {msg_id[:8]}]",
-            destination=None,
-            channel=2,
-        )
+        bridge._mesh_handler.send_text.assert_not_called()
+        assert bridge.stats["synth_ack_channel_origin_suppressed"] == 1
 
     def test_meshtastic_origin_dm_address_dispatches_as_dm(
         self, integrated_bridge,
@@ -492,13 +490,13 @@ class TestMeshtasticChannelPlaceholderDispatch:
             channel=0,
         )
 
-    def test_meshtastic_origin_malformed_channel_placeholder_logs_and_drops(
-        self, integrated_bridge, caplog,
+    def test_meshtastic_origin_malformed_channel_placeholder_also_suppressed(
+        self, integrated_bridge,
     ):
-        """A malformed placeholder ("channel:abc", "channel:") must
-        log a warning and return False — NEVER fall through to a
-        send with the literal string as destinationId."""
-        import logging
+        """Any "channel:" prefix (malformed included) is suppressed up
+        front — we no longer parse the slot index, so "channel:not-an-int"
+        is dropped silently like a valid placeholder and NEVER falls
+        through to a send with the literal string as destinationId."""
         bridge = integrated_bridge
         bridge._mesh_handler = MagicMock()
 
@@ -510,11 +508,8 @@ class TestMeshtasticChannelPlaceholderDispatch:
             ack_origin_network="meshtastic",
             ack_origin_address="channel:not-an-int",
         )
-        with caplog.at_level(logging.WARNING, logger='gateway.rns_bridge'):
-            emitted = bridge._maybe_emit_ack_for_msgid(msg_id, kind='delivered')
+        emitted = bridge._maybe_emit_ack_for_msgid(msg_id, kind='delivered')
 
-        assert emitted is False
+        assert emitted is True
         bridge._mesh_handler.send_text.assert_not_called()
-        assert any(
-            "bad channel placeholder" in r.message for r in caplog.records
-        )
+        assert bridge.stats["synth_ack_channel_origin_suppressed"] == 1

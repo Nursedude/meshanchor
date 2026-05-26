@@ -492,10 +492,13 @@ class TestGuards:
 
 
 class TestChannelPlaceholderEmitDispatch:
-    """_emit_ack_to_origin must broadcast back on the originating channel
-    when origin_address is the placeholder "channel:<idx>". DM-style
-    dispatch (destination=origin_address) only when the address is a
-    real pubkey."""
+    """Issue #66 layer-2 (2026-05-26): _emit_ack_to_origin SUPPRESSES the
+    visible receipt when origin_address is the placeholder "channel:<idx>"
+    — a channel broadcast has no single addressee, so re-broadcasting the
+    [delivered:] text to the whole channel was machine chatter on a
+    human-facing channel. The pending-ack record is still tracked; only
+    the visible channel-wide emit is dropped. DM-style dispatch
+    (destination=origin_address) still fires for a real pubkey origin."""
 
     def _build_parent_bridge_with_meshcore_handler(self, tmp_path):
         """Build a minimally-wired RNSMeshtasticBridge whose only purpose
@@ -539,7 +542,7 @@ class TestChannelPlaceholderEmitDispatch:
             bridge._meshcore_handler.send_text.return_value = True
             return bridge
 
-    def test_emit_ack_channel_placeholder_dispatches_as_broadcast(self, tmp_path):
+    def test_emit_ack_channel_placeholder_suppressed(self, tmp_path):
         bridge = self._build_parent_bridge_with_meshcore_handler(tmp_path)
         ok = bridge._emit_ack_to_origin(
             "bcast-1779170000-ch1",
@@ -547,16 +550,13 @@ class TestChannelPlaceholderEmitDispatch:
             origin_address="channel:1",
             kind="delivered",
         )
+        # Returns True (intentionally handled, not a failure) but emits
+        # nothing to the channel — the visible [delivered: bcast-17] that
+        # was landing on the meshanchor public channel is gone.
         assert ok is True
-        bridge._meshcore_handler.send_text.assert_called_once()
-        kwargs = bridge._meshcore_handler.send_text.call_args.kwargs
-        # destination=None means broadcast; channel=1 is the originating slot
-        assert kwargs["destination"] is None
-        assert kwargs["channel"] == 1
-        # The text is the standard [delivered: <id>] format
-        text = bridge._meshcore_handler.send_text.call_args.args[0]
-        # _format_ack_text truncates msg_id to 8 chars ("bcast-17")
-        assert "delivered" in text and "bcast" in text
+        bridge._meshcore_handler.send_text.assert_not_called()
+        # The suppression is observable via the stats counter.
+        assert bridge.stats["synth_ack_channel_origin_suppressed"] == 1
 
     def test_emit_ack_dm_address_dispatches_as_dm(self, tmp_path):
         bridge = self._build_parent_bridge_with_meshcore_handler(tmp_path)
@@ -569,8 +569,13 @@ class TestChannelPlaceholderEmitDispatch:
         assert ok is True
         kwargs = bridge._meshcore_handler.send_text.call_args.kwargs
         assert kwargs["destination"] == "abcdef1234567890"
+        # DM origins are NOT suppressed.
+        assert bridge.stats.get("synth_ack_channel_origin_suppressed", 0) == 0
 
-    def test_emit_ack_malformed_channel_placeholder_logs_warning(self, tmp_path):
+    def test_emit_ack_malformed_channel_placeholder_also_suppressed(self, tmp_path):
+        # Any "channel:" prefix is suppressed up front — we no longer parse
+        # the slot index (we don't broadcast), so malformed vs valid no
+        # longer matters: both are dropped silently (DEBUG) and counted.
         bridge = self._build_parent_bridge_with_meshcore_handler(tmp_path)
         ok = bridge._emit_ack_to_origin(
             "bcast-bad",
@@ -578,5 +583,6 @@ class TestChannelPlaceholderEmitDispatch:
             origin_address="channel:notanumber",
             kind="delivered",
         )
-        assert ok is False
+        assert ok is True
         bridge._meshcore_handler.send_text.assert_not_called()
+        assert bridge.stats["synth_ack_channel_origin_suppressed"] == 1
