@@ -552,8 +552,13 @@ class MeshtasticReemitConfig:
     # "[MC:" is the MeshCore->Meshtastic egress prefix (see meshcore_bridge_mixin
     # _process_meshcore_to_bridge). A MeshCore broadcast egressed to Meshtastic and
     # round-tripped back via LXMF must NOT be re-emitted onto MeshCore (echo loop).
+    # Extended 2026-05-25: ANY leading bridge tag means the content already
+    # took a detour and came back = echo. "[RNS:" = MeshForge RNS→Mesh
+    # injection; "[ch0:"/"[ch1:" = LXMFBroadcast fan-out tags; "[Mesh:" = this
+    # re-emit bridge's OWN output_format prefix (closes its self-echo loop).
+    # Mirrors MeshForge's is_already_bridged loop-guard (commit b01d8af).
     nested_drop_prefixes: List[str] = field(default_factory=lambda: [
-        "[MeshCore]", "[MC:",
+        "[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:",
     ])
 
 
@@ -791,7 +796,7 @@ class GatewayConfig:
             # Handle MeshtasticReemitConfig (list fields — explicit copy).
             reemit_data = data.get('meshtastic_reemit', {}) or {}
             default_drop_prefixes = ["[delivered:", "[timeout:", "[failed:"]
-            default_nested_drop_prefixes = ["[MeshCore]", "[MC:"]
+            default_nested_drop_prefixes = ["[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:"]
             meshtastic_reemit = MeshtasticReemitConfig(
                 enabled=reemit_data.get('enabled', False),
                 source_identities=[

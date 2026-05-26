@@ -350,6 +350,45 @@ class TestNestedBridgeLoopGuard:
         assert bridge.stats["filtered_nested_bridge"] == 0
         assert bridge.stats["reemitted"] == 1
 
+    def test_rns_injection_echo_dropped(self):
+        """The documented echo: a MeshCore cmd round-trips through MeshForge's
+        RNS→Mesh injection and comes back as `[RNS:627f] [ch0:p4] ...`. After
+        strip the body starts with `[RNS:` → must drop (was leaking pre-2026-05-25
+        because the guard only had [MeshCore]/[MC:)."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        result = bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!32962f10] [RNS:627f] [ch0:p4] meshanchor p4: wx",
+        )
+        assert result is False
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+
+    def test_lxmf_broadcast_channel_tag_echo_dropped(self):
+        """`[ch0:` / `[ch1:` is the LXMFBroadcast fan-out tag; round-tripped
+        content carrying it is an echo, not fresh MeshCore content."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abc] [ch0:p4] meshanchor p4: cmd",
+        )
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+
+    def test_own_output_self_echo_dropped(self):
+        """`[Mesh:` is THIS bridge's own output_format prefix. If its own
+        re-emit round-trips back, drop it — closes the tightest self-echo loop."""
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abc] [Mesh:p4] wx",
+        )
+        handler.send_text.assert_not_called()
+        assert bridge.stats["filtered_nested_bridge"] == 1
+
     def test_nested_guard_disabled_by_empty_list(self):
         """Operator can opt out by setting nested_drop_prefixes=[]."""
         cfg = _make_config(nested_drop_prefixes=[])
