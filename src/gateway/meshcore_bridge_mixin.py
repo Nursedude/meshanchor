@@ -237,6 +237,36 @@ class MeshCoreBridgeMixin:
                 )
                 return
 
+            # Reply-doubling guard (2026-05-26). Meshtastic-origin content
+            # (carries the "[meshtastic ch..]" wire tag) whose source identity
+            # is owned by the meshtastic_reemit bridge is ALREADY delivered to
+            # MeshCore cleanly by that bridge as "[Mesh:sender] text"; the
+            # generic path re-injecting it as "[RNS:src] [meshtastic ch..]"
+            # doubles every line on the channel. Defer to reemit ONLY when it
+            # actually owns this source — for any source NOT in
+            # source_identities the generic path stays the sole delivery, so
+            # this can never drop a uniquely-delivered message (coverage-safe
+            # by construction; verified source_identities cover the observed
+            # doubled sources, 2026-05-26).
+            reemit_cfg = getattr(self.config, 'meshtastic_reemit', None)
+            if (reemit_cfg and getattr(reemit_cfg, 'enabled', False)
+                    and "[meshtastic ch" in (content or "")):
+                owned = {str(s).lower() for s in (reemit_cfg.source_identities or ())}
+                candidates = {
+                    (getattr(msg, 'source_id', None) or "").lower(),
+                    (getattr(msg, 'source_address', None) or "").lower(),
+                }
+                if candidates & owned:
+                    with self._stats_lock:
+                        self.stats.setdefault('meshcore_bridge_reemit_dedup_drop', 0)
+                        self.stats['meshcore_bridge_reemit_dedup_drop'] += 1
+                    logger.debug(
+                        "Bridge %s→MC: deferring to meshtastic_reemit for owned "
+                        "source (reply-doubling guard): %r",
+                        net_prefix, (content or "")[:48],
+                    )
+                    return
+
             prefix = f"[{net_prefix}:{src_label}] "
             bridged_content = prefix + content
 

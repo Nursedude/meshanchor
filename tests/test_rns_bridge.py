@@ -1277,6 +1277,65 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge._meshcore_handler.send_text.assert_called_once()
         assert bridge.stats.get('meshcore_bridge_echo_loop_drop', 0) == 0
 
+    def test_process_bridge_to_meshcore_defers_owned_source_to_reemit(self, bridge):
+        """Reply-doubling guard (2026-05-26): Meshtastic-origin content
+        ([meshtastic ch..] tag) from a source the meshtastic_reemit bridge
+        OWNS is dropped here — reemit delivers it cleanly as [Mesh:..], so
+        re-injecting via the generic path would double it on MeshCore."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshtastic_reemit.enabled = True
+        bridge.config.meshtastic_reemit.source_identities = [
+            "aaa2365f799cc28aa7697df943096074"
+        ]
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="rns",
+            source_id="aaa2365f799cc28aa7697df943096074",  # owned by reemit
+            destination_id=None,
+            content="[meshtastic ch2:!a2e95ba4] 0.1in.",
+            metadata={},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        bridge._meshcore_handler.send_text.assert_not_called()
+        assert bridge.stats['meshcore_bridge_reemit_dedup_drop'] == 1
+
+    def test_process_bridge_to_meshcore_keeps_unowned_source(self, bridge):
+        """Coverage-safety: the SAME Meshtastic-origin content from a source
+        NOT in source_identities must still be delivered — the generic path
+        is its sole delivery, so the dedup guard must not touch it."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshtastic_reemit.enabled = True
+        bridge.config.meshtastic_reemit.source_identities = [
+            "aaa2365f799cc28aa7697df943096074"
+        ]
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge._meshcore_handler.send_text = MagicMock(return_value=True)
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.HEALTHY
+        )
+
+        msg = BridgedMessage(
+            source_network="rns",
+            source_id="deadbeefcafe0000deadbeefcafe0000",  # NOT owned by reemit
+            destination_id=None,
+            content="[meshtastic ch2:!99887766] hello from uncovered gw",
+            metadata={},
+        )
+        bridge._process_bridge_to_meshcore(msg)
+        bridge._meshcore_handler.send_text.assert_called_once()
+        assert bridge.stats.get('meshcore_bridge_reemit_dedup_drop', 0) == 0
+
     # ─── Bridge_loop disconnect-window requeue path (bug 2 fix 2026-05-20) ───
 
     def test_bridge_loop_disconnect_requeues_with_resolved_channel(self, bridge):
