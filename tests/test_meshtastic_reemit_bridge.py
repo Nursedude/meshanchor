@@ -729,7 +729,15 @@ class TestConfigRoundTrip:
         assert loaded.meshtastic_reemit.target_channel == 1
         assert loaded.meshtastic_reemit.output_format == "[X:{sender}] {text}"
         assert loaded.meshtastic_reemit.drop_prefixes == ["[gone:"]
-        assert loaded.meshtastic_reemit.nested_drop_prefixes == ["[OldBridge]"]
+        # Echo-loop invariant (2026-05-26): a narrow nested_drop_prefixes
+        # override keeps the operator's custom entries but is force-unioned
+        # with the invariant bridge-tag prefixes — config drift must not be
+        # able to resurrect the re-emit echo loop (the p4 self-echo). The
+        # operator can ADD prefixes, never remove these.
+        ndp = loaded.meshtastic_reemit.nested_drop_prefixes
+        assert "[OldBridge]" in ndp        # operator's custom entry preserved
+        for inv in ("[RNS:", "[ch0:", "[ch1:", "[Mesh:", "[MC:", "[MeshCore]"):
+            assert inv in ndp, f"invariant prefix {inv} must be force-unioned"
 
     def test_load_with_missing_block_uses_defaults(self, tmp_path, monkeypatch):
         # Older gateway.json files don't have meshtastic_reemit at all —

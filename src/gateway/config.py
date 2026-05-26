@@ -796,7 +796,23 @@ class GatewayConfig:
             # Handle MeshtasticReemitConfig (list fields — explicit copy).
             reemit_data = data.get('meshtastic_reemit', {}) or {}
             default_drop_prefixes = ["[delivered:", "[timeout:", "[failed:"]
-            default_nested_drop_prefixes = ["[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:"]
+            # Echo-loop invariant: content already carrying a bridge tag has
+            # round-tripped, so re-emitting it onto MeshCore is NEVER correct
+            # (it bounces back to the original sender — the p4 self-echo,
+            # 2026-05-26). These prefixes are force-unioned below regardless
+            # of operator config: a narrow `nested_drop_prefixes` override in
+            # gateway.json must not be able to resurrect the echo loop (the
+            # exact config-drift that caused it). Operators may ADD prefixes,
+            # never remove these. Mirrors MeshForge is_already_bridged (b01d8af).
+            ECHO_LOOP_INVARIANT_PREFIXES = [
+                "[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:",
+            ]
+            nested = list(reemit_data.get(
+                'nested_drop_prefixes', ECHO_LOOP_INVARIANT_PREFIXES
+            ))
+            for _p in ECHO_LOOP_INVARIANT_PREFIXES:
+                if _p not in nested:
+                    nested.append(_p)
             meshtastic_reemit = MeshtasticReemitConfig(
                 enabled=reemit_data.get('enabled', False),
                 source_identities=[
@@ -814,9 +830,7 @@ class GatewayConfig:
                 drop_prefixes=list(reemit_data.get(
                     'drop_prefixes', default_drop_prefixes
                 )),
-                nested_drop_prefixes=list(reemit_data.get(
-                    'nested_drop_prefixes', default_nested_drop_prefixes
-                )),
+                nested_drop_prefixes=nested,
             )
 
             # Reconstruct nested dataclasses
