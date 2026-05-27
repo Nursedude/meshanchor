@@ -293,6 +293,50 @@ class TestDeduplication:
         assert id1 is not None
         assert id2 is not None
 
+    # --- Ported from MeshForge: degenerate-hash regression (the live bug) ---
+
+    def test_message_shaped_payloads_hash_distinctly(self, queue):
+        """RNS→Mesh / spill payloads (rns_bridge.py) are `message`-shaped — no
+        from/to/text/type. The pre-port hash keyed only on those, so every such
+        payload hashed identically and all but the first within DEDUP_WINDOW
+        were dropped as false duplicates."""
+        h1 = queue._compute_hash({"message": "Memorial Day: rain", "channel": 0})
+        h2 = queue._compute_hash({"message": "Tonight: clear", "channel": 0})
+        assert h1 != h2
+
+    def test_distinct_message_payloads_all_enqueue(self, queue):
+        """Two different `message`-shaped payloads to the same destination
+        within the dedup window must BOTH enqueue (the degenerate hash
+        collapsed them, dropping the second)."""
+        id1 = queue.enqueue({"message": "chunk one", "channel": 2}, "meshtastic")
+        id2 = queue.enqueue({"message": "chunk two", "channel": 2}, "meshtastic")
+        assert id1 is not None
+        assert id2 is not None
+
+    def test_message_payload_dedup_still_works_for_identical(self, queue):
+        """Still content-sensitive: an identical `message` payload within the
+        window dedups."""
+        id1 = queue.enqueue({"message": "same", "destination": "x"}, "meshtastic")
+        id2 = queue.enqueue({"message": "same", "destination": "x"}, "meshtastic")
+        assert id1 is not None
+        assert id2 is None
+
+    def test_content_shaped_to_payload_hash_distinctly(self, queue):
+        """`BridgedMeshMessage.to_payload` is content-shaped (carries `content`
+        but no `message`). Distinct bodies must hash distinctly via the
+        content branch."""
+        h1 = queue._compute_hash({"content": "alpha", "source_id": "!a"})
+        h2 = queue._compute_hash({"content": "beta", "source_id": "!a"})
+        assert h1 != h2
+
+    def test_text_shaped_ingress_still_dedups(self, queue):
+        """Regression guard: the original Meshtastic-ingress `text` shape (with
+        meaningful from/to) still dedups via the text branch."""
+        id1 = queue.enqueue({"text": "hi", "from": "a", "to": "b", "type": "text"}, "meshtastic")
+        id2 = queue.enqueue({"text": "hi", "from": "a", "to": "b", "type": "text"}, "meshtastic")
+        assert id1 is not None
+        assert id2 is None
+
 
 # ---------------------------------------------------------------------------
 # PersistentMessageQueue — get_pending / priority ordering
