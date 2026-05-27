@@ -9,7 +9,7 @@ concrete methods to eliminate duplication.
 from abc import ABC, abstractmethod
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
 
@@ -19,6 +19,77 @@ if TYPE_CHECKING:
     from .node_tracker import UnifiedNodeTracker
 
 logger = logging.getLogger(__name__)
+
+
+def chunk_for_mesh(message: str,
+                   max_bytes: int = MAX_MESHTASTIC_MSG_LENGTH) -> List[str]:
+    """Split text into UTF-8-byte-bounded chunks for Meshtastic TX.
+
+    Ported from MeshForge (`0066470`). Meshtastic's on-air text payload is
+    capped; meshtasticd silently truncates anything larger. Multi-line bridge
+    output relayed RNS→Mesh (e.g. a NomadNet message, or a bot
+    ``leaderboard`` / ``wx`` reply bridged in over RNS) was cut to one packet
+    by ``_truncate_if_needed``, dropping every line past the cap. This chunker
+    splits such content into multiple packets instead, each guaranteed ≤
+    ``max_bytes`` UTF-8 bytes, so no content is lost.
+
+    Boundaries, in preference order: newline (keeps whole lines together),
+    then word, then — only for a single word longer than the budget — a hard
+    UTF-8-safe character split.
+
+    Returns at least one chunk for non-empty input; never returns empty
+    strings; never exceeds ``max_bytes`` for any chunk. A message that already
+    fits is returned unchanged as a single-element list.
+    """
+    if not message:
+        return []
+    if len(message.encode('utf-8')) <= max_bytes:
+        return [message]
+
+    def blen(s: str) -> int:
+        return len(s.encode('utf-8'))
+
+    def char_split(token: str) -> List[str]:
+        # Separator-less token longer than the budget: cut on character
+        # (codepoint) boundaries so we never split a multi-byte emoji.
+        out: List[str] = []
+        cur = ""
+        for ch in token:
+            if cur and blen(cur) + blen(ch) > max_bytes:
+                out.append(cur)
+                cur = ch
+            else:
+                cur += ch
+        if cur:
+            out.append(cur)
+        return out
+
+    def pack(atoms: List[str], sep: str) -> List[str]:
+        out: List[str] = []
+        cur = ""
+        for atom in atoms:
+            add = blen(atom) + (blen(sep) if cur else 0)
+            if cur and blen(cur) + add > max_bytes:
+                out.append(cur)
+                cur = ""
+            if not cur:
+                if blen(atom) <= max_bytes:
+                    cur = atom
+                else:
+                    # Atom itself exceeds the budget — split finer: by
+                    # word if it has spaces, else by character.
+                    finer = pack(atom.split(' '), ' ') if ' ' in atom \
+                        else char_split(atom)
+                    if finer:
+                        out.extend(finer[:-1])
+                        cur = finer[-1]
+            else:
+                cur = cur + sep + atom
+        if cur:
+            out.append(cur)
+        return out
+
+    return pack(message.split('\n'), '\n')
 
 
 class BaseMessageHandler(ABC):

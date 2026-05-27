@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
+from .base_handler import chunk_for_mesh
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
 from .reconnect import ReconnectStrategy
@@ -1891,49 +1892,109 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             logger.error(f"Failed to persist message for retry: {e}")
             return False
 
+    def _requeue_failed_chunks(self, chunks, target: str = "meshtastic") -> bool:
+        """Persist already-chunked, byte-bounded RNS→Mesh content for retry.
+
+        Ported from MeshForge. Used by the direct-send path on PARTIAL
+        failure: each failed chunk is enqueued as its own ``message``-shaped
+        item (already ≤ the byte cap) so the retry ships bounded packets,
+        rather than re-queuing the whole un-chunked original — which the
+        retry's ``_truncate_if_needed`` would truncate (data loss) and which
+        would also re-send the chunks that already went out. Returns True if
+        at least one chunk was persisted.
+        """
+        if not self._persistent_queue or not chunks:
+            return False
+        requeued = 0
+        for chunk in chunks:
+            try:
+                if self._persistent_queue.enqueue(
+                    payload={
+                        'message': chunk,
+                        'channel': self.config.meshtastic.channel,
+                        'source_id': '',
+                    },
+                    destination=target,
+                    priority=MessagePriority.HIGH,
+                ):
+                    requeued += 1
+            except Exception as e:
+                logger.error(f"Failed to persist RNS→Mesh chunk for retry: {e}")
+        return requeued > 0
+
     def _process_rns_to_mesh(self, msg: BridgedMessage):
         """Process message from RNS to Meshtastic.
 
         In mqtt_bridge mode, routes through the persistent queue for
         reliable delivery with retry. Otherwise sends directly and
         persists to queue on failure.
+
+        Oversize content is split with ``chunk_for_mesh`` (ported from
+        MeshForge `0066470`) so multi-line RNS content (NomadNet, or a bot
+        reply bridged in over RNS) isn't silently truncated to one packet by
+        the handler's ``_truncate_if_needed``. Short content yields a single
+        chunk == content, so the common path is unchanged.
         """
         try:
             prefix = f"[RNS:{msg.source_id[:4]}] "
             content = prefix + msg.content
+            chunks = chunk_for_mesh(content)
+            multi = f" [{len(chunks)} chunks]" if len(chunks) > 1 else ""
 
-            # In mqtt_bridge mode, use persistent queue for reliable delivery
+            # In mqtt_bridge mode, enqueue each chunk as its own queue item
+            # (independent retry). NOTE: meshanchor-server runs
+            # bridge_mode="meshcore_bridge", so this branch is inactive there;
+            # the direct path below is the live one.
             if (self._persistent_queue
                     and self.config.bridge_mode == "mqtt_bridge"
                     and HAS_PERSISTENT_QUEUE):
-                payload = {
-                    'message': content,
-                    'channel': self.config.meshtastic.channel,
-                    'source_id': msg.source_id,
-                }
-                msg_id = self._persistent_queue.enqueue(
-                    payload=payload,
-                    destination="mqtt",
-                    priority=MessagePriority.NORMAL,
-                )
-                if msg_id:
-                    logger.info(f"Bridge RNS→Mesh (queued): {content[:50]}...")
+                enqueued = 0
+                for chunk in chunks:
+                    payload = {
+                        'message': chunk,
+                        'channel': self.config.meshtastic.channel,
+                        'source_id': msg.source_id,
+                    }
+                    if self._persistent_queue.enqueue(
+                        payload=payload,
+                        destination="mqtt",
+                        priority=MessagePriority.NORMAL,
+                    ):
+                        enqueued += 1
+                if enqueued:
+                    logger.info(f"Bridge RNS→Mesh (queued{multi}): {content[:50]}...")
                     with self._stats_lock:
                         self.stats['messages_rns_to_mesh'] += 1
                     self.health.record_message_sent("rns_to_mesh")
                     return
+                # Nothing queued (all deduped/rejected) — fall through to a
+                # direct send attempt, mirroring the original None→fallthrough.
 
-            # Direct send (non-MQTT mode or queue unavailable)
-            if self.send_to_meshtastic(content, channel=self.config.meshtastic.channel):
-                logger.info(f"Bridge RNS→Mesh: {content[:50]}...")
+            # Direct send (non-MQTT mode or queue unavailable). Send every
+            # chunk; success requires all of them to go out.
+            failed_chunks = [
+                chunk for chunk in chunks
+                if not self.send_to_meshtastic(
+                    chunk, channel=self.config.meshtastic.channel)
+            ]
+            if chunks and not failed_chunks:
+                logger.info(f"Bridge RNS→Mesh{multi}: {content[:50]}...")
                 with self._stats_lock:
                     self.stats['messages_rns_to_mesh'] += 1
                 self.health.record_message_sent("rns_to_mesh")
             else:
-                logger.warning("Failed to bridge RNS→Mesh")
+                sent = len(chunks) - len(failed_chunks)
+                logger.warning(
+                    f"Failed to bridge RNS→Mesh ({sent}/{len(chunks)} chunks sent)"
+                )
                 with self._stats_lock:
                     self.stats['errors'] += 1
-                requeued = self._requeue_failed_message(msg, "meshtastic")
+                # Re-queue ONLY the failed chunks — each already byte-bounded —
+                # so the retry preserves the full content instead of re-sending
+                # the whole un-chunked original (which the retry would truncate)
+                # and without re-transmitting chunks that already went out.
+                requeued = self._requeue_failed_chunks(
+                    failed_chunks or chunks, "meshtastic")
                 self.health.record_message_failed("rns_to_mesh", requeued=requeued)
 
         except Exception as e:

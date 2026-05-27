@@ -866,6 +866,90 @@ class TestProcessRNSToMesh:
 
         assert sent_content.startswith("[RNS:abcd] ")
 
+    def test_multiline_content_chunked_not_truncated(self, bridge):
+        """Ported chunking (MeshForge 0066470): multi-line RNS content over the
+        Meshtastic byte cap is split into multiple ≤228 B packets, not cut to
+        one. Regression for silently-dropped lines past the cap."""
+        from gateway.rns_bridge import BridgedMessage
+        body = "\n".join(f"{i:2d}. node-{i} score {i*7}" for i in range(40))
+        assert len(body.encode("utf-8")) > 228  # would have truncated
+        msg = BridgedMessage(source_network="rns", source_id="abcdef01",
+                             destination_id=None, content=body)
+        sent = []
+
+        def capture(content, destination=None, channel=0):
+            sent.append(content)
+            return True
+
+        with patch.object(bridge, 'send_to_meshtastic', side_effect=capture):
+            bridge._process_rns_to_mesh(msg)
+
+        assert len(sent) > 1                                  # actually chunked
+        assert all(len(c.encode("utf-8")) <= 228 for c in sent)  # each within cap
+        assert sent[0].startswith("[RNS:abcd] ")              # prefix on chunk 0
+        # No content lost: every source line survives across the chunks.
+        joined = "\n".join(sent)
+        for i in range(40):
+            assert f"node-{i} score {i*7}" in joined
+        assert bridge.stats['messages_rns_to_mesh'] == 1      # one logical message
+
+    def test_partial_chunk_failure_requeues_failed_chunks(self, bridge):
+        """On partial direct-send failure the FAILED chunks are re-queued (each
+        byte-bounded), not the whole un-chunked original."""
+        from gateway.rns_bridge import BridgedMessage
+        body = "\n".join(f"line {i} " + "x" * 50 for i in range(20))
+        msg = BridgedMessage(source_network="rns", source_id="abcdef01",
+                             destination_id=None, content=body)
+        calls = {"n": 0}
+
+        def send(content, destination=None, channel=0):
+            calls["n"] += 1
+            return calls["n"] == 1  # first chunk sends, rest fail
+
+        captured = {}
+
+        def fake_requeue_chunks(chunks, target="meshtastic"):
+            captured["chunks"] = list(chunks)
+            captured["target"] = target
+            return True
+
+        with patch.object(bridge, 'send_to_meshtastic', side_effect=send), \
+             patch.object(bridge, '_requeue_failed_chunks', side_effect=fake_requeue_chunks):
+            bridge._process_rns_to_mesh(msg)
+
+        assert bridge.stats['errors'] == 1
+        assert captured["target"] == "meshtastic"
+        assert len(captured["chunks"]) >= 1                   # only the failed ones
+        assert all(len(c.encode("utf-8")) <= 228 for c in captured["chunks"])
+        bridge.health.record_message_failed.assert_called_with("rns_to_mesh", requeued=True)
+
+
+class TestChunkForMesh:
+    """Unit tests for the ported chunk_for_mesh primitive."""
+
+    def test_short_message_single_chunk(self):
+        from gateway.base_handler import chunk_for_mesh
+        assert chunk_for_mesh("hello") == ["hello"]
+
+    def test_empty_is_empty_list(self):
+        from gateway.base_handler import chunk_for_mesh
+        assert chunk_for_mesh("") == []
+
+    def test_multiline_splits_within_cap_lossless(self):
+        from gateway.base_handler import chunk_for_mesh
+        text = "\n".join(f"row {i}: " + "y" * 30 for i in range(30))
+        chunks = chunk_for_mesh(text)
+        assert len(chunks) > 1
+        assert all(len(c.encode("utf-8")) <= 228 for c in chunks)
+        assert "\n".join(chunks) == text  # newline-joined chunks reconstruct input
+
+    def test_single_oversize_word_char_split(self):
+        from gateway.base_handler import chunk_for_mesh
+        chunks = chunk_for_mesh("z" * 500, max_bytes=50)
+        assert len(chunks) >= 10
+        assert all(len(c.encode("utf-8")) <= 50 for c in chunks)
+        assert "".join(chunks) == "z" * 500
+
 
 # ---------------------------------------------------------------------------
 # _requeue_failed_message
