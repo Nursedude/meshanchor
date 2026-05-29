@@ -572,6 +572,11 @@ def _derive_overall_status(snapshot: FleetSnapshot) -> str:
 
 SCHEDULE_UNIT_PREFIXES = ("meshforge", "meshanchor", "moc-")
 SCHEDULE_STALE_MULTIPLIER = 2.0
+# A timer with NEXT unset is only "stale" if it ALSO has no recent fire.
+# systemd momentarily reports NEXT=0 at the fire instant while it
+# recomputes the next elapse (notably monotonic OnUnitActiveSec timers);
+# such a timer just ran and must not flicker the Subsystem Health banner.
+SCHEDULE_NO_NEXT_GRACE_S = 3600.0
 
 
 def _list_timers_scope(scope: str) -> List[Dict[str, Any]]:
@@ -634,11 +639,26 @@ def _normalize_timer(raw: Dict[str, Any], scope: str,
     next_unix = _us_to_unix(raw.get("next"))
     last_unix = _us_to_unix(raw.get("last"))
     age_s = (now_unix - last_unix) if last_unix is not None else None
-    stale = next_unix is None
-    if not stale and last_unix is not None and next_unix is not None:
+
+    # Stale signature 1: NEXT is unset AND there is no recent fire to
+    # vouch for the timer. A genuinely wedged timer (cf MF's moc1
+    # tracer.timer, NEXT unset ~18h) sits here with a stale `last`. But
+    # systemd ALSO briefly reports NEXT=0 at the fire instant while it
+    # recomputes the next elapse (monotonic OnUnitActiveSec timers like
+    # meshanchor-map-poke.timer) — that timer's `last` is ~now, so it
+    # just ran. Gate on a recent fire so the banner doesn't flicker.
+    if next_unix is None:
+        stale = age_s is None or age_s > SCHEDULE_NO_NEXT_GRACE_S
+    elif last_unix is not None:
+        # Stale signature 2: last fire older than 2× the nominal interval
+        # (interval ≈ next - last). Negative age (clock skew on a
+        # just-fired timer) is never stale — the comparison handles it.
         interval = next_unix - last_unix
-        if interval > 0 and age_s is not None:
-            stale = age_s > SCHEDULE_STALE_MULTIPLIER * interval
+        stale = bool(interval > 0 and age_s is not None
+                     and age_s > SCHEDULE_STALE_MULTIPLIER * interval)
+    else:
+        # NEXT known, never fired yet (fresh boot): not stale.
+        stale = False
     return {
         "name": name, "scope": scope,
         "next_fire_unix": next_unix, "last_fire_unix": last_unix,

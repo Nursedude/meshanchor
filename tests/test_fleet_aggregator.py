@@ -734,6 +734,73 @@ def test_list_timers_root_user_scope_no_operator_returns_empty(monkeypatch):
     assert fa._list_timers_scope("user") == []
 
 
+# ─── _normalize_timer staleness (monotonic-timer flicker guard) ─────────
+#
+# Mirror of MF test_fleet_snapshot's normalize-timer tests. The
+# 2026-05-29 incident: meshanchor-server's monotonic
+# meshanchor-map-poke.timer (OnUnitActiveSec=5min) was caught in its
+# sub-second fire window where systemd reports NEXT=0, flickering the
+# Subsystem Health banner to "⚠ 1/6 hosts" on a healthy fleet.
+
+_NT_NOW = 1780050000.0
+
+
+def test_normalize_timer_unset_next_and_old_last_is_stale():
+    """Genuinely wedged timer: NEXT unset AND last fire ~18h ago."""
+    raw = {
+        "unit": "meshanchor-tracer.timer",
+        "last": int((_NT_NOW - 18 * 3600) * 1_000_000),
+        "next": 0,
+    }
+    entry = fa._normalize_timer(raw, "user", _NT_NOW)
+    assert entry["next_fire_unix"] is None
+    assert entry["stale"] is True
+
+
+def test_normalize_timer_unset_next_but_just_fired_not_stale():
+    """Fire-instant transient: NEXT=0 while `last` is ~now. The poke
+    timer just ran — must NOT flag stale. Regression for the 2026-05-29
+    meshanchor-server false positive."""
+    raw = {
+        "unit": "meshanchor-map-poke.timer",
+        "last": int(_NT_NOW * 1_000_000),
+        "next": 0,
+    }
+    entry = fa._normalize_timer(raw, "user", _NT_NOW)
+    assert entry["next_fire_unix"] is None
+    assert entry["age_s"] == pytest.approx(0.0, abs=0.5)
+    assert entry["stale"] is False
+
+
+def test_normalize_timer_unset_next_negative_age_not_stale():
+    """Clock skew on a just-fired timer → slightly negative age. Never stale."""
+    raw = {"unit": "meshanchor-skew.timer", "last": int((_NT_NOW + 0.1) * 1_000_000), "next": 0}
+    entry = fa._normalize_timer(raw, "user", _NT_NOW)
+    assert entry["stale"] is False
+
+
+def test_normalize_timer_healthy_monotonic_with_next_not_stale():
+    """Steady-state monotonic timer: NEXT projected, recent last. Clean."""
+    raw = {
+        "unit": "meshanchor-map-poke.timer",
+        "last": int((_NT_NOW - 44) * 1_000_000),
+        "next": int((_NT_NOW + 256) * 1_000_000),  # 5-min cadence
+    }
+    entry = fa._normalize_timer(raw, "user", _NT_NOW)
+    assert entry["stale"] is False
+
+
+def test_normalize_timer_overdue_is_stale():
+    """NEXT + last both set, age > 2× interval ⇒ stale."""
+    raw = {
+        "unit": "meshanchor-daemon-restart.timer",
+        "last": int((_NT_NOW - 1500) * 1_000_000),
+        "next": int((_NT_NOW - 900) * 1_000_000),  # interval 600s, age 1500s
+    }
+    entry = fa._normalize_timer(raw, "user", _NT_NOW)
+    assert entry["stale"] is True
+
+
 # ─── CI status block ────────────────────────────────────────────────────
 #
 # Mirror of MF fleet_snapshot CI status tests. The block flows to the
