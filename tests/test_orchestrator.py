@@ -591,15 +591,18 @@ class TestShutdownResilientToStopTimeout:
             assert orchestrator.stop_service('rnsd') is False
 
     def test_shutdown_continues_past_a_timing_out_stop(self, orchestrator):
-        """A timeout stopping the first unit must not skip the remaining units."""
-        # reversed(STARTUP_ORDER) == ['rnsd', 'meshtasticd'] — rnsd stops first.
+        """A timeout stopping one unit must not skip the remaining units."""
+        # Use two NON-shared units so neither is skipped: put mosquitto
+        # (non-shared) ahead of meshtasticd in the stop order and make its
+        # stop time out. reversed(['meshtasticd','mosquitto']) stops mosquitto
+        # first.
+        orchestrator.STARTUP_ORDER = ['meshtasticd', 'mosquitto']
         attempted = []
 
         def fake_run(cmd, *args, **kwargs):
-            # cmd is ['systemctl', 'stop', <systemd_name>]
-            unit = cmd[-1]
+            unit = cmd[-1]  # ['systemctl', 'stop', <systemd_name>]
             attempted.append(unit)
-            if unit == 'rnsd':
+            if unit == 'mosquitto':
                 raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
             return MagicMock(returncode=0, stdout='', stderr='')
 
@@ -609,8 +612,36 @@ class TestShutdownResilientToStopTimeout:
              patch.object(orchestrator, '_emit'):
             result = orchestrator.shutdown()
 
-        # rnsd timed out -> overall shutdown reports failure...
+        # mosquitto timed out -> overall shutdown reports failure...
         assert result is False
-        # ...but meshtasticd was still stopped despite rnsd timing out first.
-        assert 'rnsd' in attempted
+        # ...but meshtasticd was still stopped despite mosquitto timing out first.
+        assert 'mosquitto' in attempted
         assert 'meshtasticd' in attempted
+
+
+class TestShutdownLeavesSharedDepsRunning:
+    """rnsd is a shared @rns host (meshanchor-daemon/map/collector depend on
+    it). The orchestrator must NOT stop it on its own shutdown — doing so
+    bounced the whole RNS surface and stalled 30s on `systemctl stop rnsd`
+    every meshanchor.service restart.
+    """
+
+    def test_shutdown_does_not_stop_shared_rnsd(self, orchestrator):
+        """rnsd (shared=True) is left running; non-shared units still stop."""
+        assert orchestrator.SERVICES['rnsd'].shared is True
+        attempted = []
+
+        def fake_run(cmd, *args, **kwargs):
+            attempted.append(cmd[-1])
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        with patch.object(orchestrator, 'is_running', return_value=True), \
+             patch('subprocess.run', side_effect=fake_run), \
+             patch('time.sleep'), \
+             patch.object(orchestrator, '_emit'):
+            result = orchestrator.shutdown()
+
+        # rnsd left running -> no stop attempted for it, and no failure logged.
+        assert 'rnsd' not in attempted
+        assert 'meshtasticd' in attempted
+        assert result is True

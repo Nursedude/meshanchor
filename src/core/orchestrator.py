@@ -78,6 +78,13 @@ class ServiceConfig:
     required: bool = True
     install_command: Optional[List[str]] = None
     dependencies: List[str] = field(default_factory=list)
+    # Shared host daemon other units depend on (e.g. rnsd hosts the @rns
+    # shared instance for meshanchor-daemon/map/collector). The orchestrator
+    # starts it if needed but must NOT stop it on its own shutdown — doing so
+    # bounces the whole RNS surface every meshanchor.service restart, with a
+    # 30s `systemctl stop rnsd` stall, for no benefit (a real system shutdown
+    # stops rnsd via its own unit). On full-system shutdown systemd handles it.
+    shared: bool = False
 
 
 @dataclass
@@ -119,6 +126,7 @@ class ServiceOrchestrator:
             required=True,
             install_command=['pipx', 'install', 'rns'],
             dependencies=['meshtasticd'],  # Start after meshtasticd
+            shared=True,  # Shared @rns host — don't stop on our shutdown
         ),
         'mosquitto': ServiceConfig(
             name='mosquitto',
@@ -1163,6 +1171,17 @@ class ServiceOrchestrator:
 
         # Stop in reverse order
         for service_name in reversed(self.STARTUP_ORDER):
+            config = self.SERVICES.get(service_name)
+            if config and config.shared:
+                # Shared host daemon (e.g. rnsd): other units still depend on
+                # it. Leave it running — stopping it here just churns the RNS
+                # surface and stalls 30s on `systemctl stop rnsd`. A real
+                # system shutdown stops it via its own unit.
+                logger.info(
+                    f"Leaving {service_name} running (shared dependency "
+                    f"for other units)"
+                )
+                continue
             if not self.stop_service(service_name):
                 success = False
 
