@@ -559,14 +559,26 @@ Examples:
         cors_origins=cors_origins,
     )
 
-    # Signal handlers for graceful shutdown
+    # Signal handlers for graceful shutdown.
+    #
+    # IMPORTANT: server.start() runs serve_forever() on the MAIN thread, and
+    # Python delivers signals to the main thread. Calling server.stop() (which
+    # calls BaseServer.shutdown()) directly in the handler would DEADLOCK:
+    # shutdown() blocks until the serve_forever() loop observes the stop flag,
+    # but that loop *is* this thread, now parked inside the handler. systemd
+    # then SIGKILLs after TimeoutStopSec on every stop/restart. Offload the
+    # stop to a separate thread so the main thread's serve_forever() unwinds
+    # naturally and main() returns through its finally. (Mirrors the MeshForge
+    # Issue #61 fix.)
+    _shutdown_started = threading.Event()
+
     def handle_signal(signum, frame):
         sig_name = signal.Signals(signum).name
         print(f"\nReceived {sig_name}, shutting down...")
-        server.stop()
-        _remove_pid_file(args.pid_file)
-        import sys
-        sys.exit(0)
+        if _shutdown_started.is_set():
+            return  # a second signal arrived mid-shutdown — ignore
+        _shutdown_started.set()
+        _spawn_shutdown(server, args.pid_file)
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
@@ -638,6 +650,30 @@ def _remove_pid_file(pid_file: str) -> None:
             Path(path).unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _spawn_shutdown(server, pid_file: str) -> threading.Thread:
+    """Run server.stop() on a separate daemon thread and return it.
+
+    Called from the SIGTERM/SIGINT handler. server.stop() calls
+    BaseServer.shutdown(), which blocks until the serve_forever() loop
+    observes the stop flag — and serve_forever() runs on the main thread,
+    which is the thread the signal handler executes on. Calling stop()
+    inline would therefore deadlock. Offloading it lets the main thread's
+    serve_forever() unwind so main() returns cleanly. See handle_signal in
+    main() and the MeshForge Issue #61 fix.
+    """
+    def _do_shutdown():
+        try:
+            server.stop()
+        except Exception as e:
+            logger.error("Error during map server shutdown: %s", e)
+        finally:
+            _remove_pid_file(pid_file)
+
+    t = threading.Thread(target=_do_shutdown, name="map-shutdown", daemon=True)
+    t.start()
+    return t
 
 
 if __name__ == "__main__":
