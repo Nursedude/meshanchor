@@ -269,6 +269,45 @@ class TestRadioHealth:
         assert health.is_healthy is False
 
 
+class TestHealthPollErrorPath:
+    """Regression: the _poll_radio_health except branch must count failures.
+
+    A stray `radio.host` reference (RadioHealth has no `host` field) used to
+    raise AttributeError *inside* the except block, skipping the
+    consecutive_failures increment and the reachable=False transition — so a
+    radio that actually went unreachable (the failover trigger) was never
+    marked down and failover never fired. This pins the error path.
+    """
+
+    def test_poll_exception_increments_failures(self, manager):
+        """An HTTP-client exception must increment consecutive_failures."""
+        radio = manager._primary
+        radio.consecutive_failures = 0
+        radio.reachable = True
+        with patch(
+            'gateway.radio_failover.get_http_client',
+            create=True,
+            side_effect=ConnectionError("radio unreachable"),
+        ):
+            manager._poll_radio_health(radio)
+        assert radio.consecutive_failures == 1
+
+    def test_poll_exception_marks_unreachable_after_threshold(self, manager):
+        """Three consecutive poll failures must flip reachable to False."""
+        radio = manager._primary
+        radio.consecutive_failures = 0
+        radio.reachable = True
+        with patch(
+            'gateway.radio_failover.get_http_client',
+            create=True,
+            side_effect=ConnectionError("radio unreachable"),
+        ):
+            for _ in range(3):
+                manager._poll_radio_health(radio)
+        assert radio.consecutive_failures == 3
+        assert radio.reachable is False
+
+
 class TestFailoverRateLimiting:
     """Test failover rate limiting to prevent flapping."""
 
