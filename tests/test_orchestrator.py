@@ -568,3 +568,49 @@ class TestApplyManagedOverrides:
 
 
 # TestEEPROMTemplateMatching removed — config.hardware is Meshtastic-specific (not in MeshAnchor)
+
+
+class TestShutdownResilientToStopTimeout:
+    """Regression: a slow `systemctl stop` must not abort the whole shutdown.
+
+    stop_service() ran subprocess.run(timeout=30) unguarded, so a
+    TimeoutExpired (a wedged shared dependency like rnsd, or a unit with a
+    long TimeoutStopSec) propagated up through shutdown() -> main() ->
+    sys.exit(1). Worse, because shutdown() stops in reversed(STARTUP_ORDER),
+    services later in that order never got stopped at all. This pins that
+    one slow stop is logged + counted as failure but the sequence continues.
+    """
+
+    def test_stop_service_swallows_timeout(self, orchestrator):
+        """stop_service returns False (not raises) when systemctl stop times out."""
+        with patch.object(orchestrator, 'is_running', return_value=True), \
+             patch('subprocess.run',
+                   side_effect=subprocess.TimeoutExpired(cmd='systemctl stop', timeout=30)), \
+             patch.object(orchestrator, '_emit'):
+            # Must not raise
+            assert orchestrator.stop_service('rnsd') is False
+
+    def test_shutdown_continues_past_a_timing_out_stop(self, orchestrator):
+        """A timeout stopping the first unit must not skip the remaining units."""
+        # reversed(STARTUP_ORDER) == ['rnsd', 'meshtasticd'] — rnsd stops first.
+        attempted = []
+
+        def fake_run(cmd, *args, **kwargs):
+            # cmd is ['systemctl', 'stop', <systemd_name>]
+            unit = cmd[-1]
+            attempted.append(unit)
+            if unit == 'rnsd':
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+            return MagicMock(returncode=0, stdout='', stderr='')
+
+        with patch.object(orchestrator, 'is_running', return_value=True), \
+             patch('subprocess.run', side_effect=fake_run), \
+             patch('time.sleep'), \
+             patch.object(orchestrator, '_emit'):
+            result = orchestrator.shutdown()
+
+        # rnsd timed out -> overall shutdown reports failure...
+        assert result is False
+        # ...but meshtasticd was still stopped despite rnsd timing out first.
+        assert 'rnsd' in attempted
+        assert 'meshtasticd' in attempted

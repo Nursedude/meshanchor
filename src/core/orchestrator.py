@@ -1001,12 +1001,27 @@ class ServiceOrchestrator:
             return True
 
         logger.info(f"Stopping {service_name}...")
-        result = subprocess.run(
-            ['systemctl', 'stop', config.systemd_name],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        try:
+            result = subprocess.run(
+                ['systemctl', 'stop', config.systemd_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            # A slow `systemctl stop` (unit with a long TimeoutStopSec, or a
+            # shared dependency like rnsd that is wedged) must NOT abort the
+            # whole shutdown sequence — services later in reversed(STARTUP_ORDER)
+            # still need to be stopped. Report failure (caller records it) but
+            # return cleanly so shutdown() keeps going.
+            logger.error(
+                f"Timed out after 30s stopping {service_name} — "
+                f"continuing with remaining services"
+            )
+            return False
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.error(f"Error stopping {service_name}: {e}")
+            return False
 
         if result.returncode != 0:
             logger.error(f"Failed to stop {service_name}: {result.stderr}")
