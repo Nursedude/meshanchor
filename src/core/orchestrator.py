@@ -27,7 +27,7 @@ import socket
 import logging
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List, Callable, Any
@@ -280,19 +280,13 @@ class ServiceOrchestrator:
             # Remove meshtasticd from startup order for usb-direct mode
             if 'meshtasticd' in self.STARTUP_ORDER:
                 self.STARTUP_ORDER = [s for s in self.STARTUP_ORDER if s != 'meshtasticd']
-            # Also remove meshtasticd dependency from rnsd
+            # Also remove meshtasticd dependency from rnsd.
+            # Use dataclasses.replace so ALL other fields (incl. shared) are
+            # preserved — manual field-by-field copies silently drop any field
+            # added later (this is exactly how rnsd.shared got lost).
             if 'rnsd' in self.SERVICES:
-                rnsd_config = self.SERVICES['rnsd']
-                self.SERVICES['rnsd'] = ServiceConfig(
-                    name=rnsd_config.name,
-                    systemd_name=rnsd_config.systemd_name,
-                    check_binary=rnsd_config.check_binary,
-                    check_port=rnsd_config.check_port,
-                    check_command=rnsd_config.check_command,
-                    startup_delay=rnsd_config.startup_delay,
-                    required=rnsd_config.required,
-                    install_command=rnsd_config.install_command,
-                    dependencies=[],  # No dependencies in usb-direct mode
+                self.SERVICES['rnsd'] = replace(
+                    self.SERVICES['rnsd'], dependencies=[],
                 )
             logger.info("Configured for USB-direct mode (no daemon required)")
             logger.info("USB radios: use 'meshtastic --port /dev/ttyUSB0 --info' directly")
@@ -335,34 +329,17 @@ class ServiceOrchestrator:
             if svc_name in self.STARTUP_ORDER:
                 self.STARTUP_ORDER = [s for s in self.STARTUP_ORDER if s != svc_name]
 
-            # Clear from dependents (rebuild ServiceConfig — dataclass is frozen-by-convention here)
+            # Clear from dependents. dataclasses.replace preserves every other
+            # field (incl. shared) — manual copies drop fields added later.
             for other_name, other_cfg in list(self.SERVICES.items()):
                 if svc_name in other_cfg.dependencies:
-                    self.SERVICES[other_name] = ServiceConfig(
-                        name=other_cfg.name,
-                        systemd_name=other_cfg.systemd_name,
-                        check_binary=other_cfg.check_binary,
-                        check_port=other_cfg.check_port,
-                        check_command=other_cfg.check_command,
-                        startup_delay=other_cfg.startup_delay,
-                        required=other_cfg.required,
-                        install_command=other_cfg.install_command,
+                    self.SERVICES[other_name] = replace(
+                        other_cfg,
                         dependencies=[d for d in other_cfg.dependencies if d != svc_name],
                     )
 
             # Demote to optional so preflight doesn't reject when binary missing
-            current = self.SERVICES[svc_name]
-            self.SERVICES[svc_name] = ServiceConfig(
-                name=current.name,
-                systemd_name=current.systemd_name,
-                check_binary=current.check_binary,
-                check_port=current.check_port,
-                check_command=current.check_command,
-                startup_delay=current.startup_delay,
-                required=False,
-                install_command=current.install_command,
-                dependencies=current.dependencies,
-            )
+            self.SERVICES[svc_name] = replace(self.SERVICES[svc_name], required=False)
 
             logger.info("Service %s opted out via noc.yaml (managed: false)", svc_name)
 

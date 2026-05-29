@@ -529,6 +529,20 @@ class TestApplyManagedOverrides:
         })
         assert 'meshtasticd' not in orch.SERVICES['rnsd'].dependencies
 
+    def test_rnsd_keeps_shared_flag_after_dependency_rebuild(self):
+        """Regression: rebuilding rnsd's config to drop the meshtasticd
+        dependency (MeshCore-only box) must PRESERVE shared=True. A manual
+        field-by-field copy dropped it, so shutdown() stopped/bounced the
+        shared rnsd on every restart despite the shared-skip code existing.
+        """
+        orch = self._build_orchestrator({
+            'meshtasticd': {'managed': False, 'auto_start': False},
+            'rnsd': {'managed': True, 'auto_start': True},
+        })
+        # rnsd was rebuilt (dependency dropped) but must still be shared.
+        assert 'meshtasticd' not in orch.SERVICES['rnsd'].dependencies
+        assert orch.SERVICES['rnsd'].shared is True
+
     def test_meshtasticd_disabled_preflight_passes(self):
         """End-to-end: _preflight_check returns empty when meshtasticd disabled and not installed."""
         orch = self._build_orchestrator({
