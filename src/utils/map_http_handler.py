@@ -617,33 +617,41 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             self._serve_json({"type": "FeatureCollection", "features": []})
             return
 
-        # Always shallow-copy before mutating — the collector cache is
-        # shared across concurrent requests via ThreadingHTTPServer.
-        geojson = self.collector.collect()
-        features = geojson.get("features") or []
-
+        # Resolve filters first (cheap query/settings parse) — they form the
+        # cache key, since they materially change the response.
         max_age_days = self._resolve_max_age_days()
         region = self._resolve_region()
+        cache_key = (max_age_days, region)
 
-        annotations: Dict[str, Any] = {}
-        if max_age_days is not None and max_age_days > 0:
-            features = self._filter_by_age(features, max_age_days)
-            annotations["max_age_days"] = max_age_days
-        if region and region != "world":
-            bbox = self.REGION_BBOXES.get(region)
-            if bbox is not None:
-                features = self._filter_by_region(features, bbox)
-                annotations["region"] = region
-                annotations["region_bbox"] = list(bbox)
+        def _build_geojson():
+            # Always shallow-copy before mutating — the collector cache is
+            # shared across concurrent requests via ThreadingHTTPServer.
+            geojson = self.collector.collect()
+            features = geojson.get("features") or []
 
-        if annotations:
-            geojson = dict(geojson)
-            geojson["features"] = features
-            props = dict(geojson.get("properties") or {})
-            props.update(annotations)
-            props["features_after_filter"] = len(features)
-            geojson["properties"] = props
-        self._serve_json(geojson)
+            annotations: Dict[str, Any] = {}
+            if max_age_days is not None and max_age_days > 0:
+                features = self._filter_by_age(features, max_age_days)
+                annotations["max_age_days"] = max_age_days
+            if region and region != "world":
+                bbox = self.REGION_BBOXES.get(region)
+                if bbox is not None:
+                    features = self._filter_by_region(features, bbox)
+                    annotations["region"] = region
+                    annotations["region_bbox"] = list(bbox)
+
+            if annotations:
+                geojson = dict(geojson)
+                geojson["features"] = features
+                props = dict(geojson.get("properties") or {})
+                props.update(annotations)
+                props["features_after_filter"] = len(features)
+                geojson["properties"] = props
+            return geojson
+
+        self._serve_cached(
+            self.collector._geojson_response_cache, cache_key, _build_geojson,
+        )
 
     def _resolve_max_age_days(self) -> Optional[int]:
         """Read max_age_days from the query string or settings, or None."""
@@ -811,6 +819,25 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
         # Include radio connection status
         status["radio"] = self._get_radio_status_summary()
 
+        # Response-cache observability (Issues #70/#71). Surfaces hit/miss/
+        # coalesced counts per heavy endpoint so operators can confirm the
+        # caches are coalescing work (and spot a regression where an endpoint
+        # stops calling get_or_build, or a TTL too short to coalesce).
+        if self.collector:
+            for stat_key, attr in (
+                ("geojson", "_geojson_response_cache"),
+                ("topology", "_topology_response_cache"),
+                ("directory_cache", "_directory_response_cache"),
+            ):
+                try:
+                    cache = getattr(self.collector, attr, None)
+                    if cache is not None:
+                        status[stat_key] = {
+                            "cache": {**cache.stats(), "ttl_s": cache.ttl_s}
+                        }
+                except Exception as e:
+                    logger.debug(f"{stat_key} cache stats lookup failed: {e}")
+
         data = json.dumps(status).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -903,11 +930,35 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             })
             return
 
-        try:
+        def _build_directory():
             features, position_less = (
                 self.collector._history.get_directory_snapshot(
                     include_position_less=True
                 )
+            )
+            # Per-network breakdown alongside the full list — same shape
+            # /api/status uses, so dashboards can consume either.
+            by_network: Dict[str, int] = {}
+            for entry in position_less:
+                net = entry.get("network", "unknown")
+                by_network[net] = by_network.get(net, 0) + 1
+            return {
+                "type": "FeatureCollection",
+                "features": features,
+                "properties": {
+                    "generated_at": datetime.now().isoformat(),
+                    "total_features": len(features),
+                    "total_position_less": len(position_less),
+                },
+                "nodes_without_position": position_less,
+                "nodes_without_position_by_network": by_network,
+            }
+
+        # No query params → single cache key. The snapshot exception path
+        # serves a 500 uncached (errors must not be cached).
+        try:
+            self._serve_cached(
+                self.collector._directory_response_cache, None, _build_directory,
             )
         except Exception as e:
             logger.error(f"directory snapshot failed: {e}")
@@ -917,27 +968,6 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
                 "properties": {"error": str(e)[:200]},
                 "nodes_without_position": [],
             }, status=500)
-            return
-
-        # Per-network breakdown alongside the full list — same shape
-        # /api/status uses, so dashboards can consume either.
-        by_network: Dict[str, int] = {}
-        for entry in position_less:
-            net = entry.get("network", "unknown")
-            by_network[net] = by_network.get(net, 0) + 1
-
-        body = {
-            "type": "FeatureCollection",
-            "features": features,
-            "properties": {
-                "generated_at": datetime.now().isoformat(),
-                "total_features": len(features),
-                "total_position_less": len(position_less),
-            },
-            "nodes_without_position": position_less,
-            "nodes_without_position_by_network": by_network,
-        }
-        self._serve_json(body)
 
     def _serve_trajectory(self, node_id: str):
         """Serve trajectory GeoJSON for a specific node."""
@@ -957,6 +987,45 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
         """Helper to serve a JSON response (gzipped when client supports)."""
         data = json.dumps(obj).encode()
         payload, encoding = self._maybe_gzip(data)
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        if encoding:
+            self.send_header('Content-Encoding', encoding)
+            self.send_header('Vary', 'Accept-Encoding')
+        self.send_header('Content-Length', str(len(payload)))
+        self._send_cors_header()
+        self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _serve_cached(self, cache, key, build_obj, status: int = 200):
+        """Serve a JSON response through a ResponseByteCache.
+
+        ``build_obj`` is a zero-arg callable returning the response dict.
+        On a cache miss it is invoked and the result is json.dumps'd and
+        (when worth it) gzipped ONCE; the (raw, gzip) bytes are cached for
+        the cache's TTL. Concurrent callers for the same key coalesce onto
+        one build instead of each repeating the multi-MB serialize+gzip
+        under the GIL (MeshForge Issues #70/#71). Errors raised by
+        ``build_obj`` propagate uncached — the caller serves them itself.
+        """
+        def _build():
+            obj = build_obj()
+            raw = json.dumps(obj).encode()
+            gz = (
+                gzip.compress(raw, compresslevel=6)
+                if len(raw) >= self._GZIP_MIN_BYTES
+                else None
+            )
+            return raw, gz
+
+        raw_bytes, gzip_bytes, _was_built = cache.get_or_build(key, _build)
+
+        if gzip_bytes is not None and self._accepts_gzip():
+            payload, encoding = gzip_bytes, 'gzip'
+        else:
+            payload, encoding = raw_bytes, None
+
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         if encoding:
@@ -1346,7 +1415,19 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
         if not self.collector:
             self._serve_json({"error": "collector not available", "nodes": [], "links": []})
             return
+        # No query params → single cache key. The O(n²) link build AND the
+        # multi-MB serialize coalesce inside the response cache.
+        self._serve_cached(
+            self.collector._topology_response_cache, None, self._build_topology_obj,
+        )
 
+    def _build_topology_obj(self) -> Dict[str, Any]:
+        """Build the network-topology dict (collect + O(n²) link build).
+
+        Invoked by the topology response cache (ResponseByteCache) so the
+        build and serialization are computed once per TTL and shared across
+        concurrent callers.
+        """
         geojson = self.collector.collect()
         nodes = []
         links = []
@@ -1448,7 +1529,7 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
                         "distance_km": round(dist, 2)
                     })
 
-        self._serve_json({
+        return {
             "nodes": nodes,
             "links": links,
             "network_counts": {
@@ -1458,7 +1539,7 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
                 "gateway": len([n for n in nodes if n["is_gateway"]])
             },
             "timestamp": datetime.now().isoformat()
-        })
+        }
 
     # ─────────────────────────────────────────────────────────────────
     # Space Weather API

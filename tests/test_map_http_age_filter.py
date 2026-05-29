@@ -69,6 +69,11 @@ def _make_handler(path: str, features: List[dict], settings_max_age_days: int = 
         "region": settings_region,
     }.get(key, default)
     h.collector._settings = settings
+    # The geojson endpoint now serves through a real per-collector response
+    # cache (Issues #70/#71). Attach a real one so get_or_build returns the
+    # (raw, gz, was_built) tuple the handler unpacks.
+    from utils._response_byte_cache import ResponseByteCache
+    h.collector._geojson_response_cache = ResponseByteCache(ttl_s=2.0)
     return h
 
 
@@ -216,6 +221,8 @@ class TestServeGeojsonAgeFilter:
             "max_age_days": 30, "region": "world",
         }.get(key, default)
         h.collector._settings = settings
+        from utils._response_byte_cache import ResponseByteCache
+        h.collector._geojson_response_cache = ResponseByteCache(ttl_s=2.0)
 
         h._serve_geojson()
 

@@ -119,6 +119,18 @@ class MapDataCollector(
         # re-runs the full path_table walk + MeshCore/MQTT fetch at once.
         self._collect_lock = threading.Lock()
 
+        # Short-TTL single-flight caches of serialized response bytes for
+        # the three GIL-bound multi-MB endpoints (ported from MeshForge
+        # Issues #70/#71). Without these, concurrent scrapers each repeat
+        # json.dumps+gzip on the same body, stacking under the GIL until
+        # /healthz stalls — the wedge the daily map-restart timer band-aids.
+        # TTLs: geojson filters on the query string so it's keyed and kept
+        # short (2s); topology/directory take no query params (5s).
+        from utils._response_byte_cache import ResponseByteCache
+        self._geojson_response_cache = ResponseByteCache(ttl_s=2.0)
+        self._topology_response_cache = ResponseByteCache(ttl_s=5.0)
+        self._directory_response_cache = ResponseByteCache(ttl_s=5.0)
+
         # Periodic background refresh state — started via
         # start_periodic_refresh() from the daemon entry point so unit
         # tests / CLI usage that construct a collector don'''t spawn a
