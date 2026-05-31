@@ -1,8 +1,34 @@
 # MeshAnchor RNS Dependencies (gateway, full profiles)
 
-# Reticulum Network Stack
-rns>=0.7.0
-lxmf>=0.4.0
+# Reticulum Network Stack — PINNED to the MeshForge-owned fork.
+#
+# RNS upstream withdrew public support (Carrier Switch, Dec 2025) — no issue/PR
+# responses, no security-disclosure channel. MeshForge responded by hard-forking
+# rns + lxmf (the RNS T2-isolate / fork arc, late May 2026) so the version is a
+# reviewed decision, never an automatic `pip install` grabbing latest. The old
+# floating `rns>=0.7.0` / `lxmf>=0.4.0` skewed the fleet across incompatible
+# versions.
+#
+# MeshAnchor adopts the SAME fork pin as MeshForge (2026-05-31, RNS-parity port):
+# the two sister NOC apps share the RNS substrate and the fleet's rnsd, so they
+# must run the identical RNS/LXMF build. The fork carries in-library hang fixes
+# for the rnsd-RPC fragility class (#68 connect-hang, #72 RPC-recv-hang,
+# rnsd-SIGTERM detach-hang) that bit BOTH apps.
+#
+#   forks: github.com/Nursedude/reticulum  (branch meshforge, tag 1.2.5+mf.3)
+#          github.com/Nursedude/lxmf        (branch meshforge, tag 0.9.4+mf.0)
+# +mf.1 (2026-05-30): #68 fix — bound LocalClientInterface connect (no thread hang).
+# +mf.2 (2026-05-30): #72 fix — bound shared-instance RPC recv (no rnstatus hang).
+# +mf.3 (2026-05-30): rnsd-SIGTERM fix — bound detach_interfaces() (no shutdown hang).
+# pip resolves by commit SHA (reproducible); the MF-FORK-PIN lines are the
+# version SSOT enforced by scripts/rns_version_check.py. The baseline is
+# IDENTICAL to stock 1.2.5/0.9.4 except the +mf.N marker + FORK.md/NOTICE, so
+# it stays wire-compatible with the public Reticulum net (NomadNet, Sideband).
+# Verify drift with: python3 scripts/rns_version_check.py
+# MF-FORK-PIN rns 1.2.5+mf.3
+# MF-FORK-PIN lxmf 0.9.4+mf.0
+rns @ git+https://github.com/Nursedude/reticulum.git@1b4a46a192c64f218effe9088860ed2b0e878d6a
+lxmf @ git+https://github.com/Nursedude/lxmf.git@66c48cfff65bce78e645bc79930bbc6b6fd6802a
 
 # Cryptography / PyOpenSSL version alignment:
 # RNS pulls in cryptography 46.x (its constraint is >=3.4.7, so pip grabs latest).

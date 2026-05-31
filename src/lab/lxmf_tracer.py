@@ -215,7 +215,8 @@ def run_trace(
         _build_client_config(tmpdir)
 
         try:
-            reticulum = RNS.Reticulum(configdir=str(tmpdir), loglevel=2)
+            from utils.rns_init import init_reticulum_with_watchdog
+            reticulum = init_reticulum_with_watchdog(str(tmpdir), loglevel=2)
         except Exception as exc:
             logger.error("tracer: RNS init failed: %s", exc)
             return [

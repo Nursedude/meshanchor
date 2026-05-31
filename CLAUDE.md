@@ -44,6 +44,7 @@ Forked from MeshForge main on 2026-04-01. Shares the same TUI framework, gateway
 - Single branch for now. Feature branches use `claude/` prefix → PR to main.
 - **Sister project**: [MeshForge](https://github.com/Nursedude/meshforge) (Meshtastic-primary)
 - **Shared contract**: `CanonicalMessage` in `src/gateway/canonical_message.py` must stay compatible with MeshForge's version.
+- **RNS-reliability parity**: MeshForge is the **lead repo** for the RNS-reliability arc; MeshAnchor mirrors it (the fleet runs one rnsd per box as a shared instance, so both apps must run the identical RNS substrate). **RNS-reliability changes land in MeshForge first, then port here.** Run `python3 /opt/meshforge/scripts/parity_check.py` to see drift. Byte-identical: `src/utils/rns_init.py` (the guarded RNS-init chokepoint — every `RNS.Reticulum()` routes through `open_reticulum()`; enforced by lint MF019 + `TestRNSReticulumChokepoint`), `src/gateway/canonical_message.py`, the `requirements/rns.txt` `MF-FORK-PIN` block (rns/lxmf pinned to the MeshForge-owned fork; verify with `scripts/rns_version_check.py`). Shape (MeshAnchor idiom): `rns_status_parser.py` `timed_out`, lint MF009+MF019, and the two RNS-wedge probes as `check_rns_rpc_responsive` + `check_rns_interface_down_peer_reachable` in `src/utils/active_health_probe.py` (HealthResult idiom, registered in the 30s gateway probe gated behind rnsd), NOT MeshForge's `watchdog_probes.py` shape.
 
 ---
 

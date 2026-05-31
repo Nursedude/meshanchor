@@ -130,9 +130,20 @@ class RNSConnectionMixin:
                            "connecting as shared instance client")
                 self._rns_via_rnsd = True
 
-            self._reticulum = RNS.Reticulum(configdir=config_dir)
-            self._rns_pre_initialized = True
-            logger.info("RNS pre-initialized from main thread")
+            from utils.rns_init import open_reticulum
+            # Guarded chokepoint: fail-open on a wedged rnsd (#68), fail-loud
+            # on a foreign @rns owner (#69), idempotent singleton reuse. The
+            # gateway may legitimately run standalone (no rnsd), so we do NOT
+            # set require_listener — absent listener -> standalone construct.
+            self._reticulum = open_reticulum(config_dir)
+            if self._reticulum is not None:
+                self._rns_pre_initialized = True
+                logger.info("RNS pre-initialized from main thread")
+            else:
+                logger.warning("RNS degraded (wedged/absent rnsd) — bridge will retry in background")
+        except RuntimeError as e:
+            # #69 foreign-owner collision — operator-actionable, surface loud.
+            logger.error("RNS init blocked: %s", e)
         except Exception as e:
             err_msg = str(e).lower()
             if "reinitialise" in err_msg or "already running" in err_msg:
@@ -194,7 +205,22 @@ class RNSConnectionMixin:
                             pass  # Use RNS default resolution
 
                     try:
-                        self._reticulum = RNS.Reticulum(configdir=config_dir)
+                        from utils.rns_init import open_reticulum
+                        # Guarded chokepoint (we're already inside
+                        # _suppress_signal_in_thread, so bg-thread signal
+                        # registration is suppressed). Fail-open on a wedged
+                        # rnsd (#68) / fail-loud on a foreign @rns owner (#69).
+                        self._reticulum = open_reticulum(config_dir)
+                        if self._reticulum is None:
+                            logger.warning("RNS degraded (wedged/absent rnsd) — will retry")
+                            self._connected_rns = False
+                            return
+                    except RuntimeError as e:
+                        # #69 foreign-owner collision — operator-actionable.
+                        logger.error("RNS init blocked: %s", e)
+                        self._rns_init_failed_permanently = True
+                        self._connected_rns = False
+                        return
                     except Exception as e:
                         err_msg = str(e).lower()
                         if "reinitialise" in err_msg or "already running" in err_msg:

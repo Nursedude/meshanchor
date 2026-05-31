@@ -209,7 +209,8 @@ def run_daemon(loglevel: str = "INFO", announce_interval_s: int = ANNOUNCE_INTER
 
         logger.info("echo: initialising RNS (configdir=%s)", tmpdir)
         try:
-            reticulum = RNS.Reticulum(configdir=str(tmpdir), loglevel=2)
+            from utils.rns_init import init_reticulum_with_watchdog
+            reticulum = init_reticulum_with_watchdog(str(tmpdir), loglevel=2)
         except Exception as exc:
             logger.error("echo: RNS init failed: %s", exc)
             return 4

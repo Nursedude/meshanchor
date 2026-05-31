@@ -119,3 +119,153 @@ class TestCreateGatewayHealthProbe:
             probe = ahp.create_gateway_health_probe()
         registered = set(probe._checks.keys())
         assert {"meshtasticd", "rnsd", "mosquitto"}.issubset(registered)
+
+
+class TestRNSWedgeProbes:
+    """RNS-reliability parity port (2026-05-31): two HealthResult probes for
+    the rnsd-RPC fragility class that check_rns_port can't see —
+      check_rns_rpc_responsive:                 #68/#72 wedged-RPC
+      check_rns_interface_down_peer_reachable:  2026-05-30 stuck-uplink islanding
+    """
+
+    def _probe(self):
+        from utils.active_health_probe import ActiveHealthProbe
+        return ActiveHealthProbe()
+
+    # --- check_rns_rpc_responsive ---
+
+    def test_rpc_timeout_is_unhealthy(self):
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        with patch.object(rsp, "run_rnstatus",
+                          return_value=RNSStatus(parse_error="timed out", timed_out=True)):
+            r = self._probe().check_rns_rpc_responsive()
+            assert r.healthy is False
+            assert "rns_rpc_unresponsive" in r.reason
+
+    def test_rpc_healthy_when_not_timed_out(self):
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        with patch.object(rsp, "run_rnstatus", return_value=RNSStatus()):
+            assert self._probe().check_rns_rpc_responsive().healthy is True
+
+    def test_rpc_fast_error_is_healthy_not_wedge(self):
+        """A down rnsd fails FAST (timed_out False) — service/port probes own
+        that, so the RPC-wedge probe must NOT alarm."""
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        with patch.object(rsp, "run_rnstatus",
+                          return_value=RNSStatus(parse_error="no shared instance")):
+            assert self._probe().check_rns_rpc_responsive().healthy is True
+
+    def test_rpc_passes_timeout_s_through(self):
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        with patch.object(rsp, "run_rnstatus", return_value=RNSStatus()) as m:
+            self._probe().check_rns_rpc_responsive(timeout_s=4.0)
+            assert m.call_args.kwargs.get("timeout_s") == 4.0
+
+    # --- check_rns_interface_down_peer_reachable ---
+
+    def _down_tcp_status(self):
+        from utils.rns_status_parser import RNSStatus, RNSInterface, InterfaceStatus
+        return RNSStatus(interfaces=[RNSInterface(
+            type_name="TCPInterface",
+            display_name="Regional RNS/192.168.1.5:4242",
+            status=InterfaceStatus.DOWN,
+        )])
+
+    def test_iface_down_peer_reachable_is_unhealthy(self):
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_tcp_reachable", return_value=True):
+            r = self._probe().check_rns_interface_down_peer_reachable(
+                rnstatus_status=self._down_tcp_status())
+            assert r.healthy is False
+            assert "rns_interface_down_peer_reachable" in r.reason
+            assert "192.168.1.5:4242" in r.reason
+
+    def test_iface_down_peer_unreachable_is_healthy(self):
+        """Down + peer NOT reachable = genuine outage, owned elsewhere."""
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_tcp_reachable", return_value=False):
+            assert self._probe().check_rns_interface_down_peer_reachable(
+                rnstatus_status=self._down_tcp_status()).healthy is True
+
+    def test_iface_up_is_healthy(self):
+        from utils import active_health_probe as ahp
+        from utils.rns_status_parser import RNSStatus, RNSInterface, InterfaceStatus
+        up = RNSStatus(interfaces=[RNSInterface(
+            type_name="TCPInterface",
+            display_name="Regional RNS/192.168.1.5:4242",
+            status=InterfaceStatus.UP,
+        )])
+        with patch.object(ahp, "_tcp_reachable", return_value=True):
+            assert self._probe().check_rns_interface_down_peer_reachable(
+                rnstatus_status=up).healthy is True
+
+    def test_iface_parse_error_is_healthy(self):
+        from utils.rns_status_parser import RNSStatus
+        assert self._probe().check_rns_interface_down_peer_reachable(
+            rnstatus_status=RNSStatus(parse_error="rnsd down")).healthy is True
+
+    def test_iface_non_tcp_down_ignored(self):
+        """A non-TCP interface Down has no routable peer — must be ignored."""
+        from utils import active_health_probe as ahp
+        from utils.rns_status_parser import RNSStatus, RNSInterface, InterfaceStatus
+        st = RNSStatus(interfaces=[RNSInterface(
+            type_name="AutoInterface",
+            display_name="Default Interface",
+            status=InterfaceStatus.DOWN,
+        )])
+        with patch.object(ahp, "_tcp_reachable", return_value=True):
+            assert self._probe().check_rns_interface_down_peer_reachable(
+                rnstatus_status=st).healthy is True
+
+    # --- _tcp_reachable helper ---
+
+    def test_tcp_reachable_true_on_connect(self):
+        from utils import active_health_probe as ahp
+        with patch("socket.create_connection") as mc:
+            mc.return_value.__enter__ = lambda s: s
+            mc.return_value.__exit__ = lambda s, *a: False
+            assert ahp._tcp_reachable("10.0.0.1", 4242) is True
+
+    def test_tcp_reachable_false_on_oserror(self):
+        from utils import active_health_probe as ahp
+        with patch("socket.create_connection", side_effect=OSError("refused")):
+            assert ahp._tcp_reachable("10.0.0.1", 4242) is False
+
+
+class TestRNSWedgeProbesRegistered:
+    """The two probes must be registered (gated behind rnsd) so they run live
+    on the existing 30s cadence — otherwise they're dead code."""
+
+    def _full_profile(self):
+        # Same shape TestCreateGatewayHealthProbe uses: a profile where rnsd
+        # is managed so the gate opens.
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            required_services=["rnsd", "mosquitto"],
+            optional_services=["meshtasticd"],
+            feature_flags={},
+        )
+
+    def test_rnsd_wedge_probes_registered_when_rnsd_managed(self):
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_unmanaged_services", return_value=set()), \
+             patch("utils.profile_services._active_profile",
+                   return_value=self._full_profile()):
+            probe = ahp.create_gateway_health_probe()
+        registered = set(probe._checks.keys())
+        assert "rnsd_rpc" in registered
+        assert "rnsd_interface" in registered
+
+    def test_rnsd_wedge_probes_skipped_when_rnsd_unmanaged(self):
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_unmanaged_services", return_value={"rnsd"}), \
+             patch("utils.profile_services._active_profile",
+                   return_value=self._full_profile()):
+            probe = ahp.create_gateway_health_probe()
+        registered = set(probe._checks.keys())
+        assert "rnsd_rpc" not in registered
+        assert "rnsd_interface" not in registered

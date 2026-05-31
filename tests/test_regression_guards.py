@@ -585,3 +585,62 @@ class TestMeshCoreConnectionContract:
             "meshcore_handler.py must call unregister_persistent() on "
             "disconnect so future consumers can probe freely"
         )
+
+
+class TestRNSReticulumChokepoint:
+    """Enforce: RNS.Reticulum() is constructed only in the guarded chokepoint.
+
+    Ported from MeshForge's RNS T2-isolate arc (2026-05-31). RNS upstream
+    withdrew public support (the "Carrier Switch", Dec 2025), so the project
+    OWNS the dependency. A single guarded entry point
+    (utils/rns_init.py::open_reticulum) makes a wedged rnsd DEGRADE (#68
+    fail-open) instead of hanging the calling thread, and a FOREIGN @rns owner
+    FAIL LOUD (#69). Raw construction anywhere else reintroduces the
+    silent-hang class — the same regression-prevention shape as
+    TestTCPConnectionContract / MF007, enforced in lint by MF019.
+    """
+
+    # Allowlisted homes for an actual RNS.Reticulum() construction:
+    #   - rns_init.py: THE chokepoint (open_reticulum + the watchdog-guarded
+    #     constructor).
+    #   - rns_interfaces.py: a `python3 -c` connectivity probe that runs in an
+    #     ISOLATED subprocess with its own timeout and tests NomadNet's OWN
+    #     venv RNS, so it cannot route through the in-process chokepoint.
+    ALLOWLISTED = {
+        'rns_init.py',
+        'rns_interfaces.py',
+    }
+
+    def test_reticulum_constructed_only_in_chokepoint(self):
+        """No file outside the chokepoint allowlist constructs RNS.Reticulum()."""
+        matches = _scan_python_files(
+            r'(=\s*\w*\.?Reticulum\s*\(|\breturn\s+\w*\.?Reticulum\s*\()',
+            exclude_files=list(self.ALLOWLISTED),
+        )
+        violations = []
+        for filepath, lineno, line in matches:
+            basename = os.path.basename(filepath)
+            if 'test_' in basename or '/tests/' in filepath:
+                continue
+            violations.append(f"{filepath}:{lineno}: {line.strip()}")
+        assert len(violations) == 0, (
+            f"Found {len(violations)} RNS.Reticulum() construction(s) outside "
+            f"the guarded chokepoint. Use open_reticulum() from utils.rns_init "
+            f"(degrades on a wedged rnsd instead of hanging the thread; "
+            f"#68/#69). If genuinely isolated, add to ALLOWLISTED here + the "
+            f"lint.py MF019 allowlist.\n\n"
+            f"Violations:\n" + "\n".join(violations)
+        )
+
+    def test_chokepoint_exports_open_reticulum(self):
+        """utils.rns_init must define a callable open_reticulum()."""
+        rns_init_path = os.path.join(SRC_DIR, 'utils', 'rns_init.py')
+        assert os.path.exists(rns_init_path), (
+            "utils/rns_init.py (the RNS-init chokepoint) is missing"
+        )
+        with open(rns_init_path, 'r') as f:
+            content = f.read()
+        assert 'def open_reticulum(' in content, (
+            "utils/rns_init.py must define open_reticulum() — the project-wide "
+            "guarded RNS-init entry point (#68 fail-open / #69 fail-loud)"
+        )

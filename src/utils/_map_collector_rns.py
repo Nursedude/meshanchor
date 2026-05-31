@@ -85,6 +85,7 @@ class RNSDataCollectorMixin:
                 # 2. Initializing interfaces that conflict with rnsd.
                 import tempfile
                 from utils.paths import ReticulumPaths
+                from utils.rns_init import open_reticulum
                 instance_name = ReticulumPaths.get_configured_instance_name()
                 client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
                 client_config_dir.mkdir(exist_ok=True)
@@ -96,24 +97,15 @@ class RNSDataCollectorMixin:
                     "  instance_control_port = 37429\n"
                     f"  instance_name = {instance_name}\n"
                 )
-                try:
-                    _RNS.Reticulum(configdir=str(client_config_dir))
-                except (OSError, ValueError) as e:
-                    # Two known cases where init fails but Transport is still
-                    # usable and we should not bail:
-                    #   1. "Attempt to reinitialise Reticulum" — another
-                    #      component beat us to init.
-                    #   2. "signal only works in main thread of the main
-                    #      interpreter" — init ran in a ThreadingHTTPServer
-                    #      worker and failed at signal.signal() registration.
-                    #      At that point Reticulum.__instance is ALREADY set
-                    #      (before the signal call), so get_instance() returns
-                    #      a usable object and Transport is running.
-                    msg = str(e).lower()
-                    if "reinitialise" in msg or "main thread" in msg:
-                        logger.debug("RNS already partially-initialized (%s) — reusing", e)
-                    else:
-                        raise
+                # Pure consumer: require_listener=True so a missing shared
+                # instance NEVER makes the map collector become the @rns host
+                # (the 2026-05-28 ~21h fleet outage shape). The chokepoint
+                # also fails open on a wedged rnsd (#68) and fails loud on a
+                # foreign @rns owner (#69), and handles the reinitialise /
+                # signal-in-thread cases internally — returns None on degrade.
+                if open_reticulum(str(client_config_dir), require_listener=True) is None:
+                    logger.debug("RNS degraded this cycle — no shared instance")
+                    return []
 
             # Check for known destinations in path table
             if hasattr(_RNS.Transport, 'path_table') and _RNS.Transport.path_table:

@@ -433,3 +433,47 @@ class TestRunRnstatus:
         result = run_rnstatus()
         assert result.parse_error is not None
         assert "Failed" in result.parse_error
+
+
+class TestRunRnstatusTimedOut:
+    """RNS-reliability parity port (2026-05-31): the ``timed_out`` flag is the
+    keystone for the rns_rpc_unresponsive probe — it must be True ONLY on a
+    subprocess TIMEOUT (the wedged-rnsd-RPC shape), never on a fast error."""
+
+    @patch('utils.rns_status_parser._find_rnstatus_binary', return_value='/usr/bin/rnstatus')
+    @patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='rnstatus', timeout=8))
+    def test_timeout_sets_timed_out_flag(self, mock_run, mock_find):
+        result = run_rnstatus(timeout_s=8.0)
+        assert result.timed_out is True
+        assert result.parse_error is not None
+
+    @patch('utils.rns_status_parser._find_rnstatus_binary', return_value=None)
+    def test_missing_binary_does_not_set_timed_out(self, mock_find):
+        result = run_rnstatus()
+        assert result.timed_out is False
+
+    @patch('utils.rns_status_parser._find_rnstatus_binary', return_value='/usr/bin/rnstatus')
+    @patch('subprocess.run', side_effect=OSError("Permission denied"))
+    def test_os_error_does_not_set_timed_out(self, mock_run, mock_find):
+        result = run_rnstatus()
+        assert result.timed_out is False
+
+    @patch('utils.rns_status_parser._find_rnstatus_binary', return_value='/usr/bin/rnstatus')
+    @patch('subprocess.run')
+    def test_successful_run_does_not_set_timed_out(self, mock_run, mock_find):
+        mock_run.return_value = MagicMock(stdout=FULL_OUTPUT, stderr="")
+        result = run_rnstatus()
+        assert result.timed_out is False
+
+    @patch('utils.rns_status_parser._find_rnstatus_binary', return_value='/usr/bin/rnstatus')
+    @patch('subprocess.run')
+    def test_timeout_s_passed_through_to_subprocess(self, mock_run, mock_find):
+        mock_run.return_value = MagicMock(stdout=FULL_OUTPUT, stderr="")
+        run_rnstatus(timeout_s=3.5)
+        _, kwargs = mock_run.call_args
+        assert kwargs.get("timeout") == 3.5
+
+    def test_default_timed_out_is_false(self):
+        """A freshly parsed status (no timeout) leaves timed_out False."""
+        assert RNSStatus().timed_out is False
+        assert parse_rnstatus(FULL_OUTPUT).timed_out is False

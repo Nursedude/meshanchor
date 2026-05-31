@@ -30,6 +30,7 @@ Reference:
 """
 
 import logging
+import re
 import socket
 import subprocess
 import threading
@@ -43,6 +44,28 @@ from utils.event_bus import emit_service_status
 from utils.service_check import check_udp_port, check_rns_shared_instance
 
 logger = logging.getLogger(__name__)
+
+
+# A routable TCPInterface display_name embeds the peer host:port, e.g.
+#   "Regional RNS/192.168.86.38:4242"
+# RNodeInterface / AutoInterface / the Shared Instance line carry no
+# host:port and are correctly ignored — only a TCP peer can be probed
+# for reachability. Used by check_rns_interface_down_peer_reachable.
+_RNS_TCP_PEER_RE = re.compile(r"(?P<host>[0-9.]+):(?P<port>\d+)\s*$")
+
+
+def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Bounded TCP-connect reachability test to ``(host, port)``.
+
+    Returns True when a connection establishes within ``timeout`` seconds,
+    False on any ``OSError`` (refused, timed out, no route, bad address).
+    Module-level so tests can monkeypatch it and do zero real network I/O.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 class HealthState(Enum):
@@ -439,6 +462,97 @@ class ActiveHealthProbe:
         except Exception as e:
             return HealthResult(healthy=False, reason=f"check_error: {e}")
 
+    def check_rns_rpc_responsive(self, timeout_s: float = 8.0) -> HealthResult:
+        """Detect a wedged rnsd RPC: ``rnstatus`` itself hangs even though
+        the shared-instance socket accepts connections (Issue #68/#72 class).
+
+        ``check_rns_port`` catches "no listener / connect refused". This
+        catches the OPPOSITE: connect succeeds, then the RPC round-trip
+        (``rpc_connection.recv`` deep in ``RNS.Reticulum``) hangs or EOFs.
+        ``rnstatus`` is the canonical RPC client, so running it bounded and
+        observing a TIMEOUT is the direct test for "RPC wedged".
+
+        A genuinely down rnsd fails FAST (binary missing / no shared
+        instance / refused) — that leaves ``RNSStatus.timed_out`` False and
+        we report healthy here (``check_rns_port`` / ``check_systemd_service``
+        own rnsd-down). Only a subprocess TIMEOUT (``timed_out=True``) is
+        reported unhealthy, so RNS-less boxes never false-alarm.
+        """
+        try:
+            from utils.rns_status_parser import run_rnstatus
+            status = run_rnstatus(timeout_s=timeout_s)
+        except Exception as e:  # pragma: no cover - defensive
+            return HealthResult(healthy=False, reason=f"rpc_check_error: {e}"[:120])
+        if status.timed_out:
+            return HealthResult(
+                healthy=False,
+                reason=(
+                    "rns_rpc_unresponsive: rnstatus timed out — rnsd accepts "
+                    "shared-instance connects but the RPC round-trip is wedged. "
+                    "Recovery: restart rnsd.service then RNS-using services."
+                ),
+            )
+        return HealthResult(healthy=True, reason="rpc_responsive")
+
+    def check_rns_interface_down_peer_reachable(
+        self,
+        *,
+        rnstatus_status=None,
+        reachable_timeout_s: float = 3.0,
+    ) -> HealthResult:
+        """Detect a TCPInterface stuck ``Status: Down`` while its peer
+        host:port is still TCP-reachable — the 2026-05-30 islanding shape.
+
+        Production incident: rnsd healthy (Up, owns ``@rns``, answers
+        ``rnstatus``) and the peer host:port + L3 reachable, but the box's
+        SOLE RNS uplink ``TCPInterface`` sat ``Status: Down`` — the box was
+        islanded until rnsd was restarted.
+
+        Logic: for each TCPInterface that is Down AND whose display name
+        embeds a routable ``host:port``, run a bounded TCP-connect. If the
+        peer ANSWERS → wedge (interface stuck, not a peer outage) → report
+        unhealthy. If the connect FAILS → genuine peer/network outage, not
+        ours; report healthy. ``rnstatus`` errored (rnsd down / wedged-RPC)
+        → healthy here; ``check_rns_port`` / ``check_rns_rpc_responsive``
+        own those.
+
+        ``rnstatus_status`` lets a caller pass a pre-fetched ``RNSStatus``
+        (and lets tests inject one with zero network I/O).
+        """
+        try:
+            from utils.rns_status_parser import run_rnstatus, InterfaceStatus
+            status = rnstatus_status if rnstatus_status is not None else run_rnstatus()
+        except Exception as e:  # pragma: no cover - defensive
+            return HealthResult(healthy=False, reason=f"iface_check_error: {e}"[:120])
+
+        if status.parse_error:
+            return HealthResult(healthy=True, reason="rnstatus_unavailable")
+
+        for iface in status.interfaces:
+            # Only TCP interfaces carry a routable peer host:port.
+            if "tcp" not in iface.type_name.lower():
+                continue
+            if iface.status != InterfaceStatus.DOWN:
+                continue
+            m = _RNS_TCP_PEER_RE.search(iface.display_name)
+            if not m:
+                continue
+            host = m.group("host")
+            try:
+                port = int(m.group("port"))
+            except (TypeError, ValueError):
+                continue
+            if _tcp_reachable(host, port, timeout=reachable_timeout_s):
+                return HealthResult(
+                    healthy=False,
+                    reason=(
+                        f"rns_interface_down_peer_reachable: {iface.full_name} "
+                        f"Down but {host}:{port} TCP-reachable — stuck uplink, "
+                        f"box may be islanded. Recovery: restart rnsd.service."
+                    ),
+                )
+        return HealthResult(healthy=True, reason="no_stuck_interface")
+
     def check_systemd_service(self, service_name: str) -> HealthResult:
         """
         Check if a systemd service is active and running.
@@ -596,6 +710,19 @@ def create_gateway_health_probe(
         probe.register_check(
             "rnsd",
             lambda: probe.check_rns_port(37428),
+        )
+        # RNS-reliability parity port (2026-05-31): two probes for the
+        # rnsd-RPC fragility class that check_rns_port can't see —
+        #   rnsd_rpc:       rnstatus hangs though the socket accepts (#68/#72)
+        #   rnsd_interface: TCPInterface stuck Down while peer reachable (2026-05-30)
+        # Same 30s cadence; surface through the existing health-probe status.
+        probe.register_check(
+            "rnsd_rpc",
+            lambda: probe.check_rns_rpc_responsive(),
+        )
+        probe.register_check(
+            "rnsd_interface",
+            lambda: probe.check_rns_interface_down_peer_reachable(),
         )
     if _should_probe("mosquitto"):
         probe.register_check(

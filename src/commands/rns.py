@@ -1090,7 +1090,13 @@ def _init_rns_client():
         f"instance_name = {instance_name}\n"
     )
 
-    return RNS.Reticulum(configdir=str(client_config_dir))
+    # Route through the guarded chokepoint (Issue #68 fail-open on a wedged
+    # rnsd, Issue #69 fail-loud on a foreign @rns owner, idempotent singleton
+    # reuse). Returns None when RNS is degraded — callers read
+    # RNS.Transport.path_table directly, so a None here means "no peers this
+    # cycle" rather than a hang.
+    from utils.rns_init import open_reticulum
+    return open_reticulum(str(client_config_dir))
 
 
 # ============================================================================
