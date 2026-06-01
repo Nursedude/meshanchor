@@ -836,6 +836,36 @@ class TestProcessMeshToRNS:
         assert bytes.fromhex("f68c2f56cb61527b6c9ad603b9a5009a") in sent_hashes
         assert bridge.stats['messages_mesh_to_rns'] == 1
 
+    def test_meshcore_broadcast_fans_out_to_rns(self, bridge):
+        """MeshCore->RNS broadcast fans out to each default_lxmf_destination too.
+
+        Regression for the live-verify gap: the MeshCore path (meshcore_bridge_mixin)
+        called send_to_rns with no destination, so MC broadcasts dropped even with the
+        list configured — and MeshCore is meshanchor-server's PRIMARY network, so this
+        is the path that actually fires. Ported from MeshForge."""
+        from gateway.rns_bridge import BridgedMessage
+        bridge.config.rns.get_lxmf_destinations.return_value = [
+            "3dfbdb5d24c6de195ae4f3c0f56b5ea5",
+            "f68c2f56cb61527b6c9ad603b9a5009a",
+        ]
+        msg = BridgedMessage(
+            source_network="meshcore", source_id="!mc01",
+            destination_id=None, content="mc broadcast", is_broadcast=True,
+        )
+        sent_to = []
+
+        def capture(content, dest_hash=None):
+            sent_to.append(dest_hash)
+            return True
+
+        with patch.object(bridge, 'send_to_rns', side_effect=capture), \
+             patch.object(bridge, 'send_to_meshtastic', return_value=True):
+            bridge._process_meshcore_to_bridge(msg)
+
+        assert len(sent_to) == 2
+        assert bytes.fromhex("3dfbdb5d24c6de195ae4f3c0f56b5ea5") in sent_to
+        assert bytes.fromhex("f68c2f56cb61527b6c9ad603b9a5009a") in sent_to
+
 
 # ---------------------------------------------------------------------------
 # _process_rns_to_mesh
