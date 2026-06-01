@@ -81,6 +81,44 @@ class TestRNSConfig:
         assert config.config_dir == "/custom/rns"
         assert config.identity_name == "custom_gateway"
 
+    def test_get_lxmf_destinations_empty_string(self):
+        """Default empty string yields empty list."""
+        assert RNSConfig().get_lxmf_destinations() == []
+
+    def test_get_lxmf_destinations_legacy_string(self):
+        """Single-string default (legacy) becomes a one-element list."""
+        config = RNSConfig(default_lxmf_destination="6b1a0120941444587d7d1dc1bf6d64d7")
+        assert config.get_lxmf_destinations() == ["6b1a0120941444587d7d1dc1bf6d64d7"]
+
+    def test_get_lxmf_destinations_list(self):
+        """List form returns the non-empty hex entries (the meshanchor-server case)."""
+        config = RNSConfig(default_lxmf_destination=[
+            "3dfbdb5d24c6de195ae4f3c0f56b5ea5",
+            "f68c2f56cb61527b6c9ad603b9a5009a",
+        ])
+        result = config.get_lxmf_destinations()
+        assert len(result) == 2
+        assert "f68c2f56cb61527b6c9ad603b9a5009a" in result
+
+    def test_get_lxmf_destinations_filters_empty_and_non_strings(self):
+        """Empty strings and non-string entries are dropped."""
+        config = RNSConfig(default_lxmf_destination=[
+            "6b1a0120941444587d7d1dc1bf6d64d7",
+            "",
+            None,
+            123,
+            "d1df31d352ede66eac819a577da22b75",
+        ])
+        assert config.get_lxmf_destinations() == [
+            "6b1a0120941444587d7d1dc1bf6d64d7",
+            "d1df31d352ede66eac819a577da22b75",
+        ]
+
+    def test_get_lxmf_destinations_unknown_type_returns_empty(self):
+        """Unknown types (int, dict) return empty list rather than crashing."""
+        assert RNSConfig(default_lxmf_destination=42).get_lxmf_destinations() == []
+        assert RNSConfig(default_lxmf_destination={"a": 1}).get_lxmf_destinations() == []
+
 
 class TestRoutingRule:
     """Tests for RoutingRule dataclass."""

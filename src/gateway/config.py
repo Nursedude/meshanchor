@@ -404,7 +404,20 @@ class RNSConfig:
     identity_name: str = "meshanchor_gateway"
     announce_interval: int = 300  # seconds
     propagation_node: str = ""  # Optional propagation node address
-    default_lxmf_destination: str = ""  # Hex hash — broadcast messages route here
+    # Hex hash (legacy) OR a list of hex hashes (multi-recipient — the gateway
+    # broadcasts the same mesh message to each LXMF destination). Use the list
+    # form when multiple LXMF inboxes (e.g. NomadNet operators) want the bridged
+    # feed. Ported from MeshForge (lead repo) — keep the str|list shape compatible.
+    default_lxmf_destination: Any = ""  # str or list[str] of hex hashes
+
+    def get_lxmf_destinations(self) -> List[str]:
+        """Return default_lxmf_destination normalized to a list of non-empty hex strings."""
+        raw = self.default_lxmf_destination
+        if isinstance(raw, str):
+            return [raw] if raw else []
+        if isinstance(raw, (list, tuple)):
+            return [d for d in raw if isinstance(d, str) and d]
+        return []
 
 
 @dataclass

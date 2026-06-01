@@ -731,6 +731,9 @@ class TestProcessMeshToRNS:
 
     def test_success_updates_stats(self, bridge):
         from gateway.rns_bridge import BridgedMessage
+        bridge.config.rns.get_lxmf_destinations.return_value = [
+            "6b1a0120941444587d7d1dc1bf6d64d7",
+        ]
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!aabb0042",
             destination_id=None, content="test msg",
@@ -784,6 +787,9 @@ class TestProcessMeshToRNS:
 
     def test_prefix_includes_source_id(self, bridge):
         from gateway.rns_bridge import BridgedMessage
+        bridge.config.rns.get_lxmf_destinations.return_value = [
+            "6b1a0120941444587d7d1dc1bf6d64d7",
+        ]
         msg = BridgedMessage(
             source_network="meshtastic", source_id="!aabb0042",
             destination_id=None, content="hello",
@@ -799,6 +805,36 @@ class TestProcessMeshToRNS:
             bridge._process_mesh_to_rns(msg)
 
         assert sent_content.startswith("[Mesh:0042] ")
+
+    def test_broadcast_fans_out_to_each_default_destination(self, bridge):
+        """default_lxmf_destination as a LIST → broadcast sends to EVERY peer.
+
+        Regression for the meshanchor-server case: the leg ran but every broadcast
+        dropped because the str-only path ignored the configured list. Ported from
+        MeshForge (lead repo)."""
+        from gateway.rns_bridge import BridgedMessage
+        bridge.config.rns.get_lxmf_destinations.return_value = [
+            "3dfbdb5d24c6de195ae4f3c0f56b5ea5",
+            "f68c2f56cb61527b6c9ad603b9a5009a",
+        ]
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!aabb0042",
+            destination_id=None, content="hello mesh", is_broadcast=True,
+        )
+        sent_hashes = []
+
+        def capture_send(content, dest_hash=None):
+            sent_hashes.append(dest_hash)
+            return True
+
+        with patch.object(bridge, 'send_to_rns', side_effect=capture_send):
+            bridge._process_mesh_to_rns(msg)
+
+        # one send per configured destination, each the decoded hex
+        assert len(sent_hashes) == 2
+        assert bytes.fromhex("3dfbdb5d24c6de195ae4f3c0f56b5ea5") in sent_hashes
+        assert bytes.fromhex("f68c2f56cb61527b6c9ad603b9a5009a") in sent_hashes
+        assert bridge.stats['messages_mesh_to_rns'] == 1
 
 
 # ---------------------------------------------------------------------------
