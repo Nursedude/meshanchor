@@ -336,9 +336,21 @@ class TestFdExhaustionProbe:
         assert r.healthy is True
 
     def test_fd_probe_registered_in_factory(self):
-        """Must be wired into create_gateway_health_probe (else dead code).
-        Registered unconditionally — it self-guards when the map is down."""
+        """Both fd checks must be wired into create_gateway_health_probe (else
+        dead code). Registered unconditionally — each self-guards when its
+        service is down. The daemon check was added after the 2026-05-31
+        message_queue incident (daemon was the 2nd fd-leak victim)."""
         from utils import active_health_probe as ahp
         with patch.object(ahp, "_unmanaged_services", return_value=set()):
             probe = ahp.create_gateway_health_probe()
-        assert "meshanchor_map_fds" in set(probe._checks.keys())
+        registered = set(probe._checks.keys())
+        assert "meshanchor_map_fds" in registered
+        assert "meshanchor_daemon_fds" in registered
+
+    def test_daemon_fd_check_targets_daemon_service(self, tmp_path):
+        """The daemon fd check resolves meshanchor-daemon.service, not the map."""
+        root = _fake_proc(tmp_path, 7777, open_fds=1000, soft="1024")
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-daemon.service", proc_root=root, main_pid=7777)
+        assert r.healthy is False
+        assert "meshanchor-daemon.service" in r.reason

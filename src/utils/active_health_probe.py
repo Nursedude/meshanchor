@@ -851,16 +851,25 @@ def create_gateway_health_probe(
             lambda: probe.check_tcp_port(1883),
         )
 
-    # FD-exhaustion probe (MeshForge Issue #73 parity port, 2026-05-31).
+    # FD-exhaustion probes (MeshForge Issue #73 parity port, 2026-05-31).
     # Proactive companion to the port wedge checks: catches a leaking fd
     # count climbing toward the soft RLIMIT_NOFILE *before* it starves
-    # accept() and wedges meshanchor-map's :5000 (the original incident was
-    # this very box). Registered unconditionally — the check self-guards,
-    # returning healthy "inactive_or_unresolved" when the map isn't running,
-    # so MESHCORE/gateway-only boxes without the map never false-alarm.
+    # accept()/file-opens and wedges a service. Both long-lived processes
+    # run their own mqtt_subscriber and so are fd-leak-prone:
+    #   - meshanchor-map     wedged its :5000 accept() (the original incident)
+    #   - meshanchor-daemon  starved SQLite opens → message_queue "unable to
+    #                        open database file" (2026-05-31, same leak, 2nd
+    #                        victim — surfaced after the map fix).
+    # Registered unconditionally — each check self-guards, returning healthy
+    # "inactive_or_unresolved" when its service isn't running, so boxes that
+    # don't run a given unit never false-alarm.
     probe.register_check(
         "meshanchor_map_fds",
         lambda: probe.check_fd_exhaustion("meshanchor-map.service"),
+    )
+    probe.register_check(
+        "meshanchor_daemon_fds",
+        lambda: probe.check_fd_exhaustion("meshanchor-daemon.service"),
     )
 
     # Wire state changes to EventBus for push-based status updates
