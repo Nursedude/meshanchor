@@ -68,6 +68,69 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
+# Soft RLIMIT_NOFILE line in /proc/<pid>/limits, e.g.:
+#   Max open files            1024                 524288               files
+_LIMITS_NOFILE_RE = re.compile(
+    r"^Max open files\s+(\d+|unlimited)\s+(\d+|unlimited)", re.MULTILINE
+)
+
+
+def _resolve_main_pid(
+    service_name: str, *, systemctl_path: str = "systemctl",
+) -> Optional[int]:
+    """``systemctl show -p MainPID <service>`` parser. Returns None on any
+    failure (including an inactive service, which reports ``MainPID=0``)."""
+    try:
+        proc = subprocess.run(
+            [systemctl_path, "show", "-p", "MainPID", "--value", service_name],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        pid = int(proc.stdout.strip())
+    except (ValueError, TypeError):
+        return None
+    return pid if pid > 1 else None
+
+
+def _read_fd_usage(pid: int, *, proc_root: str = "/proc"):
+    """Return ``(open_fd_count, soft_limit)`` for ``pid`` or None.
+
+    Counts ``/proc/<pid>/fd`` entries and parses the *soft* ``Max open
+    files`` column from ``/proc/<pid>/limits`` — the soft limit is the one a
+    process actually hits ([Errno 24]). Returns None on any read failure
+    (process vanished, permission, unlimited soft limit) so an unreadable
+    target never alarms. Module-level so tests can build a fake /proc tree.
+    """
+    import os
+    fd_dir = Path(proc_root) / str(pid) / "fd"
+    limits_path = Path(proc_root) / str(pid) / "limits"
+    try:
+        open_count = sum(1 for _ in os.scandir(fd_dir))
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        return None
+    try:
+        limits_text = limits_path.read_text()
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    m = _LIMITS_NOFILE_RE.search(limits_text)
+    if not m:
+        return None
+    soft_raw = m.group(1)
+    if soft_raw == "unlimited":
+        return None
+    try:
+        soft = int(soft_raw)
+    except (ValueError, TypeError):
+        return None
+    if soft <= 0:
+        return None
+    return open_count, soft
+
+
 class HealthState(Enum):
     """Health state for a monitored service."""
     UNKNOWN = "unknown"    # Not yet checked
@@ -553,6 +616,64 @@ class ActiveHealthProbe:
                 )
         return HealthResult(healthy=True, reason="no_stuck_interface")
 
+    def check_fd_exhaustion(
+        self,
+        service_name: str,
+        *,
+        proc_root: str = "/proc",
+        systemctl_path: str = "systemctl",
+        degraded_ratio: float = 0.80,
+        wedge_ratio: float = 0.95,
+        main_pid: Optional[int] = None,
+    ) -> HealthResult:
+        """Warn when a service's open fds approach its soft RLIMIT_NOFILE.
+
+        Proactive companion to the HTTP/port wedge checks (which only fail
+        once the port has already gone dark). MeshForge Issue #73
+        (2026-05-31): meshanchor-map leaked one paho MQTT client socket per
+        reconnect until it hit the 1024 soft fd cap; new ``accept()`` then
+        failed with ``[Errno 24]`` and ``:5000`` wedged — unservable for ~1h
+        before any wedge check fired. Counting fds vs the soft limit surfaces
+        the climb BEFORE the wedge, and names the fd-leak cause.
+
+        Unhealthy past ``degraded_ratio`` (default 80%); the reason flags
+        ``wedge`` past ``wedge_ratio`` (default 95% — exhaustion imminent).
+        Healthy (and quiet) when the service is inactive (``MainPID``
+        unresolved — ``check_systemd_service`` owns down), /proc is
+        unreadable, the soft limit is unlimited, or usage is below the
+        degraded threshold — a healthy process must not false-alarm.
+        """
+        pid = main_pid if main_pid is not None else _resolve_main_pid(
+            service_name, systemctl_path=systemctl_path
+        )
+        if pid is None:
+            return HealthResult(healthy=True, reason="inactive_or_unresolved")
+
+        usage = _read_fd_usage(pid, proc_root=proc_root)
+        if usage is None:
+            return HealthResult(healthy=True, reason="fd_usage_unreadable")
+        open_count, soft = usage
+
+        ratio = open_count / soft
+        if ratio < degraded_ratio:
+            return HealthResult(
+                healthy=True,
+                reason=f"fd_ok_{open_count}/{soft}",
+            )
+
+        level = "wedge" if ratio >= wedge_ratio else "degraded"
+        return HealthResult(
+            healthy=False,
+            reason=(
+                f"fd_exhaustion ({level}): {service_name} (pid {pid}) holds "
+                f"{open_count}/{soft} open fds ({ratio * 100:.0f}% of soft "
+                f"RLIMIT_NOFILE). Approaching [Errno 24] — new sockets/files "
+                f"will fail and the HTTP server will stop accepting (#73 "
+                f"fd-leak class). Inspect: sudo ls /proc/{pid}/fd | wc -l ; "
+                f"sudo ss -tanp | grep pid={pid}"
+            ),
+        )
+
     def check_systemd_service(self, service_name: str) -> HealthResult:
         """
         Check if a systemd service is active and running.
@@ -729,6 +850,18 @@ def create_gateway_health_probe(
             "mosquitto",
             lambda: probe.check_tcp_port(1883),
         )
+
+    # FD-exhaustion probe (MeshForge Issue #73 parity port, 2026-05-31).
+    # Proactive companion to the port wedge checks: catches a leaking fd
+    # count climbing toward the soft RLIMIT_NOFILE *before* it starves
+    # accept() and wedges meshanchor-map's :5000 (the original incident was
+    # this very box). Registered unconditionally — the check self-guards,
+    # returning healthy "inactive_or_unresolved" when the map isn't running,
+    # so MESHCORE/gateway-only boxes without the map never false-alarm.
+    probe.register_check(
+        "meshanchor_map_fds",
+        lambda: probe.check_fd_exhaustion("meshanchor-map.service"),
+    )
 
     # Wire state changes to EventBus for push-based status updates
     probe.register_callback("on_state_change", _emit_state_change)

@@ -269,3 +269,76 @@ class TestRNSWedgeProbesRegistered:
         registered = set(probe._checks.keys())
         assert "rnsd_rpc" not in registered
         assert "rnsd_interface" not in registered
+
+
+def _fake_proc(tmp_path, pid, *, open_fds, soft="1024", hard="524288"):
+    """Build a fake /proc/<pid> with `open_fds` fd entries + a limits file."""
+    pdir = tmp_path / str(pid)
+    fd_dir = pdir / "fd"
+    fd_dir.mkdir(parents=True)
+    for i in range(open_fds):
+        (fd_dir / str(i)).write_text("")
+    limits = (
+        "Limit                     Soft Limit           Hard Limit           Units\n"
+        "Max open files            {soft}                 {hard}               files\n"
+    ).format(soft=soft, hard=hard)
+    (pdir / "limits").write_text(limits)
+    return str(tmp_path)
+
+
+class TestFdExhaustionProbe:
+    """MeshForge Issue #73 parity port (2026-05-31): proactive fd-leak probe.
+    Counts /proc/<MainPID>/fd vs the soft RLIMIT_NOFILE and flags BEFORE the
+    map's :5000 wedges (the original incident was meshanchor-server itself)."""
+
+    def _probe(self):
+        from utils.active_health_probe import ActiveHealthProbe
+        return ActiveHealthProbe()
+
+    def test_quiet_when_healthy(self, tmp_path):
+        root = _fake_proc(tmp_path, 4242, open_fds=50, soft="1024")
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-map.service", proc_root=root, main_pid=4242)
+        assert r.healthy is True
+
+    def test_degraded_past_80pct(self, tmp_path):
+        root = _fake_proc(tmp_path, 4242, open_fds=820, soft="1024")
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-map.service", proc_root=root, main_pid=4242)
+        assert r.healthy is False
+        assert "fd_exhaustion (degraded)" in r.reason
+
+    def test_wedge_past_95pct(self, tmp_path):
+        root = _fake_proc(tmp_path, 4242, open_fds=1000, soft="1024")
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-map.service", proc_root=root, main_pid=4242)
+        assert r.healthy is False
+        assert "fd_exhaustion (wedge)" in r.reason
+        assert "[Errno 24]" in r.reason
+
+    def test_healthy_when_pid_unresolved(self, tmp_path):
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-map.service", proc_root=str(tmp_path), main_pid=None,
+            systemctl_path="/nonexistent/systemctl")
+        assert r.healthy is True
+        assert r.reason == "inactive_or_unresolved"
+
+    def test_healthy_when_proc_vanished(self, tmp_path):
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-map.service", proc_root=str(tmp_path), main_pid=99999)
+        assert r.healthy is True
+        assert r.reason == "fd_usage_unreadable"
+
+    def test_healthy_when_soft_limit_unlimited(self, tmp_path):
+        root = _fake_proc(tmp_path, 4242, open_fds=9000, soft="unlimited")
+        r = self._probe().check_fd_exhaustion(
+            "meshanchor-map.service", proc_root=root, main_pid=4242)
+        assert r.healthy is True
+
+    def test_fd_probe_registered_in_factory(self):
+        """Must be wired into create_gateway_health_probe (else dead code).
+        Registered unconditionally — it self-guards when the map is down."""
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_unmanaged_services", return_value=set()):
+            probe = ahp.create_gateway_health_probe()
+        assert "meshanchor_map_fds" in set(probe._checks.keys())
