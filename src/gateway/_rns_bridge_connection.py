@@ -11,6 +11,7 @@ import threading
 from contextlib import contextmanager
 
 from utils.paths import get_real_user_home, ReticulumPaths
+from utils.rns_init import open_reticulum
 from utils.safe_import import safe_import
 from utils.service_check import check_service
 from utils.config_drift import detect_rnsd_config_drift, get_rnsd_effective_config_dir
@@ -130,11 +131,11 @@ class RNSConnectionMixin:
                            "connecting as shared instance client")
                 self._rns_via_rnsd = True
 
-            from utils.rns_init import open_reticulum
-            # Guarded chokepoint: fail-open on a wedged rnsd (#68), fail-loud
-            # on a foreign @rns owner (#69), idempotent singleton reuse. The
-            # gateway may legitimately run standalone (no rnsd), so we do NOT
-            # set require_listener — absent listener -> standalone construct.
+            # Guarded chokepoint (module-level import, patchable test seam):
+            # fail-open on a wedged rnsd (#68), fail-loud on a foreign @rns
+            # owner (#69), idempotent singleton reuse. The gateway may
+            # legitimately run standalone (no rnsd), so we do NOT set
+            # require_listener — absent listener -> standalone construct.
             self._reticulum = open_reticulum(config_dir)
             if self._reticulum is not None:
                 self._rns_pre_initialized = True
@@ -205,7 +206,6 @@ class RNSConnectionMixin:
                             pass  # Use RNS default resolution
 
                     try:
-                        from utils.rns_init import open_reticulum
                         # Guarded chokepoint (we're already inside
                         # _suppress_signal_in_thread, so bg-thread signal
                         # registration is suppressed). Fail-open on a wedged

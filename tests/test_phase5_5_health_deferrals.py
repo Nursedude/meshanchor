@@ -299,7 +299,18 @@ class TestActiveHealthProbe:
              patch("utils.profile_services._active_profile", return_value=FULL):
             ahp.create_gateway_health_probe()
         names = self._registered_check_names(probe)
-        assert set(names) == {"meshtasticd", "rnsd", "mosquitto"}
+        # Full set = legacy three + the rnsd-RPC fragility companions that
+        # ride along with rnsd (RNS-reliability parity port, 2026-05-31) +
+        # the two unconditional fd-exhaustion probes (#73 parity port).
+        assert set(names) == {
+            "meshtasticd",
+            "rnsd",
+            "rnsd_rpc",
+            "rnsd_interface",
+            "mosquitto",
+            "meshanchor_map_fds",
+            "meshanchor_daemon_fds",
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────
