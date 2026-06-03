@@ -1020,3 +1020,73 @@ class TestBridgeSubsystemIsolation:
 
         assert health.get_subsystem_state("meshtastic") == SubsystemState.HEALTHY
         assert health.get_subsystem_state("rns") == SubsystemState.DISCONNECTED
+
+
+class TestNodeTrackerAttribution:
+    """Node-tracker updates must key on the ORIGINATOR (`from`), not the
+    MQTT uplinker (`sender`). On a localhost broker `sender` is ALWAYS
+    this box's own radio, so the old code wrote every heard node's
+    nodeinfo/position onto the gateway's own node id — its name churned
+    to whichever node was heard last (the live "hawaii_gaz" phantom on
+    moc, 2026-06-03) and its position teleported between sites. Parity
+    port of MeshForge 0ce2a65 (same sender-vs-from class as the 9554f06
+    text-attribution fix).
+    """
+
+    def _make_tracker_handler(self):
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        handler = MQTTBridgeHandler.__new__(MQTTBridgeHandler)
+        handler.node_tracker = MagicMock()
+        return handler
+
+    def test_nodeinfo_keyed_on_originator_not_uplinker(self):
+        """Pins the live corruption shape: a heard node's nodeinfo arrives
+        via this box's own radio as sender — it must be recorded under the
+        originator's id, never onto the gateway's own entry."""
+        handler = self._make_tracker_handler()
+        handler._update_nodeinfo({
+            "from": 0x435b1180,
+            "sender": "!32962f10",
+            "payload": {"longname": "KH7EH-15", "shortname": "EH15"},
+        })
+        node = handler.node_tracker.add_node.call_args.args[0]
+        assert node.id == "!435b1180"
+        assert node.name == "KH7EH-15"
+
+    def test_two_nodeinfos_via_same_uplinker_stay_distinct(self):
+        handler = self._make_tracker_handler()
+        for frm, name in ((0x435b1180, "KH7EH-15"), (0x47115e4f, "PHTO")):
+            handler._update_nodeinfo({
+                "from": frm,
+                "sender": "!32962f10",
+                "payload": {"longname": name, "shortname": name[:4]},
+            })
+        ids = [c.args[0].id
+               for c in handler.node_tracker.add_node.call_args_list]
+        assert ids == ["!435b1180", "!47115e4f"]
+
+    def test_nodeinfo_falls_back_to_sender_when_from_absent(self):
+        handler = self._make_tracker_handler()
+        handler._update_nodeinfo({
+            "sender": "!aabb0042",
+            "payload": {"longname": "Edge", "shortname": "EDGE"},
+        })
+        node = handler.node_tracker.add_node.call_args.args[0]
+        assert node.id == "!aabb0042"
+
+    def test_node_from_mqtt_keyed_on_originator(self):
+        handler = self._make_tracker_handler()
+        handler._update_node_from_mqtt({
+            "from": 0x435b1180,
+            "sender": "!32962f10",
+        })
+        node = handler.node_tracker.add_node.call_args.args[0]
+        assert node.id == "!435b1180"
+
+    def test_originator_id_helper_contract(self):
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        assert MQTTBridgeHandler._originator_id(
+            {"from": 0xa2e95ba4, "sender": "!32962f10"}) == "!a2e95ba4"
+        assert MQTTBridgeHandler._originator_id(
+            {"sender": "!32962f10"}) == "!32962f10"
+        assert MQTTBridgeHandler._originator_id({}) == ""
