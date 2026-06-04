@@ -73,13 +73,17 @@
 
     "direction": "bidirectional",
 
+    "_channels_comment": "Channel-index allow-list (0-7), both directions, all connection types. Empty = bridge all. RX hears every channel of its radio - without this, a secondary's ch0 text is re-TXed on the primary's ch0 (often public). Forwards preserve channel index, so listed indexes should carry the same channel (name+PSK) on both radios.",
+    "channels": [],
+
     "message_filter": "",
     "exclude_filter": "",
 
     "dedup_window_sec": 60,
 
+    "_prefix_comment": "Keep the [Mesh: tag - it marks forwards as already-bridged (ECHO_LOOP_INVARIANT_PREFIXES) so no gateway re-bridges them. An untagged prefix re-opens the cross-gateway echo-amplification loop.",
     "add_prefix": true,
-    "prefix_format": "[{source_preset}] "
+    "prefix_format": "[Mesh:{source_preset}] "
   },
 
   "routing_rules": [],

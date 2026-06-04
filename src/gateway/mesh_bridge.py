@@ -30,7 +30,10 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Callable, Any, List
 
-from .config import GatewayConfig, MeshtasticBridgeConfig, MeshtasticConfig
+from .config import (
+    GatewayConfig, MeshtasticBridgeConfig, MeshtasticConfig,
+    ECHO_LOOP_INVARIANT_PREFIXES,
+)
 from .message_queue import PersistentMessageQueue, MessagePriority, RetryPolicy
 from utils.safe_import import safe_import
 from utils.paths import get_real_user_home
@@ -198,14 +201,26 @@ class MQTTMeshInterface:
             cfg = self._config
             root = "msh"
 
-            # Subscribe to JSON topics
-            json_topic = f"{root}/{cfg.mqtt_region}/2/json/{cfg.mqtt_channel}/#"
-            client.subscribe(json_topic)
-            logger.info(f"[{self._name}] Subscribed to: {json_topic}")
+            # Subscribe to BOTH topic shapes — with and without the region
+            # segment. meshtasticd 2.7.x publishes region-less topics
+            # (msh/2/json/...); older builds include the region
+            # (msh/US/2/json/...). Same dual-shape fix as Issue #34 in
+            # mqtt_bridge_handler; per-message dedup absorbs any overlap.
+            json_topics = [f"{root}/2/json/{cfg.mqtt_channel}/#"]
+            proto_topics = [f"{root}/2/e/{cfg.mqtt_channel}/#"]
+            if cfg.mqtt_region:
+                json_topics.append(
+                    f"{root}/{cfg.mqtt_region}/2/json/{cfg.mqtt_channel}/#")
+                proto_topics.append(
+                    f"{root}/{cfg.mqtt_region}/2/e/{cfg.mqtt_channel}/#")
 
-            # Also subscribe to encrypted topic for node discovery
-            proto_topic = f"{root}/{cfg.mqtt_region}/2/e/{cfg.mqtt_channel}/#"
-            client.subscribe(proto_topic)
+            for topic in json_topics:
+                client.subscribe(topic)
+                logger.info(f"[{self._name}] Subscribed to: {topic}")
+
+            # Also subscribe to encrypted topics for node discovery
+            for topic in proto_topics:
+                client.subscribe(topic)
         else:
             logger.error(f"[{self._name}] MQTT connect failed (rc={rc})")
             self._connected = False
@@ -426,6 +441,8 @@ class MeshtasticPresetBridge:
             'messages_primary_to_secondary': 0,
             'messages_secondary_to_primary': 0,
             'duplicates_suppressed': 0,
+            'channel_filtered': 0,
+            'already_bridged_dropped': 0,
             'errors': 0,
             'start_time': None,
         }
@@ -812,6 +829,21 @@ class MeshtasticPresetBridge:
             if portnum != 'TEXT_MESSAGE_APP':
                 return
 
+            # Channel allow-list: only bridge text on allow-listed channel
+            # indexes (empty list = all). RX hears every channel of its radio;
+            # without this, a secondary's ch0 text would be re-TXed on the
+            # primary's ch0 (often a public channel).
+            allowed = self.bridge_config.channels
+            channel = packet.get('channel', 0)
+            if allowed and channel not in allowed:
+                with self._stats_lock:
+                    self.stats['channel_filtered'] += 1
+                logger.debug(
+                    f"Channel filter: dropped ch{channel} text from {source} "
+                    f"(allow-list: {allowed})"
+                )
+                return
+
             from_id = packet.get('fromId', '')
             to_id = packet.get('toId', '')
 
@@ -820,6 +852,24 @@ class MeshtasticPresetBridge:
                 text = payload.decode('utf-8', errors='ignore')
             else:
                 text = str(payload)
+
+            # ECHO-LOOP INVARIANT: content already carrying a bridge tag has
+            # crossed SOME bridge — it never crosses another. Live failure
+            # shape (moc, 2026-06-03): ST text -> mesh_bridge -> HAT -> M->R
+            # fan-out -> peer gateway (also on the ST RF segment) re-injected
+            # it tagged [RNS:...] -> our RX heard it -> re-forwarded with a
+            # fresh prefix -> dedup never matched the mutated content ->
+            # infinite prefix-growing amplification. Our own forwards carry a
+            # [Mesh: prefix (ECHO_LOOP_INVARIANT_PREFIXES), so every gateway —
+            # including this one — refuses them on re-RX.
+            if text.lstrip().startswith(tuple(ECHO_LOOP_INVARIANT_PREFIXES)):
+                with self._stats_lock:
+                    self.stats['already_bridged_dropped'] += 1
+                logger.debug(
+                    f"Already-bridged content dropped from {source}: "
+                    f"{text[:50]}..."
+                )
+                return
 
             # Skip if message matches exclude filter
             if self.bridge_config.exclude_filter:
@@ -935,12 +985,19 @@ class MeshtasticPresetBridge:
                 )
                 content = prefix + content
 
-            # Send to interface (works for both TCP and MQTT interfaces)
-            interface.sendText(
-                content,
-                destinationId=msg.destination_id if not msg.is_broadcast else None,
-                channelIndex=msg.channel
-            )
+            # Send to interface (works for TCP and MQTT interfaces).
+            # Broadcasts OMIT destinationId so each interface uses its own
+            # broadcast default — meshtastic's TCPInterface hard-exits the
+            # process (our_exit) on destinationId=None, while its default is
+            # BROADCAST_ADDR ('^all').
+            if msg.is_broadcast:
+                interface.sendText(content, channelIndex=msg.channel)
+            else:
+                interface.sendText(
+                    content,
+                    destinationId=msg.destination_id,
+                    channelIndex=msg.channel
+                )
 
             logger.info(f"Bridged {msg.source_preset} -> {dest_name}: {content[:50]}...")
             return True

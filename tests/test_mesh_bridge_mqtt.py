@@ -413,3 +413,300 @@ class TestMeshtasticPresetBridgePersistence:
         status = bridge.get_status()
         assert status['primary']['mode'] == 'mqtt'
         assert status['secondary']['mode'] == 'mqtt'
+
+
+class TestChannelAllowList:
+    """mesh_bridge.channels — channel-index allow-list (both directions,
+    all connection types). Empty = bridge everything (backward compat)."""
+
+    @staticmethod
+    def _packet(channel=None, text="ST chat"):
+        pkt = {
+            'fromId': '!b03bb70c',
+            'toId': '!ffffffff',
+            'decoded': {
+                'portnum': 'TEXT_MESSAGE_APP',
+                'payload': text,
+            },
+        }
+        if channel is not None:
+            pkt['channel'] = channel
+        return pkt
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_disallowed_channel_dropped_and_counted(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        mock_config.mesh_bridge.channels = [2]
+        bridge = MeshtasticPresetBridge(config=mock_config)
+
+        # ch0 text from the secondary must NOT reach the primary's ch0
+        bridge._process_receive(
+            self._packet(channel=0), "secondary", "primary",
+            bridge._secondary_to_primary,
+        )
+
+        assert bridge._secondary_to_primary.get_queue_depth() == 0
+        assert bridge.stats['channel_filtered'] == 1
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_allowed_channel_passes(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        mock_config.mesh_bridge.channels = [2]
+        bridge = MeshtasticPresetBridge(config=mock_config)
+
+        bridge._process_receive(
+            self._packet(channel=2), "secondary", "primary",
+            bridge._secondary_to_primary,
+        )
+
+        assert bridge._secondary_to_primary.get_queue_depth() == 1
+        assert bridge.stats['channel_filtered'] == 0
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_empty_list_bridges_all_channels(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        assert mock_config.mesh_bridge.channels == []  # dataclass default
+        bridge = MeshtasticPresetBridge(config=mock_config)
+
+        for ch, text in [(0, "ch0 text"), (5, "ch5 text")]:
+            bridge._process_receive(
+                self._packet(channel=ch, text=text), "primary", "secondary",
+                bridge._primary_to_secondary,
+            )
+
+        assert bridge._primary_to_secondary.get_queue_depth() == 2
+        assert bridge.stats['channel_filtered'] == 0
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_missing_channel_key_defaults_to_zero(self, mock_home, tmp_path, mock_config):
+        """Protobuf omits default-0 fields: a packet with no 'channel' key
+        is channel 0 and must be filtered when 0 is not allow-listed."""
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        mock_config.mesh_bridge.channels = [2]
+        bridge = MeshtasticPresetBridge(config=mock_config)
+
+        bridge._process_receive(
+            self._packet(channel=None), "secondary", "primary",
+            bridge._secondary_to_primary,
+        )
+
+        assert bridge._secondary_to_primary.get_queue_depth() == 0
+        assert bridge.stats['channel_filtered'] == 1
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_filter_applies_in_both_directions(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        mock_config.mesh_bridge.channels = [2]
+        bridge = MeshtasticPresetBridge(config=mock_config)
+
+        bridge._process_receive(
+            self._packet(channel=1, text="LF ch1"), "primary", "secondary",
+            bridge._primary_to_secondary,
+        )
+
+        assert bridge._primary_to_secondary.get_queue_depth() == 0
+        assert bridge.stats['channel_filtered'] == 1
+
+
+class TestMQTTTopicShapes:
+    """Issue #34 mirror for MQTTMeshInterface: meshtasticd 2.7.x publishes
+    region-less topics (msh/2/json/...); older builds include the region.
+    _on_connect must subscribe to BOTH shapes."""
+
+    @staticmethod
+    def _iface(region):
+        from gateway.mesh_bridge import MQTTMeshInterface
+        from gateway.config import MeshtasticConfig
+
+        config = MeshtasticConfig(
+            use_mqtt=True, mqtt_channel="meshforge", mqtt_region=region,
+        )
+        return MQTTMeshInterface(
+            config=config,
+            name="test",
+            message_callback=lambda p: None,
+            stop_event=threading.Event(),
+        )
+
+    def test_subscribes_both_shapes_when_region_set(self):
+        iface = self._iface(region="US")
+        client = MagicMock()
+
+        iface._on_connect(client, None, None, 0)
+
+        topics = [c.args[0] for c in client.subscribe.call_args_list]
+        assert "msh/2/json/meshforge/#" in topics          # region-less (2.7.x)
+        assert "msh/US/2/json/meshforge/#" in topics       # region-full (older)
+        assert "msh/2/e/meshforge/#" in topics
+        assert "msh/US/2/e/meshforge/#" in topics
+
+    def test_region_less_only_when_region_empty(self):
+        iface = self._iface(region="")
+        client = MagicMock()
+
+        iface._on_connect(client, None, None, 0)
+
+        topics = [c.args[0] for c in client.subscribe.call_args_list]
+        assert "msh/2/json/meshforge/#" in topics
+        # No malformed double-slash topic from an empty region segment
+        assert not any("//" in t for t in topics)
+
+    def test_no_subscribe_on_failed_connect(self):
+        iface = self._iface(region="US")
+        client = MagicMock()
+
+        iface._on_connect(client, None, None, 5)  # rc != 0
+
+        assert not client.subscribe.called
+        assert iface._connected is False
+
+
+class TestForwardBroadcastOmitsDestination:
+    """meshtastic's TCPInterface hard-exits the process (our_exit) when
+    sendText gets destinationId=None — broadcasts must OMIT the kwarg so
+    the interface's own BROADCAST_ADDR default applies."""
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_broadcast_forward_omits_destination_id(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge, BridgedMeshMessage
+
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        iface = MagicMock()
+
+        msg = BridgedMeshMessage(
+            source_preset="SHORT_TURBO",
+            source_id="!b03bb70c",
+            destination_id="!ffffffff",
+            content="hello LF",
+            channel=2,
+            is_broadcast=True,
+        )
+        assert bridge._forward_message(msg, iface, True, "primary") is True
+
+        _, kwargs = iface.sendText.call_args
+        assert 'destinationId' not in kwargs
+        assert kwargs['channelIndex'] == 2
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_dm_forward_keeps_destination_id(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge, BridgedMeshMessage
+
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        iface = MagicMock()
+
+        msg = BridgedMeshMessage(
+            source_preset="LONG_FAST",
+            source_id="!32962f10",
+            destination_id="!b03bb70c",
+            content="dm",
+            channel=2,
+            is_broadcast=False,
+        )
+        assert bridge._forward_message(msg, iface, True, "secondary") is True
+
+        _, kwargs = iface.sendText.call_args
+        assert kwargs['destinationId'] == "!b03bb70c"
+
+
+class TestEchoLoopInvariant:
+    """Cross-gateway echo amplification guard (live on moc 2026-06-03):
+    bridge-tagged content NEVER crosses mesh_bridge, and our own forwards
+    carry a [Mesh: tag so every gateway refuses them too."""
+
+    @staticmethod
+    def _packet(text, channel=2):
+        return {
+            'fromId': '!b03bb70c',
+            'toId': '!ffffffff',
+            'channel': channel,
+            'decoded': {'portnum': 'TEXT_MESSAGE_APP', 'payload': text},
+        }
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_rns_tagged_dropped_from_secondary(self, mock_home, tmp_path, mock_config):
+        """The exact moc loop shape: a peer gateway's [RNS:...] injection
+        heard on the secondary RF segment must not cross back."""
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        bridge._process_receive(
+            self._packet("[RNS:hawaii_gaz] [SHORT_TURBO] st-lf test"),
+            "secondary", "primary", bridge._secondary_to_primary,
+        )
+
+        assert bridge._secondary_to_primary.get_queue_depth() == 0
+        assert bridge.stats['already_bridged_dropped'] == 1
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_mesh_tagged_dropped_from_primary(self, mock_home, tmp_path, mock_config):
+        """Our own ST->LF forward republished via MQTT must not ping-pong
+        back to the secondary."""
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        bridge._process_receive(
+            self._packet("[Mesh:SHORT_TURBO] hello"),
+            "primary", "secondary", bridge._primary_to_secondary,
+        )
+
+        assert bridge._primary_to_secondary.get_queue_depth() == 0
+        assert bridge.stats['already_bridged_dropped'] == 1
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_raw_text_still_crosses(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        bridge._process_receive(
+            self._packet("plain user chatter"),
+            "secondary", "primary", bridge._secondary_to_primary,
+        )
+
+        assert bridge._secondary_to_primary.get_queue_depth() == 1
+        assert bridge.stats['already_bridged_dropped'] == 0
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_default_prefix_marks_forward_as_bridged(self, mock_home, tmp_path):
+        """Round-trip closure: with the DEFAULT prefix, a forwarded message
+        is itself bridge-tagged — so this bridge (and every gateway) drops it
+        on any re-RX. This is the structural loop-breaker."""
+        mock_home.return_value = tmp_path
+        from gateway.config import (
+            GatewayConfig, MeshtasticBridgeConfig, ECHO_LOOP_INVARIANT_PREFIXES,
+        )
+        from gateway.mesh_bridge import MeshtasticPresetBridge, BridgedMeshMessage
+
+        config = GatewayConfig()
+        config.mesh_bridge = MeshtasticBridgeConfig(enabled=True)
+        assert config.mesh_bridge.prefix_format.startswith("[Mesh:")
+
+        bridge = MeshtasticPresetBridge(config=config)
+        iface = MagicMock()
+        msg = BridgedMeshMessage(
+            source_preset="SHORT_TURBO",
+            source_id="!b03bb70c",
+            destination_id="!ffffffff",
+            content="hello LF",
+            channel=2,
+            is_broadcast=True,
+        )
+        assert bridge._forward_message(msg, iface, True, "primary") is True
+
+        sent_text = iface.sendText.call_args[0][0]
+        assert sent_text.startswith("[Mesh:SHORT_TURBO] ")
+        assert sent_text.lstrip().startswith(tuple(ECHO_LOOP_INVARIANT_PREFIXES))

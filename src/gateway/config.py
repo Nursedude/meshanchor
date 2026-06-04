@@ -23,6 +23,23 @@ _validate_gateway_rns_config, _HAS_CONFIG_DRIFT = safe_import(
 
 
 # =============================================================================
+# ECHO-LOOP INVARIANT
+# =============================================================================
+
+# Canonical bridge-tag prefixes. Content already carrying one of these has
+# crossed SOME bridge and must NEVER cross another — re-bridging tagged
+# content is the cross-gateway echo-amplification loop (the p4 self-echo,
+# 2026-05-26; moc ST<->LF mesh_bridge loop, 2026-06-03). This is the SSOT
+# for the tag set: the meshtastic_reemit force-union below references it, and
+# mesh_bridge imports it for its is-already-bridged drop. Mirrors MeshForge's
+# is_already_bridged BRIDGE_TAG_PREFIXES (kept identical by a parity-pin test
+# on the MeshForge side). Operators may ADD prefixes, never remove these.
+ECHO_LOOP_INVARIANT_PREFIXES = [
+    "[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:",
+]
+
+
+# =============================================================================
 # CONFIGURATION VALIDATION
 # =============================================================================
 
@@ -155,6 +172,32 @@ def validate_channel(channel: int, field_name: str) -> Optional[ConfigValidation
     return None
 
 
+def validate_channel_list(channels, field_name: str) -> List[ConfigValidationError]:
+    """Validate a channel allow-list: a list of Meshtastic channel indexes.
+
+    Returns a list of errors (empty = valid). Rejects non-list values and
+    non-integer entries loudly — a typo'd allow-list silently bridging the
+    wrong channels is exactly the failure shape this feature exists to stop.
+    Note: bool is an int subclass in Python, so True/False are rejected
+    explicitly.
+    """
+    if not isinstance(channels, list):
+        return [ConfigValidationError(
+            field_name,
+            f"Must be a list of channel indexes 0-7, got {type(channels).__name__}")]
+    errors = []
+    for i, ch in enumerate(channels):
+        if isinstance(ch, bool) or not isinstance(ch, int):
+            errors.append(ConfigValidationError(
+                f"{field_name}[{i}]",
+                f"Channel index must be an integer 0-7, got {ch!r}"))
+            continue
+        err = validate_channel(ch, f"{field_name}[{i}]")
+        if err:
+            errors.append(err)
+    return errors
+
+
 def validate_baud_rate(baud: int, field_name: str) -> Optional[ConfigValidationError]:
     """Validate serial baud rate is a standard value."""
     standard_rates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
@@ -269,6 +312,14 @@ class MeshtasticBridgeConfig:
     # "secondary_to_primary" - Only forward from secondary to primary
     direction: str = "bidirectional"
 
+    # Channel allow-list (Meshtastic channel indexes 0-7). When non-empty,
+    # only text received on these channel indexes is bridged — applies to
+    # BOTH directions and ALL connection types. Empty = bridge all channels
+    # (backward compatible). Forwards preserve channel index, so the
+    # allow-listed indexes should carry the same channel (name + PSK) on
+    # both radios.
+    channels: List[int] = field(default_factory=list)
+
     # Message filtering
     # Forward only messages matching these patterns (empty = all)
     message_filter: str = ""
@@ -279,9 +330,13 @@ class MeshtasticBridgeConfig:
     # Prevent message loops by not re-forwarding recently seen messages
     dedup_window_sec: int = 60
 
-    # Add prefix to forwarded messages (helps identify bridged messages)
+    # Add prefix to forwarded messages. The default uses the "[Mesh:" tag from
+    # ECHO_LOOP_INVARIANT_PREFIXES so that NO gateway — this one or an LXMF
+    # peer sharing an RF segment — ever re-bridges a mesh_bridge forward. An
+    # untagged prefix re-opens the cross-gateway echo-amplification loop (moc,
+    # 2026-06-03). Placeholders: {source_preset}, {source_id} (last 4 chars).
     add_prefix: bool = True
-    prefix_format: str = "[{source_preset}] "
+    prefix_format: str = "[Mesh:{source_preset}] "
 
 
 @dataclass
@@ -803,11 +858,12 @@ class GatewayConfig:
                 primary=MeshtasticConfig(**cls._migrate_stale_http_port(mesh_bridge_data.get('primary', {}))) if mesh_bridge_data.get('primary') else MeshtasticConfig(port=4403, preset="LONG_FAST", name="longfast"),
                 secondary=MeshtasticConfig(**cls._migrate_stale_http_port(mesh_bridge_data.get('secondary', {}))) if mesh_bridge_data.get('secondary') else MeshtasticConfig(port=4404, preset="SHORT_TURBO", name="shortturbo"),
                 direction=mesh_bridge_data.get('direction', 'bidirectional'),
+                channels=mesh_bridge_data.get('channels', []) or [],
                 message_filter=mesh_bridge_data.get('message_filter', ''),
                 exclude_filter=mesh_bridge_data.get('exclude_filter', ''),
                 dedup_window_sec=mesh_bridge_data.get('dedup_window_sec', 60),
                 add_prefix=mesh_bridge_data.get('add_prefix', True),
-                prefix_format=mesh_bridge_data.get('prefix_format', '[{source_preset}] '),
+                prefix_format=mesh_bridge_data.get('prefix_format', '[Mesh:{source_preset}] '),
             )
 
             # Handle MQTTBridgeConfig
@@ -844,9 +900,7 @@ class GatewayConfig:
             # gateway.json must not be able to resurrect the echo loop (the
             # exact config-drift that caused it). Operators may ADD prefixes,
             # never remove these. Mirrors MeshForge is_already_bridged (b01d8af).
-            ECHO_LOOP_INVARIANT_PREFIXES = [
-                "[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:",
-            ]
+            # The tag set is the module-level ECHO_LOOP_INVARIANT_PREFIXES SSOT.
             nested = list(reemit_data.get(
                 'nested_drop_prefixes', ECHO_LOOP_INVARIANT_PREFIXES
             ))
@@ -931,6 +985,7 @@ class GatewayConfig:
                 'primary': asdict(self.mesh_bridge.primary),
                 'secondary': asdict(self.mesh_bridge.secondary),
                 'direction': self.mesh_bridge.direction,
+                'channels': self.mesh_bridge.channels,
                 'message_filter': self.mesh_bridge.message_filter,
                 'exclude_filter': self.mesh_bridge.exclude_filter,
                 'dedup_window_sec': self.mesh_bridge.dedup_window_sec,
@@ -1073,8 +1128,11 @@ class GatewayConfig:
         if err:
             errors.append(err)
 
-        # Validate mesh bridge config
-        if self.bridge_mode == "mesh_bridge":
+        # Validate mesh bridge config. Composable-bridges model: mesh_bridge
+        # can be enabled alongside another bridge_mode (e.g. mqtt_bridge +
+        # mesh_bridge on a dual-radio gateway), so gate on enabled OR the
+        # legacy mode selector.
+        if self.bridge_mode == "mesh_bridge" or self.mesh_bridge.enabled:
             err = validate_port(self.mesh_bridge.primary.port, "mesh_bridge.primary.port")
             if err:
                 errors.append(err)
@@ -1106,6 +1164,34 @@ class GatewayConfig:
             err = validate_regex(self.mesh_bridge.exclude_filter, "mesh_bridge.exclude_filter")
             if err:
                 errors.append(err)
+
+            # Validate channel allow-list
+            errors.extend(validate_channel_list(
+                self.mesh_bridge.channels, "mesh_bridge.channels"))
+
+            # Echo-loop tag check: an untagged prefix_format means other
+            # gateways (and our own re-emit handler) won't recognize the
+            # forward as bridged content and will re-bridge it — the
+            # cross-gateway amplification loop. Warning, not error: a truly
+            # standalone two-radio bridge with no RNS/MeshCore anywhere has no
+            # loop path.
+            if self.mesh_bridge.add_prefix:
+                try:
+                    rendered = self.mesh_bridge.prefix_format.format(
+                        source_preset="X", source_id="0000")
+                    if not rendered.lstrip().startswith(
+                            tuple(ECHO_LOOP_INVARIANT_PREFIXES)):
+                        errors.append(ConfigValidationError(
+                            "mesh_bridge.prefix_format",
+                            f"Prefix {self.mesh_bridge.prefix_format!r} is not a "
+                            "recognized bridge tag — other gateways will re-bridge "
+                            "forwarded messages (echo-amplification risk). Use a "
+                            "'[Mesh:'-prefixed format, e.g. '[Mesh:{source_preset}] '.",
+                            severity="warning"))
+                except (KeyError, IndexError, ValueError) as e:
+                    errors.append(ConfigValidationError(
+                        "mesh_bridge.prefix_format",
+                        f"Invalid prefix template: {e}"))
 
         # Mode-specific: mqtt_bridge
         if self.bridge_mode == "mqtt_bridge":

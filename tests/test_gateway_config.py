@@ -20,6 +20,7 @@ from src.gateway.config import (
     TelemetryConfig,
     validate_log_level,
     validate_channel,
+    validate_channel_list,
     validate_baud_rate,
     validate_position_precision,
     validate_update_interval,
@@ -651,3 +652,126 @@ class TestStaleHttpPortMigration:
         out = GatewayConfig._migrate_stale_http_port(data)
         assert out["http_port"] == 9443
         assert data["http_port"] == 443
+
+
+class TestMeshBridgeChannelAllowList:
+    """mesh_bridge.channels — optional channel-index allow-list.
+    Empty/absent = bridge all (backward compatible); malformed entries
+    must be rejected loudly (validate)."""
+
+    def _write_and_load(self, tmp_path, data):
+        config_file = tmp_path / "gateway.json"
+        config_file.write_text(json.dumps(data))
+        with patch.object(GatewayConfig, 'get_config_path',
+                          return_value=config_file):
+            return GatewayConfig.load()
+
+    def test_default_is_empty_list(self):
+        from src.gateway.config import MeshtasticBridgeConfig
+        assert MeshtasticBridgeConfig().channels == []
+
+    def test_load_parses_channels(self, tmp_path):
+        loaded = self._write_and_load(tmp_path, {
+            "mesh_bridge": {"enabled": True, "channels": [2, 3]},
+        })
+        assert loaded.mesh_bridge.channels == [2, 3]
+
+    def test_load_absent_channels_is_empty(self, tmp_path):
+        loaded = self._write_and_load(tmp_path, {
+            "mesh_bridge": {"enabled": True},
+        })
+        assert loaded.mesh_bridge.channels == []
+
+    def test_save_load_round_trip(self, tmp_path):
+        config_file = tmp_path / "gateway.json"
+        with patch.object(GatewayConfig, 'get_config_path',
+                          return_value=config_file):
+            config = GatewayConfig()
+            config.mesh_bridge.enabled = True
+            config.mesh_bridge.channels = [2]
+            assert config.save() is True
+            loaded = GatewayConfig.load()
+        assert loaded.mesh_bridge.channels == [2]
+
+    def test_validate_accepts_valid_channels(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.channels = [0, 2, 7]
+        _, all_errors = config.validate()
+        errors = [e for e in all_errors
+                  if "channels" in e.field and e.severity == "error"]
+        assert errors == []
+
+    def test_validate_rejects_out_of_range(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.channels = [8]
+        _, all_errors = config.validate()
+        errors = [e for e in all_errors if "channels" in e.field]
+        assert len(errors) == 1
+        assert "out of range" in errors[0].message
+
+    def test_validate_rejects_non_int_entries(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.channels = ["2", True, -1]
+        _, all_errors = config.validate()
+        errors = [e for e in all_errors if "channels" in e.field]
+        # "2" (str), True (bool), -1 (range) — all three rejected
+        assert len(errors) == 3
+
+    def test_validate_applies_when_enabled_without_mode(self):
+        """Composable model: mesh_bridge.enabled=true alongside
+        bridge_mode=mqtt_bridge must still be validated."""
+        config = GatewayConfig(bridge_mode="mqtt_bridge")
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.channels = [99]
+        _, all_errors = config.validate()
+        errors = [e for e in all_errors if "channels" in e.field]
+        assert len(errors) == 1
+
+    def test_validate_channel_list_helper_rejects_non_list(self):
+        errs = validate_channel_list("nope", "mesh_bridge.channels")
+        assert len(errs) == 1
+        assert "mesh_bridge.channels" in errs[0].field
+
+    def test_validate_channel_list_helper_accepts_empty(self):
+        assert validate_channel_list([], "mesh_bridge.channels") == []
+
+
+class TestMeshBridgePrefixTagValidation:
+    """add_prefix forwards must carry an ECHO_LOOP_INVARIANT_PREFIXES tag or
+    other gateways re-bridge them (echo-amplification). Untagged = warning."""
+
+    def test_default_prefix_is_bridge_tagged_no_warning(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        _, all_errors = config.validate()
+        assert not [e for e in all_errors if "prefix_format" in e.field]
+
+    def test_untagged_prefix_warns(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.prefix_format = "[{source_preset}] "  # pre-fix default
+        _, all_errors = config.validate()
+        warnings = [e for e in all_errors if "prefix_format" in e.field]
+        assert len(warnings) == 1
+        assert warnings[0].severity == "warning"
+        assert "echo" in warnings[0].message.lower()
+
+    def test_no_prefix_check_when_add_prefix_off(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.add_prefix = False
+        config.mesh_bridge.prefix_format = "untagged "
+        _, all_errors = config.validate()
+        assert not [e for e in all_errors if "prefix_format" in e.field]
+
+    def test_malformed_template_is_error(self):
+        config = GatewayConfig()
+        config.mesh_bridge.enabled = True
+        config.mesh_bridge.prefix_format = "[Mesh:{bogus_placeholder}] "
+        _, all_errors = config.validate()
+        errs = [e for e in all_errors if "prefix_format" in e.field]
+        assert len(errs) == 1
+        assert errs[0].severity == "error"
