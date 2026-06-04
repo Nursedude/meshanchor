@@ -69,6 +69,14 @@ from ._rns_bridge_connection import RNSConnectionMixin
 
 logger = logging.getLogger(__name__)
 
+# Minimum seconds between consecutive queue dispatches to meshtasticd.
+# Firmware 2.7.x rate-limits API text broadcasts (Routing.Error
+# RATE_LIMIT_EXCEEDED = 38) while the toradio HTTP hand-off still returns
+# 200 — bursts (e.g. multi-chunk RNS→Mesh sends ~45ms apart) silently lose
+# every packet after the first on RF (MeshForge live find, 2026-06-04).
+# Organic sends 2-4s apart pass; 3s clears the limiter with margin.
+MESHTASTIC_TX_MIN_SPACING_S = 3.0
+
 # Centralized path utility — used by RNSConnectionMixin in _rns_bridge_connection.py
 # NO FALLBACK: stale fallback copies caused config divergence bugs (Issue #25+)
 
@@ -418,17 +426,29 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 "(recommended) or meshtastic Python library for legacy TCP bridge."
             )
 
-        # Register Meshtastic sender now that handler exists
+        # Register Meshtastic sender now that handler exists.
+        # min_spacing_s: meshtasticd 2.7.x NAKs burst API text broadcasts
+        # with RATE_LIMIT_EXCEEDED (err=38) while the toradio HTTP hand-off
+        # still returns 200 — a multi-chunk RNS→Mesh message dispatched
+        # back-to-back silently loses every chunk after the first on RF
+        # (MeshForge live find, 2026-06-04). 3s clears the limiter.
         if self._persistent_queue and self._mesh_handler:
             self._persistent_queue.register_sender(
-                "meshtastic", self._mesh_handler.queue_send
+                "meshtastic", self._mesh_handler.queue_send,
+                min_spacing_s=MESHTASTIC_TX_MIN_SPACING_S,
             )
 
-            # Register MQTT sender for persistent queue (mqtt_bridge mode)
+            # Register MQTT sender for persistent queue (mqtt_bridge mode).
+            # Paced too: R→M chunks enqueue under destination="mqtt" in
+            # mqtt_bridge mode (unlike MeshForge, which routes them under
+            # "meshtastic"), and the broker hand-off ends at the same radio
+            # TX queue — a burst published back-to-back hits the same
+            # firmware rate limiter as a toradio burst.
             if (self.config.bridge_mode == "mqtt_bridge"
                     and hasattr(self._mesh_handler, 'publish_to_mqtt')):
                 self._persistent_queue.register_sender(
-                    "mqtt", self._mesh_handler.publish_to_mqtt
+                    "mqtt", self._mesh_handler.publish_to_mqtt,
+                    min_spacing_s=MESHTASTIC_TX_MIN_SPACING_S,
                 )
                 logger.info("Registered 'mqtt' sender for persistent queue")
 
