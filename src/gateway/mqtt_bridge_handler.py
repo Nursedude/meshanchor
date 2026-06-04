@@ -37,7 +37,7 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from .base_handler import BaseMessageHandler
+from .base_handler import BaseMessageHandler, get_rf_tx_registry
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
@@ -757,6 +757,12 @@ class MQTTBridgeHandler(BaseMessageHandler):
                 result = self._client.publish(topic, mqtt_payload, qos=1)
             if result.rc == 0:
                 logger.info(f"Published to MQTT: {message[:50]}...")
+                # Dual-path dedup (mirror of MeshForge f02ad82): this is the
+                # live R→M TX path in mqtt_bridge mode (destination="mqtt"
+                # queue items end here) and it terminates at the same radio —
+                # register so the mesh_bridge forward of the same content
+                # can suppress its duplicate. All sends here are broadcast.
+                get_rf_tx_registry().register(message)
                 return True
             else:
                 logger.warning(f"MQTT publish failed with rc={result.rc}")

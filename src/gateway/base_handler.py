@@ -7,8 +7,10 @@ concrete methods to eliminate duplication.
 """
 
 from abc import ABC, abstractmethod
+import hashlib
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
@@ -21,8 +23,101 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _strip_bridge_tags(text: str) -> str:
+    """Remove LEADING bridge tags ([Mesh:..] / [RNS:..] / ...) iteratively.
+
+    Normalization helper for RecentRfTxRegistry (mirror of MeshForge
+    f02ad82): the same logical content appears raw on one path and tagged
+    on another, so tag stripping is what lets the two match. Stops at the
+    first non-tag text or a malformed tag (no closing bracket).
+    """
+    from .config import ECHO_LOOP_INVARIANT_PREFIXES
+    prefixes = tuple(ECHO_LOOP_INVARIANT_PREFIXES)
+    out = text.lstrip()
+    while out.startswith(prefixes):
+        close = out.find(']')
+        if close < 0:
+            break
+        out = out[close + 1:].lstrip()
+    return out
+
+
+class RecentRfTxRegistry:
+    """Cross-subsystem "recently transmitted on the primary radio" registry.
+
+    Mirror of MeshForge f02ad82/1494e8f. Two designed paths can put the SAME
+    logical content on a gateway's primary radio seconds apart: the local
+    mesh_bridge cross-preset forward, and a peer gateway's Mesh→RNS relay
+    arriving back via the rns_bridge as a tagged toradio/MQTT broadcast.
+    Unconditional suppression of the relay loses messages (MeshForge live
+    trace: ~40% of relayed events arrived ONLY via RNS — the local radio
+    missed them on RF). This registry implements the safe middle: each path
+    registers what it actually transmitted; the other suppresses its copy
+    only on a hit.
+
+    Keys are content-normalized (leading bridge tags stripped, whitespace
+    collapsed, sha256) so ``[RNS:xx] hello`` matches the raw ``hello``.
+    Thread-safe; entries expire lazily at ``max_age_s``; bounded by
+    ``max_entries`` (oldest evicted).
+    """
+
+    def __init__(self, max_entries: int = 512, max_age_s: float = 300.0):
+        self._max_entries = max_entries
+        self._max_age_s = max_age_s
+        self._entries: Dict[str, float] = {}   # key -> time.monotonic()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(text: str) -> Optional[str]:
+        normalized = " ".join(_strip_bridge_tags(text or "").split())
+        if not normalized:
+            return None
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    def _prune_locked(self, now: float) -> None:
+        cutoff = now - self._max_age_s
+        stale = [k for k, ts in self._entries.items() if ts < cutoff]
+        for k in stale:
+            del self._entries[k]
+        while len(self._entries) > self._max_entries:
+            oldest = min(self._entries, key=self._entries.get)
+            del self._entries[oldest]
+
+    def register(self, text: str) -> None:
+        """Record that ``text`` was just transmitted on the radio."""
+        key = self._key(text)
+        if key is None:
+            return
+        now = time.monotonic()
+        with self._lock:
+            self._entries[key] = now
+            self._prune_locked(now)
+
+    def seen_within(self, text: str, window_s: float) -> bool:
+        """True if equivalent content was registered in the last window_s."""
+        key = self._key(text)
+        if key is None:
+            return False
+        now = time.monotonic()
+        with self._lock:
+            ts = self._entries.get(key)
+            return ts is not None and (now - ts) <= window_s
+
+
+# Process-wide instance — bridges are built independently with no shared
+# object, so the registry is a module singleton both sides resolve at use
+# time via get_rf_tx_registry() (tests monkeypatch the module global).
+_rf_tx_registry = RecentRfTxRegistry()
+
+
+def get_rf_tx_registry() -> RecentRfTxRegistry:
+    """The process-wide recently-transmitted-on-radio registry."""
+    return _rf_tx_registry
+
+
 def chunk_for_mesh(message: str,
-                   max_bytes: int = MAX_MESHTASTIC_MSG_LENGTH) -> List[str]:
+                   max_bytes: int = MAX_MESHTASTIC_MSG_LENGTH,
+                   prefix: str = "") -> List[str]:
     """Split text into UTF-8-byte-bounded chunks for Meshtastic TX.
 
     Ported from MeshForge (`0066470`). Meshtastic's on-air text payload is
@@ -37,17 +132,37 @@ def chunk_for_mesh(message: str,
     then word, then — only for a single word longer than the budget — a hard
     UTF-8-safe character split.
 
+    When ``prefix`` is given (e.g. ``"[RNS:xxxx] "``), EVERY chunk carries
+    it and the split budget reserves its bytes (mirror of MeshForge
+    f02ad82). Tagging only chunk 0 was disproven live 2026-06-04: untagged
+    tail chunks bypassed the echo-loop guards on every gateway — a
+    dual-radio box re-bridged a peer's relayed tail chunks back onto its
+    primary RF, and tag-adding legs overflowed the byte cap on max-size
+    tails. The bridge tag is the echo-loop invariant; it must ride every
+    packet, not just the first.
+
     Returns at least one chunk for non-empty input; never returns empty
-    strings; never exceeds ``max_bytes`` for any chunk. A message that already
-    fits is returned unchanged as a single-element list.
+    strings; never exceeds ``max_bytes`` for any chunk (prefix included).
+    A message that already fits is returned as a single-element list.
     """
     if not message:
         return []
-    if len(message.encode('utf-8')) <= max_bytes:
-        return [message]
 
     def blen(s: str) -> int:
         return len(s.encode('utf-8'))
+
+    budget = max_bytes
+    if prefix:
+        budget = max_bytes - blen(prefix)
+        if budget < 16:
+            logger.warning(
+                "chunk_for_mesh: prefix %r leaves <16 bytes of budget — "
+                "chunking untagged", prefix[:32])
+            prefix = ""
+            budget = max_bytes
+
+    if blen(prefix) + blen(message) <= max_bytes:
+        return [prefix + message]
 
     def char_split(token: str) -> List[str]:
         # Separator-less token longer than the budget: cut on character
@@ -55,7 +170,7 @@ def chunk_for_mesh(message: str,
         out: List[str] = []
         cur = ""
         for ch in token:
-            if cur and blen(cur) + blen(ch) > max_bytes:
+            if cur and blen(cur) + blen(ch) > budget:
                 out.append(cur)
                 cur = ch
             else:
@@ -69,11 +184,11 @@ def chunk_for_mesh(message: str,
         cur = ""
         for atom in atoms:
             add = blen(atom) + (blen(sep) if cur else 0)
-            if cur and blen(cur) + add > max_bytes:
+            if cur and blen(cur) + add > budget:
                 out.append(cur)
                 cur = ""
             if not cur:
-                if blen(atom) <= max_bytes:
+                if blen(atom) <= budget:
                     cur = atom
                 else:
                     # Atom itself exceeds the budget — split finer: by
@@ -89,7 +204,10 @@ def chunk_for_mesh(message: str,
             out.append(cur)
         return out
 
-    return pack(message.split('\n'), '\n')
+    chunks = pack(message.split('\n'), '\n')
+    if prefix:
+        return [prefix + c for c in chunks]
+    return chunks
 
 
 class BaseMessageHandler(ABC):

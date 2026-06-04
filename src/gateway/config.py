@@ -481,6 +481,17 @@ class RNSConfig:
     # form when multiple LXMF inboxes (e.g. NomadNet operators) want the bridged
     # feed. Ported from MeshForge (lead repo) — keep the str|list shape compatible.
     default_lxmf_destination: Any = ""  # str or list[str] of hex hashes
+    # Dual-path dedup (mirror of MeshForge 1494e8f/f02ad82). On a box whose
+    # LOCAL mesh_bridge also carries the same RF traffic, a peer gateway's
+    # Mesh→RNS relay arrives back here and goes out as a SECOND copy of
+    # content the mesh_bridge already transmitted seconds earlier (and vice
+    # versa — the dedup is symmetric, whichever path transmits first wins).
+    # Suppression happens ONLY on a RecentRfTxRegistry hit — unconditional
+    # suppression would lose messages (MeshForge live trace: ~40% of relayed
+    # events arrived ONLY via RNS). Default off (canary-first). DMs are
+    # never suppressed.
+    dual_path_dedup_enabled: bool = False
+    dual_path_dedup_window_sec: int = 60    # registry hit window (seconds)
 
     def get_lxmf_destinations(self) -> List[str]:
         """Return default_lxmf_destination normalized to a list of non-empty hex strings."""

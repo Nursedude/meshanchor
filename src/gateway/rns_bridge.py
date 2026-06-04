@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
-from .base_handler import chunk_for_mesh
+from .base_handler import chunk_for_mesh, get_rf_tx_registry
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
 from .reconnect import ReconnectStrategy
@@ -255,6 +255,9 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         self.stats = {
             'messages_mesh_to_rns': 0,
             'messages_rns_to_mesh': 0,
+            # Dual-path dedup (gated): broadcast copies suppressed because
+            # the local mesh_bridge already put the same content on RF.
+            'rns_to_mesh_dual_path_suppressed': 0,
             'errors': 0,
             'bounced': 0,
             'start_time': None,
@@ -1957,6 +1960,24 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 logger.error(f"Failed to persist RNS→Mesh chunk for retry: {e}")
         return requeued > 0
 
+    def _dual_path_dedup_on(self) -> bool:
+        """Strict read of rns.dual_path_dedup_enabled (default False).
+
+        ``is True`` deliberately (MeshForge gate discipline): MagicMock test
+        configs and malformed gateway.json values are truthy-but-not-True
+        and must read as OFF, preserving the legacy always-deliver behavior
+        everywhere the flag wasn't explicitly enabled.
+        """
+        rns_cfg = getattr(self.config, 'rns', None)
+        return getattr(rns_cfg, 'dual_path_dedup_enabled', False) is True
+
+    def _dual_path_dedup_window(self) -> float:
+        rns_cfg = getattr(self.config, 'rns', None)
+        try:
+            return float(getattr(rns_cfg, 'dual_path_dedup_window_sec', 60))
+        except (TypeError, ValueError):
+            return 60.0
+
     def _process_rns_to_mesh(self, msg: BridgedMessage):
         """Process message from RNS to Meshtastic.
 
@@ -1973,7 +1994,30 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
         try:
             prefix = f"[RNS:{msg.source_id[:4]}] "
             content = prefix + msg.content
-            chunks = chunk_for_mesh(content)
+
+            # Dual-path dedup (gated, default off; mirror of MeshForge
+            # 1494e8f). On a box whose LOCAL mesh_bridge also carries this
+            # RF traffic, a broadcast the mesh_bridge already transmitted
+            # arrives here a second time via a peer's RNS relay and would
+            # land on the radio TWICE. Suppress ONLY on a registry hit —
+            # when the local radio missed the message on RF there is no hit
+            # and this copy still delivers (the relay's fallback value).
+            if (self._dual_path_dedup_on()
+                    and get_rf_tx_registry().seen_within(
+                        msg.content, self._dual_path_dedup_window())):
+                with self._stats_lock:
+                    self.stats['rns_to_mesh_dual_path_suppressed'] = (
+                        self.stats.get('rns_to_mesh_dual_path_suppressed', 0) + 1)
+                logger.info(
+                    f"Bridge RNS→Mesh suppressed (dual-path dedup — already "
+                    f"on RF via mesh_bridge): {msg.content[:50]}...")
+                return
+
+            # The [RNS:xxxx] prefix rides EVERY chunk (prefix= reserves its
+            # bytes; mirror of MeshForge f02ad82) — the tag is the echo-loop
+            # invariant, and the chunk-0-only shape leaked untagged tail
+            # chunks through the loop guards on every gateway.
+            chunks = chunk_for_mesh(msg.content, prefix=prefix)
             multi = f" [{len(chunks)} chunks]" if len(chunks) > 1 else ""
 
             # In mqtt_bridge mode, enqueue each chunk as its own queue item

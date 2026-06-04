@@ -2675,3 +2675,154 @@ class TestMeshcoreEgressHeaderReformat:
         )
         bridge._process_meshcore_to_bridge(dm)
         assert captured["text"] == "[MC:deadbeef] eta: 5 min"
+
+
+# ---------------------------------------------------------------------------
+# Dual-path dedup + tag-every-chunk (mirror of MeshForge 1494e8f/f02ad82)
+# ---------------------------------------------------------------------------
+
+_ML_REPLY = "\n".join(
+    f"line{i:02d} the quick brown fox jumps over the lazy dog and keeps running"
+    for i in range(1, 8)
+)
+
+
+class TestRecentRfTxRegistry:
+    """Content-normalized recently-transmitted registry (parity port)."""
+
+    def _registry(self, **kw):
+        from gateway.base_handler import RecentRfTxRegistry
+        return RecentRfTxRegistry(**kw)
+
+    def test_register_then_seen(self):
+        r = self._registry()
+        r.register("hello mesh")
+        assert r.seen_within("hello mesh", 60.0) is True
+
+    def test_unregistered_not_seen(self):
+        r = self._registry()
+        assert r.seen_within("never sent", 60.0) is False
+
+    def test_window_expiry(self):
+        r = self._registry()
+        r.register("old content")
+        key = next(iter(r._entries))
+        r._entries[key] -= 61.0
+        assert r.seen_within("old content", 60.0) is False
+
+    def test_leading_bridge_tag_normalized(self):
+        r = self._registry()
+        r.register("Bot CMD?:ping, bbshelp")
+        assert r.seen_within("[RNS:abcd] Bot CMD?:ping, bbshelp", 60.0)
+        assert r.seen_within("[Mesh:SHORT_TURBO] Bot CMD?:ping, bbshelp", 60.0)
+        assert r.seen_within("[MC:p4] Bot CMD?:ping, bbshelp", 60.0)
+
+    def test_whitespace_collapsed(self):
+        r = self._registry()
+        r.register("two  words   here")
+        assert r.seen_within("two words here", 60.0)
+
+    def test_empty_and_tag_only_never_match(self):
+        r = self._registry()
+        r.register("")
+        r.register("[RNS:xxxx] ")
+        assert r.seen_within("", 60.0) is False
+
+    def test_bounded_entries(self):
+        r = self._registry(max_entries=3)
+        for i in range(6):
+            r.register(f"content {i}")
+        assert len(r._entries) <= 3
+
+    def test_module_singleton_accessor(self):
+        import gateway.base_handler as bh
+        assert bh.get_rf_tx_registry() is bh._rf_tx_registry
+
+
+class TestChunkForMeshPrefix:
+    """Tag-every-chunk: the bridge tag is the echo-loop invariant and must
+    ride EVERY chunk (untagged tails bypassed the guards — MF 2026-06-04)."""
+
+    def test_every_chunk_carries_prefix(self):
+        from gateway.base_handler import chunk_for_mesh
+        chunks = chunk_for_mesh(_ML_REPLY, prefix="[RNS:abcd] ")
+        assert len(chunks) >= 2
+        assert all(c.startswith("[RNS:abcd] ") for c in chunks)
+
+    def test_budget_includes_prefix(self):
+        from gateway.base_handler import chunk_for_mesh
+        chunks = chunk_for_mesh(_ML_REPLY, max_bytes=100, prefix="[RNS:abcd] ")
+        assert all(len(c.encode("utf-8")) <= 100 for c in chunks)
+
+    def test_single_fit_returns_prefixed_message(self):
+        from gateway.base_handler import chunk_for_mesh
+        assert chunk_for_mesh("short", prefix="[RNS:abcd] ") == ["[RNS:abcd] short"]
+
+    def test_content_reassembles_without_loss(self):
+        from gateway.base_handler import chunk_for_mesh
+        prefix = "[RNS:abcd] "
+        chunks = chunk_for_mesh(_ML_REPLY, max_bytes=80, prefix=prefix)
+        stripped = [c[len(prefix):] for c in chunks]
+        assert " ".join(" ".join(stripped).split()) == " ".join(_ML_REPLY.split())
+
+    def test_no_prefix_behavior_unchanged(self):
+        from gateway.base_handler import chunk_for_mesh
+        assert chunk_for_mesh(_ML_REPLY) == chunk_for_mesh(_ML_REPLY, prefix="")
+
+    def test_absurd_prefix_falls_back_untagged(self):
+        from gateway.base_handler import chunk_for_mesh
+        huge = "[RNS:" + "x" * 300 + "] "
+        assert chunk_for_mesh(_ML_REPLY, prefix=huge) == chunk_for_mesh(_ML_REPLY)
+
+
+class TestRnsToMeshTaggedChunks:
+    """R→M now tags every chunk + suppresses on registry hit (gated)."""
+
+    def _fresh_registry(self, monkeypatch):
+        import gateway.base_handler as bh
+        fresh = bh.RecentRfTxRegistry()
+        monkeypatch.setattr(bh, "_rf_tx_registry", fresh)
+        return fresh
+
+    def _msg(self, content):
+        from gateway.rns_bridge import BridgedMessage
+        return BridgedMessage(
+            source_network="rns", source_id="abcdef01",
+            destination_id=None, content=content,
+        )
+
+    def test_prefix_on_every_chunk(self, bridge, monkeypatch):
+        self._fresh_registry(monkeypatch)
+        sent = []
+        with patch.object(bridge, 'send_to_meshtastic',
+                          side_effect=lambda c, channel=0: sent.append(c) or True):
+            bridge._process_rns_to_mesh(self._msg(_ML_REPLY))
+        assert len(sent) >= 2
+        assert all(c.startswith("[RNS:abcd] ") for c in sent)
+
+    def test_suppressed_on_registry_hit(self, bridge, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        reg.register("dup content from mesh_bridge")
+        bridge.config.rns.dual_path_dedup_enabled = True
+        bridge.config.rns.dual_path_dedup_window_sec = 60
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as send:
+            bridge._process_rns_to_mesh(self._msg("dup content from mesh_bridge"))
+        send.assert_not_called()
+        assert bridge.stats['rns_to_mesh_dual_path_suppressed'] == 1
+
+    def test_no_hit_delivers_normally(self, bridge, monkeypatch):
+        self._fresh_registry(monkeypatch)
+        bridge.config.rns.dual_path_dedup_enabled = True
+        bridge.config.rns.dual_path_dedup_window_sec = 60
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as send:
+            bridge._process_rns_to_mesh(self._msg("rf missed this one"))
+        send.assert_called()
+        assert bridge.stats['rns_to_mesh_dual_path_suppressed'] == 0
+
+    def test_flag_off_hit_still_delivers(self, bridge, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        reg.register("dup content")
+        # bridge fixture config.rns is a MagicMock — strict is-True gate = OFF.
+        with patch.object(bridge, 'send_to_meshtastic', return_value=True) as send:
+            bridge._process_rns_to_mesh(self._msg("dup content"))
+        send.assert_called()

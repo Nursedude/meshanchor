@@ -952,3 +952,87 @@ class TestNodeInfoInjection:
         # text still flows; nodeinfo skipped and NOT marked sent (retry later)
         assert not injector.inject_nodeinfo.called
         assert 0xDDFB8065 not in bridge._nodeinfo_sent
+
+
+class TestSymmetricDualPathSuppression:
+    """mesh_bridge's primary forward suppresses when the rns_bridge relay
+    copy already went out (registered on TX) — symmetric dedup, mirror of
+    MeshForge f02ad82. Gated on rns.dual_path_dedup_enabled, default off
+    (mock_config is a real GatewayConfig, so the default False applies)."""
+
+    def _fresh_registry(self, monkeypatch):
+        import gateway.base_handler as bh
+        fresh = bh.RecentRfTxRegistry()
+        monkeypatch.setattr(bh, "_rf_tx_registry", fresh)
+        return fresh
+
+    def _bridge(self, mock_home, tmp_path, mock_config, dedup=False):
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        mock_home.return_value = tmp_path
+        mock_config.rns.dual_path_dedup_enabled = dedup
+        mock_config.rns.dual_path_dedup_window_sec = 60
+        b = MeshtasticPresetBridge(config=mock_config)
+        b._primary_interface = MagicMock()
+        b._primary_connected = True
+        return b
+
+    def _payload(self, content, broadcast=True):
+        from gateway.mesh_bridge import BridgedMeshMessage
+        return BridgedMeshMessage(
+            source_preset="SHORT_TURBO", source_id="!b03bb70c",
+            destination_id="!ffffffff" if broadcast else "!32962f10",
+            content=content, channel=2, is_broadcast=broadcast,
+        ).to_payload()
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_suppressed_when_rns_copy_already_out(self, mock_home, tmp_path,
+                                                  mock_config, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        reg.register("[RNS:abcd] race content")
+        bridge = self._bridge(mock_home, tmp_path, mock_config, dedup=True)
+
+        assert bridge._send_to_primary(self._payload("race content")) is True
+        bridge._primary_interface.sendText.assert_not_called()
+        assert bridge.stats['dual_path_suppressed'] == 1
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_no_hit_forwards_normally(self, mock_home, tmp_path,
+                                      mock_config, monkeypatch):
+        self._fresh_registry(monkeypatch)
+        bridge = self._bridge(mock_home, tmp_path, mock_config, dedup=True)
+
+        assert bridge._send_to_primary(self._payload("fresh content")) is True
+        bridge._primary_interface.sendText.assert_called_once()
+        assert bridge.stats['dual_path_suppressed'] == 0
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_flag_off_hit_still_forwards(self, mock_home, tmp_path,
+                                         mock_config, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        reg.register("dup content")
+        bridge = self._bridge(mock_home, tmp_path, mock_config, dedup=False)
+
+        assert bridge._send_to_primary(self._payload("dup content")) is True
+        bridge._primary_interface.sendText.assert_called_once()
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_dm_never_suppressed(self, mock_home, tmp_path,
+                                 mock_config, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        reg.register("private words")
+        bridge = self._bridge(mock_home, tmp_path, mock_config, dedup=True)
+
+        assert bridge._send_to_primary(
+            self._payload("private words", broadcast=False)) is True
+        bridge._primary_interface.sendText.assert_called_once()
+        assert bridge.stats['dual_path_suppressed'] == 0
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_successful_broadcast_forward_registers(self, mock_home, tmp_path,
+                                                    mock_config, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        bridge = self._bridge(mock_home, tmp_path, mock_config, dedup=True)
+
+        assert bridge._send_to_primary(self._payload("hello LF")) is True
+        assert reg.seen_within("hello LF", 60.0)
+        assert reg.seen_within("[RNS:xxxx] hello LF", 60.0)
