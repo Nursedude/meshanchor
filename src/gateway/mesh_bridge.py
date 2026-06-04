@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, Callable, Any, List
 
-from .base_handler import get_rf_tx_registry
+from .base_handler import get_rf_tx_registry, get_secondary_rf_registry
 from .config import (
     GatewayConfig, MeshtasticBridgeConfig, MeshtasticConfig,
     ECHO_LOOP_INVARIANT_PREFIXES,
@@ -974,6 +974,20 @@ class MeshtasticPresetBridge:
             else:
                 text = str(payload)
 
+            # Seen-on-RF registration (mirror of MeshForge b645fa7,
+            # cross-BOX dedup direction): a broadcast heard on this leg IS
+            # on that radio's mesh, whoever TX'd it — including a peer
+            # box's radio on the same RF segment. Scope matters: register
+            # into the RECEIVING leg's registry only (a primary-RX entry
+            # must never suppress a primary→secondary forward of the same
+            # content). Deliberately BEFORE the already-bridged drop below
+            # — tagged content is refused for re-bridging but is still on
+            # the mesh. After the channel allow-list, so filtered channels
+            # don't poison the registry.
+            if is_broadcast and text:
+                (get_rf_tx_registry() if source == "primary"
+                 else get_secondary_rf_registry()).register(text)
+
             # ECHO-LOOP INVARIANT: content already carrying a bridge tag has
             # crossed SOME bridge — it never crosses another. Live failure
             # shape (moc, 2026-06-03): ST text -> mesh_bridge -> HAT -> M->R
@@ -1068,6 +1082,25 @@ class MeshtasticPresetBridge:
     def _send_to_secondary(self, payload: Dict) -> bool:
         """Send callback for persistent queue — forward to secondary."""
         msg = BridgedMeshMessage.from_payload(payload)
+
+        # Seen-on-RF dedup, secondary scope (gated, default off) — mirror
+        # of MeshForge b645fa7: when this content is already on the
+        # SECONDARY mesh (e.g. a peer gateway's relay injected it there and
+        # our RX heard it), suppress the forward instead of
+        # double-delivering. Checks the secondary registry ONLY: consulting
+        # the primary one here would suppress every primary→secondary
+        # forward of content just heard on primary.
+        if (msg.is_broadcast and self._dual_path_dedup_on()
+                and get_secondary_rf_registry().seen_within(
+                    msg.content, self._dual_path_dedup_window())):
+            with self._stats_lock:
+                self.stats['dual_path_suppressed_secondary'] = (
+                    self.stats.get('dual_path_suppressed_secondary', 0) + 1)
+            logger.info(
+                f"mesh_bridge secondary forward suppressed (seen-on-RF "
+                f"dedup — already on secondary mesh): {msg.content[:50]}...")
+            return True
+
         success = self._forward_message(
             msg, self._secondary_interface,
             self._secondary_connected, "secondary"
@@ -1075,6 +1108,9 @@ class MeshtasticPresetBridge:
         if success:
             with self._stats_lock:
                 self.stats['messages_primary_to_secondary'] += 1
+            # Mirror of _send_to_primary's registration, secondary scope.
+            if msg.is_broadcast:
+                get_secondary_rf_registry().register(msg.content)
         return success
 
     def _dual_path_dedup_on(self) -> bool:

@@ -2826,3 +2826,136 @@ class TestRnsToMeshTaggedChunks:
         with patch.object(bridge, 'send_to_meshtastic', return_value=True) as send:
             bridge._process_rns_to_mesh(self._msg("dup content"))
         send.assert_called()
+
+
+class TestDispatchTimeDedupRecheck:
+    """Dispatch-time dual-path dedup re-check (mirror of MeshForge 2d205b7).
+
+    The enqueue-side check races the other TX path's registration; by
+    dispatch time (past TX pacing) the registry is settled. Applied to all
+    three dispatch callbacks: MQTTBridgeHandler.queue_send,
+    MQTTBridgeHandler.publish_to_mqtt (MA's live R→M path), and
+    MeshtasticHandler.queue_send. Flag-gated strict-True; DMs exempt.
+    """
+
+    def _fresh_registry(self, monkeypatch):
+        import gateway.base_handler as bh
+        fresh = bh.RecentRfTxRegistry()
+        monkeypatch.setattr(bh, "_rf_tx_registry", fresh)
+        return fresh
+
+    def _mqtt_handler(self, dedup_on=True):
+        import threading
+        from types import SimpleNamespace
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        h = MQTTBridgeHandler.__new__(MQTTBridgeHandler)
+        h.config = SimpleNamespace(rns=SimpleNamespace(
+            dual_path_dedup_enabled=dedup_on,
+            dual_path_dedup_window_sec=60,
+        ))
+        h.stats = {}
+        h._stats_lock = threading.Lock()
+        h.send_text = MagicMock(return_value=True)
+        h._connected = True
+        h._client = MagicMock()
+        return h
+
+    def test_queue_send_suppresses_on_hit(self, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        h = self._mqtt_handler(dedup_on=True)
+        reg.register("Tonight: rain.")
+        assert h.queue_send({"message": "[RNS:abcd] Tonight: rain.",
+                             "destination": None, "channel": 2}) is True
+        h.send_text.assert_not_called()
+        assert h.stats["dispatch_dedup_suppressed"] == 1
+
+    def test_queue_send_flag_off_sends(self, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        h = self._mqtt_handler(dedup_on=False)
+        reg.register("Tonight: rain.")
+        assert h.queue_send({"message": "[RNS:abcd] Tonight: rain.",
+                             "destination": None, "channel": 2}) is True
+        h.send_text.assert_called_once()
+
+    def test_queue_send_dm_never_suppressed(self, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        h = self._mqtt_handler(dedup_on=True)
+        reg.register("private reply")
+        assert h.queue_send({"message": "private reply",
+                             "destination": "!b03bb70c", "channel": 2}) is True
+        h.send_text.assert_called_once()
+
+    def test_publish_to_mqtt_suppresses_on_hit(self, monkeypatch):
+        """MA's live R→M dispatch path (destination='mqtt')."""
+        reg = self._fresh_registry(monkeypatch)
+        h = self._mqtt_handler(dedup_on=True)
+        reg.register("race content")
+        assert h.publish_to_mqtt({"message": "[ch0:p4] race content",
+                                  "channel": 0}) is True
+        h._client.publish.assert_not_called()
+        assert h.stats["dispatch_dedup_suppressed"] == 1
+
+    def test_publish_to_mqtt_flag_off_publishes(self, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        h = self._mqtt_handler(dedup_on=False)
+        h._mqtt_lock = __import__("threading").Lock()
+        h.config.mqtt_bridge = MagicMock(
+            root_topic="msh", region="US", channel="meshanchor")
+        h._client.publish.return_value = MagicMock(rc=0)
+        reg.register("race content")
+        assert h.publish_to_mqtt({"message": "[ch0:p4] race content",
+                                  "channel": 0}) is True
+        h._client.publish.assert_called_once()
+
+
+class TestSeenOnRfRegistration:
+    """RX-time registration (seen-on-RF, mirror of MeshForge b645fa7).
+
+    A broadcast heard via MQTT is ON this radio's mesh whoever TX'd it —
+    including another box's radio on the same RF segment, which this box's
+    own TX bookkeeping can never see. Registering at RX lets the
+    inject-side checks suppress the relay copy of the same content.
+    """
+
+    def _fresh_registry(self, monkeypatch):
+        import gateway.base_handler as bh
+        fresh = bh.RecentRfTxRegistry()
+        monkeypatch.setattr(bh, "_rf_tx_registry", fresh)
+        return fresh
+
+    def _rx_handler(self):
+        import threading
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        h = MQTTBridgeHandler.__new__(MQTTBridgeHandler)
+        h.config = MagicMock()
+        h._message_queue = None
+        h._should_bridge = None
+        h._message_callback = None
+        h.stats = {"errors": 0}
+        h._stats_lock = threading.Lock()
+        return h
+
+    def _rx(self, handler, text, to=0xFFFFFFFF):
+        handler._bridge_text_message(
+            {"sender": "!ebfa1b11", "to": to,
+             "payload": {"text": text}, "channel": 0},
+            topic="msh/US/2/json/meshanchor/!ebfa1b11",
+        )
+
+    def test_broadcast_rx_registers(self, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        self._rx(self._rx_handler(), "plain user message")
+        assert reg.seen_within("plain user message", 60.0)
+
+    def test_tagged_rx_registers_normalized(self, monkeypatch):
+        """A peer box's [Mesh:..]-tagged TX heard on RF registers
+        normalized, so the relay copy of the same content matches."""
+        reg = self._fresh_registry(monkeypatch)
+        self._rx(self._rx_handler(), "[Mesh:LONG_FAST:2f10] Cmd")
+        assert reg.seen_within("Cmd", 60.0)
+        assert reg.seen_within("[RNS:abcd] Cmd", 60.0)
+
+    def test_dm_rx_does_not_register(self, monkeypatch):
+        reg = self._fresh_registry(monkeypatch)
+        self._rx(self._rx_handler(), "private note", to=0x32962F10)
+        assert not reg.seen_within("private note", 60.0)

@@ -37,7 +37,10 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from .base_handler import BaseMessageHandler, get_rf_tx_registry
+from .base_handler import (
+    BaseMessageHandler, dual_path_dedup_enabled, dual_path_dedup_window_s,
+    get_rf_tx_registry,
+)
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
@@ -363,6 +366,17 @@ class MQTTBridgeHandler(BaseMessageHandler):
         to_id = f"!{to_num:08x}" if to_num else None
         is_broadcast = to_num == 0xFFFFFFFF
 
+        # Seen-on-RF registration (mirror of MeshForge b645fa7, cross-BOX
+        # dedup direction): a broadcast heard here IS on this radio's mesh,
+        # whoever TX'd it — including another box's radio on the same RF
+        # segment, which this box's own TX bookkeeping can never see.
+        # Registering at RX lets the inject-side checks suppress the relay
+        # copy of the same content. Tagged content registers too (it is
+        # refused for re-bridging downstream but is still on the mesh).
+        # Registration unconditional/cheap; suppression flag-gated.
+        if is_broadcast:
+            get_rf_tx_registry().register(text)
+
         msg = BridgedMessage(
             source_network="meshtastic",
             source_id=sender,
@@ -556,11 +570,22 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         # Try HTTP protobuf first (preferred — no TCP contention, no subprocess)
         if self._send_via_http_protobuf(message, destination, channel):
+            # Dual-path dedup (mirror of MeshForge 2d205b7): this toradio
+            # route is the destination="meshtastic" dispatch path — register
+            # broadcast TX so the other paths to this radio can suppress
+            # their duplicate copy. Registration unconditional/cheap;
+            # suppression is flag-gated at the check side.
+            if not destination:
+                get_rf_tx_registry().register(message)
             return True
 
         # Fall back to CLI
         logger.debug("HTTP protobuf TX unavailable, falling back to CLI")
-        return self._send_via_cli(message, destination, channel)
+        if self._send_via_cli(message, destination, channel):
+            if not destination:
+                get_rf_tx_registry().register(message)
+            return True
+        return False
 
     def _send_via_http_protobuf(
         self, message: str, destination: str = None, channel: int = 0
@@ -711,6 +736,24 @@ class MQTTBridgeHandler(BaseMessageHandler):
         message = self._truncate_if_needed(payload.get('message', ''))
         destination = payload.get('destination')
         channel = payload.get('channel', 0)
+
+        # Dispatch-time dual-path dedup re-check (gated, broadcast only) —
+        # mirror of MeshForge 2d205b7. The enqueue-side check races the
+        # other TX path's registration; by dispatch time (past the TX
+        # pacing) the registry is settled, so re-checking here closes the
+        # race deterministically. Suppress-only-on-hit: True marks the
+        # queue entry done (the content IS on the radio, other path).
+        if (not destination and dual_path_dedup_enabled(self.config)
+                and get_rf_tx_registry().seen_within(
+                    message, dual_path_dedup_window_s(self.config))):
+            with self._stats_lock:
+                self.stats['dispatch_dedup_suppressed'] = (
+                    self.stats.get('dispatch_dedup_suppressed', 0) + 1)
+            logger.info(
+                f"Queue dispatch suppressed (dual-path dedup — already on "
+                f"RF): {message[:50]}...")
+            return True
+
         return self.send_text(message, destination, channel)
 
     def publish_to_mqtt(self, payload: Dict) -> bool:
@@ -736,6 +779,22 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         if not message:
             return False
+
+        # Dispatch-time dual-path dedup re-check (gated) — mirror of
+        # MeshForge 2d205b7, applied to MA's live R→M dispatch path
+        # (destination="mqtt"; all sends here are broadcast). The
+        # enqueue-side check races the mesh_bridge registration; by
+        # dispatch time the registry is settled. Suppress-only-on-hit.
+        if (dual_path_dedup_enabled(self.config)
+                and get_rf_tx_registry().seen_within(
+                    message, dual_path_dedup_window_s(self.config))):
+            with self._stats_lock:
+                self.stats['dispatch_dedup_suppressed'] = (
+                    self.stats.get('dispatch_dedup_suppressed', 0) + 1)
+            logger.info(
+                f"MQTT dispatch suppressed (dual-path dedup — already on "
+                f"RF): {message[:50]}...")
+            return True
 
         mqtt_cfg = self.config.mqtt_bridge
 

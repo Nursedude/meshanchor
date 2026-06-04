@@ -111,8 +111,57 @@ _rf_tx_registry = RecentRfTxRegistry()
 
 
 def get_rf_tx_registry() -> RecentRfTxRegistry:
-    """The process-wide recently-transmitted-on-radio registry."""
+    """The process-wide seen-on-RF registry for the PRIMARY radio's mesh.
+
+    Seen-on-RF semantics (mirror of MeshForge b645fa7): entries are
+    registered on RX as well as TX — content heard on the mesh was put
+    there by ANOTHER box's radio, which this box's own TX bookkeeping can
+    never see. "In the registry" means "this content is on that mesh
+    right now, whoever transmitted it." Suppress-only-on-hit fallback is
+    preserved: if the local radio MISSED the RF copy, nothing registered
+    and the relay copy still delivers.
+    """
     return _rf_tx_registry
+
+
+# Secondary-radio scope (mesh_bridge's serial leg). Separate module global
+# rather than a dict-of-scopes so tests that monkeypatch _rf_tx_registry
+# keep working unchanged. (Mirror of MeshForge b645fa7.)
+_rf_secondary_registry = RecentRfTxRegistry()
+
+
+def get_secondary_rf_registry() -> RecentRfTxRegistry:
+    """The process-wide seen-on-RF registry for the SECONDARY radio's mesh.
+
+    Content-keying is per-mesh: a forward INTO the secondary mesh must
+    check only what is on the SECONDARY mesh — consulting the primary
+    registry there would suppress every primary→secondary forward of
+    content just heard on primary (i.e. break bridging entirely).
+    """
+    return _rf_secondary_registry
+
+
+def dual_path_dedup_enabled(config: Any) -> bool:
+    """Strict read of rns.dual_path_dedup_enabled (default False).
+
+    Shared by the dispatch-time re-check in the handlers' queue dispatch
+    callbacks (mirror of MeshForge 2d205b7: the enqueue-side check races
+    mesh_bridge's RF-TX registration by ~250ms on LAN-fast RNS relays; by
+    dispatch time — past the TX pacing — the registry is settled). Same
+    ``is True`` discipline as the bridge-side helpers: MagicMock test
+    configs and malformed values read as OFF.
+    """
+    rns_cfg = getattr(config, 'rns', None)
+    return getattr(rns_cfg, 'dual_path_dedup_enabled', False) is True
+
+
+def dual_path_dedup_window_s(config: Any) -> float:
+    """rns.dual_path_dedup_window_sec with a safe 60s default."""
+    rns_cfg = getattr(config, 'rns', None)
+    try:
+        return float(getattr(rns_cfg, 'dual_path_dedup_window_sec', 60))
+    except (TypeError, ValueError):
+        return 60.0
 
 
 def chunk_for_mesh(message: str,
