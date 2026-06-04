@@ -17,6 +17,7 @@ Usage:
 """
 
 import hashlib
+import itertools
 import json
 import logging
 import sqlite3
@@ -35,6 +36,10 @@ from utils.paths import get_real_user_home
 from utils.timeouts import MESSAGE_STALE as _MESSAGE_STALE_TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+# Process-wide message-id sequence — disambiguates ids minted in the same
+# millisecond for the same content (see enqueue's id-generation comment).
+_MSG_ID_SEQ = itertools.count()
 
 
 class MessagePriority(Enum):
@@ -758,7 +763,16 @@ class PersistentMessageQueue:
                     return None
 
         # Generate unique ID
-        msg_id = f"{int(time.time() * 1000)}-{content_hash[:8]}"
+        # The ms-timestamp + content-hash pair alone is NOT unique:
+        # identical content enqueued twice in the same millisecond (dedup
+        # disabled, or same content to two destinations — both legitimate,
+        # test-pinned cases) collided on the TEXT PRIMARY KEY and the
+        # second INSERT failed (the test_dedup_disabled flake). A
+        # process-wide monotonic sequence makes the id unique within the
+        # process; the timestamp keeps it unique across restarts.
+        # (Mirror of MeshForge.)
+        msg_id = (f"{int(time.time() * 1000)}-{content_hash[:8]}"
+                  f"-{next(_MSG_ID_SEQ) & 0xFFFF:04x}")
 
         message = QueuedMessage(
             id=msg_id,

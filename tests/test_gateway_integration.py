@@ -859,6 +859,15 @@ class TestMeshtasticConnectionStability:
         config = GatewayConfig()
         config.enabled = True
         config.bridge_mode = "mqtt_bridge"
+        # Force broker + meshtasticd unreachable so the assertion below
+        # exercises the degraded path even on a fleet box where mosquitto
+        # + meshtasticd are healthy on localhost. Without this pin, the
+        # bridge happily connects to the real broker and
+        # `meshtastic_connected` comes back True. Mirrors the
+        # 19999-unused-port pattern of the sibling tests above (and the
+        # MeshForge fix for the identical test).
+        config.mqtt_bridge.broker = "127.0.0.1"
+        config.mqtt_bridge.port = 19999
 
         from gateway.rns_bridge import RNSMeshtasticBridge
         bridge = RNSMeshtasticBridge(config=config)

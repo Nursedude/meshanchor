@@ -29,6 +29,30 @@ from status_bar import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_status_bar_from_fleet(request):
+    """Block StatusBar.__init__ from pulling real node-tracker state.
+
+    Mirror of the MeshForge fixture. Without this, `_seed_node_count()`
+    reaches into the live node tracker singleton and pre-populates
+    `_node_count` with whatever the running box has — that invisibly
+    satisfies or breaks node-count assertions depending on the box's
+    state (`test_no_node_count_by_default` was failing on a box whose
+    tracker held 2 real nodes; CI passed because no tracker data — the
+    asymmetry was the smell).
+
+    Tests that explicitly call `bar.set_node_count(N)` after init still
+    work — that's the post-init setter, untouched by this isolation.
+    A TestSeedNodeCount class (if added) is exempted by name so the
+    seeding path itself stays testable.
+    """
+    if request.cls is not None and request.cls.__name__ == 'TestSeedNodeCount':
+        yield
+        return
+    with patch.object(StatusBar, '_seed_node_count'):
+        yield
+
+
 class TestStatusBarFormat:
     """Test status line formatting."""
 
