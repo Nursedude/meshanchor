@@ -443,9 +443,111 @@ class MeshtasticPresetBridge:
             'duplicates_suppressed': 0,
             'channel_filtered': 0,
             'already_bridged_dropped': 0,
+            'downlink_injected': 0,
             'errors': 0,
             'start_time': None,
         }
+
+        # Optional true-origin downlink injector for the primary (meshtasticd)
+        # leg — makes cross-bridge traffic show as the real source node on
+        # :9443 instead of self-TX. Default off; built only when the primary
+        # leg is configured injection_mode="downlink" with a PSK.
+        self._primary_downlink = self._build_downlink_injector(
+            self.bridge_config.primary)
+        # Origins we've already taught the primary radio about (NodeInfo
+        # downlink) so it renders the friendly name, not bare hex. Injected
+        # once per origin before its first text downlink.
+        self._nodeinfo_sent = set()
+
+    def _build_downlink_injector(self, leg: MeshtasticConfig):
+        """Construct a DownlinkInjector for a leg, or None if not enabled."""
+        if (leg.injection_mode or "toradio").lower() != "downlink":
+            return None
+        if not leg.downlink_psk:
+            logger.warning(
+                "mesh_bridge %s injection_mode=downlink but no downlink_psk — "
+                "falling back to toradio", leg.name)
+            return None
+        try:
+            from .mqtt_downlink_inject import DownlinkInjector
+            injector = DownlinkInjector(
+                broker=leg.mqtt_broker,
+                port=leg.mqtt_port,
+                channel_name=leg.mqtt_channel,
+                psk_b64=leg.downlink_psk,
+                root_topic="msh",
+            )
+            if not injector.usable:
+                logger.warning(
+                    "mesh_bridge %s downlink injector unusable: %s — "
+                    "falling back to toradio", leg.name, injector.fatal_reason)
+                return None
+            logger.info(
+                "mesh_bridge %s: true-origin downlink injection ENABLED "
+                "(channel=%s)", leg.name, leg.mqtt_channel)
+            return injector
+        except Exception as e:
+            logger.warning(
+                "mesh_bridge %s downlink injector init failed: %s — "
+                "falling back to toradio", leg.name, e)
+            return None
+
+    def _lookup_node_user(self, node_id_str: str):
+        """Return {'long','short','hw'} for a node id from an interface nodedb.
+
+        Bridged origins are heard on the source interface, whose meshtastic
+        nodedb (if any) carries the NodeInfo. MeshAnchor has no serial leg —
+        both legs are TCP/MQTT interfaces. A TCPInterface exposes `.nodes`; the
+        MQTTMeshInterface has no nodedb, so this safely returns None there and
+        NodeInfo injection is skipped (text still flows). Best-effort.
+        """
+        if not node_id_str:
+            return None
+        for iface in (self._secondary_interface, self._primary_interface):
+            nodes = getattr(iface, "nodes", None)
+            if not nodes:
+                continue
+            node = nodes.get(node_id_str)
+            user = (node or {}).get("user") if isinstance(node, dict) else None
+            if user and (user.get("longName") or user.get("shortName")):
+                return {
+                    "long": user.get("longName") or user.get("shortName") or node_id_str,
+                    "short": user.get("shortName") or node_id_str[-4:],
+                    "hw": user.get("hwModel"),
+                }
+        return None
+
+    def _ensure_nodeinfo(self, origin: int, source_id: str) -> None:
+        """Teach the primary radio this origin's NAME once (NodeInfo downlink)
+        so :9443 shows 'moc2: ...' not '!ddfb8065: ...'. Best-effort: if the
+        name isn't known yet we skip (and retry on a later message)."""
+        if origin in self._nodeinfo_sent or self._primary_downlink is None:
+            return
+        user = self._lookup_node_user(source_id)
+        if not user:
+            return  # name not learned yet; don't mark sent — retry next time
+        if self._primary_downlink.inject_nodeinfo(
+            origin, user["long"], user["short"], hw_model=user["hw"],
+        ):
+            self._nodeinfo_sent.add(origin)
+            logger.info(
+                "Taught primary radio NodeInfo for !%08x (%s)",
+                origin, user["long"])
+
+    @staticmethod
+    def _node_id_to_num(node_id) -> Optional[int]:
+        """'!ddfb8065' / '0xddfb8065' / int → node number, or None."""
+        if node_id is None:
+            return None
+        if isinstance(node_id, int):
+            return node_id
+        s = str(node_id).strip().lstrip("!")
+        if s.lower().startswith("0x"):
+            s = s[2:]
+        try:
+            return int(s, 16)
+        except ValueError:
+            return None
 
     @property
     def is_running(self) -> bool:
@@ -525,6 +627,8 @@ class MeshtasticPresetBridge:
         # Disconnect interfaces
         self._disconnect_primary()
         self._disconnect_secondary()
+        if self._primary_downlink is not None:
+            self._primary_downlink.close()
 
         # Wait for threads
         for thread in [self._primary_thread, self._secondary_thread,
@@ -847,6 +951,18 @@ class MeshtasticPresetBridge:
             from_id = packet.get('fromId', '')
             to_id = packet.get('toId', '')
 
+            # Broadcast detection must cover every shape meshtastic emits:
+            #   - serial/TCP lib maps 0xFFFFFFFF -> '^all' (BROADCAST_ADDR)
+            #   - MQTT json path here formats it as '!ffffffff'
+            #   - the raw numeric `to` field (0xFFFFFFFF, or absent = 0)
+            # Getting this wrong sends broadcasts as DMs and skips the
+            # broadcast-only downlink-injection path (moc canary, 2026-06-03).
+            to_num = packet.get('to')
+            is_broadcast = (
+                to_id in ('^all', '!ffffffff')
+                or to_num == 0xFFFFFFFF
+            )
+
             payload = decoded.get('payload', b'')
             if isinstance(payload, bytes):
                 text = payload.decode('utf-8', errors='ignore')
@@ -896,7 +1012,7 @@ class MeshtasticPresetBridge:
                 destination_id=to_id,
                 content=text,
                 channel=packet.get('channel', 0),
-                is_broadcast=to_id == '!ffffffff',
+                is_broadcast=is_broadcast,
                 metadata={
                     'snr': packet.get('rxSnr'),
                     'rssi': packet.get('rxRssi'),
@@ -984,6 +1100,43 @@ class MeshtasticPresetBridge:
                     source_id=msg.source_id[-4:] if msg.source_id else "????",
                 )
                 content = prefix + content
+
+            # True-origin downlink injection (primary/meshtasticd leg only).
+            # Makes the forward show as the REAL source node on :9443 instead
+            # of self-TX. Only for broadcasts (downlink is a channel inject);
+            # any failure falls through to the toradio sendText path below so
+            # a message is never dropped.
+            #
+            # The downlink path injects the RAW message (no [Mesh:...] prefix):
+            # the true-origin attribution already names the sender, so the tag
+            # is just clutter ("moc2: [Mesh:SHORT_TURBO:8065] hi" -> "moc2: hi").
+            # The prefix exists only as the cross-gateway echo-loop guard for
+            # the toradio path (where re-heard json could re-bridge). Downlink
+            # is loop-safe by construction: meshtasticd does NOT re-uplink a
+            # via_mqtt packet to json and the gateway can't decode the raw -e-
+            # protobuf, so the injected packet never re-enters the bridge
+            # (proven step-0 + moc canary 2026-06-03). The toradio FALLBACK
+            # below still sends the tagged `content`, so loop safety is intact
+            # whenever downlink is unavailable.
+            if (dest_name == "primary" and self._primary_downlink is not None
+                    and msg.is_broadcast):
+                origin = self._node_id_to_num(msg.source_id)
+                if origin is not None:
+                    # Teach the radio the origin's name first, so its text
+                    # renders as "moc2: ..." instead of bare hex.
+                    self._ensure_nodeinfo(origin, msg.source_id)
+                if origin is not None and self._primary_downlink.inject(
+                    msg.content, origin, hop_limit=3,
+                ):
+                    with self._stats_lock:
+                        self.stats['downlink_injected'] += 1
+                    logger.info(
+                        f"Bridged {msg.source_preset} -> {dest_name} "
+                        f"(downlink as !{origin:08x}): {msg.content[:50]}...")
+                    return True
+                logger.debug(
+                    "Downlink inject unavailable for %s — toradio fallback",
+                    dest_name)
 
             # Send to interface (works for TCP and MQTT interfaces).
             # Broadcasts OMIT destinationId so each interface uses its own

@@ -710,3 +710,245 @@ class TestEchoLoopInvariant:
         sent_text = iface.sendText.call_args[0][0]
         assert sent_text.startswith("[Mesh:SHORT_TURBO] ")
         assert sent_text.lstrip().startswith(tuple(ECHO_LOOP_INVARIANT_PREFIXES))
+
+
+class TestDownlinkInjectionWiring:
+    """mesh_bridge primary-leg true-origin downlink injection (default off).
+
+    Mirror of MeshForge TestDownlinkInjectionWiring (e98612a/72f3411)."""
+
+    def _bridge(self, tmp_path, mock_config, injection_mode=None, psk="QQ=="):
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        if injection_mode:
+            mock_config.mesh_bridge.primary.injection_mode = injection_mode
+            mock_config.mesh_bridge.primary.downlink_psk = psk
+            mock_config.mesh_bridge.primary.mqtt_channel = "meshforge"
+        return MeshtasticPresetBridge(config=mock_config)
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_no_injector_by_default(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        bridge = self._bridge(tmp_path, mock_config)
+        assert bridge._primary_downlink is None
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_downlink_mode_without_psk_falls_back(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        mock_config.mesh_bridge.primary.injection_mode = "downlink"
+        mock_config.mesh_bridge.primary.downlink_psk = ""
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        assert bridge._primary_downlink is None
+
+    def test_node_id_to_num(self):
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        f = MeshtasticPresetBridge._node_id_to_num
+        assert f("!ddfb8065") == 0xDDFB8065
+        assert f("0xddfb8065") == 0xDDFB8065
+        assert f(0xDDFB8065) == 0xDDFB8065
+        assert f(None) is None
+        assert f("not-hex") is None
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_broadcast_uses_downlink_when_injector_present(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        bridge = self._bridge(tmp_path, mock_config)
+        injector = MagicMock()
+        injector.inject.return_value = True
+        bridge._primary_downlink = injector
+        iface = MagicMock()
+
+        from gateway.mesh_bridge import BridgedMeshMessage
+        msg = BridgedMeshMessage(
+            source_preset="SHORT_TURBO", source_id="!ddfb8065",
+            destination_id="!ffffffff", content="hi", channel=2, is_broadcast=True,
+        )
+        assert bridge._forward_message(msg, iface, True, "primary") is True
+        injector.inject.assert_called_once()
+        # RAW content injected (no [Mesh:...] tag — attribution names the sender)
+        assert injector.inject.call_args[0][0] == "hi"
+        # origin passed as the true source node number
+        assert injector.inject.call_args[0][1] == 0xDDFB8065
+        # toradio path NOT used when downlink succeeds
+        assert not iface.sendText.called
+        assert bridge.stats['downlink_injected'] == 1
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_downlink_strips_tag_but_fallback_keeps_it(self, mock_home, tmp_path, mock_config):
+        """Downlink injects raw text (clean display); when downlink FAILS the
+        toradio fallback still carries the [Mesh: loop-guard tag."""
+        mock_home.return_value = tmp_path
+        mock_config.mesh_bridge.add_prefix = True
+        mock_config.mesh_bridge.prefix_format = "[Mesh:{source_preset}] "
+        bridge = self._bridge(tmp_path, mock_config)
+        injector = MagicMock()
+        injector.inject.return_value = False  # force fallback
+        bridge._primary_downlink = injector
+        iface = MagicMock()
+
+        from gateway.mesh_bridge import BridgedMeshMessage
+        msg = BridgedMeshMessage(
+            source_preset="SHORT_TURBO", source_id="!ddfb8065",
+            destination_id="!ffffffff", content="hi", channel=2, is_broadcast=True,
+        )
+        bridge._forward_message(msg, iface, True, "primary")
+        # downlink was attempted with RAW text
+        assert injector.inject.call_args[0][0] == "hi"
+        # fallback toradio carried the TAGGED text (loop guard intact)
+        assert iface.sendText.call_args[0][0] == "[Mesh:SHORT_TURBO] hi"
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_downlink_failure_falls_back_to_sendtext(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        bridge = self._bridge(tmp_path, mock_config)
+        injector = MagicMock()
+        injector.inject.return_value = False  # broker down, etc.
+        bridge._primary_downlink = injector
+        iface = MagicMock()
+
+        from gateway.mesh_bridge import BridgedMeshMessage
+        msg = BridgedMeshMessage(
+            source_preset="SHORT_TURBO", source_id="!ddfb8065",
+            destination_id="!ffffffff", content="hi", channel=2, is_broadcast=True,
+        )
+        assert bridge._forward_message(msg, iface, True, "primary") is True
+        # message NOT dropped — toradio sendText carried it
+        assert iface.sendText.called
+        assert bridge.stats['downlink_injected'] == 0
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_secondary_leg_never_downlinks(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        bridge = self._bridge(tmp_path, mock_config)
+        bridge._primary_downlink = MagicMock()  # exists, but dest is secondary
+        iface = MagicMock()
+
+        from gateway.mesh_bridge import BridgedMeshMessage
+        msg = BridgedMeshMessage(
+            source_preset="LONG_FAST", source_id="!32962f10",
+            destination_id="!ffffffff", content="hi", channel=2, is_broadcast=True,
+        )
+        bridge._forward_message(msg, iface, True, "secondary")
+        assert not bridge._primary_downlink.inject.called
+        assert iface.sendText.called
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_dm_does_not_downlink(self, mock_home, tmp_path, mock_config):
+        """Downlink is a channel inject (broadcast); DMs keep the toradio path."""
+        mock_home.return_value = tmp_path
+        bridge = self._bridge(tmp_path, mock_config)
+        bridge._primary_downlink = MagicMock()
+        iface = MagicMock()
+
+        from gateway.mesh_bridge import BridgedMeshMessage
+        msg = BridgedMeshMessage(
+            source_preset="SHORT_TURBO", source_id="!ddfb8065",
+            destination_id="!32962f10", content="dm", channel=2, is_broadcast=False,
+        )
+        bridge._forward_message(msg, iface, True, "primary")
+        assert not bridge._primary_downlink.inject.called
+        assert iface.sendText.called
+
+
+class TestBroadcastDetectionShapes:
+    """meshtastic emits broadcast destination in several shapes; all must be
+    detected as broadcast or forwards go out as DMs and skip the
+    broadcast-only downlink path (moc canary regression, 2026-06-03).
+
+    Mirror of MeshForge TestBroadcastDetectionShapes (543c99b)."""
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def _bcast(self, to_field, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        pkt = {
+            'fromId': '!ddfb8065', 'channel': 0,
+            'decoded': {'portnum': 'TEXT_MESSAGE_APP', 'payload': 'hi'},
+        }
+        pkt.update(to_field)
+        bridge._process_receive(pkt, "secondary", "primary",
+                                bridge._secondary_to_primary)
+        msgs = bridge._secondary_to_primary.get_pending()
+        assert len(msgs) == 1
+        from gateway.mesh_bridge import BridgedMeshMessage
+        return BridgedMeshMessage.from_payload(msgs[0].payload)
+
+    def test_caret_all_is_broadcast(self, tmp_path, mock_config):
+        msg = self._bcast({'toId': '^all'}, tmp_path=tmp_path, mock_config=mock_config)
+        assert msg.is_broadcast is True
+
+    def test_hex_ffffffff_is_broadcast(self, tmp_path, mock_config):
+        msg = self._bcast({'toId': '!ffffffff'}, tmp_path=tmp_path, mock_config=mock_config)
+        assert msg.is_broadcast is True
+
+    def test_numeric_to_is_broadcast(self, tmp_path, mock_config):
+        msg = self._bcast({'to': 0xFFFFFFFF}, tmp_path=tmp_path, mock_config=mock_config)
+        assert msg.is_broadcast is True
+
+    def test_real_dm_is_not_broadcast(self, tmp_path, mock_config):
+        msg = self._bcast({'toId': '!32962f10', 'to': 0x32962f10},
+                          tmp_path=tmp_path, mock_config=mock_config)
+        assert msg.is_broadcast is False
+
+
+class TestNodeInfoInjection:
+    """Teach the primary radio a bridged origin's NAME (once) so :9443 shows
+    'moc2: ...' not '!ddfb8065: ...'.
+
+    Mirror of MeshForge TestNodeInfoInjection (a3d6960)."""
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def _bridge_with_injector_and_nodedb(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        injector = MagicMock()
+        injector.inject.return_value = True
+        injector.inject_nodeinfo.return_value = True
+        bridge._primary_downlink = injector
+        # secondary interface carries the origin's NodeInfo (TCP nodedb)
+        iface = MagicMock()
+        iface.nodes = {"!ddfb8065": {"user": {
+            "longName": "meshforge moc2", "shortName": "moc2", "hwModel": "PORTDUINO"}}}
+        bridge._secondary_interface = iface
+        return bridge, injector
+
+    def _bcast_msg(self):
+        from gateway.mesh_bridge import BridgedMeshMessage
+        return BridgedMeshMessage(
+            source_preset="SHORT_TURBO", source_id="!ddfb8065",
+            destination_id="!ffffffff", content="hi", channel=2, is_broadcast=True,
+        )
+
+    def test_nodeinfo_injected_before_text(self, tmp_path, mock_config):
+        bridge, injector = self._bridge_with_injector_and_nodedb(
+            tmp_path=tmp_path, mock_config=mock_config)
+        bridge._forward_message(self._bcast_msg(), MagicMock(), True, "primary")
+        injector.inject_nodeinfo.assert_called_once()
+        args = injector.inject_nodeinfo.call_args
+        assert args[0][0] == 0xDDFB8065
+        assert args[0][1] == "meshforge moc2"
+        assert args[0][2] == "moc2"
+
+    def test_nodeinfo_only_sent_once_per_origin(self, tmp_path, mock_config):
+        bridge, injector = self._bridge_with_injector_and_nodedb(
+            tmp_path=tmp_path, mock_config=mock_config)
+        for _ in range(3):
+            bridge._forward_message(self._bcast_msg(), MagicMock(), True, "primary")
+        assert injector.inject_nodeinfo.call_count == 1
+        assert injector.inject.call_count == 3  # text every time
+
+    @patch('gateway.mesh_bridge.get_real_user_home')
+    def test_no_nodeinfo_when_name_unknown_retries_later(self, mock_home, tmp_path, mock_config):
+        mock_home.return_value = tmp_path
+        from gateway.mesh_bridge import MeshtasticPresetBridge
+        bridge = MeshtasticPresetBridge(config=mock_config)
+        injector = MagicMock()
+        injector.inject.return_value = True
+        bridge._primary_downlink = injector
+        bridge._secondary_interface = MagicMock(nodes={})  # name not learned yet
+        bridge._forward_message(self._bcast_msg(), MagicMock(), True, "primary")
+        # text still flows; nodeinfo skipped and NOT marked sent (retry later)
+        assert not injector.inject_nodeinfo.called
+        assert 0xDDFB8065 not in bridge._nodeinfo_sent
