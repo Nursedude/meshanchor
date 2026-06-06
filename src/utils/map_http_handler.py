@@ -63,8 +63,12 @@ _get_connection_manager, _ConnectionMode, _HAS_MESHTASTIC_CONN = safe_import(
 _SRTMProvider, _LOSAnalyzer, _HAS_TERRAIN = safe_import(
     'utils.terrain', 'SRTMProvider', 'LOSAnalyzer'
 )
+# MF Issue #74 port: the class is PersistentMessageQueue — the old
+# 'MessageQueue' name never existed, so _HAS_MSG_QUEUE was always
+# False and the /api/messages/queue SQLite branch was dead code
+# (silently served the cache-file fallback).
 _MessageQueue, _HAS_MSG_QUEUE = safe_import(
-    'gateway.message_queue', 'MessageQueue'
+    'gateway.message_queue', 'PersistentMessageQueue'
 )
 from commands import messaging
 _get_listener_status, _HAS_MSG_LISTENER = safe_import(
@@ -1259,18 +1263,19 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
         else:
             try:
                 queue = _MessageQueue()
-                pending = queue.get_pending_messages(limit=50)
+                pending = queue.get_pending(limit=50)
                 for msg in pending:
+                    payload = msg.payload or {}
                     messages.append({
-                        "id": msg.get("id"),
-                        "source": msg.get("source_id"),
-                        "source_name": msg.get("source_name", ""),
-                        "target": msg.get("target_id"),
-                        "target_name": msg.get("target_name", ""),
-                        "network": msg.get("target_network", "meshtastic"),
-                        "status": msg.get("status", "pending"),
-                        "created_at": msg.get("created_at", ""),
-                        "message_type": msg.get("message_type", "text")
+                        "id": msg.id,
+                        "source": payload.get("source_id", ""),
+                        "source_name": payload.get("source_name", ""),
+                        "target": payload.get("destination_id", ""),
+                        "target_name": payload.get("target_name", ""),
+                        "network": msg.destination,
+                        "status": msg.status.value,
+                        "created_at": msg.created_at.isoformat(),
+                        "message_type": payload.get("message_type", "text"),
                     })
             except Exception as e:
                 logger.debug(f"Message queue error: {e}")

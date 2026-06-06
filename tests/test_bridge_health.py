@@ -592,3 +592,22 @@ class TestSubsystemState:
             t.join(timeout=5)
 
         assert len(errors) == 0
+
+
+class TestConfirmationRateSentinelIssue74:
+    """MF Issue #74 port: zero traffic must read as 'no data' (None),
+    not '0% = total failure'. A dashboard polling at startup must not
+    see 0%."""
+
+    def test_confirmation_rate_none_at_zero_traffic(self):
+        tracker = DeliveryTracker()
+        stats = tracker.get_stats()
+        assert stats["confirmation_rate_pct"] is None
+
+    def test_confirmation_rate_zero_is_still_zero_with_traffic(self):
+        """Real 0% (sends but no confirms) stays 0.0 — only the
+        no-data case maps to None."""
+        tracker = DeliveryTracker()
+        tracker.track_message("m1", b"\x00" * 8, "Msg")
+        stats = tracker.get_stats()
+        assert stats["confirmation_rate_pct"] == 0.0

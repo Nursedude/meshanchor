@@ -827,6 +827,17 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             if destination_hash:
                 # Direct message
                 hash_short = destination_hash.hex()[:8]
+                # MF Issue #74 port: gate on the per-destination
+                # circuit BEFORE any RNS RPC. The breaker was
+                # write-only — can_send_to/record_send_* had zero
+                # callers, so an open circuit never blocked a send and
+                # organic failures never fed the threshold-OPEN.
+                if not self.can_send_to(hash_short):
+                    logger.warning(
+                        f"Send to {hash_short} blocked: circuit open "
+                        f"(recent failures; retry after recovery window)"
+                    )
+                    return False
                 if not call_boundary("rnsd.has_path",
                                      RNS.Transport.has_path, destination_hash,
                                      target=hash_short):
@@ -842,6 +853,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
                 if not RNS.Transport.has_path(destination_hash):
                     logger.warning("No path to destination")
+                    # Per-destination failure: feeds the threshold-based
+                    # OPEN transition so repeated no-path sends stop
+                    # hammering path requests (MF #74).
+                    self.record_send_failure(hash_short, "no path")
                     return False
 
                 dest_identity = call_boundary("rnsd.identity_recall",
@@ -904,12 +919,17 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             call_boundary("rnsd.handle_outbound",
                           self._lxmf_router.handle_outbound, lxm,
                           target=hash_short)
+            self.record_send_success(hash_short)
             return True
 
         except Exception as e:
             logger.error(f"Failed to send to RNS: {e}")
             with self._stats_lock:
                 self.stats['errors'] += 1
+            if destination_hash:
+                self.record_send_failure(
+                    destination_hash.hex()[:8], str(e)
+                )
             return False
 
     # send_to_meshcore() inherited from MeshCoreBridgeMixin
@@ -921,6 +941,24 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
 
         if not self._connected_rns:
             return False
+
+        # MF Issue #74 port: circuit gate BEFORE the try block — the
+        # inner except would swallow a raise into `return False`, which
+        # the queue classifies as an unknown error (one short retry,
+        # then dead-letter). Raising with a retriable-pattern message
+        # ("temporarily unavailable") makes RetryPolicy back off and
+        # retry after the circuit's recovery window instead.
+        if destination_hash:
+            _gate_key = (
+                destination_hash.hex()[:8]
+                if isinstance(destination_hash, bytes)
+                else str(destination_hash).lower()[:8]
+            )
+            if not self.can_send_to(_gate_key):
+                raise RuntimeError(
+                    f"circuit open for {_gate_key}: "
+                    f"destination temporarily unavailable"
+                )
 
         try:
             import RNS
@@ -946,6 +984,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         return False
 
             if not RNS.Transport.has_path(destination_hash):
+                self.record_send_failure(hash_short, "no path")
                 return False
 
             dest_identity = call_boundary("rnsd.identity_recall",
@@ -960,10 +999,18 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             call_boundary("rnsd.handle_outbound",
                           self._lxmf_router.handle_outbound, lxm,
                           target=hash_short)
+            self.record_send_success(hash_short)
             return True
 
         except Exception as e:
             logger.error(f"Queue send to RNS failed: {e}")
+            if destination_hash:
+                _fail_key = (
+                    destination_hash.hex()[:8]
+                    if isinstance(destination_hash, bytes)
+                    else str(destination_hash).lower()[:8]
+                )
+                self.record_send_failure(_fail_key, str(e))
             return False
 
     def enqueue_message(self, message: str, destination: str, dest_type: str = "meshtastic",
@@ -1345,6 +1392,18 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                         self.health.record_connection_event("rns", "connected")
                         self._update_subsystem_state("rns", SubsystemState.HEALTHY)
                         logger.info("RNS connection established")
+                        # MF Issue #74 port: a fresh transport
+                        # invalidates stale per-destination OPEN state
+                        # from the prior connection. Without this,
+                        # circuits stay OPEN the full recovery_timeout
+                        # after recovery.
+                        if self._circuit_breaker is not None:
+                            _reset = self._circuit_breaker.reset_all()
+                            if _reset:
+                                logger.info(
+                                    f"Reset {_reset} circuit(s) after "
+                                    f"RNS reconnect"
+                                )
                         # Start LXMF broadcast bridge plug-in (idempotent)
                         self._maybe_start_lxmf_broadcast()
                         # Start LXMF→MeshCore re-emit bridge (idempotent)
