@@ -301,7 +301,9 @@ class TestActiveHealthProbe:
         names = self._registered_check_names(probe)
         # Full set = legacy three + the rnsd-RPC fragility companions that
         # ride along with rnsd (RNS-reliability parity port, 2026-05-31) +
-        # the two unconditional fd-exhaustion probes (#73 parity port).
+        # the two unconditional fd-exhaustion probes (#73 parity port) +
+        # the two unconditional delivery-observability probes (MF Issue
+        # #74 probe port, 2026-06-06).
         assert set(names) == {
             "meshtasticd",
             "rnsd",
@@ -310,6 +312,8 @@ class TestActiveHealthProbe:
             "mosquitto",
             "meshanchor_map_fds",
             "meshanchor_daemon_fds",
+            "queue_backlog",
+            "delivery_confirmation_stall",
         }
 
 
