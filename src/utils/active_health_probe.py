@@ -35,6 +35,7 @@ import socket
 import subprocess
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional, List
@@ -216,6 +217,12 @@ class ActiveHealthProbe:
         self._stop_event = threading.Event()  # Set to signal stop
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.RLock()
+
+        # MF Issue #74 probe port: trailing dead-letter samples for
+        # check_queue_backlog's growth judgment. (ts, count) pairs;
+        # restart re-baselines (first post-restart sample = baseline,
+        # so a static historical dead-letter pile never false-alarms).
+        self._dl_samples: deque = deque()
 
     def register_check(
         self,
@@ -674,6 +681,183 @@ class ActiveHealthProbe:
             ),
         )
 
+    def check_queue_backlog(
+        self,
+        *,
+        depth_degraded: float = 0.80,
+        depth_wedge: float = 0.95,
+        dl_growth_degraded: int = 10,
+        dl_growth_wedge: int = 50,
+        growth_window_s: float = 300.0,
+        now: Optional[float] = None,
+        stats: Optional[dict] = None,
+    ) -> HealthResult:
+        """Persistent-queue backpressure (MF Issue #74 probe port).
+
+        A deep backlog masks delivery failures: messages sit 'pending'
+        while the operator reads the gateway as healthy, and at the
+        shed threshold ``_shed_overflow`` silently drops LOW/NORMAL
+        priority. Two legs:
+
+        - depth: queue_depth / max_queue_size ≥ 95% flags ``wedge``
+          (shed imminent/active), ≥ 80% ``degraded``. Skipped when
+          max_queue_size ≤ 0 (unlimited — no ceiling to judge, mirrors
+          the fd check's "unlimited" guard).
+        - dead-letter GROWTH over a trailing ``growth_window_s`` deque
+          (instance state — the MA-native replacement for MF's
+          persisted-baseline file): a one-tick spike stays ≥ threshold
+          vs the oldest in-window sample for the full window (~10
+          ticks at 30s), latching past the fails=3 hysteresis, then
+          self-heals as the elevated count becomes the new baseline.
+          A static historical pile never fires.
+
+        Reads ``PersistentMessageQueue().get_stats()`` IN-PROCESS — the
+        probe runs as the operator inside the daemon/agent (unlike
+        MF's sandboxed root watchdog, which must go over localhost
+        HTTP). Healthy (quiet) when stats are unavailable — a box with
+        no gateway/queue must not false-alarm.
+
+        ``now``/``stats`` are test seams (fd check's injection style).
+        """
+        if stats is None:
+            try:
+                from gateway.message_queue import PersistentMessageQueue
+                stats = PersistentMessageQueue().get_stats()
+            except Exception:
+                return HealthResult(healthy=True, reason="queue_stats_unavailable")
+        try:
+            max_q = int(stats.get("max_queue_size") or 0)
+            depth = int(stats.get("queue_depth") or 0)
+            dead = int(stats.get("dead_letter") or 0)
+        except (TypeError, ValueError):
+            return HealthResult(healthy=True, reason="queue_stats_malformed")
+
+        ts_now = now if now is not None else time.time()
+        findings = []  # (level, fragment)
+
+        if max_q > 0:
+            usage = depth / max_q
+            if usage >= depth_wedge:
+                findings.append((
+                    "wedge",
+                    f"queue at {usage:.0%} of max ({depth}/{max_q}) — "
+                    f"shed threshold; LOW/NORMAL priority messages are "
+                    f"being dropped",
+                ))
+            elif usage >= depth_degraded:
+                findings.append((
+                    "degraded",
+                    f"queue backlog building: {usage:.0%} of max "
+                    f"({depth}/{max_q})",
+                ))
+
+        self._dl_samples.append((ts_now, dead))
+        while self._dl_samples and ts_now - self._dl_samples[0][0] > growth_window_s:
+            self._dl_samples.popleft()
+        baseline = self._dl_samples[0][1]
+        growth = dead - baseline
+        if growth >= dl_growth_wedge:
+            findings.append((
+                "wedge",
+                f"dead-letter +{growth} in {growth_window_s / 60:.0f}m "
+                f"(now {dead}) — retries exhausting en masse",
+            ))
+        elif growth >= dl_growth_degraded:
+            findings.append((
+                "degraded",
+                f"dead-letter +{growth} in window (now {dead})",
+            ))
+
+        if not findings:
+            return HealthResult(
+                healthy=True,
+                reason=f"queue_ok depth={depth}/{max_q} dl={dead}",
+            )
+
+        level = "wedge" if any(lv == "wedge" for lv, _ in findings) else "degraded"
+        return HealthResult(
+            healthy=False,
+            reason=(
+                f"queue_backlog ({level}): "
+                + "; ".join(f for _, f in findings)
+                + ". Check /api/gateway/queue and the gateway journal "
+                "for the failing destination."
+            ),
+        )
+
+    def check_delivery_confirmation_stall(
+        self,
+        *,
+        min_sent: int = 20,
+        rate_degraded: float = 0.50,
+        rate_wedge: float = 0.10,
+        snap: Optional[dict] = None,
+    ) -> HealthResult:
+        """Sends flow but confirmations collapsed (MF Issue #74 probe port).
+
+        Closes the honest-signal gap where the bridge's own rolling
+        metrics decay to quiet/healthy when events stop — a gateway
+        shouting into a void looks fine from inside; this judges from
+        the durable counters instead. Windowed rate from the
+        ``delivery_counters.snapshot()`` recent-events ring (last 50)
+        — the lifetime-cumulative rate would mask a recent collapse on
+        a long-lived box.
+
+        Self-guards healthy (silence is NOT failure here — the
+        explicit inversion of the channel-dark class): counters
+        unavailable; ``confirmation_rate is None`` (zero sends ever);
+        ring SENT < ``min_sent`` (one unconfirmed message must not
+        tank a tiny denominator; busy gateways canary for the fleet).
+
+        In the daemon process this reads the writer's own snapshot; in
+        the agent it reads cross-process via the SQLite file (the #74
+        write-error persistence keeps that honest). ``snap`` is a test
+        seam.
+        """
+        if snap is None:
+            try:
+                from gateway.delivery_counters import snapshot as _snapshot
+                snap = _snapshot()
+            except Exception:
+                return HealthResult(
+                    healthy=True, reason="delivery_counters_unavailable",
+                )
+        if not isinstance(snap, dict) or snap.get("confirmation_rate") is None:
+            return HealthResult(healthy=True, reason="no_traffic")
+
+        recent = snap.get("recent")
+        if not isinstance(recent, list):
+            return HealthResult(healthy=True, reason="no_recent_ring")
+
+        ring_sent = sum(1 for e in recent
+                        if isinstance(e, dict) and e.get("state") == "sent")
+        ring_conf = sum(1 for e in recent
+                        if isinstance(e, dict) and e.get("state") == "confirmed")
+        if ring_sent < min_sent:
+            return HealthResult(
+                healthy=True,
+                reason=f"low_traffic ring_sent={ring_sent}<{min_sent}",
+            )
+
+        rate = ring_conf / ring_sent
+        if rate > rate_degraded:
+            return HealthResult(
+                healthy=True,
+                reason=f"confirm_ok {ring_conf}/{ring_sent} ({rate:.0%})",
+            )
+
+        level = "wedge" if rate <= rate_wedge else "degraded"
+        return HealthResult(
+            healthy=False,
+            reason=(
+                f"delivery_confirmation_stall ({level}): {ring_conf}/"
+                f"{ring_sent} confirmed in the recent-events window "
+                f"({rate:.0%}) while sends keep flowing. Receivers "
+                f"aren't acking — check RNS paths to the fan-out peers "
+                f"and /api/gateway/delivery drop_reasons."
+            ),
+        )
+
     def check_systemd_service(self, service_name: str) -> HealthResult:
         """
         Check if a systemd service is active and running.
@@ -870,6 +1054,22 @@ def create_gateway_health_probe(
     probe.register_check(
         "meshanchor_daemon_fds",
         lambda: probe.check_fd_exhaustion("meshanchor-daemon.service"),
+    )
+
+    # MF Issue #74 probe port (delivery observability): queue
+    # backpressure + delivery-confirmation stall. Registered
+    # UNCONDITIONALLY following the fd-exhaustion precedent — each
+    # check self-guards healthy when the queue/counters are
+    # unobservable, so non-gateway boxes and the agent process never
+    # false-alarm. The daemon is the counters writer (reads its own
+    # snapshot); the agent reads cross-process via the SQLite file.
+    probe.register_check(
+        "queue_backlog",
+        lambda: probe.check_queue_backlog(),
+    )
+    probe.register_check(
+        "delivery_confirmation_stall",
+        lambda: probe.check_delivery_confirmation_stall(),
     )
 
     # Wire state changes to EventBus for push-based status updates

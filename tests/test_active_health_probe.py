@@ -354,3 +354,188 @@ class TestFdExhaustionProbe:
             "meshanchor-daemon.service", proc_root=root, main_pid=7777)
         assert r.healthy is False
         assert "meshanchor-daemon.service" in r.reason
+
+
+class TestQueueBacklogProbe:
+    """MF Issue #74 probe port: persistent-queue backpressure check.
+    Depth legs (80%/95% of max) + dead-letter GROWTH over a trailing
+    window (a static historical pile never fires; a one-tick spike
+    latches past the fails=3 hysteresis because the pre-spike baseline
+    stays in-window for ~10 ticks)."""
+
+    def _probe(self):
+        from utils.active_health_probe import ActiveHealthProbe
+        return ActiveHealthProbe()
+
+    @staticmethod
+    def _stats(depth=0, max_size=1000, dead=0):
+        return {"queue_depth": depth, "max_queue_size": max_size,
+                "dead_letter": dead}
+
+    def test_healthy_when_stats_unavailable(self, monkeypatch):
+        """No gateway/queue on this box -> quiet, never an exception."""
+        import gateway.message_queue as mq
+        monkeypatch.setattr(
+            mq, "PersistentMessageQueue",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no db")),
+        )
+        r = self._probe().check_queue_backlog()
+        assert r.healthy is True
+        assert r.reason == "queue_stats_unavailable"
+
+    def test_healthy_when_unlimited_queue(self):
+        """max_queue_size=0 -> no ceiling to judge the depth leg
+        against (mirrors the fd 'unlimited' guard)."""
+        r = self._probe().check_queue_backlog(
+            stats=self._stats(depth=50_000, max_size=0))
+        assert r.healthy is True
+
+    def test_degraded_at_80pct_depth(self):
+        r = self._probe().check_queue_backlog(
+            stats=self._stats(depth=820, max_size=1000))
+        assert r.healthy is False
+        assert "queue_backlog (degraded)" in r.reason
+        assert "82%" in r.reason
+
+    def test_wedge_at_95pct_depth(self):
+        r = self._probe().check_queue_backlog(
+            stats=self._stats(depth=960, max_size=1000))
+        assert r.healthy is False
+        assert "queue_backlog (wedge)" in r.reason
+        assert "shed" in r.reason
+
+    def test_static_dead_letter_pile_never_fires(self):
+        """500 historical dead letters, no growth -> quiet on every tick."""
+        p = self._probe()
+        for i in range(5):
+            r = p.check_queue_backlog(
+                stats=self._stats(dead=500), now=1000.0 + i * 30)
+            assert r.healthy is True
+
+    def test_spike_latches_across_hysteresis_window(self):
+        """+60 spike must stay unhealthy for >=3 consecutive ticks (the
+        fails=3 hysteresis needs consecutive unhealthy results to flip
+        the service state) — the pre-spike baseline ages out only after
+        growth_window_s."""
+        p = self._probe()
+        assert p.check_queue_backlog(
+            stats=self._stats(dead=10), now=1000.0).healthy is True
+        for tick in range(1, 5):  # 4 consecutive ticks post-spike
+            r = p.check_queue_backlog(
+                stats=self._stats(dead=70), now=1000.0 + tick * 30)
+            assert r.healthy is False, f"tick {tick} must stay latched"
+            assert "queue_backlog (wedge)" in r.reason
+            assert "+60" in r.reason
+
+    def test_spike_self_heals_after_window(self):
+        """Once the pre-spike baseline ages out of the trailing window,
+        the elevated count is the new baseline -> healthy again."""
+        p = self._probe()
+        p.check_queue_backlog(stats=self._stats(dead=10), now=1000.0)
+        p.check_queue_backlog(stats=self._stats(dead=70), now=1030.0)
+        r = p.check_queue_backlog(
+            stats=self._stats(dead=70), now=1000.0 + 400.0)  # past 300s window
+        assert r.healthy is True
+
+    def test_small_growth_is_degraded(self):
+        p = self._probe()
+        p.check_queue_backlog(stats=self._stats(dead=100), now=1000.0)
+        r = p.check_queue_backlog(stats=self._stats(dead=115), now=1030.0)
+        assert r.healthy is False
+        assert "queue_backlog (degraded)" in r.reason
+        assert "+15" in r.reason
+
+    def test_max_severity_across_legs(self):
+        """Depth degraded + dead-letter wedge -> wedge wins, both legs
+        named in the reason."""
+        p = self._probe()
+        p.check_queue_backlog(
+            stats=self._stats(depth=850, max_size=1000, dead=0), now=1000.0)
+        r = p.check_queue_backlog(
+            stats=self._stats(depth=850, max_size=1000, dead=60), now=1030.0)
+        assert r.healthy is False
+        assert "queue_backlog (wedge)" in r.reason
+        assert "85%" in r.reason and "+60" in r.reason
+
+
+class TestDeliveryConfirmationStallProbe:
+    """MF Issue #74 probe port: sends flow but confirmations collapsed,
+    judged from the delivery_counters recent-events ring. Silence is
+    NOT failure here (inversion of the channel-dark class)."""
+
+    def _probe(self):
+        from utils.active_health_probe import ActiveHealthProbe
+        return ActiveHealthProbe()
+
+    @staticmethod
+    def _snap(ring_sent=0, ring_confirmed=0, cumulative=0.9):
+        recent = (
+            [{"state": "sent", "id": f"s{i}"} for i in range(ring_sent)]
+            + [{"state": "confirmed", "id": f"c{i}"}
+               for i in range(ring_confirmed)]
+        )
+        return {"confirmation_rate": cumulative, "recent": recent}
+
+    def test_healthy_when_counters_unavailable(self, monkeypatch):
+        import gateway.delivery_counters as dc
+        monkeypatch.setattr(
+            dc, "snapshot",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no db")),
+        )
+        r = self._probe().check_delivery_confirmation_stall()
+        assert r.healthy is True
+        assert r.reason == "delivery_counters_unavailable"
+
+    def test_healthy_when_no_traffic(self):
+        """confirmation_rate None <=> zero sends ever."""
+        r = self._probe().check_delivery_confirmation_stall(
+            snap={"confirmation_rate": None, "recent": []})
+        assert r.healthy is True
+        assert r.reason == "no_traffic"
+
+    def test_healthy_below_min_sent(self):
+        """3 sends, 0 confirms = 0% — but a low-traffic box must not
+        alarm; one unconfirmed message tanks a tiny denominator."""
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(ring_sent=3, ring_confirmed=0))
+        assert r.healthy is True
+        assert "low_traffic" in r.reason
+
+    def test_degraded_at_40pct(self):
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(ring_sent=25, ring_confirmed=10))
+        assert r.healthy is False
+        assert "delivery_confirmation_stall (degraded)" in r.reason
+
+    def test_wedge_at_under_10pct(self):
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(ring_sent=30, ring_confirmed=2))
+        assert r.healthy is False
+        assert "delivery_confirmation_stall (wedge)" in r.reason
+
+    def test_healthy_rate_is_quiet(self):
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(ring_sent=25, ring_confirmed=22))
+        assert r.healthy is True
+
+    def test_uses_recent_ring_not_cumulative(self):
+        """A long-lived box with a 95% LIFETIME rate but a collapsed
+        RECENT window must fire — cumulative masks the collapse."""
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(ring_sent=30, ring_confirmed=1, cumulative=0.95))
+        assert r.healthy is False
+        assert "delivery_confirmation_stall (wedge)" in r.reason
+
+
+class TestNewProbesRegistered:
+    """MF Issue #74 probe port: both new checks must be wired into
+    create_gateway_health_probe (else dead code) — unconditional, each
+    self-guards on unobservable (fd-port precedent)."""
+
+    def test_registered_in_factory(self):
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_unmanaged_services", return_value=set()):
+            probe = ahp.create_gateway_health_probe()
+        registered = set(probe._checks.keys())
+        assert "queue_backlog" in registered
+        assert "delivery_confirmation_stall" in registered
