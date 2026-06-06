@@ -34,9 +34,30 @@ from contextlib import contextmanager
 from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
 from utils.timeouts import MESSAGE_STALE as _MESSAGE_STALE_TIMEOUT
-from gateway import delivery_counters as _dc
 
 logger = logging.getLogger(__name__)
+
+
+class _LazyDeliveryCounters:
+    """Deferred delivery_counters import (MF Issue #74 probe port).
+
+    A module-level ``from gateway import delivery_counters`` here
+    deadlocked the daemon's threaded startup on meshanchor-server
+    (2026-06-06): gateway/__init__ eagerly imports the whole package,
+    so touching the parent from a submodule mid-import creates a
+    cross-thread _ModuleLock cycle ("deadlock detected by
+    _ModuleLock('gateway.message_queue')" — node tracker start
+    failed). First attribute access imports and replaces this proxy,
+    long after import time has settled.
+    """
+
+    def __getattr__(self, name):
+        from gateway import delivery_counters as mod
+        globals()["_dc"] = mod  # cache: later access skips the proxy
+        return getattr(mod, name)
+
+
+_dc = _LazyDeliveryCounters()
 
 # Process-wide message-id sequence — disambiguates ids minted in the same
 # millisecond for the same content (see enqueue's id-generation comment).

@@ -22,8 +22,23 @@ from .bridge_health import (
     BridgeHealthMonitor, DeliveryTracker,
     BridgeStatus, SubsystemState, MessageOrigin
 )
-from gateway import delivery_counters as _dc
 from utils.boundary_timing import call_boundary
+
+
+class _LazyDeliveryCounters:
+    """Deferred delivery_counters import — see the twin in
+    message_queue.py: a module-level parent-package import from a
+    gateway submodule deadlocked the daemon's threaded startup
+    (cross-thread _ModuleLock cycle, 2026-06-06). First attribute
+    access imports and replaces this proxy."""
+
+    def __getattr__(self, name):
+        from gateway import delivery_counters as mod
+        globals()["_dc"] = mod
+        return getattr(mod, name)
+
+
+_dc = _LazyDeliveryCounters()
 from utils.safe_import import safe_import
 
 # MQTT bridge handler (zero-interference, recommended)
