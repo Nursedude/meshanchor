@@ -269,3 +269,69 @@ class TestDestinationFiltering:
         queue.enqueue({"text": "mesh"}, "meshtastic")
         pending = queue.get_pending(destination="nonexistent")
         assert len(pending) == 0
+
+
+class TestDeliveryCounterWiring:
+    """MF Issue #74 port: each queue lifecycle transition records the
+    matching durable delivery_counters state, so the confirmation ring
+    the delivery_confirmation_stall check judges is honest."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_counters(self, tmp_path, monkeypatch):
+        from gateway import delivery_counters as _dc
+        monkeypatch.setenv(
+            "MESHANCHOR_DELIVERY_COUNTERS_DB",
+            str(tmp_path / "counters.db"),
+        )
+        _dc._reset_singleton_for_tests()
+        yield
+        _dc._reset_singleton_for_tests()
+
+    def _snap(self):
+        from gateway import delivery_counters as _dc
+        return _dc.get_singleton().snapshot()
+
+    def test_enqueue_records_queued(self, queue):
+        msg_id = queue.enqueue({"message": "hi"}, "rns")
+        assert msg_id is not None
+        snap = self._snap()
+        assert snap["state_totals"]["queued"] == 1
+        assert snap["state_by_protocol"]["queued"].get("rns") == 1
+
+    def test_mark_delivered_records_sent_with_protocol(self, queue):
+        msg_id = queue.enqueue({"message": "hi"}, "rns")
+        queue.mark_in_progress(msg_id)
+        queue.mark_delivered(msg_id)
+        snap = self._snap()
+        assert snap["state_totals"]["sent"] == 1
+        assert snap["state_by_protocol"]["sent"].get("rns") == 1
+
+    def test_dedup_records_dropped_dedup(self, queue):
+        queue.enqueue({"message": "dup"}, "rns")
+        result = queue.enqueue({"message": "dup"}, "rns")
+        assert result is None
+        snap = self._snap()
+        assert snap["drop_reasons"]["dedup"] == 1
+
+    def test_retries_exhausted_records_dropped(self, queue):
+        msg_id = queue.enqueue({"message": "doomed"}, "rns", max_retries=1)
+        queue.mark_in_progress(msg_id)
+        queue.mark_failed(msg_id, "timeout")  # retry 1 = max -> dead letter
+        snap = self._snap()
+        assert snap["state_totals"]["dropped"] >= 1
+        assert snap["drop_reasons"]["retries_exhausted"] >= 1
+
+    def test_worker_injects_queue_msg_id(self, queue):
+        """The Fork-C syn/ack seam: send_fn receives the queue row's id
+        so the bridge can pin LXMF callbacks to it (CONFIRMED joins
+        QUEUED + SENT under one id)."""
+        seen = {}
+
+        def capture_sender(payload):
+            seen.update(payload)
+            return True
+
+        queue.register_sender("capture", capture_sender)
+        msg_id = queue.enqueue({"message": "hi"}, "capture")
+        queue.process_once()
+        assert seen.get("_queue_msg_id") == msg_id

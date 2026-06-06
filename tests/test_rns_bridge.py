@@ -3090,3 +3090,97 @@ class TestCircuitBreakerWiringIssue74:
 
         bridge._rns_loop()
         bridge._circuit_breaker.reset_all.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# MF Issue #74 port: durable CONFIRMED/DROPPED from LXMF callbacks (both paths)
+# ---------------------------------------------------------------------------
+
+class TestDeliveryCounterCallbacksIssue74:
+    """Both send paths must pin LXMF delivery callbacks to a msg_id that
+    records durable CONFIRMED (proof) / DROPPED (failure) — the queue
+    path via the injected _queue_msg_id (Fork C syn/ack), so
+    history_for(queue_id) joins QUEUED → SENT → CONFIRMED. Without the
+    queue-path wiring the confirmation ring is biased (SENT-without-
+    CONFIRMED for all queue traffic) and the stall check false-alarms."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_counters(self, tmp_path, monkeypatch):
+        from gateway import delivery_counters as _dc
+        monkeypatch.setenv(
+            "MESHANCHOR_DELIVERY_COUNTERS_DB",
+            str(tmp_path / "counters.db"),
+        )
+        _dc._reset_singleton_for_tests()
+        yield
+        _dc._reset_singleton_for_tests()
+
+    @staticmethod
+    def _fake_rns_lxmf():
+        fake_rns = MagicMock(name="RNS")
+        fake_rns.Transport.has_path.return_value = True
+        fake_rns.Identity.recall.return_value = MagicMock(name="dest_identity")
+        fake_rns.Destination.OUT = "OUT"
+        fake_rns.Destination.SINGLE = "SINGLE"
+        fake_rns.Destination.return_value = MagicMock(name="destination")
+        fake_lxmf = MagicMock(name="LXMF")
+        fake_lxm = MagicMock(name="LXMessage_instance")
+        fake_lxmf.LXMessage.return_value = fake_lxm
+        return fake_rns, fake_lxmf, fake_lxm
+
+    def _prime(self, bridge):
+        bridge._connected_rns = True
+        bridge._lxmf_source = MagicMock(name="lxmf_source")
+        bridge._lxmf_router = MagicMock(name="lxmf_router")
+        bridge._maybe_emit_ack_for_msgid = MagicMock()
+
+    def test_queue_send_pins_callbacks_to_queue_msg_id(self, bridge):
+        """End-to-end: queue row id flows from the dispatched payload
+        through callback registration to the CONFIRMED counter."""
+        import sys
+        from gateway import delivery_counters as _dc
+        fake_rns, fake_lxmf, fake_lxm = self._fake_rns_lxmf()
+        self._prime(bridge)
+        queue_id = "1700000000000-abcd1234-0001"
+        payload = {
+            "message": "hi",
+            "destination_hash": b"\xab" * 16,
+            "_queue_msg_id": queue_id,
+        }
+        with patch.dict(sys.modules, {"RNS": fake_rns, "LXMF": fake_lxmf}):
+            assert bridge._queue_send_rns(payload) is True
+        assert fake_lxm.register_delivery_callback.called
+        assert fake_lxm.register_failed_callback.called
+        # Fire the delivery proof — CONFIRMED lands under the QUEUE id.
+        delivered_cb = fake_lxm.register_delivery_callback.call_args[0][0]
+        delivered_cb(MagicMock(name="receipt"))
+        hist = [e.state for e in _dc.get_singleton().history_for(queue_id)]
+        assert _dc.DeliveryState.CONFIRMED in hist
+
+    def test_queue_send_failed_receipt_records_drop(self, bridge):
+        import sys
+        from gateway import delivery_counters as _dc
+        fake_rns, fake_lxmf, fake_lxm = self._fake_rns_lxmf()
+        self._prime(bridge)
+        payload = {"message": "hi", "destination_hash": b"\xab" * 16,
+                   "_queue_msg_id": "q-1"}
+        with patch.dict(sys.modules, {"RNS": fake_rns, "LXMF": fake_lxmf}):
+            bridge._queue_send_rns(payload)
+        failed_cb = fake_lxm.register_failed_callback.call_args[0][0]
+        receipt = MagicMock()
+        receipt.failure_reason = "no_path"
+        failed_cb(receipt)
+        snap = _dc.get_singleton().snapshot()
+        assert snap["drop_reasons"]["rns_delivery_failed"] == 1
+
+    def test_direct_send_records_confirmed(self, bridge):
+        import sys
+        from gateway import delivery_counters as _dc
+        fake_rns, fake_lxmf, fake_lxm = self._fake_rns_lxmf()
+        self._prime(bridge)
+        with patch.dict(sys.modules, {"RNS": fake_rns, "LXMF": fake_lxmf}):
+            assert bridge.send_to_rns("hello", b"\xab" * 16) is True
+        delivered_cb = fake_lxm.register_delivery_callback.call_args[0][0]
+        delivered_cb(MagicMock(name="receipt"))
+        snap = _dc.get_singleton().snapshot()
+        assert snap["state_totals"]["confirmed"] == 1

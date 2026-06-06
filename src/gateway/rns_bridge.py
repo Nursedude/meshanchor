@@ -22,6 +22,7 @@ from .bridge_health import (
     BridgeHealthMonitor, DeliveryTracker,
     BridgeStatus, SubsystemState, MessageOrigin
 )
+from gateway import delivery_counters as _dc
 from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
 
@@ -900,6 +901,13 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             # second call to prevent double-emission.
             def on_delivered(receipt):
                 self.delivery_tracker.confirm_delivery(msg_id)
+                # MF Issue #74 port: durable CONFIRMED — the receiver
+                # proved delivery. Feeds the confirmation ring the
+                # delivery_confirmation_stall check judges.
+                _dc.record(
+                    _dc.DeliveryState.CONFIRMED,
+                    msg_id=msg_id, protocol="rns",
+                )
                 self._maybe_emit_ack_for_msgid(msg_id, kind='delivered')
 
             def on_failed(receipt):
@@ -907,6 +915,12 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
                 if hasattr(receipt, 'failure_reason'):
                     reason = str(receipt.failure_reason)
                 self.delivery_tracker.confirm_failure(msg_id, reason)
+                _dc.record(
+                    _dc.DeliveryState.DROPPED,
+                    msg_id=msg_id, protocol="rns",
+                    drop_reason=_dc.DropReason.RNS_DELIVERY_FAILED,
+                    note=reason[:80],
+                )
                 self._maybe_emit_ack_for_msgid(msg_id, kind='failed')
 
             try:
@@ -996,6 +1010,48 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin):
             )
 
             lxm = LXMF.LXMessage(destination, self._lxmf_source, message, "MeshAnchor Gateway")
+
+            # MF Issue #74 port (Fork C syn/ack): pin the LXMF delivery
+            # callbacks to the queue row's id (injected at dispatch by
+            # process_once) so history_for(msg_id) joins QUEUED (enqueue)
+            # → SENT (mark_delivered) → CONFIRMED (delivery proof).
+            # Without this, queue-path sends record SENT but never
+            # CONFIRMED — biasing the confirmation ring the
+            # delivery_confirmation_stall check judges.
+            msg_id = (
+                payload.get('_queue_msg_id')
+                or f"lxmf-{int(time.time() * 1000)}"
+            )
+
+            def on_delivered(receipt, _mid=msg_id):
+                self.delivery_tracker.confirm_delivery(_mid)
+                _dc.record(
+                    _dc.DeliveryState.CONFIRMED,
+                    msg_id=_mid, protocol="rns",
+                )
+                self._maybe_emit_ack_for_msgid(_mid, kind='delivered')
+
+            def on_failed(receipt, _mid=msg_id):
+                reason = "delivery_failed"
+                if hasattr(receipt, 'failure_reason'):
+                    reason = str(receipt.failure_reason)
+                self.delivery_tracker.confirm_failure(_mid, reason)
+                _dc.record(
+                    _dc.DeliveryState.DROPPED,
+                    msg_id=_mid, protocol="rns",
+                    drop_reason=_dc.DropReason.RNS_DELIVERY_FAILED,
+                    note=reason[:80],
+                )
+                self._maybe_emit_ack_for_msgid(_mid, kind='failed')
+
+            try:
+                lxm.register_delivery_callback(on_delivered)
+                lxm.register_failed_callback(on_failed)
+            except (AttributeError, TypeError):
+                logger.debug(
+                    "LXMF callbacks not available, skipping delivery tracking"
+                )
+
             call_boundary("rnsd.handle_outbound",
                           self._lxmf_router.handle_outbound, lxm,
                           target=hash_short)
