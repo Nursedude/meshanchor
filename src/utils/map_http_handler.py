@@ -171,6 +171,7 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             "/api/nodes/directory",
             "/api/messages/queue", "/api/messages/rx-status",
             "/api/messages/received",
+            "/api/gateway/queue", "/api/gateway/delivery",
             "/api/network/topology", "/api/weather",
             "/api/websocket/status", "/api/proxy/status",
             "/api/radio/info", "/api/radio/nodes",
@@ -287,6 +288,10 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
             self._serve_received_messages()
         elif self.path == '/api/messages/rx-status' or self.path == '/api/messages/rx-status/':
             self._serve_rx_status()
+        elif self.path == '/api/gateway/queue' or self.path == '/api/gateway/queue/':
+            self._serve_gateway_queue()
+        elif self.path == '/api/gateway/delivery' or self.path == '/api/gateway/delivery/':
+            self._serve_gateway_delivery()
         elif self.path == '/api/websocket/status' or self.path == '/api/websocket/status/':
             self._serve_websocket_status()
         elif self.path == '/api/network/topology' or self.path == '/api/network/topology/':
@@ -1252,6 +1257,47 @@ class MapRequestHandler(FleetEndpointsMixin, RadioEndpointsMixin, MeshtasticProx
         except Exception as e:
             logger.error(f"LOS endpoint error: {e}")
             self._serve_json({"error": str(e)})
+
+    def _serve_gateway_queue(self):
+        """Queue backpressure stats (MF Issue #74 probe port).
+
+        Parity/federation surface — the in-process check_queue_backlog
+        reads get_stats() directly; this endpoint serves the dashboard,
+        operators, and MF-side federation the same shape MeshForge's
+        /api/gateway/queue serves.
+        """
+        if not _HAS_MSG_QUEUE:
+            self._serve_json(
+                {"error": "message_queue_unavailable"}, status=503,
+            )
+            return
+        try:
+            stats = _MessageQueue().get_stats()
+            stats["timestamp"] = time.time()
+            self._serve_json(stats, status=200)
+        except Exception as e:
+            self._serve_json(
+                {"error": "queue_stats_unavailable", "reason": str(e)},
+                status=500,
+            )
+
+    def _serve_gateway_delivery(self):
+        """Honest delivery lifecycle counters (MF Issue #74 probe port).
+
+        Serves ``delivery_counters.snapshot()``: per-state totals
+        (QUEUED/SENT/CONFIRMED/DROPPED), drop-reason histogram,
+        per-protocol breakdown, confirmation_rate (None at zero
+        traffic), recent-events ring, and the cross-process health
+        block (preflight + write-error truth).
+        """
+        try:
+            from gateway.delivery_counters import snapshot as _delivery_snap
+            self._serve_json(_delivery_snap(), status=200)
+        except Exception as e:
+            self._serve_json(
+                {"error": "delivery_counters_unavailable", "reason": str(e)},
+                status=500,
+            )
 
     def _serve_message_queue(self):
         """Serve pending messages from the gateway message queue."""
