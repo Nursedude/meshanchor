@@ -124,6 +124,21 @@ INVENTORY: List[DBSpec] = [
         notes="Auto-traceroute results. Startup prune + after-store prune.",
     ),
     DBSpec(
+        name="delivery_counters",
+        path_factory=lambda: _meshanchor_data_dir() / "delivery_counters.db",
+        creator_module="gateway.delivery_counters",
+        has_auto_prune=True,
+        retention_days=None,  # row-cap based (RING_BUFFER_CAP = 500)
+        notes=(
+            "MF Issue #74 probe port: honest delivery counters. Two "
+            "tables: counters (KV — state totals / drop-reason histogram "
+            "/ per-protocol breakdown / first+last event ts) and events "
+            "(FIFO ring pruned on insert at RING_BUFFER_CAP = 500). "
+            "Cross-process: gateway daemon writes, map daemon serves "
+            "/api/gateway/delivery from the same file."
+        ),
+    ),
+    DBSpec(
         name="tactical_timeline",
         path_factory=lambda: _meshanchor_config_dir() / "tactical_timeline.db",
         creator_module="tactical.timeline",
