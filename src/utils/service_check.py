@@ -646,6 +646,37 @@ def _wait_for_tcp_ready(port: int, host: str = 'localhost', max_wait: int = 15) 
     return False
 
 
+def is_service_enabled(
+    service_name: str, timeout: int = 5, user: bool = False
+) -> bool:
+    """Return True iff the unit is enabled to start at boot.
+
+    Read-only (``systemctl is-enabled``). Answers "is this unit the
+    *designated* owner of its job on this box?" — distinct from
+    ``check_service`` (live state right now). Primary use case: the RNS-init
+    boot-race guard (Issue #69) must know whether rnsd WILL host the
+    ``@rns/<instance>`` shared instance even when it hasn't started yet,
+    so client daemons that win the boot race wait instead of boot-claiming
+    the instance out from under it.
+
+    Accepts ``enabled`` and ``enabled-runtime``. Returns False for
+    disabled/static/masked/not-found and on any error.
+    """
+    argv = (
+        ['systemctl', '--user', 'is-enabled', service_name]
+        if user
+        else ['systemctl', 'is-enabled', service_name]
+    )
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout
+        )
+        return result.stdout.strip() in ('enabled', 'enabled-runtime')
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+        logger.debug("is_service_enabled(%s) failed: %s", service_name, e)
+        return False
+
+
 def daemon_reload(timeout: int = 30) -> Tuple[bool, str]:
     """
     Reload the systemd daemon to pick up service file changes.

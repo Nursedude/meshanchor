@@ -249,6 +249,59 @@ class TestKnownServices:
                 assert field in config, f"Service '{name}' missing required field '{field}'"
 
 
+class TestIsServiceEnabled:
+    """Tests for is_service_enabled — used by the RNS-init boot-race guard
+    (Issue #69) to know whether rnsd WILL host @rns/<instance> even when it
+    hasn't started yet. Ported from MeshForge (lead repo for the
+    RNS-reliability arc; rns_init.py is byte-identical parity)."""
+
+    def test_enabled_returns_true(self):
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="enabled\n")
+            assert is_service_enabled('rnsd') is True
+            args, _ = mock_run.call_args
+            assert args[0] == ['systemctl', 'is-enabled', 'rnsd']
+
+    def test_enabled_runtime_returns_true(self):
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="enabled-runtime\n")
+            assert is_service_enabled('rnsd') is True
+
+    def test_disabled_returns_false(self):
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="disabled\n")
+            assert is_service_enabled('rnsd') is False
+
+    def test_not_found_returns_false(self):
+        """No unit at all (e.g. CI runner) → False, no boot-race wait."""
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=4, stdout="", stderr="Failed to get unit file state")
+            assert is_service_enabled('rnsd') is False
+
+    def test_masked_returns_false(self):
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="masked\n")
+            assert is_service_enabled('rnsd') is False
+
+    def test_systemctl_missing_returns_false(self):
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            assert is_service_enabled('rnsd') is False
+
+    def test_user_scope_argv(self):
+        from src.utils.service_check import is_service_enabled
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="enabled\n")
+            assert is_service_enabled('meshanchor-echo', user=True) is True
+            args, _ = mock_run.call_args
+            assert args[0] == ['systemctl', '--user', 'is-enabled', 'meshanchor-echo']
+
+
 class TestDaemonReload:
     """Tests for daemon_reload helper function."""
 
