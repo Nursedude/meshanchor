@@ -1260,6 +1260,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
         works without sudo, so we use it instead of a full status dump."""
         import subprocess
         try:
+            # Raw is-active (allowlisted in TestServiceCheckContract): this
+            # subtitle prints the literal systemctl state, keeping 'activating'/
+            # 'reloading' granularity that check_service() collapses.
             result = subprocess.run(
                 ["systemctl", "is-active", self.DAEMON_SERVICE],
                 capture_output=True, text=True, timeout=5,

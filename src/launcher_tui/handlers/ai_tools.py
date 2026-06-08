@@ -479,6 +479,9 @@ class AIToolsHandler(BaseHandler):
     def _get_map_service_status(self) -> str:
         """Get map server service status for display."""
         try:
+            # Raw is-active (allowlisted in TestServiceCheckContract): the
+            # returncode distinguishes the in-process-TUI case from a systemd
+            # unit — check_service() doesn't expose that.
             result = subprocess.run(
                 ['systemctl', 'is-active', 'meshanchor-map'],
                 capture_output=True, text=True, timeout=5

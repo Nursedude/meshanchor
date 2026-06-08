@@ -137,17 +137,17 @@ class DashboardHandler(BaseHandler):
                 ('rnsd', 'RNS / Reticulum'),
                 ('mosquitto', 'MQTT Broker'),
             ]
+            # MF008: service state via check_service(), not raw systemctl.
+            from utils.service_check import check_service, ServiceState
             for unit, label in fallback_order:
                 try:
-                    result = subprocess.run(
-                        ['systemctl', 'is-active', unit],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    status = result.stdout.strip()
-                    if status == 'active':
+                    svc_status = check_service(unit)
+                    if svc_status.available:
                         print(f"  \033[0;32m●\033[0m {label:<22} running")
+                    elif svc_status.state in (ServiceState.FAILED, ServiceState.DEGRADED):
+                        print(f"  \033[0;31m●\033[0m {label:<22} FAILED")
                     else:
-                        print(f"  \033[2m○\033[0m {label:<22} {status}")
+                        print(f"  \033[2m○\033[0m {label:<22} {svc_status.state.value}")
                 except Exception:
                     print(f"  ? {label:<22} unknown")
 
