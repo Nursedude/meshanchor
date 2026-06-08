@@ -20,6 +20,7 @@ Checks:
 - MF016: @patch('src.utils.paths.…') in tests — production imports via bare 'utils.paths', divergent class objects
 - MA017: hardened systemd unit (ProtectHome=read-only) ReadWritePaths drift vs the three meshanchor buckets (Issue #58 class, ported from MeshForge MF017)
 - MF019: RNS.Reticulum() outside the guarded chokepoint (must use open_reticulum from utils.rns_init; #68/#69, ported from MeshForge 2026-05-31)
+- MF020: apply_config_and_restart() return (bool, msg) discarded in TUI handlers (hardcoded-success-after-unchecked-action, honest-signal #74-#77; ported from MeshForge 2026-06-08)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -339,6 +340,23 @@ class MeshAnchorLinter:
                     "wedged rnsd instead of hanging the thread; #68/#69). If the "
                     "call is genuinely isolated, add it to the chokepoint "
                     "allowlist in lint.py + TestRNSReticulumChokepoint."
+                ))
+
+        # MF020: apply_config_and_restart() return value discarded in a TUI handler.
+        # The function returns (success, msg) precisely so callers surface a
+        # failed daemon restart; a bare-statement call drops it and feeds the
+        # #74-#77 "hardcoded success after an unchecked action" defect class.
+        # Honest pattern:
+        #   ok, msg = apply_config_and_restart('meshtasticd')
+        #   self.ctx.report_action(ok, "Applied", ..., "Restart Failed", msg)
+        norm_path = filepath.replace(os.sep, '/')
+        if 'launcher_tui/handlers/' in norm_path:
+            if re.match(r'^_?apply_config_and_restart\s*\(', stripped):
+                issues.append(LintIssue(
+                    filepath, lineno, Severity.ERROR, "MF020",
+                    "apply_config_and_restart() return (bool, msg) discarded — "
+                    "bind 'ok, msg = ...' and surface restart failure via "
+                    "ctx.report_action (honest-signal class, Issues #74-#77)"
                 ))
 
         # MF011: _nomadnet_rns_checks.py must not contain repair/service logic
