@@ -23,7 +23,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ def _fetch_peer_snapshot(peer, timeout: float):
 
 def _collect_daemon_federation_peers(
     *, timeout: float, fresh_window_s: int,
-) -> List[FederationPeer]:
+) -> Tuple[List[FederationPeer], Optional[str]]:
     """Fetch RNS announces from the daemon's `/fleet/federation` registry.
 
     The canonical source — daemon's `rns_services._service_registry`
@@ -157,7 +157,9 @@ def _collect_daemon_federation_peers(
         f"{DEFAULT_DAEMON_URL}/fleet/federation", timeout=timeout,
     )
     if err is not None or not isinstance(body, dict):
-        return []
+        # Return the failure reason (not just []) so the caller can record it —
+        # a silent [] reads identical to "heard 0 announces" (S8 L4).
+        return [], f"federation registry unreachable: {err or 'non-dict response'}"
 
     cutoff = float(fresh_window_s) if fresh_window_s > 0 else None
     out: List[FederationPeer] = []
@@ -176,7 +178,7 @@ def _collect_daemon_federation_peers(
             last_seen=entry.get("last_seen"),
             last_seen_age_s=age,
         ))
-    return out
+    return out, None
 
 
 def _collect_federation_peers(collector, fresh_window_s: int) -> List[FederationPeer]:
@@ -386,10 +388,14 @@ def collect_fleet_rollup(
         # directory cache is the fallback for hosts that persist RNS
         # entries via a future collector. Union, daemon-first, dedup by
         # node_id — matches the pattern in `_serve_fleet_federation`.
-        daemon_peers = _collect_daemon_federation_peers(
+        daemon_peers, daemon_err = _collect_daemon_federation_peers(
             timeout=timeout,
             fresh_window_s=config.federation.fresh_window_s,
         )
+        if daemon_err:
+            # Surface the registry-fetch failure instead of letting it collapse
+            # to a silent "0 peers" (indistinguishable from "heard nothing") — S8 L4.
+            rollup.errors.append({"source": "federation", "error": daemon_err})
         directory_peers = _collect_federation_peers(
             collector,
             fresh_window_s=config.federation.fresh_window_s,

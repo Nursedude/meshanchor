@@ -164,6 +164,12 @@ class ChatPaneServiceOpsMixin:
             "error": None,
         }
 
+        # meshcore-chat is a systemd --user unit; check_service() (utils.service_check)
+        # is system-scope only (no --user support), so this intentionally uses the raw
+        # --user probe rather than the SSOT. The branches keep it honest — rc==-1 ->
+        # "unreachable" (never green) and a 'failed' SubState is surfaced by the
+        # renderer. Do NOT "fix" this by routing through check_service: it would query
+        # the system manager and silently report the user unit inactive (S8 L1).
         rc, out = self._user_systemctl_text(["is-active", "meshcore-chat"])
         if rc == 0 and out == "active":
             state["active"] = True

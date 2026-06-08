@@ -127,7 +127,8 @@ def validate_meshcore_device(
     skipped — the device is assumed busy in the persistent owner.
 
     Returns a dict with keys ``exists``, ``readable``, ``responds``,
-    ``error``.
+    ``error``. ``responds`` is None when the device was not actually probed
+    (e.g. a persistent owner holds it) — never a fabricated True.
     """
     result: Dict[str, Any] = {
         'exists': False,
@@ -152,7 +153,10 @@ def validate_meshcore_device(
     mgr = get_connection_manager()
     if mgr.has_persistent():
         result['readable'] = True  # by inference: persistent owner has it open
-        result['responds'] = True
+        # NOT probed — we never sent/received, so we cannot claim it "responds".
+        # None (not True) keeps a future status surface from inheriting a
+        # fabricated green for an unmeasured device (S8 L5).
+        result['responds'] = None
         result['error'] = (
             f"persistent owner '{mgr.get_persistent_owner()}' active — "
             "skipping raw probe"

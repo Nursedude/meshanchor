@@ -240,7 +240,7 @@ class TestValidateMeshCoreDevice:
             result = mc.validate_meshcore_device("/dev/ttyMeshCore")
         assert result["exists"] is True
         assert result["readable"] is True
-        assert result["responds"] is True
+        assert result["responds"] is None  # not probed -> not a fabricated True (S8 L5)
         assert "persistent owner" in result["error"]
 
 

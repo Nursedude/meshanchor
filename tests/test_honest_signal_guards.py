@@ -495,3 +495,43 @@ class TestNomadnetUninstallM4:
             "_do_nomadnet_uninstall must track unlink failures and report "
             "'(uninstall incomplete …)' instead of unconditional 'removed' (S8 M4)"
         )
+
+
+# --- S8 LOW tier (L3-L5; L1/L2 are documented no-ops) ---
+
+ACTIVE_HEALTH_PROBE = REPO_ROOT / "src" / "utils" / "active_health_probe.py"
+MESHCORE_CONN = REPO_ROOT / "src" / "utils" / "meshcore_connection.py"
+
+
+class TestLowTierS8:
+    """S8 L3-L5 (#74-#77): low-severity fabricated-data / false-clean fixes."""
+
+    def test_l3_uptime_percent_none_when_never_checked(self):
+        # 0.0% uptime for a never-checked service is a fabricated value for
+        # "no data"; the status surface must emit None instead.
+        src = _src_or_skip(ACTIVE_HEALTH_PROBE)
+        assert "if state.total_checks else None" in src, (
+            "active_health_probe get_status must emit uptime_percent=None (not 0.0) "
+            "for a never-checked service (S8 L3)"
+        )
+
+    def test_l4_daemon_federation_error_is_threaded(self, monkeypatch):
+        # A registry-fetch failure must return its reason (not a silent []) so
+        # the rollup can surface it instead of reading "0 peers".
+        try:
+            import monitoring.fleet_rollup as fr
+            import monitoring.fleet_aggregator as fa
+        except Exception as e:
+            pytest.skip(f"fleet_rollup not importable: {e}")
+        monkeypatch.setattr(fa, "_http_get_json", lambda url, timeout=0: (None, "boom"))
+        peers, err = fr._collect_daemon_federation_peers(timeout=1, fresh_window_s=0)
+        assert peers == [] and err is not None and "unreachable" in err
+
+    def test_l5_responds_none_when_not_probed(self):
+        # When a persistent owner holds the radio we never probe, so 'responds'
+        # must be None (unmeasured), never a fabricated True.
+        src = _src_or_skip(MESHCORE_CONN)
+        assert "result['responds'] = None" in src, (
+            "validate_meshcore_device must not claim responds=True for a device "
+            "it never probed (persistent-owner skip) (S8 L5)"
+        )
