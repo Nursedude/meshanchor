@@ -1334,6 +1334,9 @@
                         label: `${sched.stale_count} timer stale`,
                     });
                 }
+                if (sched.healthy === false && sched.reason) {
+                    chips.push({ cls: 'warn', label: 'timer state unavailable' });
+                }
 
                 totalPeers += 1;
                 if (chips.length > 0) {
@@ -1469,6 +1472,7 @@
 
             let totalStale = 0;
             let totalUnits = 0;
+            let anyUnavailable = false;
 
             for (const row of rows) {
                 const snap = row.snapshot || {};
@@ -1490,14 +1494,30 @@
 
                 const staleCount = sched.stale_count || 0;
                 const units = sched.units || [];
+                // M3: a failed timer-state probe (healthy:false + reason) must
+                // render "unavailable", not the green "ok"/"no timers" a wedged
+                // systemctl is otherwise indistinguishable from.
+                const probeFailed = sched.healthy === false && !!sched.reason;
                 totalStale += staleCount;
                 totalUnits += units.length;
+                if (probeFailed) anyUnavailable = true;
 
                 header.appendChild(el('span', {
-                    class: staleCount > 0 ? 'sched-host-bad' : 'sched-host-ok',
-                    text: staleCount > 0 ? `${staleCount} stale` : 'ok',
+                    class: (probeFailed || staleCount > 0) ? 'sched-host-bad' : 'sched-host-ok',
+                    text: probeFailed ? 'unavailable'
+                          : (staleCount > 0 ? `${staleCount} stale` : 'ok'),
+                    title: probeFailed ? sched.reason : '',
                 }));
                 hostDiv.appendChild(header);
+
+                if (probeFailed) {
+                    hostDiv.appendChild(el('div', {
+                        class: 'sched-empty',
+                        text: `(${sched.reason})`,
+                    }));
+                    container.appendChild(hostDiv);
+                    continue;
+                }
 
                 if (units.length === 0) {
                     hostDiv.appendChild(el('div', {
@@ -1541,8 +1561,9 @@
 
             meta.textContent = totalStale > 0
                 ? `⚠ ${totalStale}/${totalUnits} stale`
-                : `${totalUnits} timers · all healthy`;
-            $('schedules-card').classList.toggle('card-bad', totalStale > 0);
+                : (anyUnavailable ? '⚠ timer state unavailable on some hosts'
+                                  : `${totalUnits} timers · all healthy`);
+            $('schedules-card').classList.toggle('card-bad', totalStale > 0 || anyUnavailable);
         }
 
         // ── Path-of-Record panel (Track 2.6 of we-have-a-cycle plan) ──

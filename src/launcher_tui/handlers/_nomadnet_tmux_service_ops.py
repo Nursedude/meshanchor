@@ -550,18 +550,32 @@ class NomadNetTmuxServiceOpsMixin:
             return
         self._systemctl_user_nn("stop")
         self._systemctl_user_nn("disable")
+        removal_errors = []
         for path in (_unit_dest(), _wrapper_dest()):
             try:
                 if path.exists():
                     path.unlink()
             except OSError as e:
                 logger.warning("Failed to remove %s: %s", path, e)
+                removal_errors.append(f"{path}: {e}")
         self._systemctl_user_nn("daemon-reload")
-        self.ctx.dialog.msgbox(
-            "NomadNet user unit uninstalled",
-            "Service disabled, unit + wrapper removed.\n\n"
-            "Re-install via: NomadNet > Service Control > Install user unit",
-        )
+        if removal_errors:
+            # The unlink failure was logged-only while the dialog still said
+            # "unit + wrapper removed" — but the files remain on disk (likely a
+            # permissions/ownership issue: they were chowned to the real user)
+            # and the service can re-register (honest-signal M4, S8, #74-#77).
+            self.ctx.dialog.msgbox(
+                "NomadNet uninstall incomplete",
+                "Service stopped/disabled, but these files could NOT be removed "
+                "(the service may re-register until they're gone):\n\n"
+                + "\n".join(f"  - {e}" for e in removal_errors),
+            )
+        else:
+            self.ctx.dialog.msgbox(
+                "NomadNet user unit uninstalled",
+                "Service disabled, unit + wrapper removed.\n\n"
+                "Re-install via: NomadNet > Service Control > Install user unit",
+            )
 
     def _run_nomadnet_systemctl(self, verb: str) -> None:
         ok, out = self._systemctl_user_nn(verb)

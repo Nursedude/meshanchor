@@ -434,3 +434,64 @@ class TestMADivergentS8:
             "the subscriber surface must say fan-out is enqueued and delivery is "
             "not confirmed (H2, #16)"
         )
+
+
+# --- S8 MED tier (M1-M4) ---
+
+NOMADNET_TMUX_OPS = HANDLERS_DIR / "_nomadnet_tmux_service_ops.py"
+
+
+class TestMeshcoreSaveGatedM12:
+    """S8 M1/M2 (#74-#77): _meshcore_configure / _meshcore_toggle call
+    GatewayConfig.save(), which returns False on a failed write (never raises),
+    so the 'Saved'/'enabled' dialog must gate on the bool — it had fired even
+    when nothing persisted. Shared with MeshForge."""
+
+    def test_meshcore_save_dialogs_gate_on_bool(self):
+        src = _src_or_skip(MESHCORE_HANDLER)
+        assert src.count("saved = config.save()") >= 2, (
+            "_meshcore_configure and _meshcore_toggle must bind config.save()'s "
+            "bool and branch on it, not fire 'Saved' unconditionally (S8 M1/M2)"
+        )
+        assert "Save Failed" in src, (
+            "a failed meshcore config write must surface a 'Save Failed' dialog (S8)"
+        )
+
+
+class TestSchedulesProbeFailureM3:
+    """S8 M3 (#74-#77): a failed systemctl timer-state probe must not read as
+    'all healthy' — _list_timers_scope returns None (not []) on failure and
+    _schedules_block surfaces it as healthy:False + a reason (MA-native)."""
+
+    def _fa(self):
+        try:
+            import monitoring.fleet_aggregator as fa
+        except Exception as e:
+            pytest.skip(f"fleet_aggregator not importable: {e}")
+        return fa
+
+    def test_probe_failure_is_not_healthy(self, monkeypatch):
+        fa = self._fa()
+        monkeypatch.setattr(fa, "_list_timers_scope", lambda scope: None)
+        block = fa._schedules_block()
+        assert block["healthy"] is False
+        assert "reason" in block and "unavailable" in block["reason"]
+
+    def test_genuinely_empty_is_healthy(self, monkeypatch):
+        fa = self._fa()
+        monkeypatch.setattr(fa, "_list_timers_scope", lambda scope: [])
+        block = fa._schedules_block()
+        assert block["healthy"] is True
+        assert "reason" not in block
+
+
+class TestNomadnetUninstallM4:
+    """S8 M4 (#74-#77): NomadNet uninstall must not claim 'removed' when the
+    unit/wrapper unlink failed (the file remains; the service can re-register)."""
+
+    def test_uninstall_reports_incomplete_on_unlink_failure(self):
+        src = _src_or_skip(NOMADNET_TMUX_OPS)
+        assert "removal_errors" in src and "uninstall incomplete" in src.lower(), (
+            "_do_nomadnet_uninstall must track unlink failures and report "
+            "'(uninstall incomplete …)' instead of unconditional 'removed' (S8 M4)"
+        )

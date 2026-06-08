@@ -579,8 +579,11 @@ SCHEDULE_STALE_MULTIPLIER = 2.0
 SCHEDULE_NO_NEXT_GRACE_S = 3600.0
 
 
-def _list_timers_scope(scope: str) -> List[Dict[str, Any]]:
-    """Return systemctl timers in the given scope. Same env-injection
+def _list_timers_scope(scope: str) -> Optional[List[Dict[str, Any]]]:
+    """Return systemctl timers in the given scope, or None if the probe FAILED.
+
+    None (probe failed) is deliberately distinct from [] (ran OK, no timers) so
+    a wedged systemctl can't read as a clean box downstream (M3). Same env-injection
     fix as MF's fleet_snapshot for daemon-context `--user` calls.
 
     Root-firing-operator case: when this process runs as root (the
@@ -616,11 +619,16 @@ def _list_timers_scope(scope: str) -> List[Dict[str, Any]]:
 
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, env=env)
-        if r.returncode != 0 or not r.stdout.strip():
+        if r.returncode != 0:
+            # Probe FAILED (systemctl errored) — distinct from "ran OK, no
+            # timers". Returning [] for both made a wedged probe read as a
+            # clean box (honest-signal M3, S8, #74-#77).
+            return None
+        if not r.stdout.strip():
             return []
         return json.loads(r.stdout)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, json.JSONDecodeError):
-        return []
+        return None
 
 
 def _normalize_timer(raw: Dict[str, Any], scope: str,
@@ -670,8 +678,13 @@ def _normalize_timer(raw: Dict[str, Any], scope: str,
 def _schedules_block() -> Dict[str, Any]:
     now = time.time()
     units: List[Dict[str, Any]] = []
+    failed_scopes: List[str] = []
     for scope in ("system", "user"):
-        for raw in _list_timers_scope(scope):
+        raw_timers = _list_timers_scope(scope)
+        if raw_timers is None:
+            failed_scopes.append(scope)
+            continue
+        for raw in raw_timers:
             entry = _normalize_timer(raw, scope, now)
             if entry is None:
                 continue
@@ -680,6 +693,18 @@ def _schedules_block() -> Dict[str, Any]:
             units.append(entry)
     units.sort(key=lambda u: (not u["stale"], u["name"]))
     stale_count = sum(1 for u in units if u["stale"])
+    if failed_scopes:
+        # A failed timer-state probe must not read as "all healthy" — an empty
+        # unit list from a wedged systemctl is otherwise indistinguishable from a
+        # genuinely-clean box (honest-signal M3, S8, #74-#77). The reason field
+        # is the operator's tell and drives the dashboard "unavailable" badge.
+        return {
+            "healthy": False,
+            "stale_count": stale_count,
+            "units": units,
+            "reason": ("timer state unavailable ("
+                       + ", ".join(failed_scopes) + " scope probe failed)"),
+        }
     return {
         "healthy": stale_count == 0,
         "stale_count": stale_count,
