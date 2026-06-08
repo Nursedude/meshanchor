@@ -83,7 +83,7 @@ class TestSubscriberStore:
     def test_mark_delivered_updates_timestamp(self, tmp_path):
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef")
-        store.mark_delivered("deadbeef")
+        store.mark_fanout_enqueued("deadbeef")
         sub = store.list_all()[0]
         assert sub.last_delivery is not None
 
@@ -719,7 +719,7 @@ class TestSubscriberStoreS1Failure:
         store.add("deadbeef00112233")
         for _ in range(5):
             store.mark_failed("deadbeef00112233", "reason")
-        store.mark_delivered("deadbeef00112233")
+        store.mark_fanout_enqueued("deadbeef00112233")
         sub = store.list_all()[0]
         assert sub.consecutive_failures == 0
         assert sub.state == STATE_HEALTHY
@@ -732,7 +732,7 @@ class TestSubscriberStoreS1Failure:
         store.add("deadbeef00112233")
         store.transition_state("deadbeef00112233", STATE_DEGRADED)
         assert store.list_all()[0].state == STATE_DEGRADED
-        store.mark_delivered("deadbeef00112233")
+        store.mark_fanout_enqueued("deadbeef00112233")
         assert store.list_all()[0].state == STATE_HEALTHY
 
     def test_mark_failed_on_unknown_hash_is_noop(self, tmp_path):
@@ -996,7 +996,7 @@ class TestStateTransitionsInMarkFailed:
         for _ in range(5):
             store.mark_failed("deadbeef00112233", "reason")
         assert store.list_all()[0].state == STATE_DEGRADED
-        store.mark_delivered("deadbeef00112233")
+        store.mark_fanout_enqueued("deadbeef00112233")
         sub = store.list_all()[0]
         assert sub.state == STATE_HEALTHY
         assert sub.consecutive_failures == 0
@@ -1271,7 +1271,7 @@ class TestS4StateTransitionMetric:
         with patch(
             "gateway.lxmf_broadcast_bridge.record_state_transition"
         ) as rt:
-            store.mark_delivered("deadbeef00112233")
+            store.mark_fanout_enqueued("deadbeef00112233")
             calls = [c.args for c in rt.call_args_list]
             assert calls == [(STATE_DEGRADED, STATE_HEALTHY)]
 
@@ -1282,7 +1282,7 @@ class TestS4StateTransitionMetric:
         with patch(
             "gateway.lxmf_broadcast_bridge.record_state_transition"
         ) as rt:
-            store.mark_delivered("deadbeef00112233")
+            store.mark_fanout_enqueued("deadbeef00112233")
             rt.assert_not_called()
 
 

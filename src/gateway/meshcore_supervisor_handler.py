@@ -129,11 +129,16 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         self._client = client
         self._connected = True
         _set_active_handler(self)
+        # Reflect the radio's ACTUAL state from the supervisor hello, not just
+        # "handler attached to supervisor" — reporting "connected" unconditionally
+        # latched the health monitor True even when the radio was down, and the
+        # down-event below never cleared it (honest-signal H1, #74 dead-branch).
+        radio_connected = bool(hello.get("connected"))
         try:
             self.health.record_connection_event(
-                "meshcore", "connected",
+                "meshcore", "connected" if radio_connected else "disconnected",
                 f"via supervisor (owner={hello.get('owner')}, "
-                f"device={hello.get('device')})"
+                f"device={hello.get('device')}, radio_connected={radio_connected})"
             )
         except Exception:
             pass
@@ -318,16 +323,21 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         # Supervisor's persistent owner state changed. We stay attached to
         # the supervisor either way — let the health monitor know what the
         # radio's underlying state is so the bridge surface reflects it.
+        # Emit the events bridge_health actually recognizes ("connected"/
+        # "disconnected"). The old radio-specific event names matched neither
+        # branch in record_connection_event and silently no-op'd, so a radio
+        # that went down never cleared _connected and the bridge surface read
+        # HEALTHY forever (honest-signal H1, #74 dead-branch class).
         try:
             if connected:
                 self.health.record_connection_event(
-                    "meshcore", "radio_up",
-                    f"device={data.get('device')}"
+                    "meshcore", "connected",
+                    f"radio up (device={data.get('device')})"
                 )
             else:
                 self.health.record_connection_event(
-                    "meshcore", "radio_down",
-                    str(data.get("reason", "unknown"))
+                    "meshcore", "disconnected",
+                    f"radio down ({data.get('reason', 'unknown')})"
                 )
         except Exception:
             pass

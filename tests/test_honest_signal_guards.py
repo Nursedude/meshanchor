@@ -377,3 +377,60 @@ class TestSwallowedErrorTailS7:
             "the RNS health probe must not hardcode the 'default' shared-instance "
             "socket — a non-default box gets a false health verdict (#72 class, S7)"
         )
+
+
+# --- S8: MeshAnchor-divergent honest-signal fixes (MA-native; no MeshForge twin) ---
+
+GATEWAY_DIR = REPO_ROOT / "src" / "gateway"
+SUPERVISOR_HANDLER = GATEWAY_DIR / "meshcore_supervisor_handler.py"
+BROADCAST_BRIDGE = GATEWAY_DIR / "lxmf_broadcast_bridge.py"
+BROADCAST_TUI = HANDLERS_DIR / "lxmf_broadcast.py"
+
+
+class TestMADivergentS8:
+    """S8 (#74-#77): the two HIGH findings from the MeshAnchor-divergent audit
+    (`.claude/research/ma_divergent_honest_signal_audit_2026_06_08.md`), both
+    operator-facing false verdicts. MA-native surfaces with no MeshForge twin.
+    Static source guards (zero-FP, skip-if-absent)."""
+
+    def test_h1_supervisor_emits_recognized_connection_events(self):
+        src = _src_or_skip(SUPERVISOR_HANDLER)
+        # The dead "radio_up"/"radio_down" events (unrecognized by
+        # bridge_health.record_connection_event → silent no-op → MeshCore reads
+        # HEALTHY while the radio is down) must be gone.
+        assert "radio_up" not in src and "radio_down" not in src, (
+            "supervisor handler must emit bridge_health's recognized "
+            "'connected'/'disconnected' events, not the no-op radio_* names (H1)"
+        )
+        assert '"disconnected"' in src, (
+            "a radio-down must emit the recognized 'disconnected' event (H1)"
+        )
+
+    def test_h1_connect_gates_on_actual_radio_state(self):
+        src = _src_or_skip(SUPERVISOR_HANDLER)
+        assert 'hello.get("connected")' in src, (
+            "connect() must reflect the radio's ACTUAL state from the hello, not "
+            "report 'connected' unconditionally (which latched health True) (H1)"
+        )
+
+    def test_h2_subscriber_store_renamed_off_delivered(self):
+        src = _src_or_skip(BROADCAST_BRIDGE)
+        assert "def mark_fanout_enqueued" in src, (
+            "the enqueue-time bookkeeping must be named for what it does "
+            "(enqueue), not 'mark_delivered' (H2, #16)"
+        )
+        assert "self._subs.mark_delivered(" not in src, (
+            "the fan-out enqueue path must not call mark_delivered — an enqueue "
+            "is not a confirmed delivery (H2)"
+        )
+
+    def test_h2_tui_labels_fanout_not_delivered(self):
+        src = _src_or_skip(BROADCAST_TUI)
+        assert "last_ok=" not in src, (
+            "the subscriber rows must not label the enqueue timestamp 'last_ok' "
+            "(reads as confirmed delivery) (H2)"
+        )
+        assert "last_fanout" in src and "NOT confirmed" in src, (
+            "the subscriber surface must say fan-out is enqueued and delivery is "
+            "not confirmed (H2, #16)"
+        )

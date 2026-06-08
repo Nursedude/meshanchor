@@ -195,7 +195,7 @@ class LXMFBroadcastHandler(BaseHandler):
                 h,
                 f"{h[:16]}…  state={s.get('state', '?'):<5}  "
                 f"fails={s.get('consecutive_failures', 0):<3}  "
-                f"last_ok={s.get('last_delivery') or 'never'}",
+                f"last_fanout={s.get('last_fanout_enqueued') or 'never'}",
             ))
         choices.append(("back", "Back"))
 
@@ -217,7 +217,7 @@ class LXMFBroadcastHandler(BaseHandler):
             f"Remove subscriber {picked[:16]}…?\n\n"
             f"State:    {target.get('state', '?')}\n"
             f"Failures: {target.get('consecutive_failures', 0)}\n"
-            f"Last OK:  {target.get('last_delivery') or 'never'}\n"
+            f"Last fan-out (enqueued): {target.get('last_fanout_enqueued') or 'never'}\n"
             f"Last fail: {target.get('last_failure_at') or 'never'}\n\n"
             f"This is logged but cannot be undone here.",
         )
@@ -284,6 +284,8 @@ class LXMFBroadcastHandler(BaseHandler):
             f"  errors:                 {stats.get('errors', 0)}\n"
             f"\n"
             f"--- Subscribers ({len(subs)}) ---\n"
+            f"  (last_fanout = last successful ENQUEUE to the LXMF router;\n"
+            f"   delivery is best-effort and NOT confirmed — #16)\n"
             f"{sub_block}"
         )
 
@@ -294,7 +296,7 @@ class LXMFBroadcastHandler(BaseHandler):
             )
         lines: List[str] = []
         for s in subs:
-            last_ok = s.get("last_delivery") or "never"
+            last_fanout = s.get("last_fanout_enqueued") or "never"
             last_fail = s.get("last_failure_at") or "never"
             tier = s.get("tier") or "external"
             state = s.get("state") or "healthy"
@@ -303,7 +305,7 @@ class LXMFBroadcastHandler(BaseHandler):
                 f"  {s.get('lxmf_hash', '?'):<32}  "
                 f"tier={tier:<10}  state={state:<8}  fails={fails:<3}  "
                 f"added={s.get('added_at') or '?'}  "
-                f"last_ok={last_ok}  last_fail={last_fail}"
+                f"last_fanout={last_fanout}  last_fail={last_fail}"
             )
         return "\n".join(lines)
 

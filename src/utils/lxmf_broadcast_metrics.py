@@ -213,8 +213,8 @@ def record_fanout(tier: str, outcome: str, duration_s: Optional[float] = None) -
 
 def record_state_transition(from_state: str, to_state: str) -> None:
     """Record one subscriber state transition. Called from
-    `SubscriberStore.mark_failed` / `mark_delivered` when the state actually
-    changes (no-op for same-state writes)."""
+    `SubscriberStore.mark_failed` / `mark_fanout_enqueued` when the state
+    actually changes (no-op for same-state writes)."""
     if not _HAS_PROM:
         return
     STATE_TRANSITIONS_TOTAL.labels(

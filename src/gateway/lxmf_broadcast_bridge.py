@@ -132,7 +132,7 @@ TIER_LOCAL = "local"
 TIER_FEDERATION = "federation"
 TIER_EXTERNAL = "external"
 
-# State machine values. mark_delivered always returns to `healthy`.
+# State machine values. mark_fanout_enqueued always returns to `healthy`.
 # Automatic degraded/stale/dead transitions land in mark_failed.
 STATE_HEALTHY = "healthy"
 STATE_DEGRADED = "degraded"
@@ -289,12 +289,17 @@ class SubscriberStore:
             ).fetchall()
         return [self._row_to_subscriber(r) for r in rows]
 
-    def mark_delivered(self, lxmf_hash: str) -> None:
-        """Record a successful fan-out: timestamp + reset failure counter.
+    def mark_fanout_enqueued(self, lxmf_hash: str) -> None:
+        """Record a successful fan-out ENQUEUE: timestamp + reset failure counter.
 
-        Also drops the row back to `healthy` from any prior degraded state —
-        a successful delivery is the strongest possible health signal. S3's
-        automatic state transitions still respect this reset.
+        NOTE (honest-signal H2, #16): this is the last successful hand-off to the
+        LXMF router, NOT a confirmed delivery — LXMF fan-out is best-effort and a
+        true delivery receipt (if any) arrives asynchronously via the LXMessage
+        delivery callback, not here. It still drops the row back to `healthy` from
+        a prior degraded state because a clean enqueue is the strongest signal we
+        have synchronously; S3's automatic state transitions respect this reset.
+        (Wiring true receipts to a separate confirmed-delivery field is a
+        worthwhile follow-up.)
         """
         lxmf_hash = lxmf_hash.lower()
         now = datetime.utcnow().isoformat()
@@ -336,7 +341,7 @@ class SubscriberStore:
           3. 3+ consecutive failures (recent) → degraded.
           4. otherwise → healthy.
 
-        `mark_delivered` resets failures to 0 and state to healthy directly,
+        `mark_fanout_enqueued` resets failures to 0 and state to healthy directly,
         so this function only needs to handle the failure side.
         """
         if sub.consecutive_failures == 0:
@@ -1015,7 +1020,10 @@ class LXMFBroadcastBridge:
             call_boundary("rnsd.handle_outbound",
                           self._router.handle_outbound, lxm,
                           target=hash_short)
-            self._subs.mark_delivered(sub.lxmf_hash)
+            # handle_outbound ENQUEUES (async); this records the enqueue, not a
+            # confirmed delivery — the on_delivered receipt above is the only true
+            # delivery signal (honest-signal H2, #16).
+            self._subs.mark_fanout_enqueued(sub.lxmf_hash)
             with self._stats_lock:
                 self.stats["fanouts"] += 1
             record_fanout(tier, "success",
@@ -1057,6 +1065,13 @@ class LXMFBroadcastBridge:
                 {
                     "lxmf_hash": s.lxmf_hash,
                     "added_at": s.added_at.isoformat() if s.added_at else None,
+                    # Honest name: the last successful ENQUEUE to the LXMF router,
+                    # NOT a confirmed delivery (H2, #16).
+                    "last_fanout_enqueued": (
+                        s.last_delivery.isoformat() if s.last_delivery else None
+                    ),
+                    # Deprecated alias (same value) for any pre-existing API
+                    # consumer — misleadingly named; migrate to last_fanout_enqueued.
                     "last_delivery": (
                         s.last_delivery.isoformat() if s.last_delivery else None
                     ),
