@@ -5,6 +5,15 @@ description: Merge a stack of dependent PRs in topological order without auto-cl
 
 # ship-pr-stack — merge stacked PRs without re-asking
 
+> **Status (2026-06-09): dormant, retained for the rare stacked-PR case.**
+> The solo feature-branch/PR flow was retired 2026-04-19 — day-to-day work
+> commits direct to `main`, and dependabot PRs auto-merge when green via
+> `.github/workflows/dependabot_automerge.yml` (don't use this skill for
+> those; they are independent, not stacked). Invoke ONLY when an actual
+> dependent-PR stack exists (e.g. cloud/web-Claude opened chained PRs).
+> The load-bearing invariant below (never `--delete-branch` on a parent
+> with open children) remains true and is the reason this file survives.
+
 ## When to invoke this skill
 
 Trigger words from the operator: "merge them in order", "ship the stack", "land these PRs", "/ship-pr-stack". Also self-trigger when:
