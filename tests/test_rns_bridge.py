@@ -1619,7 +1619,10 @@ class TestEnqueueMessage:
         mock_queue.enqueue.return_value = "msg-123"
         bridge._persistent_queue = mock_queue
 
-        with patch("gateway.rns_bridge.MessagePriority") as MockPriority:
+        # enqueue_message moved to BridgeSendMixin (2026-06-09 rns_bridge
+        # split) — it resolves MessagePriority in its new defining module,
+        # so the patch target moves with it.
+        with patch("gateway.bridge_send_mixin.MessagePriority") as MockPriority:
             MockPriority.NORMAL = "normal"
             MockPriority.HIGH = "high"
             MockPriority.LOW = "low"
