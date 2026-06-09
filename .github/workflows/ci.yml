@@ -40,6 +40,14 @@ jobs:
             echo "No potential hardcoded passwords found"
           fi
 
+      - name: Check Python syntax
+        # compileall exits nonzero on any syntax error (the old standalone
+        # syntax-check job used `find -exec py_compile \;`, which swallowed
+        # per-file failures and could never fail). Folded in here — the
+        # static checks share one runner/checkout/Python so action bumps
+        # touch fewer sites.
+        run: python -m compileall -q src
+
   test:
     name: Test Suite
     runs-on: ubuntu-latest
@@ -182,23 +190,8 @@ jobs:
           header: pytest-py${{ matrix.python-version }}
           path: /tmp/pr-comment.md
 
-  syntax-check:
-    name: Syntax Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
-        with:
-          python-version: '3.11'
-
-      - name: Check Python syntax
-        # compileall exits nonzero on any syntax error (the previous
-        # `find -exec py_compile \;` form swallowed per-file failures and
-        # could never fail) and uses one interpreter instead of one per file.
-        run: python -m compileall -q src
-        # NOTE: the old `security` job was deleted — its shell=True grep was a
-        # strict subset of lint rule MF002 (already gating via lint.py --all),
-        # and its secrets step could never fail; the secrets grep now lives in
-        # the lint job as an explicitly-advisory step.
+# NOTE: the old standalone `syntax-check` and `security` jobs were
+# consolidated into the `lint` job (2026-06-09): syntax-check's gate moved
+# there as a compileall step; security's shell=True grep was a strict subset
+# of lint rule MF002 and its secrets step could never fail (now an advisory
+# step in lint). One runner instead of three for the static checks.
