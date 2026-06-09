@@ -32,7 +32,6 @@ Quick navigation for AI assistants. Load only what you need.
 |------|---------|
 | `research/rns_comprehensive.md` | RNS protocol deep dive |
 | `research/rns_complete.md` | RNS configuration guide |
-| `research/rns_integration.md` | RNS integration patterns |
 | `research/rns_gateway_windows.md` | Windows RNS gateway setup |
 | `research/gateway_setup_guide.md` | Gateway configuration guide |
 | `research/gateway_scenario_analysis.md` | Gateway deployment scenarios |
@@ -63,7 +62,7 @@ Quick navigation for AI assistants. Load only what you need.
 | `research/session_rns_address_in_use.md` | RNS address conflict resolution |
 | `research/firmware_viability.md` | Firmware flashing viability |
 | `research/meshanchor_enhancement_todos.md` | Enhancement backlog |
-| `export/MESHANCHOR_INTEGRATION.md` | MQTT integration guide (ecosystem) |
+| `export/MESHFORGE_INTEGRATION.md` | MQTT integration guide (ecosystem) |
 
 ### Hardware
 | File | Purpose |

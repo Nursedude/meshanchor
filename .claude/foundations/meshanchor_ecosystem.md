@@ -271,7 +271,7 @@ The `alpha/meshcore-bridge` branch adds **MeshCore as a third protocol** alongsi
 | `gateway/meshcore_handler.py` | 796 | MeshCore bridge logic via meshcore_py |
 | `gateway/canonical_message.py` | 437 | Normalized message format (all 3 protocols) |
 | `gateway/meshcore_bridge_mixin.py` | 169 | TUI wiring for MeshCore stats |
-| `launcher_tui/meshcore_mixin.py` | 467 | MeshCore menu and config UI |
+| `launcher_tui/handlers/meshcore*.py` | — | MeshCore menu and config UI (was `meshcore_mixin.py`; migrated in the handler-registry refactor) |
 | `plugins/meshcore.py` | refactored | Plugin → handler delegation |
 | `gateway/message_routing.py` | +143 | 3-way routing tables |
 

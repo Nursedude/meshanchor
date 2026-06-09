@@ -1,6 +1,11 @@
 # MeshAnchor UI Design Decisions
 
-> **Status:** ACTIVE - This document guides all UI development
+> **Status:** PARTIALLY HISTORICAL (flagged by healthcheck 2026-06-09) — the
+> core principles (always know where you are / how to go back / what happens
+> next) remain ACTIVE for TUI development, but all `gtk_ui/` + `GLib.idle_add`
+> sections describe the GTK4 desktop UI REMOVED in v0.5.x, and `*_mixin.py`
+> references predate the handler-registry migration. The TUI is the only
+> interface; do not implement against the GTK sections.
 > **Date:** 2026-01-18
 > **Authors:** WH6GXZ (Nursedude) + Dude AI
 
