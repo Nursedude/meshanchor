@@ -675,6 +675,190 @@ def _normalize_timer(raw: Dict[str, Any], scope: str,
     }
 
 
+# ─── Phase-1 fleet visibility: crontab + cron verdicts + loop crons ──────
+#
+# Additive scheduled-work sources beyond systemd timers. Each follows the
+# honest-signal contract (``available``/``reason``) so a read FAILURE renders
+# "unavailable" on the dashboard, never a clean "nothing scheduled". The
+# operator asked for truthful reporting; silence-as-health is the bug.
+# Byte-parity with meshforge fleet_snapshot.
+CRONTAB_PROBE_TIMEOUT_S = 5
+VERDICT_LOG_FILE = "cron_verdicts.log"
+VERDICT_STALE_AFTER_S = 26 * 3600  # > daily cadence; older = stale
+LOOP_CRONS_FILE = ".claude_loop_crons.json"
+
+
+def _parse_crontab(text: str) -> List[Dict[str, str]]:
+    """Parse ``crontab -l`` output into ``[{schedule, command}]``.
+
+    Skips blank lines, ``#`` comments, and environment-assignment lines
+    (``MAILTO=``/``PATH=``/``FOO=bar`` — a first token containing ``=``).
+    A normal entry is 5 schedule fields + command, or an ``@keyword``
+    (e.g. ``@daily``) + command. Malformed short lines are dropped.
+    """
+    jobs: List[Dict[str, str]] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        first = s.split(None, 1)[0]
+        if "=" in first and not first.startswith("@"):
+            continue  # env assignment, not a job
+        if s.startswith("@"):
+            parts = s.split(None, 1)
+            schedule = parts[0]
+            command = parts[1] if len(parts) > 1 else ""
+        else:
+            parts = s.split(None, 5)
+            if len(parts) < 6:
+                continue  # need 5 schedule fields + a command
+            schedule = " ".join(parts[:5])
+            command = parts[5]
+        jobs.append({"schedule": schedule, "command": command})
+    return jobs
+
+
+def _read_crontab() -> Dict[str, Any]:
+    """Read the operator's crontab. Honest-signal contract:
+
+    - ``crontab -l`` rc=0              -> ``{available:True, jobs:[...], count}``
+    - rc!=0 + stderr 'no crontab for'  -> ``{available:True, jobs:[], count:0}`` (genuinely empty)
+    - rc!=0 other / missing bin / timeout / OSError
+                                       -> ``{available:False, reason:...}``
+
+    A failed read must NEVER render as "no cron jobs". List argv, bounded
+    timeout, root→operator drop mirrors ``_list_timers_scope``.
+    """
+    if os.geteuid() == 0:
+        try:
+            from utils.fleet_test_runner import _find_operator_user
+        except ImportError:
+            return {"available": False, "reason": "no_operator"}
+        op = _find_operator_user()
+        if op is None:
+            return {"available": False, "reason": "no_operator"}
+        _, op_name = op
+        cmd = ["sudo", "-n", "-u", op_name, "crontab", "-l"]
+    else:
+        cmd = ["crontab", "-l"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=CRONTAB_PROBE_TIMEOUT_S)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        return {"available": False,
+                "reason": f"probe_error: {e.__class__.__name__}"}
+    if r.returncode != 0:
+        stderr = (r.stderr or "").strip()
+        if "no crontab for" in stderr.lower():
+            return {"available": True, "jobs": [], "count": 0}
+        reason = stderr.splitlines()[0] if stderr else f"exit_{r.returncode}"
+        return {"available": False,
+                "reason": f"crontab unavailable ({reason[:80]})"}
+    jobs = _parse_crontab(r.stdout)
+    return {"available": True, "jobs": jobs, "count": len(jobs)}
+
+
+def _parse_cron_verdicts(text: str, now_unix: float) -> List[Dict[str, Any]]:
+    """Parse ``~/cron_verdicts.log`` -> last verdict per job name.
+
+    Line format: ``<ISO8601> <name> <STATUS> <message...>``. Last line per
+    name wins. Garbage/short lines skipped. Computes ``age_s`` from the ts.
+    A FAIL/CONCERN verdict is truthful red DATA (available stays True),
+    distinct from "can't read the log".
+    """
+    from datetime import datetime
+    latest: "Dict[str, Dict[str, Any]]" = {}
+    for line in text.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 3:
+            continue
+        ts_iso, name, status = parts[0], parts[1], parts[2]
+        message = parts[3] if len(parts) > 3 else ""
+        try:
+            ts_unix = datetime.fromisoformat(
+                ts_iso.replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            continue
+        age = now_unix - ts_unix
+        latest[name] = {
+            "name": name,
+            "status": status,
+            "ts_iso": ts_iso,
+            "age_s": round(age, 1),
+            "stale": age > VERDICT_STALE_AFTER_S,
+            "message": message.strip(),
+        }
+    return sorted(latest.values(), key=lambda v: v["name"])
+
+
+def _read_cron_verdicts() -> Dict[str, Any]:
+    """Read ``~/cron_verdicts.log`` (the silent-cron detection log).
+
+    Missing file / unreadable -> ``available:False`` + reason; present ->
+    parsed (a failing job is truthful red data, still ``available:True``).
+    """
+    home = _operator_home()
+    if home is None:
+        return {"available": False, "reason": "no_operator_home"}
+    path = home / VERDICT_LOG_FILE
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return {"available": False, "reason": "no_file"}
+    except (PermissionError, OSError) as e:
+        return {"available": False,
+                "reason": f"read_error: {e.__class__.__name__}"}
+    jobs = _parse_cron_verdicts(text, time.time())
+    return {
+        "available": True,
+        "jobs": jobs,
+        "fail_count": sum(1 for j in jobs
+                          if j["status"].upper().startswith("FAIL")),
+        "concern_count": sum(1 for j in jobs
+                             if j["status"].upper() == "CONCERN"),
+    }
+
+
+def _read_loop_crons() -> Dict[str, Any]:
+    """Read ``~/.claude_loop_crons.json`` (ephemeral Claude /loop crons).
+
+    These are SESSION-ONLY — they vanish when the Claude session ends, so
+    ``no_file`` is the NORMAL state on virtually every box (rendered muted,
+    not an error). ``ephemeral:True`` is always set so the web labels it.
+    """
+    home = _operator_home()
+    if home is None:
+        return {"available": False, "reason": "no_operator_home",
+                "ephemeral": True}
+    path = home / LOOP_CRONS_FILE
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return {"available": False, "reason": "no_file", "ephemeral": True}
+    except (PermissionError, OSError) as e:
+        return {"available": False,
+                "reason": f"read_error: {e.__class__.__name__}",
+                "ephemeral": True}
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return {"available": False, "reason": "malformed_json",
+                "ephemeral": True}
+    raw_jobs = (data if isinstance(data, list)
+                else data.get("jobs", []) if isinstance(data, dict) else [])
+    jobs: List[Dict[str, Any]] = []
+    for j in raw_jobs:
+        if not isinstance(j, dict):
+            continue
+        jobs.append({
+            "id": str(j.get("id", "")),
+            "cron": str(j.get("cron", "")),
+            "prompt": str(j.get("prompt", ""))[:200],
+            "next_fire_unix": j.get("next_fire_unix"),
+        })
+    return {"available": True, "ephemeral": True, "jobs": jobs}
+
+
 def _schedules_block() -> Dict[str, Any]:
     now = time.time()
     units: List[Dict[str, Any]] = []
@@ -698,18 +882,39 @@ def _schedules_block() -> Dict[str, Any]:
         # unit list from a wedged systemctl is otherwise indistinguishable from a
         # genuinely-clean box (honest-signal M3, S8, #74-#77). The reason field
         # is the operator's tell and drives the dashboard "unavailable" badge.
-        return {
+        block: Dict[str, Any] = {
             "healthy": False,
             "stale_count": stale_count,
             "units": units,
             "reason": ("timer state unavailable ("
                        + ", ".join(failed_scopes) + " scope probe failed)"),
         }
-    return {
-        "healthy": stale_count == 0,
-        "stale_count": stale_count,
-        "units": units,
-    }
+    else:
+        block = {
+            "healthy": stale_count == 0,
+            "stale_count": stale_count,
+            "units": units,
+        }
+    # Additive sub-sources (Phase-1 fleet visibility) — each independently
+    # honest-signalled and guarded so one failing source can never blank the
+    # block. They do NOT affect the timer-only ``healthy`` above; the web
+    # aggregates each sub-block's availability into the card.
+    try:
+        block["crontab"] = _read_crontab()
+    except Exception as e:
+        block["crontab"] = {"available": False,
+                            "reason": f"block_error: {e.__class__.__name__}"}
+    try:
+        block["verdicts"] = _read_cron_verdicts()
+    except Exception as e:
+        block["verdicts"] = {"available": False,
+                             "reason": f"block_error: {e.__class__.__name__}"}
+    try:
+        block["loop_crons"] = _read_loop_crons()
+    except Exception as e:
+        block["loop_crons"] = {"available": False, "ephemeral": True,
+                               "reason": f"block_error: {e.__class__.__name__}"}
+    return block
 
 
 # Ecosystem CI status — twice-daily timer writes ``~/.meshforge-ci-status``

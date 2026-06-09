@@ -918,3 +918,123 @@ def test_slo_view_includes_ci_status_block():
     assert "ci_status" in view
     assert isinstance(view["ci_status"], dict)
     assert "available" in view["ci_status"]
+
+
+# ─── Phase-1 sources: crontab / verdicts / loop_crons (honest-signal) ────
+# Mirror of meshforge tests/test_fleet_snapshot.py — same shapes, fa. prefix.
+
+
+def test_parse_crontab_skips_comments_env_and_malformed():
+    jobs = fa._parse_crontab(
+        "\n# comment\nMAILTO=root\nPATH=/usr/bin\n"
+        "*/5 * * * * /bin/true\n@reboot /opt/start\nbadline\n")
+    cmds = [j["command"] for j in jobs]
+    assert cmds == ["/bin/true", "/opt/start"]
+    assert jobs[0]["schedule"] == "*/5 * * * *"
+    assert jobs[1]["schedule"] == "@reboot"
+
+
+def test_read_crontab_no_crontab_is_empty_not_unavailable(monkeypatch):
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 1000)
+
+    def _fake(cmd, **kw):
+        return MagicMock(returncode=1, stdout="",
+                         stderr="no crontab for wh6gxz")
+    monkeypatch.setattr("monitoring.fleet_aggregator.subprocess.run", _fake)
+    r = fa._read_crontab()
+    assert r["available"] is True
+    assert r["jobs"] == [] and r["count"] == 0
+
+
+def test_read_crontab_error_is_unavailable(monkeypatch):
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 1000)
+
+    def _fake(cmd, **kw):
+        return MagicMock(returncode=1, stdout="",
+                         stderr="cannot connect to cron daemon")
+    monkeypatch.setattr("monitoring.fleet_aggregator.subprocess.run", _fake)
+    r = fa._read_crontab()
+    assert r["available"] is False
+    assert "unavailable" in r["reason"]
+
+
+def test_read_crontab_missing_binary_is_unavailable(monkeypatch):
+    monkeypatch.setattr("monitoring.fleet_aggregator.os.geteuid", lambda: 1000)
+
+    def _fake(cmd, **kw):
+        raise FileNotFoundError("crontab")
+    monkeypatch.setattr("monitoring.fleet_aggregator.subprocess.run", _fake)
+    r = fa._read_crontab()
+    assert r["available"] is False
+    assert "probe_error" in r["reason"]
+
+
+def test_parse_cron_verdicts_last_per_name_and_status():
+    now = 2_000_000_000.0
+    text = (
+        "2026-06-08T14:00:00+00:00 jobA OK first\n"
+        "2026-06-08T15:00:00+00:00 jobA FAIL second\n"
+        "2026-06-08T15:00:00+00:00 jobB CONCERN hmm\n"
+        "garbage line\n"
+    )
+    jobs = fa._parse_cron_verdicts(text, now)
+    by = {j["name"]: j for j in jobs}
+    assert by["jobA"]["status"] == "FAIL"
+    assert by["jobA"]["message"] == "second"
+    assert by["jobB"]["status"] == "CONCERN"
+    assert by["jobA"]["age_s"] > 0
+
+
+def test_read_cron_verdicts_missing_file_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_cron_verdicts()
+    assert r["available"] is False and r["reason"] == "no_file"
+
+
+def test_read_cron_verdicts_present_counts_fail(monkeypatch, tmp_path):
+    (tmp_path / "cron_verdicts.log").write_text(
+        "2026-06-08T15:00:00+00:00 jobA FAIL boom\n")
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_cron_verdicts()
+    assert r["available"] is True and r["fail_count"] == 1
+
+
+def test_read_loop_crons_absent_is_unavailable_ephemeral(monkeypatch, tmp_path):
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_loop_crons()
+    assert r["available"] is False
+    assert r["reason"] == "no_file"
+    assert r["ephemeral"] is True
+
+
+def test_read_loop_crons_malformed_json(monkeypatch, tmp_path):
+    (tmp_path / ".claude_loop_crons.json").write_text("{not json")
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_loop_crons()
+    assert r["available"] is False and r["reason"] == "malformed_json"
+
+
+def test_read_loop_crons_present(monkeypatch, tmp_path):
+    (tmp_path / ".claude_loop_crons.json").write_text(json.dumps(
+        [{"id": "3d4dee9a", "cron": "7,37 * * * *",
+          "prompt": "watch", "next_fire_unix": 123}]))
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_loop_crons()
+    assert r["available"] is True and r["ephemeral"] is True
+    assert r["jobs"][0]["id"] == "3d4dee9a"
+
+
+def test_schedules_block_includes_new_subkeys(monkeypatch):
+    monkeypatch.setattr(fa, "_list_timers_scope", lambda scope: [])
+    block = fa._schedules_block()
+    assert {"crontab", "verdicts", "loop_crons"} <= set(block)
+
+
+def test_failing_crontab_does_not_flip_timer_health(monkeypatch):
+    """A broken crontab read is its OWN unavailable, never a timer fault."""
+    monkeypatch.setattr(fa, "_list_timers_scope", lambda scope: [])
+    monkeypatch.setattr(fa, "_read_crontab",
+                        lambda: {"available": False, "reason": "boom"})
+    block = fa._schedules_block()
+    assert block["healthy"] is True
+    assert block["crontab"]["available"] is False

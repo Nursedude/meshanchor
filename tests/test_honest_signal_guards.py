@@ -535,3 +535,35 @@ class TestLowTierS8:
             "validate_meshcore_device must not claim responds=True for a device "
             "it never probed (persistent-owner skip) (S8 L5)"
         )
+
+
+class TestScheduledRunningPanelVisibility:
+    """Phase-1 fleet visibility: the /fleet 'Scheduled & Running' panel adds
+    crontab / cron-verdict / loop-cron sub-sources to the timer view. The
+    operator asked for TRUTHFUL reporting — a failed read must render
+    'unavailable', NEVER a silent green. Static guards on the web render lock
+    that contract (skip-if-absent so they port across the diverged repos)."""
+
+    FLEET_HTML = REPO_ROOT / "web" / "fleet.html"
+
+    def test_web_has_honest_unavailable_branch(self):
+        src = _src_or_skip(self.FLEET_HTML)
+        assert "renderSchedSub" in src
+        # The sub-source renderer MUST branch on availability and render an
+        # explicit 'unavailable' — never fall through to a green pill.
+        assert "block.available === false" in src
+        assert "'unavailable'" in src
+
+    def test_web_covers_all_three_sources_and_synth(self):
+        src = _src_or_skip(self.FLEET_HTML)
+        for kind in ("'crontab'", "'verdicts'", "'loop_crons'"):
+            assert kind in src, f"Scheduled & Running missing sub-source {kind}"
+        assert "data.synth_md" in src, "synth-soak result not wired into the panel"
+        assert "Scheduled &amp; Running" in src
+
+    def test_web_labels_loop_crons_ephemeral(self):
+        src = _src_or_skip(self.FLEET_HTML)
+        assert "session-only" in src, (
+            "ephemeral Claude /loop crons must be labeled session-only, not "
+            "presented as a durable schedule"
+        )

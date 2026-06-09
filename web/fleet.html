@@ -404,6 +404,11 @@
         .sched-row.sched-stale .sched-name { color: #ef5350; font-weight: 600; }
         .sched-row.sched-stale .sched-next { color: #ef5350; }
         .sched-empty { padding: 4px 0; color: #6a7a8a; font-size: 11px; font-style: italic; }
+        /* Phase-1 fleet-visibility sub-sources (crontab / verdicts / loop crons) */
+        .sched-sub { margin: 4px 0 2px 8px; padding-left: 6px; border-left: 2px solid #1a2638; }
+        .sched-sub-head { display: flex; align-items: center; gap: 8px; }
+        .sched-sub-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #6a7886; }
+        .sched-sub-eph { font-size: 9px; color: #5a6a7a; font-style: italic; }
         .card.card-bad { border-color: #ef5350; box-shadow: 0 0 12px rgba(239,83,80,0.18); }
 
         /* ── Path-of-Record panel (Track 2.6) ─────────────────
@@ -689,7 +694,7 @@
 
             <!-- Schedules / Timer health (T0 of fleet dashboard roadmap) -->
             <div class="card" id="schedules-card">
-                <h2>Schedules <span id="schedules-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
+                <h2>Scheduled &amp; Running <span id="schedules-meta" style="font-size:11px; color:#6a7886; font-weight:normal;"></span></h2>
                 <div id="schedules-content"></div>
             </div>
 
@@ -1459,6 +1464,84 @@
         }
 
 
+        // Phase-1 fleet visibility: render one scheduled-work sub-source
+        // (crontab / verdicts / loop crons) under a host's timer table.
+        // Honest-signal: available===false renders "unavailable" (never a
+        // silent green). loop_crons "no_file" is the muted NORMAL state.
+        // Returns {unavailable, bad} so the card header can aggregate.
+        function renderSchedSub(hostDiv, label, block, kind) {
+            const sub = el('div', { class: 'sched-sub' });
+            const head = el('div', { class: 'sched-sub-head' });
+            head.appendChild(el('span', { class: 'sched-sub-label', text: label }));
+            if (!block) {
+                head.appendChild(el('span', { class: 'sched-host-noinfo', text: 'no feed' }));
+                sub.appendChild(head);
+                hostDiv.appendChild(sub);
+                return { unavailable: false, bad: false };
+            }
+            if (block.ephemeral) {
+                head.appendChild(el('span', { class: 'sched-sub-eph', text: 'session-only' }));
+            }
+            if (block.available === false) {
+                // loop_crons absent is the normal muted case, not a fault.
+                const normalAbsent = kind === 'loop_crons' && block.reason === 'no_file';
+                head.appendChild(el('span', {
+                    class: normalAbsent ? 'sched-host-noinfo' : 'sched-host-bad',
+                    text: normalAbsent ? 'none' : 'unavailable',
+                    title: block.reason || '',
+                }));
+                sub.appendChild(head);
+                if (!normalAbsent) {
+                    sub.appendChild(el('div', { class: 'sched-empty', text: `(${block.reason || 'unavailable'})` }));
+                }
+                hostDiv.appendChild(sub);
+                return { unavailable: !normalAbsent, bad: !normalAbsent };
+            }
+            const jobs = block.jobs || [];
+            let bad = false;
+            if (jobs.length === 0) {
+                head.appendChild(el('span', { class: 'sched-host-ok', text: 'none' }));
+                sub.appendChild(head);
+                sub.appendChild(el('div', { class: 'sched-empty',
+                    text: kind === 'verdicts' ? '(no verdicts)' : '(none)' }));
+                hostDiv.appendChild(sub);
+                return { unavailable: false, bad: false };
+            }
+            let pill = `${jobs.length}`;
+            if (kind === 'verdicts') {
+                const fails = block.fail_count || 0;
+                const concerns = block.concern_count || 0;
+                if (fails || concerns) { bad = fails > 0; pill = `${fails} fail · ${concerns} concern`; }
+                else pill = `${jobs.length} ok`;
+            }
+            head.appendChild(el('span', {
+                class: bad ? 'sched-host-bad' : 'sched-host-ok', text: pill }));
+            sub.appendChild(head);
+            const tbl = el('table', { class: 'sched-table' });
+            const tbody = el('tbody');
+            for (const j of jobs) {
+                const tr = el('tr', { class: 'sched-row' });
+                if (kind === 'crontab') {
+                    tr.appendChild(el('td', { class: 'sched-name', text: j.schedule || '' }));
+                    tr.appendChild(el('td', { class: 'sched-next', text: j.command || '', title: j.command || '' }));
+                } else if (kind === 'verdicts') {
+                    const isBad = /^FAIL/i.test(j.status || '') || /CONCERN/i.test(j.status || '');
+                    tr.className = isBad ? 'sched-row sched-stale' : 'sched-row';
+                    tr.appendChild(el('td', { class: 'sched-name', text: j.name || '', title: j.message || '' }));
+                    tr.appendChild(el('td', { class: 'sched-age',
+                        text: `${j.status || '?'} · ${j.age_s != null ? fmtAge(j.age_s) + ' ago' : '—'}` }));
+                } else { // loop_crons
+                    tr.appendChild(el('td', { class: 'sched-name', text: j.cron || '', title: j.id || '' }));
+                    tr.appendChild(el('td', { class: 'sched-next', text: (j.prompt || '').slice(0, 60), title: j.prompt || '' }));
+                }
+                tbody.appendChild(tr);
+            }
+            tbl.appendChild(tbody);
+            sub.appendChild(tbl);
+            hostDiv.appendChild(sub);
+            return { unavailable: false, bad };
+        }
+
         function renderSchedules(rollup) {
             const container = $('schedules-content');
             const meta = $('schedules-meta');
@@ -1473,6 +1556,7 @@
             let totalStale = 0;
             let totalUnits = 0;
             let anyUnavailable = false;
+            let anyBad = false;
 
             for (const row of rows) {
                 const snap = row.snapshot || {};
@@ -1510,60 +1594,63 @@
                 }));
                 hostDiv.appendChild(header);
 
+                // Timer section — NO early continue: the additive
+                // sub-sources below must render even when timers are
+                // empty/unavailable (a box can have crontab but no timers).
                 if (probeFailed) {
                     hostDiv.appendChild(el('div', {
                         class: 'sched-empty',
                         text: `(${sched.reason})`,
                     }));
-                    container.appendChild(hostDiv);
-                    continue;
-                }
-
-                if (units.length === 0) {
+                } else if (units.length === 0) {
                     hostDiv.appendChild(el('div', {
                         class: 'sched-empty',
                         text: '(no fleet timers on this host)',
                     }));
-                    container.appendChild(hostDiv);
-                    continue;
+                } else {
+                    const tbl = el('table', { class: 'sched-table' });
+                    const tbody = el('tbody');
+                    for (const u of units) {
+                        const tr = el('tr', {
+                            class: u.stale ? 'sched-row sched-stale' : 'sched-row',
+                        });
+                        // Strip ".timer" suffix for readability; full name is
+                        // still in the title attribute for operator copy-paste.
+                        const displayName = (u.name || '').replace(/\.timer$/, '');
+                        tr.appendChild(el('td', {
+                            class: 'sched-name', text: displayName, title: u.name,
+                        }));
+                        tr.appendChild(el('td', {
+                            class: 'sched-age',
+                            text: u.age_s != null ? `${fmtAge(u.age_s)} ago` : '—',
+                        }));
+                        tr.appendChild(el('td', {
+                            class: 'sched-next',
+                            text: u.next_fire_unix ? `→ ${fmtClock(u.next_fire_unix)}` : 'NEXT —',
+                        }));
+                        tbody.appendChild(tr);
+                    }
+                    tbl.appendChild(tbody);
+                    hostDiv.appendChild(tbl);
                 }
 
-                const tbl = el('table', { class: 'sched-table' });
-                const tbody = el('tbody');
-                for (const u of units) {
-                    const tr = el('tr', {
-                        class: u.stale ? 'sched-row sched-stale' : 'sched-row',
-                    });
-                    // Strip ".timer" suffix for readability; full name is
-                    // still in the data attribute for operator copy-paste.
-                    const displayName = (u.name || '').replace(/\.timer$/, '');
-                    tr.appendChild(el('td', {
-                        class: 'sched-name',
-                        text: displayName,
-                        title: u.name,
-                    }));
-                    tr.appendChild(el('td', {
-                        class: 'sched-age',
-                        text: u.age_s != null ? `${fmtAge(u.age_s)} ago` : '—',
-                    }));
-                    tr.appendChild(el('td', {
-                        class: 'sched-next',
-                        text: u.next_fire_unix
-                            ? `→ ${fmtClock(u.next_fire_unix)}`
-                            : 'NEXT —',
-                    }));
-                    tbody.appendChild(tr);
-                }
-                tbl.appendChild(tbody);
-                hostDiv.appendChild(tbl);
+                // Additive scheduled-work sub-sources (Phase-1 visibility).
+                const s1 = renderSchedSub(hostDiv, 'crontab', sched.crontab, 'crontab');
+                const s2 = renderSchedSub(hostDiv, 'verdicts', sched.verdicts, 'verdicts');
+                const s3 = renderSchedSub(hostDiv, 'loop crons', sched.loop_crons, 'loop_crons');
+                if (s1.unavailable || s2.unavailable || s3.unavailable) anyUnavailable = true;
+                if (s1.bad || s2.bad || s3.bad) anyBad = true;
+
                 container.appendChild(hostDiv);
             }
 
             meta.textContent = totalStale > 0
                 ? `⚠ ${totalStale}/${totalUnits} stale`
-                : (anyUnavailable ? '⚠ timer state unavailable on some hosts'
-                                  : `${totalUnits} timers · all healthy`);
-            $('schedules-card').classList.toggle('card-bad', totalStale > 0 || anyUnavailable);
+                : (anyUnavailable ? '⚠ some sources unavailable'
+                   : (anyBad ? '⚠ cron/verdict needs attention'
+                      : `${totalUnits} timers · all healthy`));
+            $('schedules-card').classList.toggle('card-bad',
+                totalStale > 0 || anyUnavailable || anyBad);
         }
 
         // ── Path-of-Record panel (Track 2.6 of we-have-a-cycle plan) ──
@@ -2185,6 +2272,60 @@
                 }
                 table.appendChild(tbody);
                 content.appendChild(table);
+            }
+
+            // Synth soak (Phase-1 visibility) — the meshforge-synth-soak
+            // timer's RESULT, already fetched into synth_md but dropped
+            // until now. Reuses the rollup-markdown render. Honest: a
+            // null/fix-hint synth_md shows verbatim, never faked green.
+            if (data.synth_md) {
+                content.appendChild(el('h3', {
+                    text: 'Synth soak',
+                    style: 'margin: 18px 0 6px; font-size: 12px; ' +
+                           'color: #6a7886; font-weight: normal; ' +
+                           'border-top: 1px solid #1a2638; padding-top: 12px;',
+                }));
+                const synth = _parseRollupMd(data.synth_md);
+                if (synth.hint) {
+                    content.appendChild(el('div', { class: 'lab-rollup-hint', text: synth.hint }));
+                } else if (synth.sections.length === 0) {
+                    content.appendChild(el('div', { class: 'empty', text: 'no synth-soak rows yet' }));
+                } else {
+                    for (const section of synth.sections) {
+                        content.appendChild(el('h3', {
+                            text: section.heading,
+                            style: 'margin: 10px 0 6px; font-size: 11px; ' +
+                                   'color: #6a7886; font-weight: normal;',
+                        }));
+                        if (section.rows.length === 0) {
+                            content.appendChild(el('div', { class: 'empty', text: 'no fires in this window' }));
+                            continue;
+                        }
+                        const stbl = el('table', { class: 'lab-leaderboard' });
+                        stbl.appendChild(el('thead', {}, el('tr', {}, [
+                            el('th', { text: 'pair' }),
+                            el('th', { class: 'num', text: 'samples' }),
+                            el('th', { class: 'num', text: 'mean ms' }),
+                            el('th', { class: 'num', text: 'p95 ms' }),
+                            el('th', { class: 'num', text: 'fail %' }),
+                            el('th', { text: 'breakdown' }),
+                        ])));
+                        const stbody = el('tbody', {});
+                        for (const r of section.rows.slice(0, 50)) {
+                            stbody.appendChild(el('tr', {}, [
+                                el('td', { text: r.pair }),
+                                el('td', { class: 'num', text: r.samples }),
+                                el('td', { class: 'num', text: r.mean_ms }),
+                                el('td', { class: 'num', text: r.p95_ms }),
+                                el('td', { class: 'num fail-cell ' + _failClass(r.fail_pct),
+                                           text: r.fail_pct.toFixed(1) }),
+                                el('td', { text: r.breakdown }),
+                            ]));
+                        }
+                        stbl.appendChild(stbody);
+                        content.appendChild(stbl);
+                    }
+                }
             }
         }
 
