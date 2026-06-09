@@ -6,20 +6,39 @@ on:
   pull_request:
     branches: [main]
 
+# Least-privilege default for every job; the pr-comment job widens
+# pull-requests for its sticky failure comment.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint & Security Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.11'
 
       - name: Run MeshAnchor linter
         run: python3 scripts/lint.py --all
+
+      - name: Advisory scan for hardcoded secrets (non-blocking)
+        run: |
+          # Advisory only — docstring usage examples legitimately match this
+          # pattern, so it cannot hard-fail. Blocking secret hygiene lives in
+          # lint + review.
+          HITS=$(grep -rn "password\s*=\s*['\"][^'\"]\+" src/ --include="*.py" \
+            | grep -v "password\s*=\s*['\"]['\"]" | grep -v "#" | head -5 || true)
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::warning::Potential hardcoded passwords above — verify they are docstring examples"
+          else
+            echo "No potential hardcoded passwords found"
+          fi
 
   test:
     name: Test Suite
@@ -33,12 +52,20 @@ jobs:
         python-version: ['3.10', '3.11']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+          # Deps are installed inline below, so key the wheel cache off the
+          # requirements files plus this workflow (rotates when the inline
+          # list changes).
+          cache-dependency-path: |
+            requirements.txt
+            requirements/*.txt
+            .github/workflows/ci.yml
 
       - name: Install dependencies
         run: |
@@ -59,7 +86,7 @@ jobs:
 
       - name: Upload pytest log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pytest-log-py${{ matrix.python-version }}
           path: /tmp/pytest.log
@@ -81,7 +108,7 @@ jobs:
     steps:
       - name: Download pytest log
         id: download
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: pytest-log-py${{ matrix.python-version }}
           path: /tmp/pytest-artifact
@@ -150,7 +177,7 @@ jobs:
 
       - name: Post sticky comment
         if: steps.download.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405 # v2.9.4
         with:
           header: pytest-py${{ matrix.python-version }}
           path: /tmp/pr-comment.md
@@ -159,42 +186,19 @@ jobs:
     name: Syntax Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.11'
 
       - name: Check Python syntax
-        run: |
-          set -o pipefail
-          find src -name "*.py" -type f -exec python -m py_compile {} \;
-          echo "Syntax check passed"
-
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check for shell=True violations (MF002)
-        run: |
-          set -o pipefail
-          # Only fail on actual shell=True in subprocess calls, not comments
-          VIOLATIONS=$(grep -rn "subprocess\.\(run\|Popen\|call\).*shell\s*=\s*True" src/ --include="*.py" 2>/dev/null || true)
-          if [ -n "$VIOLATIONS" ]; then
-            echo "ERROR: Found shell=True in subprocess calls:"
-            echo "$VIOLATIONS"
-            exit 1
-          fi
-          echo "No shell=True violations found"
-
-      - name: Check for hardcoded secrets
-        run: |
-          set -o pipefail
-          # Basic check for potential secrets
-          if grep -rn "password\s*=\s*['\"][^'\"]\+" src/ --include="*.py" | grep -v "password\s*=\s*['\"]['\"]" | grep -v "#" | head -5; then
-            echo "Warning: Potential hardcoded passwords found"
-          fi
-          echo "Security scan complete"
+        # compileall exits nonzero on any syntax error (the previous
+        # `find -exec py_compile \;` form swallowed per-file failures and
+        # could never fail) and uses one interpreter instead of one per file.
+        run: python -m compileall -q src
+        # NOTE: the old `security` job was deleted — its shell=True grep was a
+        # strict subset of lint rule MF002 (already gating via lint.py --all),
+        # and its secrets step could never fail; the secrets grep now lives in
+        # the lint job as an explicitly-advisory step.
