@@ -468,13 +468,25 @@ class TestDeliveryConfirmationStallProbe:
         return ActiveHealthProbe()
 
     @staticmethod
-    def _snap(ring_sent=0, ring_confirmed=0, cumulative=0.9):
+    def _snap(*, confirmed=0, failed=0, mesh_sent=0, dedup_drops=0,
+              confirmable=("rns",), cumulative=0.9):
+        """Real delivery_counters shape: ring events carry protocol +
+        drop_reason, plus state_by_protocol. mesh_sent = structurally
+        unconfirmable Meshtastic `sent`; dedup_drops = benign rns drops."""
         recent = (
-            [{"state": "sent", "id": f"s{i}"} for i in range(ring_sent)]
-            + [{"state": "confirmed", "id": f"c{i}"}
-               for i in range(ring_confirmed)]
+            [{"state": "confirmed", "protocol": "rns", "id": f"c{i}"}
+             for i in range(confirmed)]
+            + [{"state": "dropped", "protocol": "rns",
+                "drop_reason": "rns_delivery_failed", "id": f"f{i}"}
+               for i in range(failed)]
+            + [{"state": "dropped", "protocol": "rns",
+                "drop_reason": "dedup", "id": f"d{i}"} for i in range(dedup_drops)]
+            + [{"state": "sent", "protocol": "meshtastic", "id": f"m{i}"}
+               for i in range(mesh_sent)]
         )
-        return {"confirmation_rate": cumulative, "recent": recent}
+        return {"confirmation_rate": cumulative,
+                "state_by_protocol": {"confirmed": {p: 9000 for p in confirmable}},
+                "recent": recent}
 
     def test_healthy_when_counters_unavailable(self, monkeypatch):
         import gateway.delivery_counters as dc
@@ -486,45 +498,48 @@ class TestDeliveryConfirmationStallProbe:
         assert r.healthy is True
         assert r.reason == "delivery_counters_unavailable"
 
-    def test_healthy_when_no_traffic(self):
-        """confirmation_rate None <=> zero sends ever."""
+    def test_mesh_sends_do_not_false_alarm(self):
+        """THE bug: 20 meshtastic sent + 10 rns confirmed read 50% under the
+        old confirmed/sent ratio. Meshtastic is unconfirmable → honest rate
+        10/10 = 100% → healthy."""
         r = self._probe().check_delivery_confirmation_stall(
-            snap={"confirmation_rate": None, "recent": []})
+            min_terminal=5, snap=self._snap(confirmed=10, mesh_sent=20))
         assert r.healthy is True
-        assert r.reason == "no_traffic"
 
-    def test_healthy_below_min_sent(self):
-        """3 sends, 0 confirms = 0% — but a low-traffic box must not
-        alarm; one unconfirmed message tanks a tiny denominator."""
+    def test_no_confirmable_protocol(self):
         r = self._probe().check_delivery_confirmation_stall(
-            snap=self._snap(ring_sent=3, ring_confirmed=0))
+            min_terminal=5, snap=self._snap(mesh_sent=30, confirmable=()))
+        assert r.healthy is True
+        assert r.reason == "no_confirmable_protocol"
+
+    def test_healthy_below_min_terminal(self):
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(confirmed=2, failed=1, mesh_sent=40))
         assert r.healthy is True
         assert "low_traffic" in r.reason
 
+    def test_dedup_drops_excluded(self):
+        """Benign dedup drops are not delivery failures."""
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(confirmed=24, dedup_drops=30))
+        assert r.healthy is True
+
     def test_degraded_at_40pct(self):
         r = self._probe().check_delivery_confirmation_stall(
-            snap=self._snap(ring_sent=25, ring_confirmed=10))
+            snap=self._snap(confirmed=10, failed=15))
         assert r.healthy is False
         assert "delivery_confirmation_stall (degraded)" in r.reason
 
     def test_wedge_at_under_10pct(self):
         r = self._probe().check_delivery_confirmation_stall(
-            snap=self._snap(ring_sent=30, ring_confirmed=2))
+            snap=self._snap(confirmed=2, failed=23))
         assert r.healthy is False
         assert "delivery_confirmation_stall (wedge)" in r.reason
 
     def test_healthy_rate_is_quiet(self):
         r = self._probe().check_delivery_confirmation_stall(
-            snap=self._snap(ring_sent=25, ring_confirmed=22))
+            snap=self._snap(confirmed=24, failed=1))
         assert r.healthy is True
-
-    def test_uses_recent_ring_not_cumulative(self):
-        """A long-lived box with a 95% LIFETIME rate but a collapsed
-        RECENT window must fire — cumulative masks the collapse."""
-        r = self._probe().check_delivery_confirmation_stall(
-            snap=self._snap(ring_sent=30, ring_confirmed=1, cumulative=0.95))
-        assert r.healthy is False
-        assert "delivery_confirmation_stall (wedge)" in r.reason
 
 
 class TestNewProbesRegistered:

@@ -791,31 +791,32 @@ class ActiveHealthProbe:
     def check_delivery_confirmation_stall(
         self,
         *,
-        min_sent: int = 20,
+        min_terminal: int = 20,
         rate_degraded: float = 0.50,
         rate_wedge: float = 0.10,
         snap: Optional[dict] = None,
     ) -> HealthResult:
-        """Sends flow but confirmations collapsed (MF Issue #74 probe port).
+        """A confirmable protocol's deliveries are failing instead of
+        confirming (MF Issue #74 probe port; disjoint-protocol fix 2026-06-09).
 
-        Closes the honest-signal gap where the bridge's own rolling
-        metrics decay to quiet/healthy when events stop — a gateway
-        shouting into a void looks fine from inside; this judges from
-        the durable counters instead. Windowed rate from the
-        ``delivery_counters.snapshot()`` recent-events ring (last 50)
-        — the lifetime-cumulative rate would mask a recent collapse on
-        a long-lived box.
+        Windowed rate from the ``delivery_counters.snapshot()`` recent-events
+        ring (last 50). CRUCIAL: judges ONLY protocols that actually have a
+        confirmation mechanism (record `confirmed` events — RNS today;
+        Meshtastic once ACK consumption lands), comparing that protocol's two
+        REAL terminal outcomes — `confirmed` vs a failed-delivery `dropped` —
+        NOT the meaningless cross-population `confirmed/sent` ratio. The
+        counters use disjoint lifecycle states per protocol (RNS:
+        queued→confirmed, never `sent`; Meshtastic: queued→sent, never
+        `confirmed`), so `confirmed/sent` was (RNS-confirmed ÷ mesh-sent) —
+        two different populations that never measured a coherent rate and
+        false-alarmed ~50% on every mesh-heavy gateway.
 
-        Self-guards healthy (silence is NOT failure here — the
-        explicit inversion of the channel-dark class): counters
-        unavailable; ``confirmation_rate is None`` (zero sends ever);
-        ring SENT < ``min_sent`` (one unconfirmed message must not
-        tank a tiny denominator; busy gateways canary for the fleet).
-
-        In the daemon process this reads the writer's own snapshot; in
-        the agent it reads cross-process via the SQLite file (the #74
-        write-error persistence keeps that honest). ``snap`` is a test
-        seam.
+        Self-guards healthy (silence is NOT failure here): counters
+        unavailable; no confirmable protocol (nothing tracks confirmation);
+        confirmable terminal events < ``min_terminal`` (one failure must not
+        tank a tiny denominator; on a mesh-heavy box the 50-event ring holds
+        few RNS events, so healthy is the honest answer over a small sample).
+        ``snap`` is a test seam.
         """
         if snap is None:
             try:
@@ -825,38 +826,61 @@ class ActiveHealthProbe:
                 return HealthResult(
                     healthy=True, reason="delivery_counters_unavailable",
                 )
-        if not isinstance(snap, dict) or snap.get("confirmation_rate") is None:
+        if not isinstance(snap, dict):
             return HealthResult(healthy=True, reason="no_traffic")
+
+        # Confirmable = protocols that have ever recorded a `confirmed` event.
+        confirmed_by_proto = (snap.get("state_by_protocol") or {}).get("confirmed") or {}
+        confirmable = {
+            p for p, c in confirmed_by_proto.items()
+            if isinstance(c, (int, float)) and not isinstance(c, bool) and c > 0
+        }
+        if not confirmable:
+            return HealthResult(healthy=True, reason="no_confirmable_protocol")
 
         recent = snap.get("recent")
         if not isinstance(recent, list):
             return HealthResult(healthy=True, reason="no_recent_ring")
 
-        ring_sent = sum(1 for e in recent
-                        if isinstance(e, dict) and e.get("state") == "sent")
-        ring_conf = sum(1 for e in recent
-                        if isinstance(e, dict) and e.get("state") == "confirmed")
-        if ring_sent < min_sent:
+        # Drop reasons meaning ATTEMPTED-and-FAILED (the denominator-mates of
+        # `confirmed`); benign dedup/capacity drops are NOT delivery failures.
+        failure_reasons = {
+            "rns_delivery_failed", "retries_exhausted", "destination_unreachable",
+            "delivery_timeout", "non_retriable_error", "circuit_open", "wedged",
+        }
+        ring_conf = 0
+        ring_failed = 0
+        for e in recent:
+            if not isinstance(e, dict) or e.get("protocol") not in confirmable:
+                continue
+            st = e.get("state")
+            if st == "confirmed":
+                ring_conf += 1
+            elif st == "dropped" and e.get("drop_reason") in failure_reasons:
+                ring_failed += 1
+
+        terminal = ring_conf + ring_failed
+        if terminal < min_terminal:
             return HealthResult(
                 healthy=True,
-                reason=f"low_traffic ring_sent={ring_sent}<{min_sent}",
+                reason=f"low_traffic terminal={terminal}<{min_terminal}",
             )
 
-        rate = ring_conf / ring_sent
+        rate = ring_conf / terminal
         if rate > rate_degraded:
             return HealthResult(
                 healthy=True,
-                reason=f"confirm_ok {ring_conf}/{ring_sent} ({rate:.0%})",
+                reason=f"confirm_ok {ring_conf}/{terminal} ({rate:.0%})",
             )
 
         level = "wedge" if rate <= rate_wedge else "degraded"
+        protos = ", ".join(sorted(confirmable))
         return HealthResult(
             healthy=False,
             reason=(
-                f"delivery_confirmation_stall ({level}): {ring_conf}/"
-                f"{ring_sent} confirmed in the recent-events window "
-                f"({rate:.0%}) while sends keep flowing. Receivers "
-                f"aren't acking — check RNS paths to the fan-out peers "
+                f"delivery_confirmation_stall ({level}): {ring_conf}/{terminal} "
+                f"{protos} messages confirmed in the recent window ({rate:.0%}); "
+                f"the rest failed delivery. Check RNS paths to the fan-out peers "
                 f"and /api/gateway/delivery drop_reasons."
             ),
         )
