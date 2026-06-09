@@ -40,12 +40,25 @@ jobs:
             echo "No potential hardcoded passwords found"
           fi
 
+  # Branch protection REQUIRES the literal context "Syntax Check" — the
+  # 2026-06-09 fold-into-lint (1635e67c, MeshForge parity) made every PR
+  # unmergeable: checks all green, but the required context never reported.
+  # Keep this job's name in lockstep with the protection rule.
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.11'
+
       - name: Check Python syntax
         # compileall exits nonzero on any syntax error (the old standalone
         # syntax-check job used `find -exec py_compile \;`, which swallowed
-        # per-file failures and could never fail). Folded in here — the
-        # static checks share one runner/checkout/Python so action bumps
-        # touch fewer sites.
+        # per-file failures and could never fail).
         run: python -m compileall -q src
 
   test:
