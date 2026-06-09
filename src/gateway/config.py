@@ -289,6 +289,13 @@ class MeshtasticConfig:
     # out of committed configs (security rules MF014/MF015). Empty disables
     # downlink injection (falls back to toradio).
     downlink_psk: str = ""
+    # Extra base64 channel PSKs the gateway uses to DECRYPT the /e/
+    # ServiceEnvelope topic when consuming ROUTING_APP ACKs (#74, ported from
+    # MeshForge). The default LongFast key + downlink_psk are tried
+    # automatically; add the PSK of the channel directed downlinks go out on
+    # here when it isn't either of those. Operator-specific secrets — same
+    # MF014/MF015 rules as downlink_psk. Empty = default key (+ downlink_psk).
+    channel_keys: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -492,6 +499,20 @@ class RNSConfig:
     # never suppressed.
     dual_path_dedup_enabled: bool = False
     dual_path_dedup_window_sec: int = 60    # registry hit window (seconds)
+    # Honest Meshtastic delivery confirmation (#74, ported from MeshForge
+    # 204da9e). When True, directed downlinks (DMs to a specific mesh node) are
+    # sent wantAck=True and the gateway consumes the recipient's ROUTING_APP
+    # ACK/NAK, recording the real CONFIRMED / DROPPED(reason) terminal state in
+    # delivery_counters — so Meshtastic joins the confirmable set instead of the
+    # "Sent (not guaranteed)" ceiling (#16). In mqtt_bridge mode the ACK is
+    # decoded from the encrypted /e/ ServiceEnvelope MQTT topic
+    # (utils.meshtastic_se_crypto), staying within MQTT — NO fromradio read
+    # (#17/#75 preserved). Confirms only DMs whose recipient ACK the radio HEARS
+    # on a channel it can decrypt; needs the cryptography + meshtastic-protobuf
+    # deps (the handler warns at startup if absent). Default False (observe-first).
+    meshtastic_ack_consumption_enabled: bool = False
+    ack_pending_ttl_sec: int = 600          # forget an un-acked DM after ~10 min
+    ack_pending_max: int = 1024             # in-flight DM cap, oldest-evicted
 
     def get_lxmf_destinations(self) -> List[str]:
         """Return default_lxmf_destination normalized to a list of non-empty hex strings."""
