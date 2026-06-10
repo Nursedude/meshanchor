@@ -9,7 +9,7 @@
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-4335%20passing-blue.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-5168%20passing-blue.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the arch
 
 > **ALPHA SOFTWARE — Field-deployed and accumulating mileage. More testers wanted.**
 >
-> MeshAnchor has **4,335 tests passing** against mocks. The canonical NOC
+> MeshAnchor has **5,168 tests passing** against mocks. The canonical NOC
 > (`meshanchor-server`, Pi 4B + RAK Heltec V3 in Serial Companion mode) has
 > been running as a continuous deployment since 2026-05-02 and is currently
 > the source of truth for field validation. As of 2026-05-13 it carries:
@@ -268,9 +268,9 @@ sudo python3 src/launcher_tui/main.py
 |---------|-------|-------|
 | Companion radio detection | -- | Serial USB scan + udev persistent naming (`/dev/ttyMeshCore`) |
 | Pre-flight device validation | -- | Serial probe before connection, permission + existence checks |
-| meshcore_py connection | 602 | Async event loop, reconnect, message handling. **Field-validated** with RAK Heltec V3 in Serial Companion mode (2026-05-02). |
-| CanonicalMessage bridging | 553 | Protocol-agnostic message format, N-protocol routing |
-| 3-way routing classifier | 684 | MeshCore + Meshtastic + RNS tri-bridge tests (mock-only) |
+| meshcore_py connection | 58 | Async event loop, reconnect, message handling. **Field-validated** with RAK Heltec V3 in Serial Companion mode (2026-05-02). |
+| CanonicalMessage bridging | 46 | Protocol-agnostic message format, N-protocol routing |
+| 3-way routing classifier | 32 | MeshCore + Meshtastic + RNS tri-bridge tests (mock-only) |
 | MeshCore TUI menu | -- | Status, detect, config, nodes, stats, chat, daemon control |
 | Chat HTTP API (`/chat/*` on :8081) | 19 | Daemon-side ring buffer + send/receive endpoints. Bidirectional Public + private-channel messaging field-validated 2026-05-02. |
 | Daemon control in TUI | 5 | start / stop / restart / journal / live tail through `service_check` SSOT |
@@ -279,13 +279,13 @@ sudo python3 src/launcher_tui/main.py
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| Meshtastic MQTT bridge | 140 | Zero-interference gateway (v0.5.4 architecture) |
+| Meshtastic MQTT bridge | 250 | Zero-interference gateway (v0.5.4 architecture) |
 | RNS/LXMF gateway | 97 | rnsd shared instance client |
 | LXMF broadcast bridge plug-in | -- | **Field-validated 2026-05-09**: same-host + cross-federation subscribe/fan-out. Fleet floor: RNS ≥ 1.1.9. |
 | LXMF subscriber reliability | 187 | **Field-live 2026-05-12**: state machine, tier engine, auto-transitions, tier-aware backoff, Stale Subscribers TUI prune, Prometheus metrics on `/metrics`, structured JSON state-transition logs, `/health` digest, Stack Health probe |
-| Message queue (SQLite) | 72 | Persistent queue, retry policy, circuit breaker |
+| Message queue (SQLite) | 104 | Persistent queue, retry policy, circuit breaker |
 | Reconnect engine | 45 | Exponential backoff (1s -> 30s max), jitter, slow start |
-| MQTT robustness | 66 | Reconnection, message loss recovery, broker failover |
+| MQTT robustness | 68 | Reconnection, message loss recovery, broker failover |
 
 ### Fleet Observability (Field-Validated 2026-05-09 → 2026-05-11)
 
@@ -326,7 +326,7 @@ sudo python3 src/launcher_tui/main.py
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| MQTT subscriber | 66 | Nodeless node tracking, protobuf decode |
+| MQTT subscriber | 68 | Nodeless node tracking, protobuf decode |
 | Traffic inspector | -- | Packet capture, protocol tree, display filters |
 | RNS packet sniffer | -- | Wireshark-grade capture, announce tracking |
 | Prometheus exporter | -- | 50+ metric families, Grafana-compatible |
@@ -342,7 +342,7 @@ sudo python3 src/launcher_tui/main.py
 
 ### Testing Reality Check
 
-MeshAnchor has **4,335 automated tests** across 145 test files. However, automated tests
+MeshAnchor has **5,168 automated tests** across 165 test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.
@@ -354,7 +354,8 @@ be considered reliable.
   through the TUI, both directions confirmed
 - **MeshCore↔RNS LXMF broadcast bridge (2026-05-09)** — same-host subscribe + fan-out,
   then cross-host fan-out across the MeshForge Hawaii federation; "Got to test Claude"
-  message round-tripped from `p3` to `meshanchor-server` and broadcast to subscribers
+  message round-tripped from a federation peer to `meshanchor-server` and broadcast
+  to subscribers
 - **LXMF subscriber reliability stack (2026-05-12)** — state machine, tier engine,
   Prometheus metrics on daemon `/metrics` (4 metric families), `/health` digest,
   Stack Health probe; live sample shows 3 healthy/external subscribers
@@ -369,7 +370,7 @@ be considered reliable.
   most recent 24h window)
 - Chat HTTP API + TUI Chat menu (since-id polling, channel + DM send paths)
 - TUI daemon control (status / start / stop / restart / journal / live tail)
-- RNS announce reception (gateway sees external `MeshForge Gateway (moc)` etc.)
+- RNS announce reception (gateway sees external MeshForge gateway announces)
 
 **What has not yet been tested with real hardware in MeshAnchor:**
 - Coverage maps with real GPS position data
@@ -611,10 +612,10 @@ MeshAnchor was **extracted from MeshForge main** at commit `7e4fa02`. The extrac
 Two sister projects with the same DNA, different home radios:
 
 ```
-MeshForge (v0.5.5-beta)           MeshAnchor (v0.1.0-alpha)
+MeshForge (v0.6.1-beta)           MeshAnchor (v0.1.0-alpha)
   Primary: Meshtastic               Primary: MeshCore
   Gateway to: MeshCore/RNS          Gateway to: Meshtastic/RNS
-  Field-tested: Yes                  Field-tested: No — needs YOU
+  Field-tested: Yes                  Field-tested: One box — needs YOU
 ```
 
 ---
@@ -626,7 +627,7 @@ MeshAnchor is part of a 5-repository ecosystem:
 | Repository | Purpose | Version |
 |------------|---------|---------|
 | **[meshanchor](https://github.com/Nursedude/meshanchor)** (this repo) | MeshCore-primary NOC — gateway, TUI, RF tools, diagnostics | 0.1.0-alpha |
-| **[meshforge](https://github.com/Nursedude/meshforge)** | Meshtastic-primary NOC — same architecture, different home radio | 0.5.5-beta |
+| **[meshforge](https://github.com/Nursedude/meshforge)** | Meshtastic-primary NOC — same architecture, different home radio | 0.6.1-beta |
 | **meshanchor-maps** | Visualization plugin — Leaflet/D3.js topology, health scoring | 0.7.0 |
 | **meshing_around_meshanchor** | Bot alerting — 12 alert types, complements meshing-around bot | 0.5.0 |
 | **[RNS-Management-Tool](https://github.com/Nursedude/RNS-Management-Tool)** | Cross-platform RNS ecosystem installer | 0.3.2 |
@@ -641,6 +642,12 @@ contract must stay compatible across both projects:
 - **TUI handler architecture** — Protocol + BaseHandler + HandlerRegistry dispatch
 - **RF tools** (`src/utils/rf.py`) — link budget, Fresnel, FSPL, coverage maps
 - **Gateway bridge pattern** — adapter -> CanonicalMessage -> message router
+- **RNS substrate** (`src/utils/rns_init.py` + the `requirements/rns.txt` fork pin) —
+  RNS and LXMF are installed from MeshForge-owned hard forks
+  ([Nursedude/reticulum](https://github.com/Nursedude/reticulum),
+  [Nursedude/lxmf](https://github.com/Nursedude/lxmf)), pinned by tag + SHA
+  (`MF-FORK-PIN` lines). MeshForge is the lead repo for this substrate; its
+  `scripts/parity_check.py` keeps the shared files byte-identical across both projects
 
 ### Which Should You Run?
 
@@ -662,6 +669,7 @@ src/
 │   ├── startup_checks.py   # Environment checks + conflict resolution
 │   ├── status_bar.py       # Service status bar
 │   └── handlers/            # 85 registered command handlers
+├── daemon.py              # MeshCore radio daemon (chat API + /radio endpoints on :8081)
 ├── gateway/               # Multi-protocol bridge engine
 │   ├── meshcore_handler.py   # MeshCore companion radio (meshcore_py) — PRIMARY
 │   ├── rns_bridge.py        # RNS/LXMF gateway (optional)
@@ -684,6 +692,8 @@ src/
 │   ├── diagnostic_engine.py # Rule-based diagnostics
 │   ├── claude_assistant.py  # AI assistant (Standalone + PRO)
 │   ├── prometheus_exporter.py # Metrics pipeline
+│   ├── active_health_probe.py # Health probes (RNS wedge, delivery stall, drift checks)
+│   ├── rns_init.py        # Guarded RNS chokepoint (shared with MeshForge, fork-pinned)
 │   └── paths.py           # Sudo-safe path resolution
 ├── tactical/              # Tactical operations, QR transport, compliance
 ├── core/                  # RadioMode, orchestrator, plugin system
@@ -694,7 +704,7 @@ scripts/
 ├── install_noc.sh         # Full NOC stack installer
 ├── update.sh              # In-place code update
 ├── reinstall.sh           # Clean reinstall (preserves config)
-├── lint.py                # Security linter (15 rules: MF001-MF013, MF016)
+├── lint.py                # Security linter (17 rules: MF001-MF014, MF016, MA017, MF019-MF020)
 ├── meshanchor-launcher.sh # Shell wrapper
 └── verify_post_install.sh # Post-install health check
 
@@ -707,7 +717,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # 145 test files, 4,335 tests
+tests/                     # 165 test files, 5,168 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
@@ -761,26 +771,26 @@ Gateway-specific templates in `config_templates/`:
 
 ### Test Coverage
 
-**4,335 tests** across 145 test files. Top suites by depth:
+**5,168 tests** across 165 test files. Top suites by depth:
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
-| `test_tribridge_integration.py` | 684 | MeshCore <> Meshtastic <> RNS 3-way routing |
-| `test_meshcore_handler.py` | 602 | MeshCore connection, messaging, node tracking |
-| `test_canonical_message.py` | 553 | CanonicalMessage format, protocol conversion |
-| `test_rns_bridge.py` | 140 | Core bridge: routing, circuit breaker, callbacks |
+| `test_all_handlers_protocol.py` | 449 | Protocol conformance across all 85 TUI handlers |
+| `test_rns_bridge.py` | 250 | Core bridge: routing, circuit breaker, callbacks |
 | `test_rf.py` | 107 | RF calculations: haversine, FSPL, Fresnel, link budget |
+| `test_message_queue.py` | 104 | SQLite queue, retry policy, dead letter |
 | `test_rns_transport.py` | 97 | Packet fragmentation, reassembly, transport stats |
-| `test_meshtastic_protobuf.py` | 74 | Protobuf HTTP client, device config |
-| `test_message_queue.py` | 72 | SQLite queue, retry policy, dead letter |
+| `test_lxmf_broadcast_bridge.py` | 88 | LXMF broadcast bridge: subscribe, fan-out, dedup |
+| `test_gateway_config.py` | 80 | Gateway config + validators |
 | `test_status_bar.py` | 70 | TUI status bar rendering |
+| `test_fleet_aggregator.py` | 69 | Fleet observability aggregation |
 | `test_node_tracker.py` | 68 | Unified node tracking |
-| `test_mqtt_robustness.py` | 66 | MQTT reconnection, broker failover |
+| `test_mqtt_robustness.py` | 68 | MQTT reconnection, broker failover |
+| `test_service_check.py` | 67 | Service management single source of truth |
 | `test_phase4b_radio_writes.py` | 63 | MeshCore radio writes, region-aware validation |
+| `test_rns_status_parser.py` | 62 | rnstatus parsing (incl. `timed_out` wedge detection) |
 | `test_commands.py` | 61 | CLI command handlers |
-| `test_phase6_2_lifecycle.py` | 50 | meshforge-maps systemd lifecycle control |
-| `test_phase6_3_maps_config.py` | 49 | meshforge-maps endpoint config persistence |
-| `test_phase7_profile_defaults.py` | 45 | Profile defaults matrix + doc-link integrity |
+| `test_meshcore_handler.py` | 58 | MeshCore connection, messaging, node tracking |
 
 *All tests use mocked external services. Field validation with real hardware is a separate track — and the one that needs your help.*
 
@@ -792,7 +802,7 @@ python3 -m pytest tests/test_meshcore_handler.py -v  # MeshCore tests only
 
 ### Auto-Review & Lint
 
-Security linter (`scripts/lint.py`) enforces 15 rules:
+Security linter (`scripts/lint.py`) enforces 17 rules:
 
 | Rule | Description |
 |------|-------------|
@@ -808,7 +818,11 @@ Security linter (`scripts/lint.py`) enforces 15 rules:
 | MF011 | RNS repair logic must live in `_rns_repair.py` / diagnostics |
 | MF012 | Context-loaded docs (e.g. `persistent_issues.md`) must stay under 40k chars |
 | MF013 | Bare `sqlite3.connect()` outside `db_helpers.py` — use `connect_tuned()` |
+| MF014 | No operator-specific values (hostnames, personal emails, `/home/<user>/` paths) |
 | MF016 | `@patch('src.utils.paths.…')` in tests no-ops — production imports via `utils.paths` |
+| MA017 | Hardened systemd units: `ReadWritePaths=` must cover the MeshAnchor write buckets |
+| MF019 | `RNS.Reticulum()` only via the `open_reticulum()` chokepoint in `utils/rns_init.py` |
+| MF020 | `apply_config_and_restart()` `(bool, msg)` result must not be discarded in TUI handlers |
 
 ```bash
 python3 scripts/lint.py --all          # Run all lint rules
@@ -875,7 +889,8 @@ See [CLAUDE.md](CLAUDE.md) for the complete development guide.
 **Sister project:** [MeshForge](https://github.com/Nursedude/meshforge) is the
 Meshtastic-primary NOC — extracted from the same codebase on 2026-04-01.
 
-Feature branches use `claude/` prefix, merged via PR to main.
+Feature branches use `claude/` prefix, merged via PR to main. Dependabot
+dependency PRs auto-merge once CI is green.
 
 **Shared contract:** `CanonicalMessage` in `src/gateway/canonical_message.py` must
 stay compatible with MeshForge's version. Changes to the message format should be
