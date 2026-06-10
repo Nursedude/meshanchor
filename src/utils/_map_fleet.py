@@ -19,6 +19,7 @@ import functools
 import logging
 import os
 import threading
+import time
 from typing import Any, Callable, Dict
 
 logger = logging.getLogger(__name__)
@@ -842,3 +843,53 @@ class FleetEndpointsMixin:
         result["test"] = test_id
         result["host"] = _socket.gethostname()
         self._serve_json(result, status=200 if result.get("ok") else 500)
+
+    # ─── Gateway introspection (MF Issue #74 probe ports) ───────────────
+    # Moved here from map_http_handler.py in the size-cap split,
+    # mirroring MeshForge's _map_fleet_endpoints.py boundary.
+
+    def _serve_gateway_queue(self):
+        """Queue backpressure stats (MF Issue #74 probe port).
+
+        Parity/federation surface — the in-process check_queue_backlog
+        reads get_stats() directly; this endpoint serves the dashboard,
+        operators, and MF-side federation the same shape MeshForge's
+        /api/gateway/queue serves.
+        """
+        # Lazy hub-read: tests patch utils.map_http_handler._HAS_MSG_QUEUE
+        # and ._MessageQueue (tests/test_gateway_endpoints.py), so resolve
+        # the safe_import results through the hub module at call time
+        # rather than binding module-local copies here.
+        from utils import map_http_handler as _hub
+        if not _hub._HAS_MSG_QUEUE:
+            self._serve_json(
+                {"error": "message_queue_unavailable"}, status=503,
+            )
+            return
+        try:
+            stats = _hub._MessageQueue().get_stats()
+            stats["timestamp"] = time.time()
+            self._serve_json(stats, status=200)
+        except Exception as e:
+            self._serve_json(
+                {"error": "queue_stats_unavailable", "reason": str(e)},
+                status=500,
+            )
+
+    def _serve_gateway_delivery(self):
+        """Honest delivery lifecycle counters (MF Issue #74 probe port).
+
+        Serves ``delivery_counters.snapshot()``: per-state totals
+        (QUEUED/SENT/CONFIRMED/DROPPED), drop-reason histogram,
+        per-protocol breakdown, confirmation_rate (None at zero
+        traffic), recent-events ring, and the cross-process health
+        block (preflight + write-error truth).
+        """
+        try:
+            from gateway.delivery_counters import snapshot as _delivery_snap
+            self._serve_json(_delivery_snap(), status=200)
+        except Exception as e:
+            self._serve_json(
+                {"error": "delivery_counters_unavailable", "reason": str(e)},
+                status=500,
+            )
