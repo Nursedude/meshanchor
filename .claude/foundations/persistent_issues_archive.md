@@ -346,3 +346,27 @@ MeshAnchor supports two independent transports:
 uplink/downlink to the same broker with same channel/PSK. No gateway code needed.
 
 **Full NOC** (Meshtastic + RNS) uses both transports. They coexist independently.
+
+---
+
+## Issue #17: Meshtastic Connection Contention (Single-Client TCP)
+
+> Demoted from persistent_issues.md 2026-06-15 (MF012 headroom); table row + Lint
+> MF007 carry the live essence. Fully resolved + guarded.
+
+**meshtasticd only supports ONE TCP client at a time.** Multiple components creating
+independent connections causes thrashing every 1-2 seconds.
+
+### Fix: Shared Connection Manager
+All components share ONE persistent connection via `get_connection_manager()`.
+Short-lived reads use `MeshtasticConnection` context manager.
+Long-lived connections acquire `MESHTASTIC_CONNECTION_LOCK`.
+
+### HTTP fromradio Contention Fix
+The `/api/v1/fromradio` endpoint is also single-consumer. `send_text_direct()` POSTs
+directly to `/api/v1/toradio` without ever reading fromradio. All TX paths use this.
+
+### Prevention
+- **NEVER** create `TCPInterface()` directly — use connection manager
+- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()`
+- Reserve session-based `connect()` + `start_polling()` for config reads only

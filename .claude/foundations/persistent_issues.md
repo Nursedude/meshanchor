@@ -20,6 +20,7 @@ Full history in `persistent_issues_archive.md`.
 | #8 Outdated Fallback Versions | Search hardcoded versions on bump | `grep -rn "0\.[0-9]\.[0-9]" src/` |
 | #9 Broad Exception Swallowing | 28/30 fixed; 2 benign by design | `grep except.*:.*pass` |
 | #10 Map Scrollbar Overlap | Thin dark-themed scrollbar CSS | — |
+| #17 TCP Connection Contention | Connection manager + `send_text_direct()`; never raw `TCPInterface()`/fromradio in TX. Body in archive | Lint MF007 |
 | #25, #26, #28 | rnsd ratchets, ReticulumPaths copies, API proxy | — |
 | #3 Services Not Started/Verified | `check_service()` before connect; gateway checks ADVISORY (warn+continue), TUI BLOCKING. Body in archive | — |
 | #6 Large Files | All under 1,500 except `knowledge_content.py`; split at 1,000 when adding. Body in archive | — |
@@ -114,27 +115,6 @@ Delivery is **best-effort** — inherent to mesh networking. Message queue persi
 Always show "Sent (delivery not guaranteed)" or "Queued" status.
 
 Files: `commands/messaging.py`, `gateway/rns_bridge.py`, `gateway/message_queue.py`
-
----
-
-## Issue #17: Meshtastic Connection Contention (Single-Client TCP)
-
-**meshtasticd only supports ONE TCP client at a time.** Multiple components creating
-independent connections causes thrashing every 1-2 seconds.
-
-### Fix: Shared Connection Manager
-All components share ONE persistent connection via `get_connection_manager()`.
-Short-lived reads use `MeshtasticConnection` context manager.
-Long-lived connections acquire `MESHTASTIC_CONNECTION_LOCK`.
-
-### HTTP fromradio Contention Fix
-The `/api/v1/fromradio` endpoint is also single-consumer. `send_text_direct()` POSTs
-directly to `/api/v1/toradio` without ever reading fromradio. All TX paths use this.
-
-### Prevention
-- **NEVER** create `TCPInterface()` directly — use connection manager
-- **NEVER** read `/api/v1/fromradio` in TX paths — use `send_text_direct()`
-- Reserve session-based `connect()` + `start_polling()` for config reads only
 
 ---
 
@@ -811,3 +791,17 @@ the appropriate level. Audit reflex: `grep -n 'errors.*+= 1' src/gateway/*.py`
 PID unchanged, NRestarts=0, 100% connectivity (moc:9443/rns/meshcore), egress
 `errors`=0 under load, loop guard no runaway, `reemit.errors` flat (the 2
 were one-time transients).
+
+---
+
+## Issue #79: Deploy-restart gap — repo-code daemons stale after a pull (ported from MeshForge, 2026-06-15)
+
+Ported from MeshForge #79: a deploy path that refreshes a unit FILE but never RESTARTS
+the daemon leaves it on OLD code after `git pull`. MA's only pull-deploy path is
+`scripts/update.sh` (no `fleet_sync.sh`). **Fix** (`update.sh`): a sudo→user-bus
+`run_user_systemctl` + `try-restart meshanchor-echo` (USER, `lab.lxmf_echo`) + a
+`CODE_CHANGED`-gated `try-restart` of SYSTEM `meshanchor` + `meshanchor-map` (so a
+docs-only pull does not bounce the NOC). Interactive tmux panes + external wrappers
+(meshcore-chat/nomadnet/meshchatx/rnsd/meshtasticd) are NOT auto-restarted. **Guard**
+`TestDeployRestartHook` (§3b-ii, red-test-first) enforces every repo-code daemon is
+restart-wired. `845269ed`/`8d354b31`.
