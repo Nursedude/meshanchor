@@ -1,0 +1,162 @@
+"""Honest-by-construction invariants — MeshAnchor.
+
+Ported from MeshForge, the lead repo for the honest-dev-env arc
+(MeshForge: ``tests/test_honesty_invariants.py``). Each invariant converts a
+known blind-spot lesson into a BUILD FAILURE — passive knowledge does not
+prevent regression; only enforcement at the moment of action does.
+
+DISCIPLINE (load-bearing): every invariant ships with BOTH a GREEN test (the
+repo holds it now) AND a RED test (a deliberately-seeded violation is actually
+caught). A guard that cannot be shown to fail is a vacuous false guard. Green
+tests also fail loud — never vacuously pass — if their input path moved.
+
+This file starts with the §3b-ii deploy-restart guard (#79). Future ports of
+the other honest-dev-env families land here too, keeping parity with MeshForge.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+# ═════════════════════════════════════════════════════════════════════
+# §3b-ii — every long-lived MeshAnchor-code daemon has a deploy-restart hook
+# ═════════════════════════════════════════════════════════════════════
+
+# Issue #79 (ported from MeshForge 37fd01f/e1ee1af; MA fix 845269ed): a deploy
+# path that copies a unit template + daemon-reloads but never RESTARTS the
+# running daemon leaves it on OLD code after a `git pull` until a hand-restart.
+# MA's only pull-deploy path is scripts/update.sh (no fleet_sync.sh — that is a
+# MeshForge-fleet tool). The invariant: every long-lived USER daemon whose code
+# lives in THIS repo is try-restarted by update.sh after a pull.
+#
+# CURATED, not a glob (the MeshForge-sanctioned approach): "runs MeshAnchor code"
+# is a semantic property of the ExecStart, not a filename. Each entry verified
+# 2026-06-15 against the unit's ExecStart.
+MESHANCHOR_CODE_USER_DAEMONS: dict = {
+    # unit base name → ExecStart provenance
+    "meshanchor-echo": "lab.lxmf_echo responder (templates/systemd/meshanchor-echo-user.service)",
+}
+
+# Long-lived user/forking daemons MeshAnchor installs that a /opt/meshanchor pull
+# does NOT change (external binary) OR that are operator-driven interactive tmux
+# sessions — restarting them on a code pull is wrong, so they are correctly
+# absent from the deploy-restart path.
+RESTART_EXEMPT_DAEMONS: dict = {
+    "meshcore-chat": "operator-attached interactive tmux pane (utils.chat_client); its "
+                     "lifecycle is owned by the chat_pane TUI handler — an auto-restart "
+                     "would kill an attached session",
+    "nomadnet-tmux": "interactive tmux pane wrapping the external nomadnet app",
+    "nomadnet":      "external `nomadnet --daemon` binary; a MeshAnchor pull doesn't change it",
+    "meshchatx":     "wraps the external meshchatx app; pull doesn't change it",
+    "rnsd":          "runs pip-installed (forked) rnsd, not repo code; restart is "
+                     "explicitly dangerous (RNS rapid-cycle @rns race, #69)",
+    "meshtasticd-native": "external meshtasticd binary (upstream)",
+    "meshtasticd-alt":    "external meshtasticd binary (TUI-deployed secondary radio)",
+}
+
+# SYSTEM daemons that run MeshAnchor code but are NOT restarted on a pull: MA has
+# no fleet_sync.sh, and update.sh only refreshes their unit FILE (cp), never
+# restarts them. This is a BROADER gap than #79 (which is about user daemons) —
+# documented here, deliberately NOT asserted as restart-wired, and surfaced for
+# an operator decision (add on-pull restart, or is the periodic
+# meshanchor-map-restart.timer + manual ops the intended model?). Listed so the
+# exclusion is VISIBLE, never silent (honest_failure_modes #9).
+KNOWN_UNRESTARTED_SYSTEM_DAEMONS: dict = {
+    "meshanchor":     "src/launcher.py --no-services (main NOC); update.sh updates the file, no restart",
+    "meshanchor-map": "map daemon; periodic meshanchor-map-restart.timer, not on-pull",
+}
+
+_RESTART_KEYWORDS = ("try-restart", "restart", "sync_repo", "sync_local_unit",
+                     "sync_user_unit", "sync_local_user_unit")
+
+
+def deploy_restarted_units(*script_texts: str) -> set:
+    """Set of systemd unit base names a deploy script restarts after a pull. A
+    unit is "restart-wired" if its base name appears (as a whole token, not a
+    hyphen-prefix of a longer name) on a non-comment line that also contains a
+    restart verb — covering `systemctl try-restart <unit>.service` and the
+    unit-name-as-arg wrappers. Pure over the passed text so the red proof can
+    feed synthetic scripts."""
+    found = set()
+    candidates = set(MESHANCHOR_CODE_USER_DAEMONS) | set(RESTART_EXEMPT_DAEMONS)
+    for text in script_texts:
+        for raw in text.splitlines():
+            line = raw.strip()
+            if line.startswith("#"):
+                continue
+            if not any(kw in line for kw in _RESTART_KEYWORDS):
+                continue
+            for unit in candidates:
+                if re.search(re.escape(unit) + r"(?![\w-])", line):
+                    found.add(unit)
+    return found
+
+
+class TestDeployRestartHook:
+    """§3b-ii — the #79 deploy gap: a long-lived daemon running THIS repo's code
+    must be restarted by update.sh after a pull, or it silently serves stale
+    code. MA's only pull-deploy path is update.sh."""
+
+    def _deploy_sources(self):
+        update = REPO / "scripts" / "update.sh"
+        assert update.exists(), f"{update} moved — the deploy-restart guard would vacuously pass"
+        return (update.read_text(),)
+
+    def test_every_user_code_daemon_is_deploy_restarted(self):
+        restarted = deploy_restarted_units(*self._deploy_sources())
+        # Non-vacuity anchor: the known-wired echo daemon MUST be found, else the
+        # parser broke against the real script (refuse to pass empty).
+        assert "meshanchor-echo" in restarted, (
+            "parser found NO meshanchor-echo restart wiring in update.sh — it "
+            "broke against the real script, or the #79 fix regressed.")
+        missing = set(MESHANCHOR_CODE_USER_DAEMONS) - restarted
+        assert not missing, (
+            f"long-lived MeshAnchor-code daemon(s) {sorted(missing)} are NOT "
+            f"restarted by update.sh after a pull → they serve OLD code until a "
+            f"hand-restart (the #79 deploy gap). Wire a try-restart into "
+            f"update.sh's user-unit block. "
+            f"Provenance: {[MESHANCHOR_CODE_USER_DAEMONS[m] for m in sorted(missing)]}")
+
+    def test_exempt_daemons_are_genuinely_distinct(self):
+        """A daemon can't be both 'runs repo code' and 'external/interactive' —
+        an overlap would let a real gap hide as exempt."""
+        overlap = set(MESHANCHOR_CODE_USER_DAEMONS) & set(RESTART_EXEMPT_DAEMONS)
+        assert not overlap, f"daemon(s) {overlap} listed as BOTH code-daemon and exempt"
+
+    def test_unrestarted_system_daemons_stay_documented(self):
+        """The broader system-daemon gap must stay VISIBLE (honest_failure #9):
+        every entry carries a specific note so it can't be silently dropped, and
+        no entry collides with a must-restart user daemon."""
+        assert KNOWN_UNRESTARTED_SYSTEM_DAEMONS, (
+            "the known-unrestarted-system-daemon finding was emptied — if MA now "
+            "restarts them on pull, move them to MESHANCHOR_CODE_USER_DAEMONS; "
+            "don't just delete the finding.")
+        for unit, note in KNOWN_UNRESTARTED_SYSTEM_DAEMONS.items():
+            assert len(note) >= 20, f"{unit}: finding note too thin to be honest"
+        assert not (set(KNOWN_UNRESTARTED_SYSTEM_DAEMONS)
+                    & set(MESHANCHOR_CODE_USER_DAEMONS))
+
+    def test_red_unrestarted_daemon_is_detected(self):
+        """RED proof — a code-daemon whose name is on NO restart line is flagged.
+        If this passed, the gate would miss the #79 gap."""
+        update = "echo just deploying templates\ncp foo bar\n"  # no restart at all
+        restarted = deploy_restarted_units(update)
+        assert "meshanchor-echo" not in restarted  # the seeded gap is caught
+
+    def test_red_token_boundary_no_false_match(self):
+        """The token guard must not let a longer-named unit satisfy a shorter
+        one (or vice versa) — proven on synthetic hyphenated names."""
+        line = "run_user_systemctl try-restart nomadnet-tmux.service\n"
+        restarted = deploy_restarted_units(line)
+        assert "nomadnet-tmux" in restarted
+        assert "nomadnet" not in restarted  # 'nomadnet' must not match 'nomadnet-tmux'
+
+    def test_red_comment_line_is_not_a_wiring(self):
+        """A restart verb inside a comment must NOT count as wiring."""
+        commented = "# TODO: try-restart meshanchor-echo.service someday\n"
+        assert "meshanchor-echo" not in deploy_restarted_units(commented)
