@@ -266,7 +266,28 @@ fi
 # Deploy user-level service templates
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~${REAL_USER}")
+REAL_UID="$(id -u "${REAL_USER}" 2>/dev/null || echo "")"
 USER_SYSTEMD_DIR="${REAL_HOME}/.config/systemd/user"
+
+# User-scope systemctl that bridges a sudo/root context to the operator's user
+# bus (Issue #45 documented incantation). Used to daemon-reload + restart changed
+# USER units so a `git pull` actually lands the new code on the running daemon —
+# the #79 deploy gap (ported from MeshForge: nothing restarted the user daemons
+# after a pull, leaving them on OLD code until a hand-restart).
+run_user_systemctl() {
+    if [[ "$(id -un)" == "${REAL_USER}" ]]; then
+        systemctl --user "$@"
+    elif [[ -n "${REAL_UID}" ]]; then
+        sudo -u "${REAL_USER}" -H \
+            env "XDG_RUNTIME_DIR=/run/user/${REAL_UID}" \
+                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${REAL_UID}/bus" \
+            systemctl --user "$@"
+    else
+        return 1
+    fi
+}
+
+USER_SVC_UPDATED=false
 if [[ -d "$INSTALL_DIR/templates/systemd" ]]; then
     mkdir -p "$USER_SYSTEMD_DIR"
     for tmpl in "$INSTALL_DIR/templates/systemd/"*-user.service; do
@@ -276,6 +297,7 @@ if [[ -d "$INSTALL_DIR/templates/systemd" ]]; then
         fi
     done
     chown -R "${REAL_USER}:" "$USER_SYSTEMD_DIR" 2>/dev/null || true
+    USER_SVC_UPDATED=true
     echo -e "  ${GREEN}✓ User service templates deployed${NC}"
 fi
 
@@ -283,6 +305,24 @@ fi
 if $SVC_UPDATED; then
     systemctl daemon-reload 2>/dev/null || true
     echo -e "  ${GREEN}✓ systemctl daemon-reload${NC}"
+fi
+
+# Restart changed USER daemons on the operator's bus so the running daemon picks
+# up the new code (the #79 deploy gap, ported from MeshForge). try-restart only
+# touches an already-active unit, so an operator-disabled/stopped daemon stays
+# stopped (intent honored), and a box that does not run the unit is a clean
+# no-op. meshanchor-echo runs MeshAnchor code (lab.lxmf_echo); the interactive
+# tmux panes (meshcore-chat, nomadnet) are operator-driven via the TUI and the
+# external-app wrappers (meshchatx, nomadnet, rnsd) are not this repo's code —
+# so none of those are auto-restarted here.
+if $USER_SVC_UPDATED; then
+    if run_user_systemctl daemon-reload 2>/dev/null; then
+        run_user_systemctl try-restart meshanchor-echo.service 2>/dev/null || true
+        echo -e "  ${GREEN}✓ MeshAnchor user daemons refreshed (try-restart)${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ Could not reach the operator user bus to restart user daemons.${NC}"
+        echo -e "  ${YELLOW}  As ${REAL_USER}: systemctl --user restart meshanchor-echo.service${NC}"
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────────────
