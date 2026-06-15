@@ -31,15 +31,19 @@ REPO = Path(__file__).resolve().parent.parent
 # path that copies a unit template + daemon-reloads but never RESTARTS the
 # running daemon leaves it on OLD code after a `git pull` until a hand-restart.
 # MA's only pull-deploy path is scripts/update.sh (no fleet_sync.sh — that is a
-# MeshForge-fleet tool). The invariant: every long-lived USER daemon whose code
-# lives in THIS repo is try-restarted by update.sh after a pull.
+# MeshForge-fleet tool). The invariant: every long-lived daemon whose code lives
+# in THIS repo — USER-bus or SYSTEM — is restarted by update.sh after a pull.
 #
 # CURATED, not a glob (the MeshForge-sanctioned approach): "runs MeshAnchor code"
 # is a semantic property of the ExecStart, not a filename. Each entry verified
-# 2026-06-15 against the unit's ExecStart.
-MESHANCHOR_CODE_USER_DAEMONS: dict = {
-    # unit base name → ExecStart provenance
-    "meshanchor-echo": "lab.lxmf_echo responder (templates/systemd/meshanchor-echo-user.service)",
+# 2026-06-15 against the unit's ExecStart. The system daemons were wired into
+# update.sh's CODE_CHANGED restart on 2026-06-15 (closing the broader on-pull
+# gap that this guard previously only documented).
+MESHANCHOR_CODE_DAEMONS: dict = {
+    # unit base name → ExecStart provenance + where its restart is wired
+    "meshanchor-echo": "lab.lxmf_echo responder, USER bus (update.sh user-unit try-restart)",
+    "meshanchor":      "src/launcher.py --no-services — main NOC, SYSTEM (update.sh CODE_CHANGED restart)",
+    "meshanchor-map":  "map daemon, SYSTEM (update.sh CODE_CHANGED restart)",
 }
 
 # Long-lived user/forking daemons MeshAnchor installs that a /opt/meshanchor pull
@@ -59,18 +63,6 @@ RESTART_EXEMPT_DAEMONS: dict = {
     "meshtasticd-alt":    "external meshtasticd binary (TUI-deployed secondary radio)",
 }
 
-# SYSTEM daemons that run MeshAnchor code but are NOT restarted on a pull: MA has
-# no fleet_sync.sh, and update.sh only refreshes their unit FILE (cp), never
-# restarts them. This is a BROADER gap than #79 (which is about user daemons) —
-# documented here, deliberately NOT asserted as restart-wired, and surfaced for
-# an operator decision (add on-pull restart, or is the periodic
-# meshanchor-map-restart.timer + manual ops the intended model?). Listed so the
-# exclusion is VISIBLE, never silent (honest_failure_modes #9).
-KNOWN_UNRESTARTED_SYSTEM_DAEMONS: dict = {
-    "meshanchor":     "src/launcher.py --no-services (main NOC); update.sh updates the file, no restart",
-    "meshanchor-map": "map daemon; periodic meshanchor-map-restart.timer, not on-pull",
-}
-
 _RESTART_KEYWORDS = ("try-restart", "restart", "sync_repo", "sync_local_unit",
                      "sync_user_unit", "sync_local_user_unit")
 
@@ -83,7 +75,7 @@ def deploy_restarted_units(*script_texts: str) -> set:
     unit-name-as-arg wrappers. Pure over the passed text so the red proof can
     feed synthetic scripts."""
     found = set()
-    candidates = set(MESHANCHOR_CODE_USER_DAEMONS) | set(RESTART_EXEMPT_DAEMONS)
+    candidates = set(MESHANCHOR_CODE_DAEMONS) | set(RESTART_EXEMPT_DAEMONS)
     for text in script_texts:
         for raw in text.splitlines():
             line = raw.strip()
@@ -107,39 +99,26 @@ class TestDeployRestartHook:
         assert update.exists(), f"{update} moved — the deploy-restart guard would vacuously pass"
         return (update.read_text(),)
 
-    def test_every_user_code_daemon_is_deploy_restarted(self):
+    def test_every_code_daemon_is_deploy_restarted(self):
         restarted = deploy_restarted_units(*self._deploy_sources())
         # Non-vacuity anchor: the known-wired echo daemon MUST be found, else the
         # parser broke against the real script (refuse to pass empty).
         assert "meshanchor-echo" in restarted, (
             "parser found NO meshanchor-echo restart wiring in update.sh — it "
             "broke against the real script, or the #79 fix regressed.")
-        missing = set(MESHANCHOR_CODE_USER_DAEMONS) - restarted
+        missing = set(MESHANCHOR_CODE_DAEMONS) - restarted
         assert not missing, (
             f"long-lived MeshAnchor-code daemon(s) {sorted(missing)} are NOT "
             f"restarted by update.sh after a pull → they serve OLD code until a "
-            f"hand-restart (the #79 deploy gap). Wire a try-restart into "
-            f"update.sh's user-unit block. "
-            f"Provenance: {[MESHANCHOR_CODE_USER_DAEMONS[m] for m in sorted(missing)]}")
+            f"hand-restart (the #79 deploy gap). Wire a try-restart (the user-unit "
+            f"block for USER daemons, the CODE_CHANGED block for SYSTEM daemons). "
+            f"Provenance: {[MESHANCHOR_CODE_DAEMONS[m] for m in sorted(missing)]}")
 
     def test_exempt_daemons_are_genuinely_distinct(self):
         """A daemon can't be both 'runs repo code' and 'external/interactive' —
         an overlap would let a real gap hide as exempt."""
-        overlap = set(MESHANCHOR_CODE_USER_DAEMONS) & set(RESTART_EXEMPT_DAEMONS)
+        overlap = set(MESHANCHOR_CODE_DAEMONS) & set(RESTART_EXEMPT_DAEMONS)
         assert not overlap, f"daemon(s) {overlap} listed as BOTH code-daemon and exempt"
-
-    def test_unrestarted_system_daemons_stay_documented(self):
-        """The broader system-daemon gap must stay VISIBLE (honest_failure #9):
-        every entry carries a specific note so it can't be silently dropped, and
-        no entry collides with a must-restart user daemon."""
-        assert KNOWN_UNRESTARTED_SYSTEM_DAEMONS, (
-            "the known-unrestarted-system-daemon finding was emptied — if MA now "
-            "restarts them on pull, move them to MESHANCHOR_CODE_USER_DAEMONS; "
-            "don't just delete the finding.")
-        for unit, note in KNOWN_UNRESTARTED_SYSTEM_DAEMONS.items():
-            assert len(note) >= 20, f"{unit}: finding note too thin to be honest"
-        assert not (set(KNOWN_UNRESTARTED_SYSTEM_DAEMONS)
-                    & set(MESHANCHOR_CODE_USER_DAEMONS))
 
     def test_red_unrestarted_daemon_is_detected(self):
         """RED proof — a code-daemon whose name is on NO restart line is flagged.

@@ -146,10 +146,18 @@ fi
 
 # Pull updates
 echo "Pulling latest changes..."
+# Whether the pull brought CODE changes (src / pyproject / requirements) — gates
+# the on-pull restart of the heavy system daemons below so a docs-only pull does
+# not bounce the NOC. Stays 0 on a no-op or a failed pull.
+CODE_CHANGED=0
 if git pull origin "$CURRENT_BRANCH" 2>&1; then
     NEW_COMMIT=$(git rev-parse --short HEAD)
     if [[ "$CURRENT_COMMIT" != "$NEW_COMMIT" ]]; then
         echo -e "${GREEN}Updated: $CURRENT_COMMIT → $NEW_COMMIT${NC}"
+        if git diff --name-only "$CURRENT_COMMIT" "$NEW_COMMIT" 2>/dev/null \
+                | grep -qE '^src/|^pyproject\.toml$|^requirements.*\.txt$'; then
+            CODE_CHANGED=1
+        fi
 
         # Show what changed
         echo ""
@@ -323,6 +331,29 @@ if $USER_SVC_UPDATED; then
         echo -e "  ${YELLOW}⚠ Could not reach the operator user bus to restart user daemons.${NC}"
         echo -e "  ${YELLOW}  As ${REAL_USER}: systemctl --user restart meshanchor-echo.service${NC}"
     fi
+fi
+
+# System daemons that run THIS repo's code (the NOC + map). MeshAnchor has no
+# fleet_sync.sh, so update.sh owns their on-pull restart (the system-daemon half
+# of the #79 deploy gap). Gated on an actual CODE change (computed in step 1):
+# bouncing the NOC on a docs-only pull is disruptive, whereas the lightweight
+# echo responder above is try-restarted unconditionally. The helper keeps a
+# literal unit name on each call line so the §3b-ii deploy-restart guard can see
+# the wiring; try-restart no-ops when the unit is inactive and honors an
+# operator-disabled unit (it never STARTS a stopped daemon).
+try_restart_system_unit() {
+    local unit="$1"
+    if systemctl list-unit-files "$unit" 2>/dev/null | grep -q "^$unit"; then
+        if systemctl try-restart "$unit" >/dev/null 2>&1; then
+            echo -e "  ${GREEN}✓ $unit restarted (code changed)${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ $unit try-restart failed — restart it manually${NC}"
+        fi
+    fi
+}
+if [[ "$CODE_CHANGED" == "1" ]]; then
+    try_restart_system_unit meshanchor.service
+    try_restart_system_unit meshanchor-map.service
 fi
 
 # ─────────────────────────────────────────────────────────────────
