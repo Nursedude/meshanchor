@@ -5,6 +5,7 @@
 
 <!-- Auto-loaded by Claude Code -->
 @.claude/rules/security.md
+@.claude/rules/calibrated_claims.md
 @.claude/foundations/persistent_issues.md
 
 ---
@@ -22,7 +23,18 @@
 - **ALWAYS** split files exceeding 1,500 lines
 - **NOTE**: Meshtastic TCP rules (TCPInterface, fromradio) apply only to optional gateway code
 
+**Calibrated claims** (the discipline for what *I* say; ported from MeshForge's
+calibration spine): never emit a bare "100% / verified / all green / it works /
+done" without a quoted external result. Tag every completion claim **VERIFIED**
+(a check ran this turn — quote its exit code), **BELIEVED** (written, not run —
+say so), or **UNKNOWN** (couldn't check — unobservable ≠ healthy). "Worked once"
+is not "reliable". Re-derive the count at the end; never patch a running tally.
+Checks of record: `python3 -m pytest tests/ -q` + `python3 scripts/lint.py --all`
+(capture the real exit code; never `| tail`). The `claim_gate` Stop hook injects
+this as one reflective beat — not a cage.
+
 > Full security rules: `.claude/rules/security.md`
+> Calibrated-claims discipline: `.claude/rules/calibrated_claims.md`
 > Known issues & fixes: `.claude/foundations/persistent_issues.md`
 
 ---
