@@ -59,6 +59,19 @@ from utils.knowledge_base import (
 
 logger = logging.getLogger(__name__)
 
+# Single source of truth for the PRO-tier Claude API model (parity with
+# MeshForge's claude_assistant.py — MeshForge is the lead repo for this hardening,
+# self-audit-qa-arc §0). A bare model id inline at the call site is a
+# stale-hardcode trap: when a model is retired/renamed, messages.create() starts
+# raising and the assistant drops to the standalone knowledge base. Naming it here
+# AND honoring MESHANCHOR_ASSISTANT_MODEL makes a swap a one-env-var change, not a
+# code edit. Contract on a retired/unknown model: the API call raises -> logged
+# (a witness, honest_failure_modes #9) -> ask() degrades to standalone (fail-SAFE:
+# still answers, never silently-wrong). Value tracks MeshForge's current default.
+DEFAULT_ASSISTANT_MODEL = os.environ.get(
+    "MESHANCHOR_ASSISTANT_MODEL", "claude-sonnet-4-6"
+)
+
 
 class ExpertiseLevel(Enum):
     """User expertise levels for response adaptation."""
@@ -251,7 +264,7 @@ Always prioritize safety - never suggest actions that could damage hardware
 
             # Call Claude API
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=DEFAULT_ASSISTANT_MODEL,
                 max_tokens=1024,
                 system=self._get_system_prompt(),
                 messages=messages
