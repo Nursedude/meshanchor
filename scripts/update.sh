@@ -227,12 +227,17 @@ echo -e "${CYAN}[4/5] Updating systemd service files...${NC}"
 
 SVC_UPDATED=false
 
-# Update meshanchor.service from repo template (if it exists in /etc/systemd/system/)
-if [[ -f /etc/systemd/system/meshanchor.service ]] && [[ -f "$INSTALL_DIR/scripts/meshanchor.service" ]]; then
-    cp "$INSTALL_DIR/scripts/meshanchor.service" /etc/systemd/system/meshanchor.service
-    echo -e "  ${GREEN}✓ meshanchor.service updated${NC}"
-    SVC_UPDATED=true
-fi
+# Update the system unit files from repo templates (only those already installed
+# in /etc/systemd/system/). meshanchor-daemon.service is the headless NOC daemon
+# enabled at boot; meshanchor.service is the on-demand TUI launcher — refresh both
+# files if present so a unit-file change (e.g. ExecStart) actually lands.
+for _unit in meshanchor-daemon.service meshanchor.service; do
+    if [[ -f "/etc/systemd/system/$_unit" ]] && [[ -f "$INSTALL_DIR/scripts/$_unit" ]]; then
+        cp "$INSTALL_DIR/scripts/$_unit" "/etc/systemd/system/$_unit"
+        echo -e "  ${GREEN}✓ $_unit updated${NC}"
+        SVC_UPDATED=true
+    fi
+done
 
 # Update rnsd.service (system-level) if it exists
 if [[ -f /etc/systemd/system/rnsd.service ]]; then
@@ -352,7 +357,13 @@ try_restart_system_unit() {
     fi
 }
 if [[ "$CODE_CHANGED" == "1" ]]; then
-    try_restart_system_unit meshanchor.service
+    # meshanchor-daemon.service (src/daemon.py --foreground) is the headless NOC
+    # daemon ENABLED at boot (deploy_noc.sh ENABLE_UNITS) — restart THIS one, not
+    # meshanchor.service (the on-demand TUI launcher that deploy_noc.sh never
+    # auto-enables; restarting it would kill an attached session and it picks up
+    # new code on the next manual start). Fixed 2026-06-20: the old line restarted
+    # the launcher, leaving the running daemon on stale code (the #79 gap).
+    try_restart_system_unit meshanchor-daemon.service
     try_restart_system_unit meshanchor-map.service
 fi
 

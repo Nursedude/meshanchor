@@ -41,9 +41,16 @@ REPO = Path(__file__).resolve().parent.parent
 # gap that this guard previously only documented).
 MESHANCHOR_CODE_DAEMONS: dict = {
     # unit base name → ExecStart provenance + where its restart is wired
-    "meshanchor-echo": "lab.lxmf_echo responder, USER bus (update.sh user-unit try-restart)",
-    "meshanchor":      "src/launcher.py --no-services — main NOC, SYSTEM (update.sh CODE_CHANGED restart)",
-    "meshanchor-map":  "map daemon, SYSTEM (update.sh CODE_CHANGED restart)",
+    "meshanchor-echo":   "lab.lxmf_echo responder, USER bus (update.sh user-unit try-restart)",
+    # The headless NOC daemon (src/daemon.py start --foreground) is the unit
+    # ENABLED at boot (deploy_noc.sh ENABLE_UNITS) — NOT meshanchor.service, which
+    # deploy_noc.sh leaves never-auto-enabled. update.sh must restart THIS one on a
+    # code pull (the 2026-06-20 fix: it previously restarted the on-demand launcher,
+    # so the running daemon kept serving stale code — the #79 gap, un-caught because
+    # this guard checked the wrong unit too).
+    "meshanchor-daemon": "src/daemon.py start --foreground — headless NOC daemon, "
+                         "ENABLED at boot, SYSTEM (update.sh CODE_CHANGED restart)",
+    "meshanchor-map":    "map daemon, SYSTEM (update.sh CODE_CHANGED restart)",
 }
 
 # Long-lived user/forking daemons MeshAnchor installs that a /opt/meshanchor pull
@@ -51,6 +58,11 @@ MESHANCHOR_CODE_DAEMONS: dict = {
 # sessions — restarting them on a code pull is wrong, so they are correctly
 # absent from the deploy-restart path.
 RESTART_EXEMPT_DAEMONS: dict = {
+    "meshanchor":    "src/launcher.py --no-services — the on-demand interactive TUI NOC. "
+                     "deploy_noc.sh leaves it NEVER auto-enabled (the long-lived headless "
+                     "code daemon is meshanchor-daemon). Auto-restarting it on a pull would "
+                     "kill an attached TUI session, and it picks up new code on the next "
+                     "manual start anyway — so it is deliberately NOT deploy-restarted",
     "meshcore-chat": "operator-attached interactive tmux pane (utils.chat_client); its "
                      "lifecycle is owned by the chat_pane TUI handler — an auto-restart "
                      "would kill an attached session",
