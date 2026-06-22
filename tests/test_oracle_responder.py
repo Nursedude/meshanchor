@@ -152,6 +152,26 @@ def test_from_env_star_answers_all():
     assert r is not None and r._answer_all is True
 
 
+def test_consume_defaults_true():
+    # back-compat: unset MESHANCHOR_ORACLE_CONSUME ⇒ per-mesh-local (consume)
+    r = MeshOracleResponder.from_env(
+        snapshot_fn=_snap, send_fn=lambda *a: True,
+        env={"MESHANCHOR_ORACLE_ENABLED": "1", "MESHANCHOR_ORACLE_ALLOWLIST": "*"})
+    assert r is not None and r.consume is True
+
+
+def test_consume_false_is_bridge_through():
+    r = MeshOracleResponder.from_env(
+        snapshot_fn=_snap, send_fn=lambda *a: True,
+        env={"MESHANCHOR_ORACLE_ENABLED": "1", "MESHANCHOR_ORACLE_ALLOWLIST": "*",
+             "MESHANCHOR_ORACLE_CONSUME": "0"})
+    assert r is not None and r.consume is False
+    # handle() still ANSWERS in bridge-through mode (returns the reply); the
+    # consume flag is the CALLER's signal to keep bridging, not handle's job.
+    reply = r.handle("!a1b2c3d4", "status")
+    assert reply and reply.startswith("dude-AI@boxA: ")
+
+
 def test_from_env_enabled_empty_allowlist_is_fail_closed():
     r = MeshOracleResponder.from_env(
         snapshot_fn=_snap, send_fn=lambda *a: True,

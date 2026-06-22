@@ -663,12 +663,15 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             )
 
             # Mesh oracle (read-only): answer a query DIRECTED back to the
-            # sender; a handled query is consumed (NOT bridged onward). A DM has
-            # no channel → identity-gated only (channel=None) via
-            # MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST or answer-all.
+            # sender. A handled query is consumed (NOT bridged onward) UNLESS the
+            # oracle is in bridge-through mode (MESHANCHOR_ORACLE_CONSUME=0), in
+            # which case it answers AND lets the command bridge so the far mesh
+            # sees the activity. A DM has no channel → identity-gated only
+            # (channel=None) via MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST or answer-all.
             if self._oracle is not None:
                 try:
-                    if self._oracle.handle(msg.source_address, msg.content, None):
+                    reply = self._oracle.handle(msg.source_address, msg.content, None)
+                    if reply is not None and self._oracle.consume:
                         return
                 except Exception as e:
                     logger.debug(f"meshcore oracle handle error: {e}")
@@ -746,7 +749,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                     chan_name, sender, query = _parse_meshcore_channel_text(
                         msg.content)
                     who = sender or msg.source_address or ""
-                    if self._oracle.handle(who, query, chan_name):
+                    reply = self._oracle.handle(who, query, chan_name)
+                    # consume (default) stops here; bridge-through
+                    # (MESHANCHOR_ORACLE_CONSUME=0) answers AND lets the command
+                    # bridge to the other mesh for cross-mesh visibility.
+                    if reply is not None and self._oracle.consume:
                         return
                 except Exception as e:
                     logger.debug(f"meshcore oracle (channel) handle error: {e}")

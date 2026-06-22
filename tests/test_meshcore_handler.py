@@ -1032,6 +1032,24 @@ class TestMeshOracleMeshcoreWiring:
         handler._oracle.handle.assert_called_once_with('p3', 'status', 'meshanchor')
         assert handler._message_queue.empty()  # consumed
 
+    def test_channel_query_bridges_through_when_consume_false(self, handler):
+        # Bridge-through (MESHANCHOR_ORACLE_CONSUME=0): the oracle answers AND
+        # the command still bridges, so the far mesh's NOC sees the activity.
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._connect())
+            handler._oracle = MagicMock()
+            handler._oracle.handle.return_value = "dude-AI@x: fleet:?"
+            handler._oracle.consume = False
+            event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
+                'text': 'meshanchor p3: status', 'sender': 'p3',
+                'destination': None, 'is_channel': True, 'channel': 1})
+            loop.run_until_complete(handler._on_channel_message(event))
+            handler._oracle.handle.assert_called_once_with('p3', 'status', 'meshanchor')
+            assert not handler._message_queue.empty()  # answered AND bridged
+        finally:
+            loop.close()
+
     def test_channel_reply_broadcasts_on_private_slot(self, handler, monkeypatch):
         # The reply is a channel BROADCAST on the private slot — NOT a DM to the
         # parsed sender (a display name, not a resolvable contact: a DM drops).
