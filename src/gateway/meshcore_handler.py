@@ -330,10 +330,24 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
         def _snapshot():
             return read_snapshot(status=fetch_api_status(), box=socket.gethostname())
 
+        # Reply on the PRIVATE channel slot (not a DM): a MeshCore channel
+        # query's asker is a display name from the message prefix, NOT a
+        # resolvable contact — a DM drops (and the contact-not-found fallback
+        # is correctly blocked to avoid the slot-0/Public leak, 2026-05-19). A
+        # private-channel oracle answers the group ON the channel. The slot is
+        # the configured private channel (bridge_target_channel); override with
+        # MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT.
+        try:
+            _reply_slot = int(os.environ.get(
+                "MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT",
+                getattr(self.config.meshcore, "bridge_target_channel", 1)) or 1)
+        except (TypeError, ValueError):
+            _reply_slot = 1
+
         def _send(text: str, dest: str, channel) -> bool:
-            # The matched token is the channel NAME, not a TX slot; the reply is
-            # a DM to the asker (dest), so send on slot 0.
-            return self.send_text(text, destination=dest, channel=0)
+            # Channel BROADCAST on the private slot (dest/channel here are the
+            # asker name / channel name — not usable as TX targets).
+            return self.send_text(text, destination=None, channel=_reply_slot)
 
         def _log(record: dict) -> None:
             try:

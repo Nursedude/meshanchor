@@ -1032,6 +1032,31 @@ class TestMeshOracleMeshcoreWiring:
         handler._oracle.handle.assert_called_once_with('p3', 'status', 'meshanchor')
         assert handler._message_queue.empty()  # consumed
 
+    def test_channel_reply_broadcasts_on_private_slot(self, handler, monkeypatch):
+        # The reply is a channel BROADCAST on the private slot — NOT a DM to the
+        # parsed sender (a display name, not a resolvable contact: a DM drops).
+        monkeypatch.setenv("MESHANCHOR_ORACLE_ENABLED", "1")
+        monkeypatch.delenv("MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST", raising=False)
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "meshanchor")
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT", "1")
+        monkeypatch.setattr("oracle.fetch_api_status", lambda *a, **k: None)
+        monkeypatch.setattr("utils.jsonl_log.append_jsonl", lambda *a, **k: None)
+        handler.send_text = MagicMock(return_value=True)
+        handler._oracle = handler._build_meshcore_oracle_responder()
+        assert handler._oracle is not None
+        event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
+            'text': 'meshanchor p3: status', 'is_channel': True, 'channel': 0})
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._on_channel_message(event))
+        finally:
+            loop.close()
+        handler.send_text.assert_called_once()
+        kwargs = handler.send_text.call_args.kwargs
+        assert kwargs.get("destination") is None  # channel broadcast, not a DM
+        assert kwargs.get("channel") == 1          # the private slot
+        assert handler._message_queue.empty()      # query consumed
+
     def test_non_query_passes_through_to_bridge(self, handler):
         handler._oracle = MagicMock()
         handler._oracle.handle.return_value = None  # not a query
