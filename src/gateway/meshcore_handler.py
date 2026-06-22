@@ -270,6 +270,73 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
         # Register as the active handler for cross-module access (config_api).
         _set_active_handler(self)
 
+        # Mesh oracle (read-only "ask dude-AI over MeshCore" responder) — the
+        # MeshCore leg. MeshCore is MeshAnchor's domain, so this is where
+        # MeshCore nodes reach the oracle. Default OFF; inert unless
+        # MESHANCHOR_ORACLE_ENABLED is set (self._oracle stays None and the RX
+        # hooks are no-ops). Read-only — never controls services or mutates.
+        self._oracle = None
+        try:
+            self._oracle = self._build_meshcore_oracle_responder()
+        except Exception as e:  # pragma: no cover - never break handler init
+            logger.debug(f"meshcore oracle not initialized: {e}")
+
+    def _build_meshcore_oracle_responder(self):
+        """Construct the read-only MeshCore oracle responder, or None if disabled.
+
+        Default OFF (opt-in via MESHANCHOR_ORACLE_ENABLED) — the env is checked
+        BEFORE importing the oracle so a disabled daemon pays no import cost.
+        Access is additive: a known sender (MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST,
+        keyed on the MeshCore source_address / pubkey-prefix / adv_name) OR a
+        whitelisted channel index (MESHANCHOR_ORACLE_MESHCORE_CHANNELS — MeshCore
+        channels are numeric indices). Replies go DIRECTED to the sender via
+        send_text; the audit log lives under the MeshAnchor data dir. The oracle
+        never controls services or mutates config (autonomy rung 1 — report).
+        """
+        import os
+        if str(os.environ.get("MESHANCHOR_ORACLE_ENABLED", "")).strip().lower() \
+                not in ("1", "true", "yes", "on"):
+            return None
+        import socket
+
+        from oracle import fetch_api_status, oracle_log_path, read_snapshot
+        from oracle.responder import MeshOracleResponder
+        from utils.jsonl_log import append_jsonl
+
+        def _snapshot():
+            return read_snapshot(status=fetch_api_status(), box=socket.gethostname())
+
+        def _send(text: str, dest: str, channel) -> bool:
+            return self.send_text(text, destination=dest, channel=channel or 0)
+
+        def _log(record: dict) -> None:
+            try:
+                p = oracle_log_path()
+                p.parent.mkdir(parents=True, exist_ok=True)
+                err = append_jsonl(str(p), [record], 2 * 1024 * 1024)
+                if err:  # honest_failure_modes #9: a swallow leaves a witness
+                    logger.warning(f"mesh oracle audit log write failed: {err}")
+            except Exception as e:  # pragma: no cover - best-effort audit log
+                logger.debug(f"mesh oracle (meshcore) log append failed: {e}")
+
+        allowed_channels = set()
+        for tok in os.environ.get(
+                "MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "").split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                allowed_channels.add(int(tok))
+            except ValueError:
+                logger.warning(
+                    f"mesh oracle meshcore channel {tok!r} not an int; skipped")
+
+        return MeshOracleResponder.from_env(
+            snapshot_fn=_snapshot, send_fn=_send, log_fn=_log,
+            transport="meshcore",
+            allowlist_env="MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST",
+            allowed_channels=allowed_channels)
+
     def connect(self) -> bool:
         """MeshCore connection is managed by run_loop() via async _connect()."""
         logger.warning("MeshCoreHandler.connect() called directly; use run_loop()")
@@ -556,6 +623,17 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                 sender=msg.source_address,
             )
 
+            # Mesh oracle (read-only): answer a query DIRECTED back to the
+            # sender; a handled query is consumed (NOT bridged onward). A DM has
+            # no channel → identity-gated only (channel=None) via
+            # MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST or answer-all.
+            if self._oracle is not None:
+                try:
+                    if self._oracle.handle(msg.source_address, msg.content, None):
+                        return
+                except Exception as e:
+                    logger.debug(f"meshcore oracle handle error: {e}")
+
             # Check routing rules
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug(f"MeshCore message blocked by routing rules")
@@ -616,6 +694,19 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                 channel=getattr(msg, "channel", None),
                 sender=msg.source_address,
             )
+
+            # Mesh oracle (read-only): a query on a whitelisted channel is
+            # answered DIRECTED back to the asker (a DM, never a channel
+            # broadcast — honors "broadcast is not auto-answered") and consumed.
+            # Channel-gated via MESHANCHOR_ORACLE_MESHCORE_CHANNELS; per-sender
+            # cooldown also dedups the event-vs-poll dual delivery.
+            if self._oracle is not None:
+                try:
+                    chan = (msg.metadata or {}).get('channel', 0)
+                    if self._oracle.handle(msg.source_address, msg.content, chan):
+                        return
+                except Exception as e:
+                    logger.debug(f"meshcore oracle (channel) handle error: {e}")
 
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug("MeshCore channel message blocked by routing rules")
