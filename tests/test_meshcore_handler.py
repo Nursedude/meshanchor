@@ -978,13 +978,27 @@ class TestMeshOracleMeshcoreWiring:
         monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST", "*")
         assert handler._build_meshcore_oracle_responder() is not None
 
-    def test_build_responder_with_channel_indices(self, handler, monkeypatch):
+    def test_build_responder_with_channel_names(self, handler, monkeypatch):
+        # MeshCore channel identity is a NAME (from the "<channel> <sender>:"
+        # message prefix), so the whitelist is lowercased names, not indices.
         monkeypatch.setenv("MESHANCHOR_ORACLE_ENABLED", "1")
         monkeypatch.delenv("MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST", raising=False)
-        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "1, 2, oops")
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "MeshAnchor, Fleet")
         responder = handler._build_meshcore_oracle_responder()
         assert responder is not None
-        assert responder._allowed_channels == {1, 2}  # 'oops' skipped
+        assert responder._allowed_channels == {"meshanchor", "fleet"}
+
+    def test_parse_meshcore_channel_text(self):
+        from gateway.meshcore_handler import _parse_meshcore_channel_text
+        assert _parse_meshcore_channel_text("meshanchor p3: Status") == (
+            "meshanchor", "p3", "Status")
+        assert _parse_meshcore_channel_text("MeshAnchor p3: ?") == (
+            "meshanchor", "p3", "?")
+        assert _parse_meshcore_channel_text("meshanchor p3: status report") == (
+            "meshanchor", "p3", "status report")  # only the FIRST ': ' splits
+        # no "<...>: " prefix → channel unidentifiable, whole content as query
+        assert _parse_meshcore_channel_text("status") == (None, "", "status")
+        assert _parse_meshcore_channel_text("") == (None, "", "")
 
     def test_dm_query_routed_directed_and_consumed(self, handler):
         handler._oracle = MagicMock()
@@ -1001,18 +1015,21 @@ class TestMeshOracleMeshcoreWiring:
         handler._oracle.handle.assert_called_once_with('abc123', 'status', None)
         assert handler._message_queue.empty()  # consumed, NOT bridged onward
 
-    def test_channel_query_routed_with_channel_index_and_consumed(self, handler):
+    def test_channel_query_parsed_and_routed_by_name(self, handler):
+        # Real MeshCore channel text: "<channel> <sender>: <text>" with an empty
+        # source_address. The hook parses the channel NAME + sender + query.
         handler._oracle = MagicMock()
         handler._oracle.handle.return_value = "dude-AI@x: fleet:?"
         event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
-            'text': 'status', 'sender': 'node789', 'destination': None,
-            'is_channel': True, 'channel': 2})
+            'text': 'meshanchor p3: status', 'destination': None,
+            'is_channel': True, 'channel': 0})
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(handler._on_channel_message(event))
         finally:
             loop.close()
-        handler._oracle.handle.assert_called_once_with('node789', 'status', 2)
+        # channel matched by NAME, sender from the prefix, query stripped of prefix
+        handler._oracle.handle.assert_called_once_with('p3', 'status', 'meshanchor')
         assert handler._message_queue.empty()  # consumed
 
     def test_non_query_passes_through_to_bridge(self, handler):

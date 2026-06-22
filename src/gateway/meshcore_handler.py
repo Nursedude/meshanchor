@@ -69,6 +69,29 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_meshcore_channel_text(content):
+    """Split a MeshCore channel message into (channel_name, sender, text).
+
+    MeshCore delivers channel messages as ``<channel> <sender>: <text>`` (e.g.
+    ``"meshanchor p3: status"``) — the channel name and sender are embedded in
+    the payload text, and ``CanonicalMessage.source_address`` comes through
+    empty. Split on the FIRST ``": "``: the prefix's first word is the channel
+    NAME (lowercased), its second word the sender, and the remainder is the real
+    message. With no ``": "`` prefix (e.g. an un-prefixed message) the channel
+    can't be identified by name, so return ``(None, "", <stripped content>)`` —
+    which the name-scoped oracle then declines (fail-closed). Pure helper.
+    """
+    s = content or ""
+    if ": " in s:
+        prefix, _, text = s.partition(": ")
+        toks = prefix.split()
+        chan = toks[0].lower() if toks else None
+        sender = toks[1] if len(toks) >= 2 else ""
+        return chan, sender, text.strip()
+    return None, "", s.strip()
+
+
 # meshcore_py is an optional external dependency
 _meshcore_mod, _HAS_MESHCORE = safe_import('meshcore')
 
@@ -286,12 +309,13 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
 
         Default OFF (opt-in via MESHANCHOR_ORACLE_ENABLED) — the env is checked
         BEFORE importing the oracle so a disabled daemon pays no import cost.
-        Access is additive: a known sender (MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST,
-        keyed on the MeshCore source_address / pubkey-prefix / adv_name) OR a
-        whitelisted channel index (MESHANCHOR_ORACLE_MESHCORE_CHANNELS — MeshCore
-        channels are numeric indices). Replies go DIRECTED to the sender via
-        send_text; the audit log lives under the MeshAnchor data dir. The oracle
-        never controls services or mutates config (autonomy rung 1 — report).
+        Access is additive: a known sender (MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST)
+        OR a whitelisted channel NAME (MESHANCHOR_ORACLE_MESHCORE_CHANNELS).
+        MeshCore channel messages arrive as ``<channel> <sender>: <text>``, so the
+        channel is matched by NAME and the embedded sender is the reply target
+        (see ``_on_channel_message`` + ``_parse_meshcore_channel_text``). Replies
+        go DIRECTED (DM) to the asker via send_text; the audit log lives under the
+        MeshAnchor data dir. Read-only — never controls services or mutates.
         """
         import os
         if str(os.environ.get("MESHANCHOR_ORACLE_ENABLED", "")).strip().lower() \
@@ -307,7 +331,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             return read_snapshot(status=fetch_api_status(), box=socket.gethostname())
 
         def _send(text: str, dest: str, channel) -> bool:
-            return self.send_text(text, destination=dest, channel=channel or 0)
+            # The matched token is the channel NAME, not a TX slot; the reply is
+            # a DM to the asker (dest), so send on slot 0.
+            return self.send_text(text, destination=dest, channel=0)
 
         def _log(record: dict) -> None:
             try:
@@ -319,17 +345,16 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             except Exception as e:  # pragma: no cover - best-effort audit log
                 logger.debug(f"mesh oracle (meshcore) log append failed: {e}")
 
-        allowed_channels = set()
-        for tok in os.environ.get(
-                "MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "").split(","):
-            tok = tok.strip()
-            if not tok:
-                continue
-            try:
-                allowed_channels.add(int(tok))
-            except ValueError:
-                logger.warning(
-                    f"mesh oracle meshcore channel {tok!r} not an int; skipped")
+        # MeshCore channel messages arrive as "<channel> <sender>: <text>", so
+        # the channel identity is a NAME (e.g. "meshanchor"), matched against
+        # this lowercased name set — cleaner + more robust than the opaque,
+        # per-message numeric index.
+        allowed_channels = {
+            tok.strip().lower()
+            for tok in os.environ.get(
+                "MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "").split(",")
+            if tok.strip()
+        }
 
         return MeshOracleResponder.from_env(
             snapshot_fn=_snapshot, send_fn=_send, log_fn=_log,
@@ -698,12 +723,16 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             # Mesh oracle (read-only): a query on a whitelisted channel is
             # answered DIRECTED back to the asker (a DM, never a channel
             # broadcast — honors "broadcast is not auto-answered") and consumed.
-            # Channel-gated via MESHANCHOR_ORACLE_MESHCORE_CHANNELS; per-sender
-            # cooldown also dedups the event-vs-poll dual delivery.
+            # MeshCore channel text is "<channel> <sender>: <text>", so parse the
+            # channel NAME + sender out of it (msg.source_address comes through
+            # empty for channel messages) and match the channel by name. Per-
+            # sender cooldown also dedups the event-vs-poll dual delivery.
             if self._oracle is not None:
                 try:
-                    chan = (msg.metadata or {}).get('channel', 0)
-                    if self._oracle.handle(msg.source_address, msg.content, chan):
+                    chan_name, sender, query = _parse_meshcore_channel_text(
+                        msg.content)
+                    who = sender or msg.source_address or ""
+                    if self._oracle.handle(who, query, chan_name):
                         return
                 except Exception as e:
                     logger.debug(f"meshcore oracle (channel) handle error: {e}")
