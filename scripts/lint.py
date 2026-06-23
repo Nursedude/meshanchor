@@ -21,6 +21,7 @@ Checks:
 - MA017: hardened systemd unit (ProtectHome=read-only) ReadWritePaths drift vs the three meshanchor buckets (Issue #58 class, ported from MeshForge MF017)
 - MF019: RNS.Reticulum() outside the guarded chokepoint (must use open_reticulum from utils.rns_init; #68/#69, ported from MeshForge 2026-05-31)
 - MF020: apply_config_and_restart() return (bool, msg) discarded in TUI handlers (hardcoded-success-after-unchecked-action, honest-signal #74-#77; ported from MeshForge 2026-06-08)
+- MF023: blocking meshtastic interface creation (_create_interface — the nodedb sync) in the map collector outside the bounded helper _collect_interface_bounded (serving must never block on collection; ported from MeshForge 2026-06-23)
 - MA022: bare/exit-code-masked pip & swallowed apt in shell installers (must route through scripts/lib/install_common.sh — pip-presence + PEP 668 + checked rc; install-hardening arc, ported from MeshForge MF022)
 
 Usage:
@@ -30,6 +31,7 @@ Usage:
 """
 
 import argparse
+import ast
 import os
 import re
 import subprocess
@@ -730,6 +732,87 @@ def check_context_doc_sizes(repo_root: str = '.') -> List[LintIssue]:
     return issues
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# MF023: serving never blocks on collection — bounded-collect chokepoint.
+#
+# The meshtastic interface constructor blocks until the full nodedb sync, and a
+# wedged daemon can stall it up to its ~900s idle cap. If a serving/collection
+# path creates that interface OUTSIDE the bounded worker, it can pin the map
+# collector's _collect_lock and wedge every /api/nodes/geojson +
+# /api/network/topology request behind it (the 2026-06-23 MeshForge moc1 spin).
+# So the blocking create (_create_interface) must live ONLY inside
+# _collect_interface_bounded. Mirror of MF019's chokepoint shape. AST-scoped
+# because the rule is "which function is this call in", not a regex. Ported
+# from MeshForge 2026-06-23.
+# ─────────────────────────────────────────────────────────────────────────
+MF023_SCAN_FILES = (
+    os.path.join('src', 'utils', '_map_collector_meshtastic.py'),
+)
+MF023_BOUNDED_HELPER = '_collect_interface_bounded'
+MF023_BLOCKING_CALLS = {'_create_interface'}
+
+
+def _mf023_call_name(func) -> str:
+    """Last attribute/name of a call target: manager._create_interface -> the
+    attr; TCPInterface(...) -> the name. '' for anything else."""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ''
+
+
+def _mf023_scan_file(filepath: str, rel_path: str) -> List[LintIssue]:
+    issues: List[LintIssue] = []
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            src = f.read()
+    except (IOError, OSError):
+        return issues
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return issues  # py_compile / the parser-based rules surface syntax errors
+
+    def walk(node, func_stack):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # Nested fns (e.g. the bounded helper's _worker) inherit the
+                # ancestry, so a call inside _worker still counts as "inside
+                # _collect_interface_bounded".
+                walk(child, func_stack + [child.name])
+                continue
+            if isinstance(child, ast.Call):
+                name = _mf023_call_name(child.func)
+                if name in MF023_BLOCKING_CALLS and MF023_BOUNDED_HELPER not in func_stack:
+                    issues.append(LintIssue(
+                        rel_path, child.lineno, Severity.ERROR, "MF023",
+                        f"'{name}()' (blocking meshtastic nodedb sync) called "
+                        f"outside {MF023_BOUNDED_HELPER}() — serving must never "
+                        f"block on collection. Route it through the bounded "
+                        f"helper so a wedged daemon can't pin _collect_lock (the "
+                        f"2026-06-23 MeshForge moc1 spin). If a new call site is "
+                        f"genuinely bounded/isolated, add it to "
+                        f"MF023_BLOCKING_CALLS' allowlist in lint.py + "
+                        f"TestServingNeverBlocksOnCollection."
+                    ))
+            walk(child, func_stack)
+
+    walk(tree, [])
+    return issues
+
+
+def check_bounded_collect_chokepoint(repo_root: str = '.') -> List[LintIssue]:
+    """MF023: confine the blocking meshtastic nodedb sync to the bounded helper."""
+    issues: List[LintIssue] = []
+    for rel in MF023_SCAN_FILES:
+        full = os.path.join(repo_root, rel)
+        if os.path.isfile(full):
+            r = os.path.relpath(full, repo_root).replace(os.sep, '/')
+            issues.extend(_mf023_scan_file(full, r))
+    return issues
+
+
 def main():
     parser = argparse.ArgumentParser(description='MeshAnchor Linter')
     parser.add_argument('files', nargs='*', help='Files to lint')
@@ -772,6 +855,11 @@ def main():
     # MA022: shell-installer pip/apt hygiene (.sh/.bash); full-tree like MA017.
     if not args.staged:
         issues.extend(check_pip_invocations_full_tree())
+
+    # MF023: bounded-collect chokepoint. Scans one fixed file (cheap), so run
+    # it in both whole-tree and --staged modes — an unbounded interface create
+    # sneaking into a serving path must always fail.
+    issues.extend(check_bounded_collect_chokepoint())
 
     # Filter by severity
     severity_order = {'error': 0, 'warning': 1, 'info': 2}
