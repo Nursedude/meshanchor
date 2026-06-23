@@ -16,6 +16,7 @@ Expects on the host class:
 - self._make_feature(...): GeoJSON feature builder
 - self._is_node_online(last_heard, source): online status check
 - self.get_meshtasticd_host() / .get_meshtasticd_port()
+- self.get_meshtasticd_tcp_collect_timeout_seconds()
 - self.get_online_threshold_seconds()
 - self._nodes_without_position: List[Dict] (mutable, extended)
 - self._total_nodes_seen: int (mutable counter)
@@ -25,6 +26,7 @@ import json
 import logging
 import socket
 import subprocess
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -59,6 +61,34 @@ logger = logging.getLogger(__name__)
 
 class MeshtasticDataCollectorMixin:
     """Meshtastic data collection — HTTP / TCP / CLI / direct-radio paths."""
+
+    def _meshtasticd_present(self) -> bool:
+        """True iff a local meshtasticd service is running.
+
+        The direct-USB-radio fallback (_collect_direct_radio) is for usb-direct
+        boxes where meshtasticd is ABSENT. Gating it on "meshtasticd returned no
+        nodes" instead conflated a WEDGED daemon (empty result, daemon present)
+        with an absent one — so the fallback opened /dev/ttyACM0, which on a
+        gateway/claw box is a DIFFERENT radio (the dude-claw USB radio),
+        starving it (#17 contention class; ports MeshForge 232c4e60, 2026-06-23).
+
+        Unknown state → True (assume PRESENT). When we can't tell, we must NOT
+        grab the serial radio — a wrongly-skipped direct collect on a true
+        usb-direct box just yields no local nodes that cycle (recoverable),
+        whereas a wrongly-taken one seizes another subsystem's hardware.
+        """
+        try:
+            from utils.service_check import check_service, ServiceState
+            state = check_service("meshtasticd").state
+            # Only a genuinely NOT_INSTALLED daemon means "this is a usb-direct
+            # box". Running / degraded / failed / stopped / UNKNOWN all mean
+            # "don't seize the radio" — installed-but-not-serving is NOT a
+            # usb-direct box, and UNKNOWN must not overlap the absent domain
+            # (honest-failure-modes #1: degraded value != healthy/absent value).
+            return state != ServiceState.NOT_INSTALLED
+        except Exception as e:  # noqa: BLE001 — can't tell → assume present
+            logger.debug("meshtasticd-present check failed: %s", e)
+            return True
 
     def _collect_meshtasticd(self) -> List[Dict]:
         """Collect nodes from meshtasticd.
@@ -95,6 +125,12 @@ class MeshtasticDataCollectorMixin:
         features = self._collect_via_tcp_interface()
         if features:
             return features
+
+        # On a TCP-collect timeout the daemon is wedged; the CLI fallback hits
+        # the same daemon and only adds latency to the held _collect_lock.
+        # _collect_via_tcp_interface set the wedge flag, so skip the fallback.
+        if getattr(self, "_meshtasticd_collect_wedged", False):
+            return []
 
         # Strategy 3: Fall back to CLI parsing
         features = self._collect_via_cli()
@@ -179,71 +215,143 @@ class MeshtasticDataCollectorMixin:
             logger.debug(f"HTTP collection error: {e}")
             return []
 
+    def _drain_interface_nodes(self, interface, source, post_feature=None):
+        """Read nodes off a connected interface into LOCAL lists.
+
+        Pure with respect to ``self``'s mutable collection state (it only
+        reads self's parse helpers), so it is SAFE to run inside a worker that
+        the caller may abandon — the caller publishes the results into ``self``
+        only after a clean join. ``post_feature`` (optional) mutates each
+        positioned feature in place (e.g. tag source=direct_radio).
+
+        Returns ``(features, no_position_nodes, total_nodes)``.
+        """
+        features = []
+        no_position = []
+        total = 0
+        if hasattr(interface, 'nodes') and interface.nodes:
+            now = time.time()
+            online_threshold = self.get_online_threshold_seconds()
+            total = len(interface.nodes)
+            for node_id, node_data in interface.nodes.items():
+                feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
+                if feature:
+                    if post_feature is not None:
+                        post_feature(feature)
+                    features.append(feature)
+                else:
+                    no_pos_info = self._extract_node_info_without_position(
+                        node_id, node_data, now, online_threshold
+                    )
+                    if no_pos_info:
+                        no_position.append(no_pos_info)
+            logger.debug(
+                "%s: %d with GPS, %d without GPS (total: %d)",
+                source, len(features), len(no_position), total,
+            )
+        return features, no_position, total
+
+    def _collect_interface_bounded(self, manager, source, timeout, post_feature=None):
+        """Connect + read the nodedb + close, bounded to ``timeout`` wall-clock.
+
+        The meshtastic interface constructor blocks until the nodedb sync
+        completes; a wedged daemon can stall it up to its ~900s idle cap,
+        holding the map collector's ``_collect_lock`` and wedging every
+        geojson/topology request behind it (the 2026-06-23 MeshForge moc1
+        spin; ports MeshForge 9ab98bb4). We run the full connect -> read ->
+        close lifecycle in a worker that OWNS the connection-manager lock for
+        its whole life; the caller waits at most ``timeout``. On timeout we
+        return ``([], 0, True)`` and let the worker finish and clean up in the
+        background — it keeps the connection-manager lock so a concurrent
+        collect fails-fast (5s) instead of opening a second contending PhoneAPI
+        stream (#17).
+
+        The worker writes ONLY to its local ``result`` dict, never to
+        ``self``'s mutable node lists, so an abandoned worker can never corrupt
+        a later collect cycle (honest-failure-modes #8). The caller publishes
+        results into ``self`` only on a clean join. A timeout leaves a WARNING
+        witness (MeshAnchor's collector has no per-source diagnostic sink).
+
+        Returns ``(features, total_nodes, timed_out)``.
+        """
+        result = {"features": [], "no_position": [], "total": 0}
+
+        def _worker():
+            # Full lifecycle under the connection-manager lock. acquire_lock
+            # is bounded (5s); a concurrent/abandoned holder makes us fail-fast.
+            if not manager.acquire_lock(timeout=5.0):
+                logger.debug("Could not acquire %s lock (in use)", source)
+                return
+            try:
+                manager._wait_for_cooldown()
+                interface = manager._create_interface()  # may block on nodedb sync
+                try:
+                    feats, no_pos, total = self._drain_interface_nodes(
+                        interface, source, post_feature
+                    )
+                    result["features"] = feats
+                    result["no_position"] = no_pos
+                    result["total"] = total
+                finally:
+                    safe_close_interface(interface)
+            except Exception as e:  # noqa: BLE001 — degraded source, not fatal
+                logger.debug("%s interface collection error: %s", source, e)
+            finally:
+                manager.release_lock()
+
+        worker = threading.Thread(
+            target=_worker, daemon=True, name=f"{source}-collect"
+        )
+        worker.start()
+        worker.join(timeout)
+        if worker.is_alive():
+            logger.warning(
+                "%s collect exceeded %.0fs — likely wedged meshtasticd; served "
+                "no nodes this cycle (cache + other sources unaffected). Worker "
+                "finishes + holds the lock so concurrent collects fail-fast.",
+                source, timeout,
+            )
+            return [], 0, True
+        # Clean join — publish from THIS thread. The worker never touches self's
+        # mutable lists, so this is the only writer (no interleave, #8).
+        self._nodes_without_position.extend(result["no_position"])
+        return result["features"], result["total"], False
+
     def _collect_via_tcp_interface(self) -> List[Dict]:
         """Collect nodes using the meshtastic Python TCP interface.
 
-        Uses MeshtasticConnectionManager for safe locking and cleanup.
+        Uses MeshtasticConnectionManager for safe locking and cleanup, and
+        bounds the connect + nodedb sync to
+        ``get_meshtasticd_tcp_collect_timeout_seconds()`` so a wedged daemon
+        can't pin ``_collect_lock`` (ports MeshForge 9ab98bb4).
         Returns list of GeoJSON features for nodes with valid positions.
         Also populates self._nodes_without_position for nodes lacking GPS.
         """
         if not _HAS_MESHTASTIC_CONN:
             return []
-        features = []
-        no_position_nodes = []
         host = self.get_meshtasticd_host()
         port = self.get_meshtasticd_port()
         manager = get_connection_manager(host=host, port=port)
+        timeout = self.get_meshtasticd_tcp_collect_timeout_seconds()
 
-        # Don't block if someone else holds the connection
-        if not manager.acquire_lock(timeout=5.0):
-            logger.debug("Could not acquire meshtasticd lock (in use)")
-            return []
-
-        try:
-            manager._wait_for_cooldown()
-            interface = manager._create_interface()
-
-            try:
-                if hasattr(interface, 'nodes') and interface.nodes:
-                    now = time.time()
-                    online_threshold = self.get_online_threshold_seconds()
-                    total_nodes = len(interface.nodes)
-
-                    for node_id, node_data in interface.nodes.items():
-                        feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
-                        if feature:
-                            features.append(feature)
-                        else:
-                            # Track nodes without valid position
-                            no_pos_info = self._extract_node_info_without_position(
-                                node_id, node_data, now, online_threshold
-                            )
-                            if no_pos_info:
-                                no_position_nodes.append(no_pos_info)
-
-                    # Extend (don't replace) — _collect_locked clears once at top.
-                    self._nodes_without_position.extend(no_position_nodes)
-                    self._total_nodes_seen += total_nodes
-
-                    logger.debug(
-                        f"meshtasticd (TCP): {len(features)} with GPS, "
-                        f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
-                    )
-            finally:
-                safe_close_interface(interface)
-
-        except Exception as e:
-            logger.debug(f"TCP interface collection error: {e}")
-        finally:
-            manager.release_lock()
-
+        features, total, timed_out = self._collect_interface_bounded(
+            manager, "meshtasticd", timeout
+        )
+        # Surface a wedge so _collect_meshtasticd skips the CLI fallback (it
+        # hits the same wedged daemon and only adds latency to the held lock).
+        self._meshtasticd_collect_wedged = timed_out
+        # Accumulate (don't replace) — _collect_locked clears once at top.
+        if total:
+            self._total_nodes_seen += total
         return features
 
     def _collect_direct_radio(self) -> List[Dict]:
         """Collect nodes directly from USB radio (serial connection).
 
-        Used when meshtasticd is not running (usb-direct mode).
-        MeshAnchor connects directly to the radio via USB serial.
+        Used when meshtasticd is not running (usb-direct mode). MeshAnchor
+        connects directly to the radio via USB serial. Bounded by the same
+        wall-clock cap as the TCP path so a wedged radio can't pin
+        ``_collect_lock`` (ports MeshForge 9ab98bb4).
 
         Returns list of GeoJSON features for nodes with valid positions.
         """
@@ -272,59 +380,21 @@ class MeshtasticDataCollectorMixin:
             logger.debug("No USB radio devices found (MeshCore-claimed devices excluded)")
             return []
 
-        features = []
-        no_position_nodes = []
-
         # Reset manager to ensure we get SERIAL mode
         # (in case a previous TCP connection left it in TCP mode)
         reset_connection_manager()
         manager = get_connection_manager(mode=ConnectionMode.SERIAL)
+        timeout = self.get_meshtasticd_tcp_collect_timeout_seconds()
 
-        # Don't block if someone else holds the connection
-        if not manager.acquire_lock(timeout=5.0):
-            logger.debug("Could not acquire radio lock (in use)")
-            return []
+        def _tag_direct(feature):
+            feature["properties"]["source"] = "direct_radio"
 
-        try:
-            manager._wait_for_cooldown()
-            interface = manager._create_interface()
-
-            try:
-                if hasattr(interface, 'nodes') and interface.nodes:
-                    now = time.time()
-                    online_threshold = self.get_online_threshold_seconds()
-                    total_nodes = len(interface.nodes)
-
-                    for node_id, node_data in interface.nodes.items():
-                        feature = self._parse_tcp_node(node_id, node_data, now, online_threshold)
-                        if feature:
-                            # Mark as from direct radio
-                            feature["properties"]["source"] = "direct_radio"
-                            features.append(feature)
-                        else:
-                            # Track nodes without valid position
-                            no_pos_info = self._extract_node_info_without_position(
-                                node_id, node_data, now, online_threshold
-                            )
-                            if no_pos_info:
-                                no_position_nodes.append(no_pos_info)
-
-                    # Extend (don't replace) — _collect_locked clears once at top.
-                    self._nodes_without_position.extend(no_position_nodes)
-                    self._total_nodes_seen += total_nodes
-
-                    logger.debug(
-                        f"Direct radio (USB): {len(features)} with GPS, "
-                        f"{len(no_position_nodes)} without GPS (total: {total_nodes})"
-                    )
-            finally:
-                safe_close_interface(interface)
-
-        except Exception as e:
-            logger.debug(f"Direct radio collection error: {e}")
-        finally:
-            manager.release_lock()
-
+        features, total, _timed_out = self._collect_interface_bounded(
+            manager, "direct_radio", timeout, post_feature=_tag_direct
+        )
+        # Accumulate (don't replace) — _collect_locked clears once at top.
+        if total:
+            self._total_nodes_seen += total
         return features
 
     def _parse_tcp_node(self, node_id: str, data: dict, now: float,

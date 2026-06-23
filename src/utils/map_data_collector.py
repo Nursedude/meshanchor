@@ -88,6 +88,17 @@ class MapDataCollector(
     # Meshtasticd connection defaults
     DEFAULT_MESHTASTICD_HOST = "localhost"
     DEFAULT_MESHTASTICD_PORT = 4403
+    # Hard wall-clock cap on the meshtasticd TCP collect (connect + nodedb
+    # sync). The meshtastic TCPInterface constructor blocks until the full
+    # nodedb is received; a wedged/slow daemon can stall it up to its own
+    # ~900s server-side idle timeout, and for that whole time the map
+    # collector's _collect_lock is held — wedging every /api/nodes/geojson +
+    # /api/network/topology request behind it (the 2026-06-23 MeshForge moc1
+    # spin; ports MeshForge 9ab98bb4). The collect runs the blocking call in a
+    # worker and abandons the wait after this cap, returning the rest of the
+    # collect. Must exceed a box's legitimate cold sync (a CH341 USB-SPI radio:
+    # 14-19s) with margin; raise in map_settings.json on a slower-radio box.
+    DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS = 45
     # Daemon /radio HTTP endpoint (cross-process self-feature lookup).
     DAEMON_RADIO_URL = "http://127.0.0.1:8081/radio"
     DAEMON_RADIO_TTL_SECONDS = 10.0
@@ -148,6 +159,8 @@ class MapDataCollector(
                 "online_status_threshold_minutes": self.DEFAULT_ONLINE_THRESHOLD_MINUTES,
                 "meshtasticd_host": self.DEFAULT_MESHTASTICD_HOST,
                 "meshtasticd_port": self.DEFAULT_MESHTASTICD_PORT,
+                "meshtasticd_tcp_collect_timeout_seconds":
+                    self.DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS,
                 "aredn_node_ips": [],  # e.g. ["10.54.25.1", "10.1.0.1"]
                 # Per-source online thresholds (minutes)
                 "meshtastic_threshold_minutes": self.DEFAULT_MESHTASTIC_THRESHOLD_MINUTES,
@@ -336,6 +349,19 @@ class MapDataCollector(
         if self._settings:
             return int(self._settings.get("meshtasticd_port", self.DEFAULT_MESHTASTICD_PORT))
         return self.DEFAULT_MESHTASTICD_PORT
+
+    def get_meshtasticd_tcp_collect_timeout_seconds(self) -> float:
+        """Wall-clock cap for the meshtasticd TCP collect (connect + nodedb sync).
+
+        Bounds how long a wedged daemon can hold ``_collect_lock``. See
+        ``DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS`` for the why.
+        """
+        if self._settings:
+            return float(self._settings.get(
+                "meshtasticd_tcp_collect_timeout_seconds",
+                self.DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS,
+            ))
+        return float(self.DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS)
 
     def set_meshtasticd_connection(self, host: str, port: int) -> None:
         """Set meshtasticd connection parameters.
@@ -557,10 +583,16 @@ class MapDataCollector(
                 if fid:
                     features[fid] = f
 
-            # Source 1.5: Direct USB radio (when meshtasticd not running)
-            # Only try this if TCP returned nothing (avoids double-connection)
+            # Source 1.5: Direct USB radio — ONLY when meshtasticd is genuinely
+            # ABSENT (usb-direct mode). Gating on `not tcp_features` alone was a
+            # cross-subsystem cascade bug: a WEDGED meshtasticd also returns
+            # empty, and the fallback then opened /dev/ttyACM0 — which on a
+            # gateway/claw box is a DIFFERENT radio (e.g. dude-claw's USB
+            # radio), starving it. One subsystem's wedge must not seize
+            # another's hardware (the 2026-06-23 MeshForge moc1 incident; ports
+            # MeshForge 232c4e60). Gate on the SERVICE state, not the result.
             direct_radio_features = []
-            if not tcp_features:
+            if not tcp_features and not self._meshtasticd_present():
                 direct_radio_features = self._tag_source_origin(self._collect_direct_radio(), "local_radio")
                 for f in direct_radio_features:
                     fid = f["properties"].get("id", "")
