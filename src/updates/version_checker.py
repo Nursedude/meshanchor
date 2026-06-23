@@ -189,6 +189,23 @@ def get_meshtastic_cli_version() -> Optional[str]:
     return None
 
 
+def get_meshanchor_venv_dir() -> Optional[Path]:
+    """Return MeshAnchor's venv dir IFF the updater installs into it.
+
+    SINGLE SOURCE OF TRUTH for "which python does MeshAnchor install into" — the
+    venv is used when ``venv/bin/python`` exists and there is no ``.no-venv``
+    opt-out marker (the same gate ``install.sh`` writes). Consumed by
+    ``utils.pip_install.resolve_target_python`` so writes target one interpreter
+    instead of the ~10 inline venv-vs-system copies MeshAnchor had. Ported from
+    MeshForge's ``get_meshforge_venv_dir`` (install-hardening parity, 2026-06-23).
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    venv_dir = repo_root / 'venv'
+    if (venv_dir / 'bin' / 'python').exists() and not (repo_root / '.no-venv').exists():
+        return venv_dir
+    return None
+
+
 def get_meshtastic_lib_version() -> Optional[str]:
     """Get installed meshtastic Python library version.
 

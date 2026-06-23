@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from handler_protocol import BaseHandler
 from utils.safe_import import safe_import
+from utils.pip_install import pip_install
 
 logger = logging.getLogger(__name__)
 
@@ -383,59 +384,47 @@ class UpdatesHandler(BaseHandler):
         """
         from pathlib import Path
 
-        meshanchor_dir = Path(__file__).parent.parent.parent.parent
-        venv_pip = meshanchor_dir / 'venv' / 'bin' / 'pip'
-        no_venv_marker = meshanchor_dir / '.no-venv'
+        # Primary install into MeshAnchor's interpreter (venv if present, else
+        # system pip with --break-system-packages auto-applied) via the ONE
+        # hardened helper: ensures pip exists, checks the return code, and
+        # verifies meshtastic actually IMPORTS afterward.
+        primary = pip_install(['meshtastic'], upgrade=upgrade,
+                              verify_import='meshtastic', timeout=120)
+        if not primary.ok:
+            return False, primary.detail
 
-        if venv_pip.exists() and not no_venv_marker.exists():
-            pip_cmd = [str(venv_pip), 'install']
-        else:
-            pip_cmd = ['pip3', 'install', '--break-system-packages']
-
-        if upgrade:
-            pip_cmd.append('--upgrade')
-        pip_cmd.append('meshtastic')
-
-        try:
-            result = subprocess.run(
-                pip_cmd,
-                capture_output=True,
-                text=True,
-                timeout=120
+        # Dual-install for rnsd (Issue #24): rnsd runs as root and needs
+        # meshtastic in root's system Python. verify_import with sudo runs the
+        # root-import check; its failure is now surfaced honestly instead of
+        # being swallowed to a log warning (the old behavior reported full
+        # success even when rnsd's copy failed — Issue #24 defeated).
+        rnsd_interface = Path('/etc/reticulum/interfaces/Meshtastic_Interface.py')
+        if rnsd_interface.exists():
+            self.ctx.dialog.infobox(
+                "System Install",
+                "Also installing system-wide for rnsd..."
             )
-
-            if result.returncode != 0:
-                return False, result.stderr or result.stdout or f"Exit code: {result.returncode}"
-
-            # Dual-install for rnsd (Issue #24)
-            rnsd_interface = Path('/etc/reticulum/interfaces/Meshtastic_Interface.py')
-            if rnsd_interface.exists():
-                self.ctx.dialog.infobox(
-                    "System Install",
-                    "Also installing system-wide for rnsd..."
+            rnsd_result = pip_install(
+                ['meshtastic'], python='python3', sudo=True, break_system=True,
+                ignore_installed=True, upgrade=upgrade,
+                verify_import='meshtastic', timeout=120,
+            )
+            if not rnsd_result.ok:
+                logger.warning(
+                    "rnsd system-wide meshtastic install failed: %s", rnsd_result.detail
                 )
-                sudo_cmd = ['sudo', 'pip3', 'install',
-                            '--break-system-packages', '--ignore-installed']
-                if upgrade:
-                    sudo_cmd.append('--upgrade')
-                sudo_cmd.append('meshtastic')
+                self.ctx.dialog.msgbox(
+                    "rnsd Install Incomplete",
+                    "The Meshtastic library updated for MeshAnchor, but the\n"
+                    "system-wide copy that rnsd needs did NOT install.\n\n"
+                    "Impact: the RNS gateway bridge may not pick up the new\n"
+                    "protobuf definitions until this lands (Issue #24).\n\n"
+                    "Fix: re-run this update from the Updates menu. If it\n"
+                    "keeps failing, the error below shows why:\n\n"
+                    f"{rnsd_result.detail[:400]}"
+                )
 
-                try:
-                    subprocess.run(
-                        sudo_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=120
-                    )
-                except Exception as e:
-                    logger.warning("System-wide meshtastic install error: %s", e)
-
-            return True, result.stdout
-
-        except subprocess.TimeoutExpired:
-            return False, "Installation timed out after 2 minutes"
-        except Exception as e:
-            return False, str(e)
+        return True, primary.stdout or primary.detail
 
     def _firmware_info(self):
         """Show firmware update information."""
@@ -534,35 +523,15 @@ class UpdatesHandler(BaseHandler):
             self.ctx.dialog.msgbox("Error", "requirements.txt not found!")
             return
 
-        venv_pip = meshanchor_dir / 'venv' / 'bin' / 'pip'
-        no_venv_marker = meshanchor_dir / '.no-venv'
-
-        try:
-            if venv_pip.exists() and not no_venv_marker.exists():
-                pip_cmd = [str(venv_pip), 'install', '-r', str(requirements_file)]
-            else:
-                pip_cmd = ['pip3', 'install', '--break-system-packages', '-r', str(requirements_file)]
-
-            result = subprocess.run(
-                pip_cmd,
-                capture_output=True,
-                text=True,
-                timeout=300
+        # Route through the hardened helper: SSOT venv-vs-system resolution
+        # (`get_meshanchor_venv_dir`) + ensure_pip + return-code check, replacing
+        # the hand-rolled venv gate.
+        result = pip_install([], requirements_file=requirements_file, timeout=300)
+        if not result.ok:
+            self.ctx.dialog.msgbox(
+                "Pip Install Failed",
+                f"Failed to install dependencies:\n\n{result.detail[:500]}"
             )
-            pip_output = result.stdout + result.stderr
-
-            if result.returncode != 0:
-                self.ctx.dialog.msgbox(
-                    "Pip Install Failed",
-                    f"Failed to install dependencies:\n\n{pip_output[:500]}"
-                )
-                return
-
-        except subprocess.TimeoutExpired:
-            self.ctx.dialog.msgbox("Error", "Pip install timed out after 5 minutes.")
-            return
-        except Exception as e:
-            self.ctx.dialog.msgbox("Error", f"Pip install failed: {e}")
             return
 
         self.ctx.dialog.infobox("Updating MeshAnchor", "Step 3/3: Updating service files...")

@@ -109,6 +109,39 @@ class TestTCPConnectionContract:
         )
 
 
+class TestPipInvocationContract:
+    """Enforce: raw pip-install subprocess construction only in utils/pip_install.py.
+
+    The install-hardening arc (ported from MeshForge) routed every pip site
+    through the one hardened helper (ensure_pip + PEP 668 + checked rc +
+    import-as-consumer verify). A new raw ``['pip', 'install', ...]`` argv (or
+    ``run_command('pip install ...')``) re-opens the fresh-user / silent-failure
+    class this arc closed. pipx is excluded (owner-aware, not pip). The Python
+    analogue of lint MA022.
+    """
+
+    ALLOWLISTED = {
+        'pip_install.py',  # IS the hardened helper
+    }
+
+    def test_no_raw_pip_install_outside_helper(self):
+        matches = _scan_python_files(
+            r"""(['"]pip3?['"]\s*,\s*['"]install['"])|(run_command\([^)]*pip3?\s+install)""",
+            exclude_files=list(self.ALLOWLISTED),
+        )
+        violations = []
+        for filepath, lineno, line in matches:
+            basename = os.path.basename(filepath)
+            if 'test_' in basename or '/tests/' in filepath:
+                continue
+            violations.append(f"{os.path.relpath(filepath, SRC_DIR)}:{lineno}: {line.strip()}")
+        assert not violations, (
+            f"Found {len(violations)} raw pip-install construction(s) outside "
+            f"utils/pip_install.py.\nRoute through utils.pip_install.pip_install "
+            f"(ensure_pip + PEP 668 + checked rc).\n\n" + "\n".join(violations)
+        )
+
+
 class TestFromradioContract:
     """Enforce: TX paths never read /api/v1/fromradio.
 

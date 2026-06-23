@@ -149,6 +149,81 @@ fi
 log ""
 
 # ─────────────────────────────────────────────────────────────────
+# Section 1b: Python Environment & Dependencies
+# (the install-hardening verification — pip presence is now first-class,
+#  and "installed" is checked against "importable by the consumer")
+# ─────────────────────────────────────────────────────────────────
+log "${BOLD}[1b] Python Environment & Dependencies${NC}"
+
+VENV_PY="/opt/meshanchor/venv/bin/python"
+
+# pip presence — a fresh user once had to install pip by hand because NOTHING
+# detected its absence. These probes are read-only (never apt-install in a
+# checker). Note: `python3 -c` here runs inside a shell script (allowed).
+if python3 -m pip --version &>/dev/null; then
+    check_pass "pip (system python3)" "$(python3 -m pip --version 2>/dev/null)"
+else
+    check_fail "pip (system python3)" "python3 -m pip is not available" \
+        "sudo apt install -y python3-pip"
+fi
+
+if [[ -x "$VENV_PY" ]]; then
+    if "$VENV_PY" -m pip --version &>/dev/null; then
+        check_pass "pip (venv)" "$("$VENV_PY" -m pip --version 2>/dev/null)"
+    else
+        check_fail "pip (venv)" "venv python has no pip" \
+            "Recreate: python3 -m venv /opt/meshanchor/venv --system-site-packages"
+    fi
+fi
+
+# Import-as-consumer: "installed" is not "importable". Check the launcher's
+# core dependency in the interpreter the services actually run.
+CONSUMER_PY="python3"
+[[ -x "$VENV_PY" ]] && CONSUMER_PY="$VENV_PY"
+if "$CONSUMER_PY" -c "import rich" &>/dev/null; then
+    check_pass "Core deps importable" "rich imports in $CONSUMER_PY"
+else
+    check_fail "Core deps importable" "rich not importable in $CONSUMER_PY" \
+        "Re-run the Python deps step: sudo bash scripts/install_noc.sh"
+fi
+
+# Issue #24: meshtastic must import as ROOT when rnsd's Meshtastic_Interface
+# plugin is installed — pipx/--user installs don't reach root's Python.
+RNSD_IFACE="/etc/reticulum/interfaces/Meshtastic_Interface.py"
+if [[ -f "$RNSD_IFACE" ]]; then
+    if sudo python3 -c "import meshtastic" &>/dev/null; then
+        check_pass "meshtastic for rnsd (root import)" "importable by root"
+    else
+        check_fail "meshtastic for rnsd (root import)" \
+            "Meshtastic_Interface.py installed but meshtastic not importable by root (rnsd will fail)" \
+            "sudo python3 -m pip install --break-system-packages --ignore-installed meshtastic"
+    fi
+else
+    check_skip "meshtastic for rnsd (root import)" "Meshtastic_Interface.py not installed"
+fi
+
+# RNS/LXMF fork-pin drift (read-only gate; a box may intentionally lag, so WARN).
+if [[ -f /opt/meshanchor/scripts/rns_version_check.py ]]; then
+    if python3 /opt/meshanchor/scripts/rns_version_check.py &>/dev/null; then
+        check_pass "RNS/LXMF fork pin" "installed rns/lxmf match requirements/rns.txt"
+    else
+        check_warn "RNS/LXMF fork pin" "rns/lxmf drifted from the MF-FORK-PIN" \
+            "Review + reinstall: pip install -r requirements/rns.txt (see rns_version_check.py)"
+    fi
+fi
+
+# Designed-absent optional config — make absence an OBSERVED state, not a silent
+# gap, and distinguish "off by default" from "misconfigured". The oracle is
+# opt-in via MESHANCHOR_ORACLE_ENABLED on the meshanchor-daemon unit.
+if systemctl show meshanchor-daemon 2>/dev/null | grep -qiE "MESHANCHOR_ORACLE_ENABLED=(1|true|yes|on)"; then
+    check_info "mesh-oracle" "ENABLED via systemd Environment (opt-in)"
+else
+    check_info "mesh-oracle" "DISABLED (MESHANCHOR_ORACLE_ENABLED unset — this is the default)"
+fi
+
+log ""
+
+# ─────────────────────────────────────────────────────────────────
 # Section 2: meshtasticd Installation
 # ─────────────────────────────────────────────────────────────────
 log "${BOLD}[2/6] meshtasticd Installation${NC}"

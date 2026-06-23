@@ -321,28 +321,28 @@ class MeshCoreCLIHandler(BaseHandler):
     def _attempt_install(self):
         venv_pip = "/opt/meshanchor/venv/bin/pip"
         import os
-        cmd: Optional[List[str]] = None
+        # Route through the hardened helper so pip presence is ensured and the
+        # return code is CHECKED — the old `subprocess.run(check=False)` never
+        # inspected rc, so a failed meshcore-cli install passed silently.
+        from utils.pip_install import pip_install, pipx_install
         if os.path.isfile(venv_pip) and os.access(venv_pip, os.X_OK):
-            cmd = [venv_pip, "install", "meshcore-cli"]
+            venv_python = os.path.join(os.path.dirname(venv_pip), "python")
+            print("\n  Installing meshcore-cli into the MeshAnchor venv...\n")
+            r = pip_install(["meshcore-cli"], python=venv_python, timeout=300)
         else:
             import shutil
-            pipx = shutil.which("pipx")
-            if pipx:
-                cmd = [pipx, "install", "meshcore-cli"]
-        if not cmd:
-            print("\n  No suitable installer (venv pip / pipx) found.")
-            print("  Install Python tooling first, then retry.")
-            self.ctx.wait_for_enter()
-            return
-        print(f"\n  Running: {' '.join(cmd)}\n")
-        try:
-            subprocess.run(cmd, timeout=300, check=False)
-        except subprocess.TimeoutExpired:
-            print("\n  Install timed out (5 min). Try manually.")
-        except FileNotFoundError as e:
-            print(f"\n  Installer missing: {e}")
-        except KeyboardInterrupt:
-            print("\n  (cancelled)")
+            if shutil.which("pipx"):
+                print("\n  Installing meshcore-cli via pipx...\n")
+                r = pipx_install("meshcore-cli", timeout=300)
+            else:
+                print("\n  No suitable installer (venv pip / pipx) found.")
+                print("  Install Python tooling first, then retry.")
+                self.ctx.wait_for_enter()
+                return
+        if r.ok:
+            print(f"  ✓ {r.detail}")
+        else:
+            print(f"  ✗ meshcore-cli install failed: {r.detail}")
         self.ctx.wait_for_enter()
 
     # ─────────────────────────────────────────────────────────────────

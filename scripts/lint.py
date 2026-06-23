@@ -21,6 +21,7 @@ Checks:
 - MA017: hardened systemd unit (ProtectHome=read-only) ReadWritePaths drift vs the three meshanchor buckets (Issue #58 class, ported from MeshForge MF017)
 - MF019: RNS.Reticulum() outside the guarded chokepoint (must use open_reticulum from utils.rns_init; #68/#69, ported from MeshForge 2026-05-31)
 - MF020: apply_config_and_restart() return (bool, msg) discarded in TUI handlers (hardcoded-success-after-unchecked-action, honest-signal #74-#77; ported from MeshForge 2026-06-08)
+- MA022: bare/exit-code-masked pip & swallowed apt in shell installers (must route through scripts/lib/install_common.sh — pip-presence + PEP 668 + checked rc; install-hardening arc, ported from MeshForge MF022)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -616,6 +617,99 @@ def check_systemd_sandbox_paths(repo_root: str = '.') -> List[LintIssue]:
     return issues
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# MA022: pip/apt hygiene in shell installers (install-hardening arc, ported
+# from MeshForge MF022). Shell scripts must route package installs through
+# scripts/lib/install_common.sh so pip-presence (ensure_pip), PEP 668, and the
+# REAL exit code are handled — the fresh-user "had to install pip by hand"
+# failure + the `pip … | tail` exit-code mask. `lint_file` is .py-only, so
+# (like MA017) MA022 scans shell files via its own full-tree pass.
+# ─────────────────────────────────────────────────────────────────────────
+MA022_SCAN_EXTENSIONS = {'.sh', '.bash'}
+MA022_EXCLUDE_DIRS = {
+    '.git', 'venv', '.venv', '__pycache__', 'node_modules', '.pytest_cache',
+    '.tox', '.cache', '.mypy_cache', '.ruff_cache', 'dist', 'build', '.eggs',
+}
+
+# The lib DEFINES the sanctioned wrappers (it legitimately constructs `pip
+# install` / `apt-get install`); lint.py + the rule's own test carry example
+# strings. Exempt them.
+MA022_ALLOWED_FILES = {
+    'scripts/lib/install_common.sh',
+    'scripts/lint.py',
+    'tests/test_lint_ma022.py',
+}
+
+MA022_PIPE_MASK = re.compile(r'\bpip3?\s+install\b.*\|\s*(tail|head)\b')
+MA022_BARE_PIP = re.compile(r'\bpip3?\s+install\b')
+MA022_APT_SWALLOW = re.compile(r'\bapt(-get)?\s+install\b.*&>\s*/dev/null')
+
+
+def _ma022_match_in_quotes(line: str, pos: int) -> bool:
+    """True when the match at `pos` sits inside a quoted string — i.e. it is a
+    fix-hint / echo / dry-run preview, not an actual command. An odd count of
+    quotes before the match means we are inside one."""
+    prefix = line[:pos]
+    return (prefix.count('"') % 2 == 1) or (prefix.count("'") % 2 == 1)
+
+
+def _check_pip_invocations_in_file(filepath: str, rel_path: str) -> List[LintIssue]:
+    issues: List[LintIssue] = []
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            for lineno, line in enumerate(f, 1):
+                if line.lstrip().startswith('#'):
+                    continue
+                m = MA022_PIPE_MASK.search(line)
+                if m and not _ma022_match_in_quotes(line, m.start()):
+                    issues.append(LintIssue(
+                        rel_path, lineno, Severity.ERROR, "MA022",
+                        "pip install piped to tail/head masks pip's exit code — route "
+                        "through mf_pip_install (scripts/lib/install_common.sh) and check rc",
+                    ))
+                    continue
+                m = MA022_BARE_PIP.search(line)
+                if (m and not _ma022_match_in_quotes(line, m.start())
+                        and '-m pip' not in line and 'mf_pip_install' not in line):
+                    issues.append(LintIssue(
+                        rel_path, lineno, Severity.WARNING, "MA022",
+                        "bare 'pip install' in a shell script — route through mf_pip_install "
+                        "(scripts/lib/install_common.sh) for pip-presence + PEP 668 + checked rc",
+                    ))
+                    continue
+                m = MA022_APT_SWALLOW.search(line)
+                if m and not _ma022_match_in_quotes(line, m.start()):
+                    issues.append(LintIssue(
+                        rel_path, lineno, Severity.WARNING, "MA022",
+                        "apt-get install with &>/dev/null hides the failure reason — "
+                        "use mf_apt_install (scripts/lib/install_common.sh)",
+                    ))
+    except (IOError, OSError):
+        pass
+    return issues
+
+
+def _ma022_exempt(rel_path: str) -> bool:
+    if rel_path in MA022_ALLOWED_FILES:
+        return True
+    ext = os.path.splitext(rel_path)[1].lower()
+    return ext not in MA022_SCAN_EXTENSIONS
+
+
+def check_pip_invocations_full_tree(repo_root: str = '.') -> List[LintIssue]:
+    """MA022: scan the whole repo tree's shell scripts for pip/apt hygiene."""
+    issues: List[LintIssue] = []
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = [d for d in dirs if d not in MA022_EXCLUDE_DIRS]
+        rel_root = os.path.relpath(root, repo_root)
+        for filename in files:
+            rel_path = os.path.normpath(os.path.join(rel_root, filename)) if rel_root != '.' else filename
+            if _ma022_exempt(rel_path):
+                continue
+            issues.extend(_check_pip_invocations_in_file(os.path.join(root, filename), rel_path))
+    return issues
+
+
 def check_context_doc_sizes(repo_root: str = '.') -> List[LintIssue]:
     """MF012: enforce char-size caps on docs routinely loaded into model context."""
     issues: List[LintIssue] = []
@@ -674,6 +768,10 @@ def main():
     # mode — only relevant when whole-repo state is being checked).
     if not args.staged:
         issues.extend(check_systemd_sandbox_paths())
+
+    # MA022: shell-installer pip/apt hygiene (.sh/.bash); full-tree like MA017.
+    if not args.staged:
+        issues.extend(check_pip_invocations_full_tree())
 
     # Filter by severity
     severity_order = {'error': 0, 'warning': 1, 'info': 2}
