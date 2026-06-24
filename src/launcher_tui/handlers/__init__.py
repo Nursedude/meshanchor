@@ -257,4 +257,10 @@ def get_all_handlers() -> List[Type]:
     from handlers.lxmf_broadcast import LXMFBroadcastHandler
     handlers.append(LXMFBroadcastHandler)
 
+    # Batch 25 — Fleet Architecture: reproduce a box to a lab-hardened preset
+    # (preview + guarded apply over provision_role + docs/fleet_presets.yaml).
+    # Ported from MeshForge alongside the role provisioner.
+    from handlers.fleet_provision import FleetProvisionHandler
+    handlers.append(FleetProvisionHandler)
+
     return handlers

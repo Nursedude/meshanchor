@@ -1,0 +1,107 @@
+# MeshAnchor fleet role definitions — machine-readable: which systemd units each
+# role runs. Companion to docs/fleet_presets.yaml (the named bridge-leg topologies).
+#
+# GENERIC + DUPLICABLE. No instance values (hostnames, LAN IPs, usernames,
+# coordinates) — those live in ~/.config/ and are never committed (MF014).
+# Consumed by scripts/provision_role.py (ported from MeshForge — MeshAnchor owns
+# the convergence of its OWN units; MeshForge's fleet_roles marks the
+# `meshanchor-noc` role `provisioned_by: meshanchor`, i.e. defers to this file).
+#
+# Service values: enabled | disabled | absent.
+#   enabled  = unit installed, enabled+active
+#   disabled = unit installed but deliberately enabled=false/inactive (not a fault)
+#   absent   = unit not installed for this role
+#
+# UNIT NAMES are REAL MeshAnchor systemd units (bare, no .service suffix):
+#   meshanchor-daemon           headless NOC services daemon; ALSO hosts the
+#                               gateway bridge (GatewayBridgeService). Whether it
+#                               bridges — and over which legs — is the gateway.json
+#                               bridge_mode (the PRESET axis), NOT a separate unit.
+#   meshanchor-map              NOC web map / dashboard
+#   meshanchor-fleet-collector  observability writer (polls /fleet/*)
+#   meshanchor-fleet-watchdog   silence detector (blackout events)
+#   meshcore-radio              MeshCore companion-radio supervisor (the MeshCore leg)
+#   meshtasticd                 Meshtastic daemon (the Meshtastic leg; optional)
+#   rnsd / mosquitto            RNS daemon / MQTT broker
+#
+# WHY the role axis looks different from MeshForge: MeshForge has a distinct
+# `meshforge-gateway` unit, so its roles express "bridges vs doesn't". MeshAnchor
+# runs the bridge INSIDE meshanchor-daemon, so that distinction lives entirely in
+# the PRESET axis (gateway.json bridge_mode). Roles here vary the OBSERVABLE units
+# — the map, the radios, the observability pair.
+version: 0
+updated: "2026-06-24"
+
+# Role ownership: provision_role converges only roles WITHOUT a `provisioned_by`
+# key (a role marked provisioned_by:<repo> is owned by that repo's provisioner and
+# only reported here).
+
+invariants:
+  one_rnsd_per_box: "Only rnsd hosts RNS; every other RNS user joins via a shared instance. A box running BOTH a MeshForge and a MeshAnchor stack shares ONE rnsd — never run two (Issue #69)."
+  one_canonical_noc: "Exactly one node (singleton: noc) serves the canonical fleet dashboard + observability rollup."
+  born_correct_permissions: "Every box runs services as the non-root operator user and owns its data-roots + RNS config tree (utils.fleet_foundation). Enforced on every converge."
+
+roles:
+
+  noc:
+    singleton: true
+    board_tier: pi4_or_pi5_min_4gb
+    install_profile: full
+    repo: meshanchor
+    # The canonical NOC server: serves the dashboard, runs the fleet observability
+    # pair, hosts NOC services. Radio-less by default (a field box supplies RF) —
+    # add meshcore-radio via a per-box service_override if this box also carries one.
+    services:
+      rnsd: enabled
+      mosquitto: enabled
+      meshanchor-daemon: enabled
+      meshanchor-map: enabled
+      meshanchor-fleet-collector: enabled
+      meshanchor-fleet-watchdog: enabled
+      meshcore-radio: absent
+      meshtasticd: absent
+
+  radio-gateway:
+    board_tier: pi4_min_4gb
+    install_profile: full
+    repo: meshanchor
+    # A field box with a MeshCore companion radio that bridges (MeshCore-primary).
+    # The actual bridge legs are the gateway.json bridge_mode (the PRESET axis):
+    # meshcore_bridge (default), tri_bridge, etc. Serves its own map + observability.
+    services:
+      rnsd: enabled
+      mosquitto: enabled
+      meshanchor-daemon: enabled
+      meshanchor-map: enabled
+      meshanchor-fleet-collector: enabled
+      meshanchor-fleet-watchdog: enabled
+      meshcore-radio: enabled
+      meshtasticd: enabled
+
+  collector:
+    inherits: radio-gateway
+    board_tier: pi4_min_4gb
+    # A monitor/observability box: the radio-gateway stack but RADIO-LESS — ingests
+    # from the fleet, serves the map, runs the observability pair, carries no
+    # companion radio (no local RF leg). Bridging adds nothing without a radio, so
+    # leave the gateway.json bridge_mode off (preset: monitor). The RF-sparse site.
+    services:
+      meshcore-radio: absent         # OVERRIDE radio-gateway: no companion radio
+      meshtasticd: absent            # OVERRIDE radio-gateway: no Meshtastic leg
+
+  radio-node:
+    board_tier: pi3b_1gb_ok          # constrained board
+    install_profile: meshcore
+    repo: meshanchor
+    # A lightweight field radio box: the MeshCore companion radio + the daemon
+    # (which can bridge), but NO map server (too heavy for ~1GB). The slim
+    # MeshCore-primary node.
+    services:
+      rnsd: enabled
+      mosquitto: enabled
+      meshanchor-daemon: enabled
+      meshcore-radio: enabled
+      meshtasticd: disabled
+      meshanchor-map: disabled       # DELIBERATE: map server too heavy for ~1GB
+      meshanchor-fleet-collector: enabled
+      meshanchor-fleet-watchdog: enabled

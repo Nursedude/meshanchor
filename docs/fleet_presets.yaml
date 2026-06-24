@@ -1,0 +1,154 @@
+# MeshAnchor fleet PRESETS — lab-hardened (role × bridge-leg) configurations.
+#
+# A preset NAMES a proven topology variation a user can reproduce via the TUI: the
+# meshanchor hub bridging protocol legs, e.g. MC<>meshanchor<>ST/LF. It is the
+# curated catalog behind "configure this domain with proven, lab-hardened
+# configurations" — NOT an arbitrary combination space.
+#
+# Companion to fleet_roles.yaml (the ROLE source of truth: which systemd units
+# run). A preset = (role from fleet_roles.yaml) × (gateway.json bridge_mode).
+# MeshAnchor is MeshCore-PRIMARY: the default bridge is meshcore_bridge.
+#
+# GENERIC + DUPLICABLE: no instance values (hostnames, LAN IPs, coordinates) —
+# those live in ~/.config/ and are never committed (MF014). Provenance is a
+# maturity tag, not a box name.
+#
+# UNLIKE MeshForge (independent boolean leg toggles), MeshAnchor's bridge is a
+# SINGLE bridge_mode enum, so a bridge preset carries exactly ONE leg.
+#
+# maturity:  field-proven | lab-proven | alpha
+version: 0
+updated: "2026-06-24"
+
+# ---------------------------------------------------------------------------
+# Bridge-leg vocabulary. Each leg maps to the gateway.json bridge_mode it sets
+# (~/.config/meshanchor/gateway.json). Meaningful only for bridge presets (a
+# radio-gateway / radio-node role with meshanchor-daemon running the bridge);
+# noc/collector presets run no bridge, so they carry no legs.
+# ---------------------------------------------------------------------------
+legs:
+  meshcore:
+    desc: "MeshCore companion-radio bridge to Meshtastic/RNS — the MeshCore-primary default."
+    gateway_json:
+      bridge_mode: meshcore_bridge
+  tri:
+    desc: "All three meshes at once: Meshtastic + MeshCore + RNS."
+    gateway_json:
+      bridge_mode: tri_bridge
+  meshtastic_rns:
+    desc: "Meshtastic <-> RNS message bridge (no MeshCore leg)."
+    gateway_json:
+      bridge_mode: message_bridge
+  dual_meshtastic:
+    desc: "Two Meshtastic RF presets on one box (LONG_FAST <-> SHORT_TURBO)."
+    gateway_json:
+      bridge_mode: mesh_bridge
+  rns_transport:
+    desc: "RNS-over-Meshtastic transport leg."
+    gateway_json:
+      bridge_mode: rns_transport
+  mqtt:
+    desc: "MQTT-based bridge (zero web-client interference; needs a local broker)."
+    gateway_json:
+      bridge_mode: mqtt_bridge
+
+# ---------------------------------------------------------------------------
+# The catalog. `role` MUST name a role in fleet_roles.yaml. `bridge_legs` MUST
+# name legs in the vocabulary above and only appear when bridge: true.
+# ---------------------------------------------------------------------------
+presets:
+
+  meshcore-bridge:
+    title: "MeshCore bridge — MC <> meshanchor <> ST/LF"
+    shorthand: "MC<>meshanchor<>ST/LF"
+    role: radio-gateway
+    bridge: true
+    bridge_legs: [meshcore]
+    board_tier: pi4_min_4gb
+    maturity: field-proven
+    use_when: >-
+      The canonical MeshAnchor field gateway: bridge a MeshCore companion radio to
+      Meshtastic/RNS and serve the map. The default MeshCore-primary variation.
+
+  tri-bridge:
+    title: "Tri-bridge — Meshtastic + MeshCore + RNS"
+    shorthand: "ST+MC+LF<>meshanchor"
+    role: radio-gateway
+    bridge: true
+    bridge_legs: [tri]
+    board_tier: pi4_min_4gb
+    maturity: lab-proven
+    use_when: >-
+      A full crossroads box bridging all three meshes at once. Heaviest; use on a
+      Pi4+ where one box must unify Meshtastic, MeshCore, and RNS.
+
+  meshtastic-rns:
+    title: "Meshtastic <-> RNS bridge — ST <> meshanchor <> LF"
+    shorthand: "ST<>meshanchor<>LF"
+    role: radio-gateway
+    bridge: true
+    bridge_legs: [meshtastic_rns]
+    board_tier: pi4_min_4gb
+    maturity: lab-proven
+    use_when: >-
+      Bridge Meshtastic to RNS/LXMF without a MeshCore radio (message_bridge). The
+      MeshForge-style ST<>LF variation, run on a MeshAnchor box.
+
+  dual-meshtastic:
+    title: "Dual-radio cross-preset — ST <> meshanchor <> ST"
+    shorthand: "ST<>meshanchor<>ST"
+    role: radio-gateway
+    bridge: true
+    bridge_legs: [dual_meshtastic]
+    board_tier: pi4_min_4gb
+    maturity: lab-proven
+    use_when: >-
+      Bridge two Meshtastic RF presets on one box (LONG_FAST <-> SHORT_TURBO) via
+      the mesh_bridge mode.
+
+  mqtt-ingest:
+    title: "MQTT ingest bridge"
+    shorthand: "MQTT<>meshanchor"
+    role: radio-gateway
+    bridge: true
+    bridge_legs: [mqtt]
+    board_tier: pi4_min_4gb
+    maturity: lab-proven
+    use_when: >-
+      MQTT-based bridging with zero web-client interference — the recommended
+      transport when a local broker is already in play.
+
+  radio-node-slim:
+    title: "Slim MeshCore node (no map) — MC <> meshanchor"
+    shorthand: "MC<>meshanchor"
+    role: radio-node
+    bridge: true
+    bridge_legs: [meshcore]
+    board_tier: pi3b_1gb_ok
+    maturity: field-proven
+    use_when: >-
+      A constrained ~1GB board whose whole job is a MeshCore bridge — the map
+      server is off to fit memory. Same MeshCore leg as meshcore-bridge, lighter.
+
+  noc-server:
+    title: "NOC server / manager (no bridge)"
+    shorthand: "-"
+    role: noc
+    bridge: false
+    singleton: true
+    board_tier: pi4_or_pi5_min_4gb
+    maturity: field-proven
+    use_when: >-
+      The one canonical NOC node (singleton): the fleet dashboard, observability
+      rollup, NOC services. It does not host an RF bridge.
+
+  monitor:
+    title: "Monitor / collector (no bridge)"
+    shorthand: "-"
+    role: collector
+    bridge: false
+    board_tier: pi4_min_4gb
+    maturity: field-proven
+    use_when: >-
+      A radio-less observability box: serve the map, run the collector+watchdog,
+      ingest from the fleet — no local RF, no bridge.
