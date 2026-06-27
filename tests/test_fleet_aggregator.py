@@ -999,6 +999,67 @@ def test_read_cron_verdicts_present_counts_fail(monkeypatch, tmp_path):
     assert r["available"] is True and r["fail_count"] == 1
 
 
+def test_wired_verdict_names_extracts_from_crontab():
+    crontab = {"available": True, "jobs": [
+        {"schedule": "* * * * *",
+         "command": "/h/job.sh >/dev/null 2>&1 ; "
+                    "/opt/meshanchor/scripts/cron_verdict.sh soak_cron $?"},
+        {"schedule": "* * * * *", "command": "/h/power.sh >/dev/null 2>&1"},
+    ]}
+    assert fa._wired_verdict_names(crontab) == {"soak_cron"}
+
+
+def test_wired_verdict_names_none_when_crontab_unavailable():
+    assert fa._wired_verdict_names({"available": False, "reason": "x"}) is None
+
+
+def test_verdict_names_in_command_finditer_all_chained():
+    # Both chained verdict calls are wired (.finditer, not .search) — the SSOT
+    # that keeps this in parity with MeshForge (honest_failure_modes #5).
+    cmd = ("/h/a.sh ; /opt/meshanchor/scripts/cron_verdict.sh job_a $? ; "
+           "/h/b.sh ; /opt/meshanchor/scripts/cron_verdict.sh job_b $?")
+    assert fa._verdict_names_in_command(cmd) == ["job_a", "job_b"]
+    assert fa._verdict_names_in_command("") == []
+
+
+def test_read_cron_verdicts_keeps_fresh_orphan_secondary_verdict(
+        monkeypatch, tmp_path):
+    # Parity with MeshForge review finding #1: a FRESH unwired verdict (a
+    # secondary verdict emitted from inside a wrapper) must NOT be dropped --
+    # doing so hides a live FAIL.
+    from datetime import datetime, timedelta, timezone
+    fresh = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00")
+    (tmp_path / "cron_verdicts.log").write_text(
+        f"{fresh} mf5_soak_watch OK\n"
+        f"{fresh} mf5_soak_verdict FAIL soak regression\n")
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_cron_verdicts(wired_names={"mf5_soak_watch"})
+    assert "mf5_soak_verdict" in {j["name"] for j in r["jobs"]}  # fresh kept
+    assert r["fail_count"] == 1
+    assert r["orphan_filtered"] == 0
+
+
+def test_read_cron_verdicts_keeps_fresh_drops_stale_when_none_wired(
+        monkeypatch, tmp_path):
+    # Parity with MeshForge review finding #2: empty wired set (not None) must
+    # keep FRESH verdicts and drop only STALE ones, never blanket-drop to a
+    # clean-looking fail_count=0.
+    from datetime import datetime, timedelta, timezone
+    fresh = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00")
+    stale = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00")
+    (tmp_path / "cron_verdicts.log").write_text(
+        f"{fresh} live_secondary CONCERN active emitter\n"
+        f"{stale} parked_cron FAIL long gone\n")
+    monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
+    r = fa._read_cron_verdicts(wired_names=set())
+    assert {j["name"] for j in r["jobs"]} == {"live_secondary"}
+    assert r["concern_count"] == 1
+    assert r["orphan_filtered"] == 1
+
+
 def test_read_loop_crons_absent_is_unavailable_ephemeral(monkeypatch, tmp_path):
     monkeypatch.setattr(fa, "_operator_home", lambda: tmp_path)
     r = fa._read_loop_crons()

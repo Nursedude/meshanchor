@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import time
@@ -791,7 +792,48 @@ def _parse_cron_verdicts(text: str, now_unix: float) -> List[Dict[str, Any]]:
     return sorted(latest.values(), key=lambda v: v["name"])
 
 
-def _read_cron_verdicts() -> Dict[str, Any]:
+# Matches the verdict-emitting call in a crontab command:
+#   <job> >/dev/null 2>&1 ; /opt/meshanchor/scripts/cron_verdict.sh <name> $?
+# The captured <name> is the cron the verdict belongs to.
+_VERDICT_CALL_RE = re.compile(r"cron_verdict\.sh\s+(\S+)")
+
+
+def _verdict_names_in_command(command: str) -> List[str]:
+    """All cron names a crontab command WIRES via ``cron_verdict.sh``.
+
+    A single command may chain several verdict calls (``jobA; cron_verdict.sh a
+    $?; jobB; cron_verdict.sh b $?``) — ALL are wired (``finditer``, not
+    ``search``: a second wired cron is still a real cron). The SSOT for "which
+    crons are wired" (honest_failure_modes #5). Ported from MeshForge's
+    ``fleet_snapshot._verdict_names_in_command`` for fleet-rollup parity.
+    """
+    return [m.group(1) for m in _VERDICT_CALL_RE.finditer(command or "")]
+
+
+def _wired_verdict_names(crontab_block: Dict[str, Any]) -> Optional[set]:
+    """Cron names currently WIRED to ``cron_verdict.sh`` in the live crontab.
+
+    A verdict whose name is NOT in this set is an ORPHAN candidate — but note
+    that "wired" only sees names on a crontab COMMAND line. A script that emits
+    a *second* verdict from inside its body (e.g. ``mf5_soak_watch.sh`` emits
+    ``mf5_soak_verdict`` — the final soak PASS/FAIL) is active yet unwired, as
+    is a verdict from a non-user-crontab emitter. So the caller drops an orphan
+    only when it is ALSO stale: a parked/removed cron leaves a STALE verdict,
+    while a FRESH unwired verdict is a live signal that must not be hidden.
+
+    Returns ``None`` when the crontab is unavailable — the caller must then NOT
+    filter (we can't prove a verdict is orphan if we can't read the crontab;
+    absence of evidence ≠ orphan, honest_failure_modes #2).
+    """
+    if not crontab_block.get("available"):
+        return None
+    names: set = set()
+    for job in crontab_block.get("jobs", []):
+        names.update(_verdict_names_in_command(job.get("command", "")))
+    return names
+
+
+def _read_cron_verdicts(wired_names: Optional[set] = None) -> Dict[str, Any]:
     """Read ``~/cron_verdicts.log`` (the silent-cron detection log).
 
     Missing file / unreadable -> ``available:False`` + reason; present ->
@@ -809,6 +851,20 @@ def _read_cron_verdicts() -> Dict[str, Any]:
         return {"available": False,
                 "reason": f"read_error: {e.__class__.__name__}"}
     jobs = _parse_cron_verdicts(text, time.time())
+    orphan_filtered = 0
+    if wired_names is not None:
+        # Drop a verdict only when it is BOTH unwired AND stale. A parked/
+        # removed cron leaves a STALE verdict (the #78 dead-cron lesson); it
+        # should not linger in the fleet view as a false CONCERN/FAIL. But an
+        # unwired verdict that is still FRESH is a LIVE signal — a secondary
+        # verdict emitted from inside a wrapper (e.g. mf5_soak_watch.sh's
+        # mf5_soak_verdict) or a non-user-crontab emitter. Dropping a fresh
+        # orphan would bury a live FAIL (honest_failure_modes #2). When
+        # wired_names is None (crontab unreadable) we keep everything.
+        kept = [j for j in jobs
+                if j["name"] in wired_names or not j.get("stale", False)]
+        orphan_filtered = len(jobs) - len(kept)
+        jobs = kept
     return {
         "available": True,
         "jobs": jobs,
@@ -816,6 +872,7 @@ def _read_cron_verdicts() -> Dict[str, Any]:
                           if j["status"].upper().startswith("FAIL")),
         "concern_count": sum(1 for j in jobs
                              if j["status"].upper() == "CONCERN"),
+        "orphan_filtered": orphan_filtered,
     }
 
 
@@ -905,7 +962,14 @@ def _schedules_block() -> Dict[str, Any]:
         block["crontab"] = {"available": False,
                             "reason": f"block_error: {e.__class__.__name__}"}
     try:
-        block["verdicts"] = _read_cron_verdicts()
+        # Pass the live crontab's wired cron names so verdicts for parked/
+        # removed (orphan) crons that have gone STALE are dropped from the
+        # fleet view rather than lingering as false CONCERN/FAIL — while fresh
+        # secondary/non-user-crontab verdicts are kept (rollup parity with
+        # MeshForge's fleet_snapshot orphan filter).
+        block["verdicts"] = _read_cron_verdicts(
+            wired_names=_wired_verdict_names(block.get("crontab", {}))
+        )
     except Exception as e:
         block["verdicts"] = {"available": False,
                              "reason": f"block_error: {e.__class__.__name__}"}
