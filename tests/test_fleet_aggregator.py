@@ -1058,6 +1058,9 @@ def test_read_cron_verdicts_keeps_fresh_drops_stale_when_none_wired(
     assert {j["name"] for j in r["jobs"]} == {"live_secondary"}
     assert r["concern_count"] == 1
     assert r["orphan_filtered"] == 1
+    # Itemized witness (Finding 4 parity): the dropped stale FAIL is named with
+    # its status, not hidden behind fail_count=0.
+    assert r["orphan_dropped"] == [{"name": "parked_cron", "status": "FAIL"}]
 
 
 def test_read_loop_crons_absent_is_unavailable_ephemeral(monkeypatch, tmp_path):

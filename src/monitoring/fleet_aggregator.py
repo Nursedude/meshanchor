@@ -852,6 +852,7 @@ def _read_cron_verdicts(wired_names: Optional[set] = None) -> Dict[str, Any]:
                 "reason": f"read_error: {e.__class__.__name__}"}
     jobs = _parse_cron_verdicts(text, time.time())
     orphan_filtered = 0
+    orphan_dropped: List[Dict[str, str]] = []
     if wired_names is not None:
         # Drop a verdict only when it is BOTH unwired AND stale. A parked/
         # removed cron leaves a STALE verdict (the #78 dead-cron lesson); it
@@ -861,9 +862,16 @@ def _read_cron_verdicts(wired_names: Optional[set] = None) -> Dict[str, Any]:
         # mf5_soak_verdict) or a non-user-crontab emitter. Dropping a fresh
         # orphan would bury a live FAIL (honest_failure_modes #2). When
         # wired_names is None (crontab unreadable) we keep everything.
-        kept = [j for j in jobs
-                if j["name"] in wired_names or not j.get("stale", False)]
-        orphan_filtered = len(jobs) - len(kept)
+        kept: List[Dict[str, Any]] = []
+        for j in jobs:
+            if j["name"] in wired_names or not j.get("stale", False):
+                kept.append(j)
+            else:
+                # ITEMIZED witness (honest_failure_modes #9): name the dropped
+                # stale verdict AND its status so a dropped FAIL/CONCERN stays
+                # visible instead of folded into a bare count (rollup parity).
+                orphan_dropped.append({"name": j["name"], "status": j["status"]})
+        orphan_filtered = len(orphan_dropped)
         jobs = kept
     return {
         "available": True,
@@ -873,6 +881,7 @@ def _read_cron_verdicts(wired_names: Optional[set] = None) -> Dict[str, Any]:
         "concern_count": sum(1 for j in jobs
                              if j["status"].upper() == "CONCERN"),
         "orphan_filtered": orphan_filtered,
+        "orphan_dropped": orphan_dropped,
     }
 
 
