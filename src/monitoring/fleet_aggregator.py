@@ -237,6 +237,21 @@ def _tcp_listener_alive(host: str, port: int, timeout: float = 0.5) -> bool:
         return False
 
 
+def _service_available(name: str) -> bool:
+    """True iff systemd reports `name` AVAILABLE or DEGRADED.
+
+    Unknown / un-checkable → False: never claim a service is up without
+    basis (honest signal — absence of evidence ≠ evidence of up).
+    """
+    try:
+        from utils.service_check import check_service, ServiceState
+        return check_service(name).state in (
+            ServiceState.AVAILABLE, ServiceState.DEGRADED
+        )
+    except Exception:
+        return False
+
+
 def _collect_radio(daemon_url: str, timeout: float):
     """Collect radio status with multi-stack fallback.
 
@@ -270,6 +285,24 @@ def _collect_radio(daemon_url: str, timeout: float):
 
     if meshcore_view is not None and meshcore_view.get("connected"):
         return meshcore_view, None
+
+    # #17 single-consumer defer (ported from MF b0973361, 2026-06-27): when
+    # meshforge-gateway owns the local :4403 PhoneAPI, a connect_ex probe is
+    # itself a contender — meshtasticd accepts it as a PhoneAPI client and
+    # force-closes the gateway's stream ("Force close previous TCP connection").
+    # This collector runs every SLO poll, so on a shared box (MA + an MF
+    # gateway) it would churn :4403 — the leak MF's probe_meshtasticd_phoneapi_
+    # wedge catches. Latent here (MA isn't on the MF gateway boxes today) but the
+    # mirrored MF _probe_radio carries the same guard. Report meshtasticd from
+    # its service state instead — non-contending, and honest (a down daemon
+    # still reads connected=False).
+    if _service_available("meshforge-gateway"):
+        return {
+            "connected": _service_available("meshtasticd"),
+            "name": "meshtasticd",
+            "preset": None,
+            "battery_pct": None,
+        }, None
 
     if _tcp_listener_alive("127.0.0.1", MESHTASTICD_API_PORT):
         return {

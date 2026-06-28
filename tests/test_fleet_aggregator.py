@@ -281,6 +281,60 @@ def test_slo_view_handles_empty_snapshot():
 
 
 # ──────────────────────────────────────────────────────────────────────
+# _collect_radio — #17 single-consumer defer (ported from MF b0973361)
+# ──────────────────────────────────────────────────────────────────────
+#
+# _collect_radio falls back to a connect_ex(:4403) probe (_tcp_listener_alive)
+# when MeshCore isn't connected — the same contending probe as MF's
+# _probe_radio. On a shared box where meshforge-gateway owns the single-consumer
+# :4403 PhoneAPI, that probe is itself a contender (meshtasticd force-closes the
+# gateway's stream). Defer: when the gateway owns :4403, report meshtasticd from
+# its service state instead of probing — non-contending, and honest (a down
+# daemon still reads connected=False).
+
+
+def test_collect_radio_defers_4403_probe_when_gateway_owns_it(fake_service_check):
+    from utils.service_check import ServiceState
+    states = {"meshforge-gateway": (ServiceState.AVAILABLE, True),
+              "meshtasticd": (ServiceState.AVAILABLE, True)}
+    with patch("utils.service_check.check_service",
+               side_effect=fake_service_check(states)), \
+         patch.object(fa, "_http_get_json", return_value=(None, "down")), \
+         patch.object(fa, "_tcp_listener_alive") as mock_probe:
+        view, err = fa._collect_radio("http://127.0.0.1:8081", 1.0)
+    assert view == {"connected": True, "name": "meshtasticd",
+                    "preset": None, "battery_pct": None}
+    mock_probe.assert_not_called()        # NO contending :4403 connect
+
+
+def test_collect_radio_gateway_owns_but_meshtasticd_down_is_disconnected(fake_service_check):
+    from utils.service_check import ServiceState
+    states = {"meshforge-gateway": (ServiceState.AVAILABLE, True),
+              "meshtasticd": (ServiceState.NOT_INSTALLED, False)}
+    with patch("utils.service_check.check_service",
+               side_effect=fake_service_check(states)), \
+         patch.object(fa, "_http_get_json", return_value=(None, "down")), \
+         patch.object(fa, "_tcp_listener_alive") as mock_probe:
+        view, err = fa._collect_radio("http://127.0.0.1:8081", 1.0)
+    assert view["connected"] is False     # honest: daemon down ≠ connected
+    assert view["name"] == "meshtasticd"
+    mock_probe.assert_not_called()
+
+
+def test_collect_radio_probes_4403_when_no_gateway(fake_service_check):
+    from utils.service_check import ServiceState
+    states = {"meshforge-gateway": (ServiceState.NOT_INSTALLED, False)}
+    with patch("utils.service_check.check_service",
+               side_effect=fake_service_check(states)), \
+         patch.object(fa, "_http_get_json", return_value=(None, "down")), \
+         patch.object(fa, "_tcp_listener_alive", return_value=True) as mock_probe:
+        view, err = fa._collect_radio("http://127.0.0.1:8081", 1.0)
+    assert view["connected"] is True
+    assert view["name"] == "meshtasticd"
+    mock_probe.assert_called_once()       # off-gateway box still probes (unchanged)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # _radio_slo_shape — daemon body → slo_view contract
 # ──────────────────────────────────────────────────────────────────────
 
