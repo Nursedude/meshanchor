@@ -315,6 +315,26 @@ class TestConfigPathContract:
             # Just print for awareness, don't fail (too many legitimate uses)
             pass
 
+    def test_gateway_rns_clients_use_shared_configdir(self):
+        """Both gateway RNS clients init through
+        ReticulumPaths.ensure_rns_client_configdir() so the process singleton's
+        resourcepath is DETERMINISTIC, not init-order-dependent
+        (gw-resourcepath-determinism, ported from MeshForge 2026-06-27). A new
+        inline ``/tmp/meshanchor_rns_client`` builder in either file would
+        reintroduce the race the helper fixes."""
+        for rel in ("gateway/_rns_bridge_connection.py",
+                    "gateway/node_tracker.py"):
+            fp = os.path.join(SRC_DIR, rel)
+            with open(fp, encoding="utf-8") as fh:
+                src = fh.read()
+            assert "ensure_rns_client_configdir(" in src, (
+                f"{rel} must init RNS via "
+                f"ReticulumPaths.ensure_rns_client_configdir() "
+                f"(deterministic resourcepath)")
+            assert 'tempfile.gettempdir()) / "meshanchor_rns_client"' not in src, (
+                f"{rel} rebuilds the client configdir inline — use "
+                f"ReticulumPaths.ensure_rns_client_configdir() instead")
+
 
 class TestPathHomeContract:
     """Enforce: No Path.home() usage outside paths.py (Issue #1, MF001)."""

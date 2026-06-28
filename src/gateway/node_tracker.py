@@ -169,69 +169,17 @@ class UnifiedNodeTracker:
             # rnsd is running - connect to existing instance as CLIENT ONLY
             logger.info(f"rnsd detected (PID: {rns_pids[0]}), connecting as client...")
             try:
-                # Create a client-only config to avoid interface conflicts
-                # This prevents RNS from trying to bind ports that rnsd already owns
-                import tempfile
+                # Canonical clean-client config (NO interfaces — avoids binding
+                # ports rnsd owns) at a FIXED location, SHARED with the bridge
+                # connection so the gateway process's RNS singleton resourcepath
+                # is deterministic (gw-resourcepath-determinism, ported from
+                # MeshForge 2026-06-27). The helper resolves instance_name + the
+                # rnsd rpc_key (explicit line → derive from rnsd's
+                # transport_identity → None) via get_shared_rpc_key(), so the
+                # client still authenticates to rnsd correctly — a mismatch would
+                # silently block ALL inbound LXMF DM delivery ("digest rejected").
                 from utils.paths import ReticulumPaths
-                instance_name = ReticulumPaths.get_configured_instance_name()
-                client_config_dir = Path(tempfile.gettempdir()) / "meshanchor_rns_client"
-                client_config_dir.mkdir(exist_ok=True)
-                client_config_file = client_config_dir / "config"
-
-                # Write minimal client-only config (no interfaces, just shared transport).
-                # instance_name MUST match what rnsd actually uses — the shared-instance
-                # socket is namespaced as @rns/<instance_name> and a mismatch makes the
-                # client spawn its own fresh socket instead of attaching to rnsd.
-                #
-                # rpc_key MUST match rnsd's: RNS 1.2.0+ requires the multiprocessing
-                # RPC authkey to match between client and rnsd. Two cases:
-                #   (a) /etc/reticulum/config has an explicit `rpc_key = ...` line —
-                #       use THAT verbatim (it overrides derivation).
-                #   (b) No explicit line — RNS 1.2.0 derives the key as
-                #       Identity.full_hash(Transport.identity.private_key) from the
-                #       configdir's transport_identity. Our /tmp client has its own
-                #       (different) Transport identity, so the derived key won't match
-                #       rnsd's. Compute rnsd's derived value by reading
-                #       /etc/reticulum/storage/transport_identity (mode 0666).
-                # Without this, every multiprocessing.connection.Client RPC call
-                # (Identity.recall, get_packet_rssi, etc) fails with "digest sent was
-                # rejected", which propagates through Link.__update_phy_stats on every
-                # incoming Link packet — silently blocking ALL inbound LXMF DM
-                # delivery to the daemon (gateway and broadcast bridge alike).
-                rpc_key_line = ""
-                try:
-                    rnsd_config_path = "/etc/reticulum/config"
-                    explicit = ""
-                    if os.path.isfile(rnsd_config_path):
-                        with open(rnsd_config_path) as _cfg:
-                            for _line in _cfg:
-                                _s = _line.strip()
-                                if _s.startswith("rpc_key"):
-                                    _left, _, _right = _s.partition("=")
-                                    if _left.strip() == "rpc_key":
-                                        explicit = _right.strip()
-                                        break
-                    if explicit:
-                        rpc_key_line = f"rpc_key = {explicit}\n"
-                    else:
-                        rnsd_identity_path = "/etc/reticulum/storage/transport_identity"
-                        if os.path.isfile(rnsd_identity_path):
-                            rnsd_identity = RNS.Identity.from_file(rnsd_identity_path)
-                            rpc_key = RNS.Identity.full_hash(rnsd_identity.get_private_key()).hex()
-                            rpc_key_line = f"rpc_key = {rpc_key}\n"
-                except Exception as _e:
-                    logger.warning("Could not resolve rpc_key for rnsd shared instance: %s", _e)
-
-                client_config_file.write_text(
-                    "# MeshAnchor RNS Client Config (auto-generated)\n"
-                    "# Connects to existing rnsd without creating interfaces\n\n"
-                    "[reticulum]\n"
-                    "share_instance = Yes\n"
-                    "shared_instance_port = 37428\n"
-                    "instance_control_port = 37429\n"
-                    f"instance_name = {instance_name}\n"
-                    + rpc_key_line
-                )
+                client_config_dir = ReticulumPaths.ensure_rns_client_configdir()
 
                 # Pre-flight: check if shared instance port is listening
                 try:
