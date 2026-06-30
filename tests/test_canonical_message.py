@@ -723,3 +723,78 @@ class TestAckFieldsIssue66:
         assert request.ack_required is True
         assert response.message_type == MessageType.ACK
         assert response.ack_of == request.id
+
+
+# =============================================================================
+# Dedup / identity arc — STEP 1: the unified logical content-id
+# (canonical_message.py is byte-identical with MeshForge; this is MeshAnchor's
+#  own coverage + drift guard against config.ECHO_LOOP_INVARIANT_PREFIXES.)
+# =============================================================================
+
+import hashlib  # noqa: E402
+from gateway.canonical_message import (  # noqa: E402
+    compute_content_id,
+    normalize_content_for_id,
+    CONTENT_ID_SCHEME,
+    _CONTENT_ID_BRIDGE_TAGS,
+)
+from gateway.config import ECHO_LOOP_INVARIANT_PREFIXES  # noqa: E402
+
+
+class TestComputeContentId:
+    """compute_content_id() — ONE stable id per logical message, byte-identical
+    across the MeshForge↔MeshAnchor contract (dedup/identity arc, STEP 1)."""
+
+    OT = "meshtastic:!a2e95ba4"
+    CH = "meshforge"
+
+    def test_deterministic(self):
+        a = compute_content_id(self.OT, "hello world", self.CH)
+        assert a != "" and a == compute_content_id(self.OT, "hello world", self.CH)
+
+    def test_no_timestamp_component(self):
+        ids = {compute_content_id(self.OT, "stable", self.CH) for _ in range(5)}
+        assert len(ids) == 1
+
+    def test_bridge_tag_invariance(self):
+        raw = compute_content_id(self.OT, "hello", self.CH)
+        rns = compute_content_id(self.OT, "[RNS:1f68] hello", self.CH)
+        mc = compute_content_id(self.OT, "[MC:p4] hello", self.CH)
+        mesh = compute_content_id(self.OT, "[Mesh:LONG_FAST:2f10] hello", self.CH)
+        assert raw == rns == mc == mesh
+
+    def test_whitespace_normalized(self):
+        a = compute_content_id(self.OT, "hello   world", self.CH)
+        b = compute_content_id(self.OT, "  hello world  ", self.CH)
+        assert a == b
+
+    def test_origin_distinguishes(self):
+        a = compute_content_id("meshtastic:!aaaaaaaa", "ping", self.CH)
+        b = compute_content_id("meshtastic:!bbbbbbbb", "ping", self.CH)
+        assert a != b
+
+    def test_channel_name_distinguishes_and_case_insensitive(self):
+        assert (compute_content_id(self.OT, "hi", "meshforge")
+                != compute_content_id(self.OT, "hi", "LongFast"))
+        assert (compute_content_id(self.OT, "hi", "MeshForge")
+                == compute_content_id(self.OT, "hi", "meshforge"))
+
+    def test_empty_and_tag_only_return_empty(self):
+        assert compute_content_id(self.OT, "", self.CH) == ""
+        assert compute_content_id(self.OT, "   ", self.CH) == ""
+        assert compute_content_id(self.OT, "[RNS:1f68]", self.CH) == ""
+
+    def test_scheme_prefix_and_shape(self):
+        cid = compute_content_id(self.OT, "hello", self.CH)
+        assert cid.startswith(CONTENT_ID_SCHEME + ":")
+        digest = cid.split(":", 1)[1]
+        assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
+
+    def test_normalization_strips_tags(self):
+        assert normalize_content_for_id("[RNS:1f68] hi  there") == "hi there"
+        assert normalize_content_for_id("[RNS:1f68]") == ""
+
+    def test_bridge_tag_list_pinned_to_config_invariant(self):
+        # Drift guard (honest_failure_modes #5): the content-id tag list and
+        # MeshAnchor's echo-loop invariant prefixes are ONE list.
+        assert tuple(_CONTENT_ID_BRIDGE_TAGS) == tuple(ECHO_LOOP_INVARIANT_PREFIXES)
