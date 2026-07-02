@@ -335,6 +335,21 @@ class TestFromBridgedMessage:
         assert restored.origin == original.origin
         assert restored.via_internet == original.via_internet
 
+    def test_content_id_carries_canonical_to_bridged(self):
+        """STEP 3 carry: to_bridged_message() stamps content_id onto the
+        BridgedMessage (the field-parity half the twin commit ac2a987b
+        shipped without — to_bridged_message raised TypeError for 2 days)."""
+        canonical = CanonicalMessage(
+            source_network='meshtastic',
+            source_address='!aabbccdd',
+            destination_address=None,
+            content='carry me',
+            is_broadcast=True,
+            content_id='c1:deadbeef',
+        )
+        bridged = canonical.to_bridged_message()
+        assert bridged.content_id == 'c1:deadbeef'
+
     def test_broadcast_round_trip(self):
         """Broadcast BridgedMessage round-trips correctly."""
         from gateway.rns_bridge import BridgedMessage
