@@ -121,6 +121,34 @@ class TestDepFloorRegistered:
 
 
 # ---------------------------------------------------------------------------
+# The one-shot runner (scripts/dep_floor_check.py) — the remote leg of the
+# mini uplink. The manager cron ssh-invokes it under the venv python; its
+# contract is: one OK/FAIL line, exit code matching the prefix, exit 2 only
+# when the check itself could not run (failed observation ≠ health).
+# ---------------------------------------------------------------------------
+
+class TestDepFloorOneShot:
+
+    SCRIPT = os.path.join(os.path.dirname(__file__), '..', 'scripts',
+                          'dep_floor_check.py')
+
+    def test_contract_under_this_interpreter(self):
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, self.SCRIPT],
+            capture_output=True, text=True, timeout=30)
+        line = r.stdout.strip().splitlines()[0] if r.stdout.strip() else ""
+        assert line.startswith(("OK ", "FAIL ")), f"bad output: {r.stdout!r}"
+        if line.startswith("OK "):
+            assert r.returncode == 0
+        else:
+            assert r.returncode in (1, 2)
+        # In a CI env installed from requirements/core.txt (>= the floor) or
+        # with meshtastic absent (indeterminate), OK/exit-0 is the only
+        # truthful outcome; a FAIL here means the test env itself drifted.
+
+
+# ---------------------------------------------------------------------------
 # The shared parser (one parser, one comparison — honest_failure_modes #5)
 # ---------------------------------------------------------------------------
 
