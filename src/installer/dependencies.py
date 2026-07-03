@@ -48,7 +48,6 @@ class DependencyManager:
         'requests',
         'psutil',
         'distro',
-        'python-dotenv',
     ]
 
     # Packages that should be installed via pipx (isolated environments)
