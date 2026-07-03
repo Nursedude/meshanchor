@@ -8,5 +8,8 @@ pyyaml>=6.0
 requests>=2.31.0
 distro>=1.8.0
 
-# Meshtastic protobuf definitions (used by gateway protobuf client)
-meshtastic>=2.5.0
+# Meshtastic protobuf definitions (used by gateway protobuf client).
+# Floor mirrors the FLEET baseline pinned in MeshForge's requirements/core.txt
+# (the copy MF's probe_dep_version_drift reads as SSOT — no MA probe reads this
+# line yet). Keep the two floors in lockstep on a reviewed roll.
+meshtastic>=2.7.9
