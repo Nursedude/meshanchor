@@ -303,7 +303,8 @@ class TestActiveHealthProbe:
         # ride along with rnsd (RNS-reliability parity port, 2026-05-31) +
         # the two unconditional fd-exhaustion probes (#73 parity port) +
         # the two unconditional delivery-observability probes (MF Issue
-        # #74 probe port, 2026-06-06).
+        # #74 probe port, 2026-06-06) + the unconditional dep version-floor
+        # probe (MF probe_dep_version_drift parity, 2026-07-03).
         assert set(names) == {
             "meshtasticd",
             "rnsd",
@@ -314,6 +315,7 @@ class TestActiveHealthProbe:
             "meshanchor_daemon_fds",
             "queue_backlog",
             "delivery_confirmation_stall",
+            "dep_floor",
         }
 
 

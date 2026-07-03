@@ -517,6 +517,84 @@ class ActiveHealthProbe:
         except Exception as e:
             return HealthResult(healthy=False, reason=str(e)[:100])
 
+    # Critical pip deps floor-checked against requirements/core.txt. rns/lxmf
+    # are deliberately EXCLUDED — they live under the MF-fork pin regime
+    # (requirements/rns.txt), not the core floor. The gap this fills:
+    # meshtastic, the lib whose silent drift left meshanchor-server on 2.7.8
+    # while the fleet pin was 2.7.9 (found by the 2026-07-03 audit — the one
+    # box no MeshForge probe watches).
+    DEP_FLOOR_WATCHED = ("meshtastic",)
+
+    def check_dep_version_floor(
+        self,
+        *,
+        requirements_path=None,
+        installed: Optional[Dict[str, str]] = None,
+    ) -> HealthResult:
+        """A critical pip dependency importable by THIS process sits BELOW the
+        requirements/core.txt floor — the box missed or failed an update
+        (MeshForge ``probe_dep_version_drift`` parity, 2026-07-03).
+
+        Consumer-of-record simplification vs MeshForge: MF's watchdog runs in
+        a DIFFERENT process/user than the services, so it must enumerate
+        venv/user-site/system-dist installs. This check runs INSIDE the
+        MeshAnchor daemon — the very interpreter that imports meshtastic — so
+        ``importlib.metadata`` on our own env IS the consumer-of-record. The
+        read hits on-disk dist-info each tick, so a pip upgrade clears the
+        alarm as soon as it lands (before the restart that loads it).
+
+        Self-guards healthy-with-reason (this codebase's idiom for
+        not-applicable, cf. check_fd_exhaustion): no parseable floor
+        (unreadable SSOT must not read as compliant OR as drift — it is
+        indeterminate), or no watched package importable here (a venv
+        elsewhere may be the consumer — don't guess). Fires unhealthy only on
+        a concrete below-floor fact.
+        """
+        from utils.requirements_floor import (
+            default_core_requirements,
+            read_requirement_floors,
+            version_below,
+        )
+
+        req = (Path(requirements_path) if requirements_path
+               else default_core_requirements())
+        floors = read_requirement_floors(self.DEP_FLOOR_WATCHED, req)
+        if not floors:
+            return HealthResult(
+                healthy=True, reason="dep_floor_indeterminate_no_floor")
+
+        if installed is None:
+            import importlib.metadata as _md
+            installed = {}
+            for pkg in floors:
+                try:
+                    installed[pkg] = _md.version(pkg)
+                except _md.PackageNotFoundError:
+                    continue  # not visible in this env — don't guess
+                except Exception:
+                    continue
+        if not installed:
+            return HealthResult(
+                healthy=True, reason="dep_floor_indeterminate_not_importable")
+
+        stale = [
+            f"{pkg} installed={installed[pkg]} floor>={floor}"
+            for pkg, floor in floors.items()
+            if pkg in installed and version_below(installed[pkg], floor)
+        ]
+        if stale:
+            return HealthResult(
+                healthy=False,
+                reason=(
+                    f"below_requirements_floor: {'; '.join(stale)} — this box "
+                    f"missed or failed an update; fix: sudo pip3 install "
+                    f"--break-system-packages '<pkg>==<floor>' then restart "
+                    f"meshanchor (see feedback_version_env_rigor)"
+                ),
+            )
+        ok = ", ".join(f"{p}={v}" for p, v in sorted(installed.items()))
+        return HealthResult(healthy=True, reason=f"dep_floor_ok {ok}")
+
     def check_rns_port(self, port: int = 37428, host: str = "127.0.0.1") -> HealthResult:
         """
         Probe RNS shared instance availability.
@@ -1081,6 +1159,17 @@ def create_gateway_health_probe(
     probe.register_check(
         "meshanchor_daemon_fds",
         lambda: probe.check_fd_exhaustion("meshanchor-daemon.service"),
+    )
+
+    # Dep version-floor probe (MeshForge probe_dep_version_drift parity,
+    # 2026-07-03): our own interpreter's meshtastic vs the requirements/
+    # core.txt fleet floor — the silent-drift class that left
+    # meshanchor-server on 2.7.8 with nothing watching. Registered
+    # unconditionally; self-guards indeterminate (unreadable floor /
+    # package not importable here) as healthy-with-reason.
+    probe.register_check(
+        "dep_floor",
+        lambda: probe.check_dep_version_floor(),
     )
 
     # MF Issue #74 probe port (delivery observability): queue
