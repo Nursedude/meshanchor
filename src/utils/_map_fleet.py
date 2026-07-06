@@ -692,7 +692,13 @@ class FleetEndpointsMixin:
 
         Same shape as MF's endpoint — the dashboard's renderLogs() is
         unit-aware but otherwise agnostic to which daemon answered.
+
+        Journal slices carry LAN IPs / peer hostnames / debug secrets; on a
+        0.0.0.0 bind this must not be readable by an untrusted network. Gated to
+        loopback / the configured LAN (2026-07-05 maps QA audit port from MF).
         """
+        if self._reject_if_untrusted():
+            return
         from urllib.parse import urlparse, parse_qs
 
         qs = parse_qs(urlparse(self.path).query)
@@ -809,11 +815,14 @@ class FleetEndpointsMixin:
     def _serve_fleet_run_test(self) -> None:
         """POST /fleet/run-test — fire an allowlisted lab unit.
 
-        Body: {"test": "<id>"} where id ∈ self._FLEET_TESTS. No
-        localhost gate at this entry point — the allowlist is the
-        authorization surface, and the units are oneshots with no
-        write side-effects beyond their own logging.
+        Body: {"test": "<id>"} where id ∈ self._FLEET_TESTS. Defense in depth:
+        the allowlist bounds WHICH units fire, and (2026-07-05 maps QA audit
+        port from MF) a loopback/LAN-trust gate bounds WHO can fire them — so an
+        untrusted network on this 0.0.0.0 bind (AREDN 10.x, VPN) can't trigger
+        fleet traffic on demand. The LAN dashboard (operator /24) stays allowed.
         """
+        if self._reject_if_untrusted():
+            return
         import json as _json
         import socket as _socket
 

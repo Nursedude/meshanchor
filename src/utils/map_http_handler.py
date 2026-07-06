@@ -105,6 +105,64 @@ except Exception:
     _SERVER_VERSION = "MeshAnchor"
 
 
+def _origin_allowed(origin: str, allowed: Optional[List[str]]) -> bool:
+    """Exact-or-/24 CORS origin match (tail-anchored).
+
+    Ported from meshforge/src/utils/map_http_handler.py (2026-07-05 maps QA
+    audit). ``allowed`` holds the ``--cors-origins`` prefixes. Two shapes:
+      * exact host  (``http://localhost``) — the origin must equal it, optionally
+        with a ``:port`` suffix and nothing else after.
+      * IP /24 prefix (``http://192.168.86.`` — trailing dot) — the origin must
+        complete the final octet with 1-3 digits (+ optional ``:port``).
+
+    A bare ``origin.startswith(prefix)`` let ``http://192.168.86.evil.com`` and
+    ``http://localhost.attacker.example`` pass (subdomain-suffix CORS bypass — an
+    attacker page reads the whole NOC API cross-origin). Anchoring the tail
+    with ``$`` closes that while preserving the /24 intent.
+    """
+    if not origin or not allowed:
+        return False
+    for prefix in allowed:
+        if not prefix:
+            continue
+        esc = re.escape(prefix)
+        pat = esc + (r'\d{1,3}(?::\d+)?$' if prefix.endswith('.') else r'(?::\d+)?$')
+        if re.match(pat, origin):
+            return True
+    return False
+
+
+def _trusted_networks_from_origins(allowed: Optional[List[str]]):
+    """Parse the CORS allow-list host parts into ``ip_network`` objects, used to
+    gate log-exposing / state-changing endpoints by client IP on a ``0.0.0.0``
+    bind. A ``.``-terminated prefix (``http://192.168.86.``) → the /24; a bare IP
+    host → /32. Non-IP hosts (``localhost``) are skipped. Ported from MeshForge."""
+    nets = []
+    for prefix in allowed or []:
+        if not prefix:
+            continue
+        host = prefix.split('://', 1)[-1].split(':', 1)[0].rstrip('.')
+        cidr = host + '.0/24' if prefix.endswith('.') else host + '/32'
+        try:
+            nets.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError:
+            continue  # non-IP host (localhost) or malformed prefix
+    return nets
+
+
+def _client_ip_trusted(client_host: str, allowed: Optional[List[str]]) -> bool:
+    """True if ``client_host`` is loopback or inside a configured LAN origin.
+    With no ``--cors-origins`` configured only loopback is trusted (secure
+    default). Ported from MeshForge."""
+    try:
+        ip = ipaddress.ip_address(client_host)
+    except ValueError:
+        return False
+    if ip.is_loopback:
+        return True
+    return any(ip in net for net in _trusted_networks_from_origins(allowed))
+
+
 class MapRequestHandler(
     FleetEndpointsMixin,
     RadioEndpointsMixin,
@@ -142,6 +200,30 @@ class MapRequestHandler(
         except ValueError:
             return False
 
+    def _client_is_trusted(self) -> bool:
+        """True when the request comes from loopback or a configured LAN origin.
+
+        Ported from MeshForge (2026-07-05 maps QA audit). Gate for the
+        log-exposing / fleet-action endpoints that must stay reachable by the
+        LAN dashboard (loaded from a /24 host) but NOT by an untrusted network
+        on this ``0.0.0.0`` bind (AREDN 10.x, VPN). Radio TX stays the stricter
+        ``_is_localhost`` (loopback-only) — do not loosen it here."""
+        try:
+            host = self.client_address[0]
+        except (IndexError, AttributeError):
+            return False
+        return _client_ip_trusted(host, self.allowed_origins)
+
+    def _reject_if_untrusted(self) -> bool:
+        """Send 403 + return True when the caller isn't loopback/LAN-trusted."""
+        if self._client_is_trusted():
+            return False
+        self._serve_json(
+            {"error": "forbidden",
+             "detail": "endpoint restricted to loopback or a configured LAN origin"},
+            status=403)
+        return True
+
     def _send_cors_header(self):
         """Send appropriate CORS header based on configuration.
 
@@ -164,7 +246,7 @@ class MapRequestHandler(
         if not origin:
             return
         origins = self.allowed_origins if self.allowed_origins is not None else self._DEFAULT_ORIGINS
-        if any(origin.startswith(allowed) for allowed in origins):
+        if _origin_allowed(origin, origins):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
 
