@@ -440,20 +440,19 @@ class NodeHistoryDB:
         #     We compute the existing priority in SQL via a CASE expression
         #     over the known origin tags (kept short — unknown origins map
         #     to 10, the same fallback as _origin_priority()).
+        # GENERATED from _ORIGIN_PRIORITY so the SQL existing-row priority can
+        # never drift from the Python new-row priority — two independent
+        # hardcodes WILL diverge (honest_failure_modes #5). Keys are fixed
+        # identifiers (no quotes → no injection); the None key can't be a SQL
+        # `WHEN` and correctly falls to ELSE 10. (QA deferred low/perf, 2026-07-06.)
         existing_case = (
             "CASE nodes.source_origin "
-            "WHEN 'local_radio' THEN 100 "
-            "WHEN 'rns_path_table' THEN 90 "
-            "WHEN 'aredn_local' THEN 80 "
-            "WHEN 'mqtt_local' THEN 70 "
-            "WHEN 'node_tracker' THEN 60 "
-            "WHEN 'operator_positions' THEN 50 "
-            "WHEN 'meshcore_public' THEN 30 "
-            "WHEN 'aredn_worldmap' THEN 30 "
-            "WHEN 'mqtt_global' THEN 30 "
-            "WHEN 'public_fallback' THEN 20 "
-            "WHEN '' THEN 0 "
-            "ELSE 10 END"
+            + " ".join(
+                f"WHEN '{origin}' THEN {prio}"
+                for origin, prio in _ORIGIN_PRIORITY.items()
+                if origin is not None
+            )
+            + " ELSE 10 END"
         )
         sql = f"""
             INSERT INTO nodes (

@@ -118,6 +118,28 @@ _MAX_QUERY_BODY = 64 * 1024
 _node_geojson_cache: Optional[Dict[str, Any]] = None
 _node_geojson_cache_time: float = 0.0
 _NODE_CACHE_TTL: float = 90.0  # seconds
+# Lock (unsynchronized module globals raced across scrape threads) + single
+# flight + a reused collector (a fresh one per cache-miss scrape was wasteful).
+# (QA deferred low/perf, 2026-07-06.)
+_node_cache_lock = threading.Lock()
+_shared_collector = None
+# Cap per-node label cardinality on the env/air-quality metric loops (emit for
+# at most the N most-recently-seen sensor nodes). node_id is attacker-
+# influenceable, so an unbounded loop churns the TSDB — matches SNR/RSSI [:100].
+# (QA deferred low/perf, 2026-07-06.)
+_PER_NODE_LABEL_CAP = 200
+
+
+def _get_shared_collector():
+    """Process-wide MapDataCollector, built once. collect() is internally
+    serialized + idempotent, so reuse is safe. The runtime meshtastic gate is
+    refreshed by the caller each collect (the operator can flip it)."""
+    global _shared_collector
+    if _shared_collector is None:
+        _shared_collector = MapDataCollector(
+            enable_history=False, meshtastic_enabled=_meshtastic_enabled(),
+        )
+    return _shared_collector
 
 
 def _meshtastic_enabled() -> bool:
@@ -173,23 +195,30 @@ def _collect_node_geojson() -> Dict[str, Any]:
     """
     global _node_geojson_cache, _node_geojson_cache_time
     now = time.time()
+    # Fast path: fresh cache, lock-free read.
     if (_node_geojson_cache is not None
             and now - _node_geojson_cache_time < _NODE_CACHE_TTL):
         return _node_geojson_cache
     if not _HAS_MAP_COLLECTOR:
         return {}
-    try:
-        collector = MapDataCollector(
-            enable_history=False,
-            meshtastic_enabled=_meshtastic_enabled(),
-        )
-        geojson = collector.collect(max_age_seconds=60)
-        _node_geojson_cache = geojson
-        _node_geojson_cache_time = now
-        return geojson
-    except Exception as e:
-        logger.debug(f"MapDataCollector error: {e}")
-        return _node_geojson_cache if _node_geojson_cache is not None else {}
+    with _node_cache_lock:
+        now = time.time()
+        if (_node_geojson_cache is not None
+                and now - _node_geojson_cache_time < _NODE_CACHE_TTL):
+            return _node_geojson_cache
+        try:
+            collector = _get_shared_collector()
+            # Refresh the runtime meshtastic gate on the reused singleton (the
+            # operator can flip it — a stale True would reintroduce the 12-19s
+            # TCP-timeout-per-scrape this flag exists to avoid).
+            collector._meshtastic_enabled = _meshtastic_enabled()
+            geojson = collector.collect(max_age_seconds=60)
+            _node_geojson_cache = geojson
+            _node_geojson_cache_time = now
+            return geojson
+        except Exception as e:
+            logger.debug(f"MapDataCollector error: {e}")
+            return _node_geojson_cache if _node_geojson_cache is not None else {}
 
 
 class PrometheusExporter:
@@ -687,6 +716,10 @@ class PrometheusExporter:
 
             # Environment sensors (BME280/BME680/BMP280)
             env_nodes = subscriber.get_nodes_with_environment_metrics()
+            env_nodes = sorted(
+                env_nodes or [], key=lambda n: getattr(n, "last_seen", 0) or 0,
+                reverse=True,
+            )[:_PER_NODE_LABEL_CAP]
             if env_nodes:
                 # Temperature
                 temp_nodes = [n for n in env_nodes if n.temperature is not None]
@@ -734,6 +767,10 @@ class PrometheusExporter:
 
             # Air quality sensors (PMSA003I, SCD4X)
             aq_nodes = subscriber.get_nodes_with_air_quality()
+            aq_nodes = sorted(
+                aq_nodes or [], key=lambda n: getattr(n, "last_seen", 0) or 0,
+                reverse=True,
+            )[:_PER_NODE_LABEL_CAP]
             if aq_nodes:
                 pm25_nodes = [n for n in aq_nodes if n.pm25_standard is not None]
                 if pm25_nodes:

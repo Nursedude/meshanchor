@@ -61,6 +61,10 @@ def _reset_node_cache():
     """
     pe._node_geojson_cache = None
     pe._node_geojson_cache_time = 0.0
+    # The collector is now a process-wide singleton (built once, reused across
+    # scrapes for perf) — reset it too so each test's mocked constructor is
+    # re-invoked. (QA deferred low/perf, 2026-07-06.)
+    pe._shared_collector = None
 
 
 # ──────────────────────────────────────────────────────────────────────
