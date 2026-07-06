@@ -788,7 +788,12 @@ class FleetEndpointsMixin:
         now = _time.time()
         timer_index: Dict[str, Dict[str, Any]] = {}
         for scope in ("system", "user"):
-            for raw in _list_timers_scope(scope):
+            # `_list_timers_scope` returns None when the scope probe FAILED
+            # (e.g. no resolvable operator on a root-daemon host) — treat that as
+            # "no timer pairings for this listing" and degrade gracefully rather
+            # than crash `for raw in None`. (Re-review of the B-F9 fix: the new
+            # None return needed BOTH consumers guarded, not just _schedules_block.)
+            for raw in (_list_timers_scope(scope) or []):
                 entry = _normalize_timer(raw, scope, now)
                 if entry is None:
                     continue
