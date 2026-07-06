@@ -46,6 +46,7 @@ import logging
 import mimetypes
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler
@@ -584,6 +585,13 @@ class MapRequestHandler(
                 except (ValueError, IndexError):
                     self._serve_json({"error": "Invalid destination format"}, status=400)
                     return
+                # Meshtastic node numbers are unsigned 32-bit; reject anything
+                # outside that range before it reaches send_text_direct (the
+                # _VALID_DESTINATION regex allows arbitrarily long digit runs).
+                # (MF maps-QA audit port, 2026-07-06.)
+                if not (0 <= dest_num <= 0xFFFFFFFF):
+                    self._serve_json({"error": "destination out of range"}, status=400)
+                    return
 
             # Prefer HTTP protobuf — no TCP contention with web UI
             try:
@@ -641,14 +649,18 @@ class MapRequestHandler(
         else:
             file_path = Path(__file__).parent.parent.parent / "web" / path_only
 
-        # Security: prevent path traversal
+        # Security: prevent path traversal. Use relative_to on the resolved
+        # paths, not a string prefix — `startswith(base)` also matches a sibling
+        # dir sharing the prefix (base `web` → `web-secret`), a one-rename-away
+        # escape. Mirrors _serve_mesh_web_client's guard. (MF maps-QA port.)
         try:
             base_dir = Path(self.web_dir) if self.web_dir else Path(__file__).parent.parent.parent / "web"
             file_path = file_path.resolve()
             base_dir = base_dir.resolve()
-            if not str(file_path).startswith(str(base_dir)):
-                self.send_error(403, "Forbidden")
-                return
+            file_path.relative_to(base_dir)
+        except ValueError:
+            self.send_error(403, "Forbidden")
+            return
         except Exception:
             self.send_error(400, "Invalid path")
             return
@@ -840,10 +852,17 @@ class MapRequestHandler(
         """
         from urllib.parse import urlparse, parse_qs
 
-        # Parse query parameters
+        # Parse query parameters. Clamp limit defensively — a bare int() here
+        # (outside the try below) turned ?limit=abc into an uncaught 500 and
+        # ?limit=-1 into SQLite `LIMIT -1` (unbounded table dump on the request
+        # thread). (MF maps-QA audit port, 2026-07-06.)
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
-        limit = int(params.get('limit', ['50'])[0])
+        try:
+            limit = int(params.get('limit', ['50'])[0])
+        except (ValueError, TypeError):
+            limit = 50
+        limit = max(1, min(limit, 500))
         network = params.get('network', ['all'])[0]
         since = params.get('since', [None])[0]
 
@@ -1080,9 +1099,14 @@ class MapRequestHandler(
     # Space Weather API
     # ─────────────────────────────────────────────────────────────────
 
-    # Cache space weather data (refreshes every 15 minutes)
+    # Cache space weather data (refreshes every 15 minutes). Class-level state
+    # shared across ThreadingHTTPServer request threads — guard the check-and-set
+    # with a lock (MF maps-QA port): without it, N concurrent cold-cache requests
+    # each fire an independent NOAA fetch (thundering herd) and an unsynchronized
+    # reader can observe a half-populated cache dict.
     _weather_cache: Optional[Dict] = None
     _weather_cache_time: float = 0
+    _weather_cache_lock = threading.Lock()
     _WEATHER_CACHE_TTL = 900  # 15 minutes
 
     def _serve_weather(self):
@@ -1095,12 +1119,26 @@ class MapRequestHandler(
         """
         now = time.time()
 
-        # Return cached data if still fresh
-        if (MapRequestHandler._weather_cache
-                and (now - MapRequestHandler._weather_cache_time) < self._WEATHER_CACHE_TTL):
-            self._serve_json(MapRequestHandler._weather_cache)
+        # Fast path: serve a fresh cache without the lock (a single dict read is
+        # atomic under CPython's GIL).
+        cached = MapRequestHandler._weather_cache
+        if cached and (now - MapRequestHandler._weather_cache_time) < self._WEATHER_CACHE_TTL:
+            self._serve_json(cached)
             return
 
+        # Miss: serialize the refetch so a burst of concurrent misses collapses
+        # to a single NOAA round-trip instead of a thundering herd.
+        with MapRequestHandler._weather_cache_lock:
+            now = time.time()
+            cached = MapRequestHandler._weather_cache
+            if cached and (now - MapRequestHandler._weather_cache_time) < self._WEATHER_CACHE_TTL:
+                self._serve_json(cached)
+                return
+            self._fetch_and_serve_weather(now)
+
+    def _fetch_and_serve_weather(self, now):
+        """Fetch space weather from NOAA and serve it, refreshing the shared
+        cache. Called under ``_weather_cache_lock`` (single-flight)."""
         try:
             from commands.propagation import get_space_weather, get_band_conditions
 
