@@ -423,8 +423,14 @@ class MapDataCollector(
 
         Returns list of dicts with id, name, last_seen, network info.
         Updated after each collect() call.
+
+        Returns a point-in-time COPY: the background collect thread resets this
+        list to [] and extends it across a cycle, so a request thread reading the
+        live reference could observe a half-populated / just-reset list. The copy
+        gives a stable snapshot without blocking on collection. (QA deferred
+        low/perf, 2026-07-06.)
         """
-        return self._nodes_without_position
+        return list(self._nodes_without_position)
 
     def collect(self, max_age_seconds: int = 30) -> Dict[str, Any]:
         """Collect nodes from all sources, merge, and return GeoJSON.

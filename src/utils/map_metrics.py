@@ -72,10 +72,14 @@ if _HAS_PROM:
     # body unless explicitly added later.
     REGISTRY = CollectorRegistry(auto_describe=True)
 
-    # ----- Service health (mirror of what /healthz reports in JSON)
+    # ----- Service health. NOTE: currently a CONSTANT-1 exporter-liveness marker
+    # (equivalent to Prometheus's built-in `up`) — MA has no dynamic readiness/
+    # warming signal to flip it to 0, so DO NOT alert on `== 0` (it never fires).
+    # `set_service_up()` is the writer for a future readiness signal (matching
+    # MeshForge's set_warming). (QA deferred low/perf, 2026-07-06.)
     SERVICE_UP = Gauge(
         "meshanchor_map_service_up",
-        "1 if the map server is up and serving live traffic.",
+        "Constant 1 while running (~= Prometheus up).",
         registry=REGISTRY,
     )
 
