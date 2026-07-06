@@ -98,6 +98,11 @@ get_topology_snapshot_store, _HAS_TOPOLOGY_SNAPSHOT = safe_import(
 
 logger = logging.getLogger(__name__)
 
+# PromQL query bodies are tiny; cap the POST body read so a huge/malformed
+# declared Content-Length can't force a large RAM allocation or a slowloris
+# read on the ThreadingHTTPServer. (QA audit 2026-07-06.)
+_MAX_QUERY_BODY = 64 * 1024
+
 # Shared node data cache to avoid repeated MapDataCollector instantiation.
 #
 # TTL sized to typical Prometheus scrape intervals (15-60s) so back-to-back
@@ -946,15 +951,24 @@ class PrometheusExporter:
             True if written successfully
         """
         try:
-            # Atomic write using temp file
-            temp_path = f"{path}.tmp"
             content = self.export()
-
-            with open(temp_path, 'w') as f:
-                f.write(content)
-
-            # Atomic rename
-            os.replace(temp_path, path)
+            # Unique temp file in the same dir — a fixed "{path}.tmp" name
+            # collides if two writers (textfile timer + a manual call) race,
+            # publishing a torn file via os.replace (honest_failure #8). (QA
+            # audit 2026-07-06.)
+            import tempfile
+            d = os.path.dirname(path) or "."
+            fd, temp_path = tempfile.mkstemp(prefix=".metrics.", suffix=".tmp", dir=d)
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    f.write(content)
+                os.replace(temp_path, path)
+            except Exception:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                raise
             logger.debug(f"Metrics written to {path}")
             return True
 
@@ -1050,8 +1064,11 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
             query = params.get("query", [""])[0]
         else:
             # Read POST body
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+            except (ValueError, TypeError):
+                content_length = 0
+            if 0 < content_length <= _MAX_QUERY_BODY:
                 body = self.rfile.read(content_length).decode('utf-8')
                 params = urllib.parse.parse_qs(body)
                 query = params.get("query", [""])[0]
@@ -1148,8 +1165,11 @@ class MetricsHTTPHandler(http.server.BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(self.path.split("?", 1)[1])
             query = params.get("query", [""])[0]
         else:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+            except (ValueError, TypeError):
+                content_length = 0
+            if 0 < content_length <= _MAX_QUERY_BODY:
                 body = self.rfile.read(content_length).decode('utf-8')
                 params = urllib.parse.parse_qs(body)
                 query = params.get("query", [""])[0]
@@ -1440,16 +1460,17 @@ Grafana Setup (Option 2 - Infinity plugin):
             'services': {},
         }
 
-        # Check services
+        # Check services via the SSOT service layer, not raw `systemctl` (MF008):
+        # check_service() carries sudo/degraded-daemon semantics + the fleet's
+        # ServiceState vocabulary, so /api/json/status agrees with /metrics and
+        # the fleet views. (QA audit 2026-07-06.)
         for svc in ['meshtasticd', 'rnsd', 'mosquitto', 'grafana-server']:
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['systemctl', 'is-active', svc],
-                    capture_output=True, text=True, timeout=5
-                )
-                status['services'][svc] = result.stdout.strip()
-            except Exception:
+            if _HAS_SERVICE_CHECK:
+                try:
+                    status['services'][svc] = check_service(svc).state.value
+                except Exception:
+                    status['services'][svc] = 'unknown'
+            else:
                 status['services'][svc] = 'unknown'
 
         self.send_response(200)

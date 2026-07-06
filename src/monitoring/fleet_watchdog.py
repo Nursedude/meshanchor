@@ -120,6 +120,29 @@ def _check_daemon_active() -> Optional[bool]:
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _daemon_dead_reason() -> Optional[str]:
+    """Evaluate the daemon-dead signal (INDEPENDENT of heartbeat data) and
+    advance the hysteresis streak. Returns a reason when active, else None.
+
+    Extracted so it runs even when the heartbeat table is empty — otherwise the
+    empty-table early return in detect_silence would abstain on daemon_dead, and
+    reconcile_blackouts would CLOSE a genuinely-valid daemon_dead blackout (the
+    daemon is actually down). Absence-of-evaluation ≠ recovery (honest_failure
+    #2). (QA audit 2026-07-06.)"""
+    daemon_active = _check_daemon_active()
+    if daemon_active is True:
+        _daemon_state["inactive_streak"] = 0
+    elif daemon_active is False:
+        _daemon_state["inactive_streak"] += 1
+        if _daemon_state["inactive_streak"] >= DAEMON_HYSTERESIS_CYCLES:
+            return (
+                f"meshanchor-daemon.service not active for "
+                f"{_daemon_state['inactive_streak']} consecutive checks"
+            )
+    # daemon_active is None → probe failed; leave streak unchanged.
+    return None
+
+
 def detect_silence(
     *,
     now: Optional[float] = None,
@@ -144,9 +167,20 @@ def detect_silence(
     latest = fleet_history.query_latest_heartbeat(db_path=db_path)
     if latest is None:
         out[KIND_NO_DATA] = "heartbeat table is empty"
+        # daemon_dead is independent of heartbeat data — evaluate it even here,
+        # else an empty/reset table would wrongly close a valid daemon_dead
+        # blackout (B-F2, honest_failure #2).
+        out[KIND_DAEMON_DEAD] = _daemon_dead_reason()
         return out
 
-    age = now - float(latest["ts"])
+    # Guard the ts cast + clamp a future/negative age. A malformed heartbeat ts
+    # would raise (aborting detection); a future ts (clock step / forged) yields
+    # a negative age that shouldn't read as a bare "fresh forever". (QA audit.)
+    try:
+        ts = float(latest["ts"])
+    except (TypeError, ValueError, KeyError):
+        ts = now
+    age = max(0.0, now - ts)
     if age > stale_threshold_s:
         out[KIND_HTTP_DEAD] = (
             f"latest heartbeat is {age:.0f}s old "
@@ -190,17 +224,7 @@ def detect_silence(
     # Hysteresis bias is "false negative for one cycle" rather than
     # "false positive on a 5s daemon restart" — the streak counter
     # advances only on confirmed-inactive reads.
-    daemon_active = _check_daemon_active()
-    if daemon_active is True:
-        _daemon_state["inactive_streak"] = 0
-    elif daemon_active is False:
-        _daemon_state["inactive_streak"] += 1
-        if _daemon_state["inactive_streak"] >= DAEMON_HYSTERESIS_CYCLES:
-            out[KIND_DAEMON_DEAD] = (
-                f"meshanchor-daemon.service not active for "
-                f"{_daemon_state['inactive_streak']} consecutive checks"
-            )
-    # daemon_active is None → probe failed; leave streak unchanged.
+    out[KIND_DAEMON_DEAD] = _daemon_dead_reason()
 
     return out
 

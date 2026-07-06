@@ -44,6 +44,12 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("fleet.collector")
 
+# Hard byte cap on a peer's HTTP body. Peers are semi-trusted; the fleet
+# directory is already tens of MB, but a wedged/hostile peer can stream a
+# multi-GB body (or trickle it) that resp.read() buffers whole → OOM on a Pi.
+# 128 MB is a backstop well above legit. (QA audit 2026-07-06.)
+MAX_FETCH_BYTES = 128 * 1024 * 1024
+
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5000"
 """Canonical NOC layout. VolcanoAI dev surface uses :5002; the operator
@@ -82,7 +88,9 @@ def _fetch_json(url: str, *, timeout: float) -> Tuple[Optional[Any], Optional[st
             url, headers={"Accept": "application/json"}
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
+            body = resp.read(MAX_FETCH_BYTES + 1)
+        if len(body) > MAX_FETCH_BYTES:
+            return None, f"response exceeded {MAX_FETCH_BYTES} bytes"
         return json.loads(body.decode("utf-8")), None
     except urllib.error.URLError as e:
         return None, f"url error: {getattr(e, 'reason', e)}"

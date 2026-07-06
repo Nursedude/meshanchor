@@ -771,9 +771,11 @@ def test_list_timers_root_system_scope_stays_plain(monkeypatch):
     assert "sudo" not in cap["cmd"]
 
 
-def test_list_timers_root_user_scope_no_operator_returns_empty(monkeypatch):
-    """No candidate UID in /run/user/ → return [] without invoking
-    subprocess. Avoids cryptic root-bus errors leaking into the panel."""
+def test_list_timers_root_user_scope_no_operator_returns_none(monkeypatch):
+    """No candidate operator → the probe FAILED, so return None (not []) without
+    invoking subprocess. QA audit 2026-07-06: [] masqueraded as "clean, no user
+    timers" (silence-as-health, honest_failure #2); None makes the caller badge
+    the scope unavailable."""
 
     def _should_not_be_called(*args, **kwargs):
         raise AssertionError("subprocess.run must not be invoked")
@@ -785,7 +787,7 @@ def test_list_timers_root_user_scope_no_operator_returns_empty(monkeypatch):
     monkeypatch.setattr(
         "monitoring.fleet_aggregator.subprocess.run", _should_not_be_called,
     )
-    assert fa._list_timers_scope("user") == []
+    assert fa._list_timers_scope("user") is None
 
 
 # ─── _normalize_timer staleness (monotonic-timer flicker guard) ─────────

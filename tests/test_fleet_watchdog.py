@@ -380,3 +380,15 @@ def test_reconcile_opens_daemon_dead_through_to_blackout_row(db):
     rows = fh.query_active_blackouts(db_path=db)
     kinds = {r["kind"] for r in rows}
     assert "daemon_dead" in kinds
+
+
+def test_daemon_dead_evaluated_on_empty_heartbeat_table(db):
+    """QA audit 2026-07-06: the empty-table early return must NOT skip the
+    daemon_dead check (it's independent of heartbeat data) — else reconcile
+    would wrongly CLOSE a valid daemon_dead blackout (honest_failure #2)."""
+    wd._daemon_state["inactive_streak"] = wd.DAEMON_HYSTERESIS_CYCLES
+    with patch.object(wd, "_check_daemon_active", return_value=False):
+        out = wd.detect_silence(db_path=db, now=1000.0)
+    assert out[wd.KIND_NO_DATA] is not None       # table is empty
+    assert out[wd.KIND_DAEMON_DEAD] is not None   # still evaluated, not skipped
+    wd._daemon_state["inactive_streak"] = 0

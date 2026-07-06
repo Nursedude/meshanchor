@@ -50,6 +50,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Hard byte cap on a peer/self HTTP body — a wedged/hostile upstream can stream a
+# multi-GB body that resp.read() buffers whole → OOM on a Pi. 128 MB backstop,
+# well above the tens-of-MB legit fleet directory. (QA audit 2026-07-06.)
+_MAX_FETCH_BYTES = 128 * 1024 * 1024
+
 
 _PROCESS_START_TIME = time.time()
 """Monotonic-ish process start; used for `uptime_s` in snapshots."""
@@ -191,7 +196,9 @@ def _http_get_json(
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
+            body = resp.read(_MAX_FETCH_BYTES + 1)
+        if len(body) > _MAX_FETCH_BYTES:
+            return None, f"response exceeded {_MAX_FETCH_BYTES} bytes"
         return json.loads(body.decode("utf-8")), None
     except urllib.error.URLError as e:
         return None, f"url error: {e.reason if hasattr(e, 'reason') else e}"
@@ -635,7 +642,11 @@ def _list_timers_scope(scope: str) -> Optional[List[Dict[str, Any]]]:
         from utils.fleet_test_runner import _find_operator_user
         op = _find_operator_user()
         if op is None:
-            return []
+            # No resolvable operator → the probe FAILED; return None so the
+            # caller badges the scope unavailable. `[]` here would masquerade as
+            # "clean, no user timers" (silence-as-health, honest_failure #2).
+            # (QA audit 2026-07-06.)
+            return None
         op_uid, op_name = op
         cmd = [
             "sudo", "-n", "-u", op_name,

@@ -212,10 +212,22 @@ def record_snapshot(
     path = init_db(db_path)
     ts = ts if ts is not None else time.time()
 
-    # Pre-compute heartbeat fields from the slo + activity views.
+    # Pre-compute heartbeat fields. These MUST NOT raise — the heartbeat is the
+    # load-bearing artifact (its absence fires a fleet-wide false http_dead
+    # blackout), and `federation` comes from semi-trusted PEER data. A hostile
+    # or malformed field (chat_total="x", "peers": 5, last_seen_age_s="soon")
+    # used to raise here, BEFORE the write's try/except, losing the heartbeat.
+    # Coerce defensively so one bad field degrades that one count, never the
+    # write. (QA audit 2026-07-06.)
+    def _sint(v, default=0):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
     services = slo.get("services") or {}
-    services_total = int(services.get("total") or 0)
-    services_available = int(services.get("available") or 0)
+    services_total = _sint(services.get("total"))
+    services_available = _sint(services.get("available"))
     overall_status = slo.get("overall_status") or "unknown"
     uptime_s = slo.get("uptime_s")
     if uptime_s is not None:
@@ -223,16 +235,21 @@ def record_snapshot(
             uptime_s = float(uptime_s)
         except (TypeError, ValueError):
             uptime_s = None
-    chat_total = int(activity.get("chat_total") or 0)
+    chat_total = _sint(activity.get("chat_total"))
 
-    fed_peers = federation.get("peers") or []
+    fed_peers = federation.get("peers")
+    fed_peers = fed_peers if isinstance(fed_peers, list) else []
     federation_peer_count = len(fed_peers)
-    federation_active_count = sum(
-        1 for p in fed_peers
-        if isinstance(p, dict)
-        and p.get("last_seen_age_s") is not None
-        and p["last_seen_age_s"] <= FEDERATION_ACTIVE_AGE_S
-    )
+    federation_active_count = 0
+    for p in fed_peers:
+        if not isinstance(p, dict):
+            continue
+        age = p.get("last_seen_age_s")
+        # 0 <= age <= threshold. A NEGATIVE age (forged future last_seen) is
+        # untrustworthy, not "very fresh" — don't count it active (B-F10).
+        if (isinstance(age, (int, float)) and not isinstance(age, bool)
+                and 0 <= age <= FEDERATION_ACTIVE_AGE_S):
+            federation_active_count += 1
 
     soft_error_count = (
         len(slo.get("errors") or [])

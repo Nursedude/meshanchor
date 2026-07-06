@@ -339,3 +339,37 @@ def test_dbspec_registered():
     assert spec.has_auto_prune is True
     assert spec.retention_days == 7
     assert spec.creator_module == "monitoring.fleet_history"
+
+
+class TestRecordSnapshotHostileInputQA20260706:
+    """QA audit 2026-07-06: the heartbeat (load-bearing artifact — its absence
+    fires a fleet-wide false http_dead) must survive a hostile/malformed peer
+    field. Those were computed BEFORE the write's try/except, losing the
+    heartbeat."""
+
+    def test_bad_fields_still_write_heartbeat(self, db):
+        counts = fh.record_snapshot(
+            _slo(),
+            _activity(chat_total="not-a-number"),
+            _fed(peers=[{"last_seen_age_s": "soon"}, {"last_seen_age_s": 30}]),
+            host="h", ts=1000.0, db_path=db,
+        )
+        assert counts["heartbeat"] == 1              # written despite bad fields
+        hb = fh.query_latest_heartbeat(db_path=db)
+        assert hb["chat_total"] == 0                 # bad value → default
+        assert hb["federation_active_count"] == 1    # only the numeric 30
+
+    def test_peers_not_a_list_does_not_raise(self, db):
+        counts = fh.record_snapshot(
+            _slo(), _activity(), _fed(peers=5), host="h", ts=1000.0, db_path=db,
+        )
+        assert counts["heartbeat"] == 1
+
+    def test_negative_age_not_counted_active(self, db):
+        fh.record_snapshot(
+            _slo(), _activity(),
+            _fed(peers=[{"last_seen_age_s": -50}, {"last_seen_age_s": 10}]),
+            host="h", ts=1000.0, db_path=db,
+        )
+        hb = fh.query_latest_heartbeat(db_path=db)
+        assert hb["federation_active_count"] == 1    # forged-future (negative) excluded
