@@ -50,8 +50,24 @@ DEFAULT_MESHCORE_PUBLIC_URL = (
 DEFAULT_CACHE_TTL_SEC = 3600  # 1 hour
 DEFAULT_FETCH_TIMEOUT_SEC = 30
 DEFAULT_MAX_NODES = 50_000  # soft safety cap
+# Hard byte cap on the PUBLIC (hostile-by-assumption) meshcore.dev body. Real
+# payload is ~12 MB (~42k nodes); 48 MB is 4x headroom. Without this, a
+# compromised/misbehaving upstream (or MITM) can return a multi-GB body that
+# resp.read() buffers whole → OOM on a Pi. The max_nodes cap only applies AFTER
+# the full decode, so it protects nothing here. (QA audit 2026-07-06.)
+MAX_MESHCORE_PUBLIC_BYTES = 48 * 1024 * 1024
 
 _CACHE_FILENAME = "meshcore_public_cache.msgpack"
+
+
+def _safe_int(value, default: int) -> int:
+    """int() that falls back to a default instead of raising — an operator
+    typo in map_settings.json (e.g. ``"1h"``) must not abort the collect
+    cycle. (QA audit 2026-07-06.)"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class MeshCorePublicCollectorMixin:
@@ -74,19 +90,19 @@ class MeshCorePublicCollectorMixin:
             "enabled": settings.get(
                 "meshcore_public_enabled", True
             ),
-            "ttl_sec": int(settings.get(
+            "ttl_sec": _safe_int(settings.get(
                 "meshcore_public_cache_ttl_sec", DEFAULT_CACHE_TTL_SEC,
-            )),
-            "max_nodes": int(settings.get(
+            ), DEFAULT_CACHE_TTL_SEC),
+            "max_nodes": _safe_int(settings.get(
                 "meshcore_public_max_nodes", DEFAULT_MAX_NODES,
-            )),
+            ), DEFAULT_MAX_NODES),
             "url": settings.get(
                 "meshcore_public_url", DEFAULT_MESHCORE_PUBLIC_URL,
             ),
-            "timeout_sec": int(settings.get(
+            "timeout_sec": _safe_int(settings.get(
                 "meshcore_public_fetch_timeout_sec",
                 DEFAULT_FETCH_TIMEOUT_SEC,
-            )),
+            ), DEFAULT_FETCH_TIMEOUT_SEC),
         }
 
     def _collect_meshcore_public(self) -> List[Dict]:
@@ -137,7 +153,14 @@ class MeshCorePublicCollectorMixin:
                     headers={"User-Agent": "MeshAnchor/0.1 (+map.meshcore.dev fetcher)"},
                 )
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw = resp.read()
+                    raw = resp.read(MAX_MESHCORE_PUBLIC_BYTES + 1)
+                if len(raw) > MAX_MESHCORE_PUBLIC_BYTES:
+                    logger.warning(
+                        "meshcore_public: response exceeded %d bytes — rejecting "
+                        "(hostile/misconfigured upstream); not caching",
+                        MAX_MESHCORE_PUBLIC_BYTES,
+                    )
+                    return []
                 logger.info(
                     "meshcore_public: fetched %d bytes from %s",
                     len(raw), url,

@@ -532,6 +532,18 @@ class NodeHistoryDB:
             if len(coords) < 2:
                 continue
 
+            # Coerce coords to float up front. An external source (meshforge-maps
+            # peer, MQTT) can hand a string ("19.4") or None; left raw, round(lat)
+            # below raises and aborts the ENTIRE batch (every node's write lost
+            # that cycle, swallowed at DEBUG by the caller). Skip only the bad
+            # feature — one malformed entry must not blank the whole pipeline
+            # (honest_failure_modes: error isolation). (QA audit 2026-07-06.)
+            try:
+                lon = float(coords[0])
+                lat = float(coords[1])
+            except (TypeError, ValueError):
+                continue
+
             node_id = props.get("id", "")
             if not node_id:
                 continue
@@ -550,7 +562,7 @@ class NodeHistoryDB:
             if now - last < MIN_RECORD_INTERVAL:
                 continue
 
-            lon, lat = coords[0], coords[1]
+            # lon/lat were coerced to float above.
             network = props.get("network", "meshtastic")
 
             # Value-dedup: skip when (lat, lon, network) match the last

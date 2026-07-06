@@ -27,6 +27,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# A last_heard more than this many seconds in the FUTURE is implausible (clock
+# skew / a hostile injected stamp) and must not read as "online". (QA audit
+# 2026-07-06.)
+_ONLINE_FUTURE_SKEW_TOLERANCE_S = 300
+
 # --- Imports ---
 from utils.safe_import import safe_import
 
@@ -320,23 +325,60 @@ class MapDataCollector(
             minutes = default
         return int(minutes * 60)
 
-    def _is_node_online(self, last_heard: float, source: str = "meshtastic") -> bool:
+    @staticmethod
+    def _coerce_epoch(v) -> float:
+        """Best-effort convert a timestamp to a Unix-epoch float.
+
+        Accepts int/float, a numeric string, or an ISO-8601 string; returns 0.0
+        (== "unknown") for anything unparseable, and NEVER raises. A source cache
+        can carry a timestamp as an ISO string; passing that into a `<= 0`
+        comparison raises TypeError, which a collector's `except` turns into a
+        DROPPED node — worse than rendering it offline. (QA audit 2026-07-06.)"""
+        if v is None or isinstance(v, bool):
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return 0.0
+            try:
+                return float(s)
+            except ValueError:
+                pass
+            try:
+                from datetime import datetime
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return 0.0
+        return 0.0
+
+    def _is_node_online(self, last_heard, source: str = "meshtastic") -> bool:
         """Determine if a node is online based on last_heard timestamp.
 
         Single source of truth for online status determination.
         Uses per-source thresholds for accurate status across network types.
 
         Args:
-            last_heard: Unix timestamp of last communication (0 or None = unknown)
+            last_heard: Unix timestamp (0/None/unparseable = unknown). Coerced
+                defensively — a non-numeric value must never raise out of the SSOT.
             source: Network source type for threshold lookup
 
         Returns:
             True if the node was heard within the source's threshold window
         """
+        last_heard = self._coerce_epoch(last_heard)
         if not last_heard or last_heard <= 0:
             return False
+        age = time.time() - last_heard
+        # A forgeable/hostile FUTURE timestamp (clock skew or an injected "last
+        # seen 2099") makes age negative → online forever. Reject anything
+        # meaningfully in the future; a small negative (benign skew) still counts
+        # as fresh. (QA audit 2026-07-06.)
+        if age < -_ONLINE_FUTURE_SKEW_TOLERANCE_S:
+            return False
         threshold = self.get_source_threshold_seconds(source)
-        return (time.time() - last_heard) < threshold
+        return age < threshold
 
     def get_meshtasticd_host(self) -> str:
         """Get meshtasticd host setting."""
@@ -549,7 +591,7 @@ class MapDataCollector(
         # MeshCore nodes are rare. Position-less nodes go to the side panel.
         meshcore_features = self._tag_source_origin(self._collect_meshcore(), "local_radio")
         for f in meshcore_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid:
                 features[fid] = f
 
@@ -561,7 +603,7 @@ class MapDataCollector(
         self_feature = self._collect_meshcore_self()
         if self_feature is not None:
             self_feature = self._tag_source_origin([self_feature], "local_radio")[0]
-            fid = self_feature["properties"].get("id", "")
+            fid = (self_feature.get("properties") or {}).get("id", "") if isinstance(self_feature, dict) else ""
             if fid:
                 features[fid] = self_feature
 
@@ -571,7 +613,7 @@ class MapDataCollector(
         # Tagging is per-feature inside _collect_unified_tracker (mixed RNS + Meshtastic).
         tracker_unified_features = self._collect_unified_tracker()
         for f in tracker_unified_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid and fid not in features:
                 features[fid] = f
 
@@ -579,7 +621,7 @@ class MapDataCollector(
         if self._meshtastic_enabled:
             tcp_features = self._tag_source_origin(self._collect_meshtasticd(), "local_radio")
             for f in tcp_features:
-                fid = f["properties"].get("id", "")
+                fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
                 if fid:
                     features[fid] = f
 
@@ -595,7 +637,7 @@ class MapDataCollector(
             if not tcp_features and not self._meshtasticd_present():
                 direct_radio_features = self._tag_source_origin(self._collect_direct_radio(), "local_radio")
                 for f in direct_radio_features:
-                    fid = f["properties"].get("id", "")
+                    fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
                     if fid:
                         features[fid] = f
         else:
@@ -607,7 +649,7 @@ class MapDataCollector(
         # tier; external/global firehoses (when added) should tag mqtt_global.
         mqtt_features = self._tag_source_origin(self._collect_mqtt(), "mqtt_local")
         for f in mqtt_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid and fid not in features:
                 features[fid] = f
             elif fid and fid in features:
@@ -617,21 +659,21 @@ class MapDataCollector(
         # Source 3: Node tracker cache files (locally-cached, replayed on cold start)
         tracker_features = self._tag_source_origin(self._collect_node_tracker(), "node_tracker")
         for f in tracker_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid and fid not in features:
                 features[fid] = f
 
         # Source 4: AREDN mesh network
         aredn_features = self._tag_source_origin(self._collect_aredn(), "aredn_local")
         for f in aredn_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid and fid not in features:
                 features[fid] = f
 
         # Source 5: RNS direct query (from rnsd path table)
         rns_direct_features = self._tag_source_origin(self._collect_rns_direct(), "rns_path_table")
         for f in rns_direct_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid and fid not in features:
                 features[fid] = f
 
@@ -645,7 +687,7 @@ class MapDataCollector(
             self._collect_meshcore_public(), "meshcore_public",
         )
         for f in meshcore_public_features:
-            fid = f["properties"].get("id", "")
+            fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
             if fid and fid not in features:
                 features[fid] = f
 
@@ -658,7 +700,7 @@ class MapDataCollector(
                 self._collect_meshforge_maps(), "external_maps"
             )
             for f in meshforge_maps_features:
-                fid = f["properties"].get("id", "")
+                fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
                 if fid and fid not in features:
                     features[fid] = f
         else:
@@ -669,7 +711,7 @@ class MapDataCollector(
         if not features:
             cache_features = self._tag_source_origin(self._load_cache(), "node_tracker")
             for f in cache_features:
-                fid = f["properties"].get("id", "")
+                fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
                 if fid:
                     features[fid] = f
 
@@ -1455,12 +1497,24 @@ class MapDataCollector(
         return []
 
     def _save_cache(self, geojson: Dict) -> None:
-        """Persist current node state to disk."""
+        """Persist current node state to disk atomically (tmp + fsync +
+        os.replace) so a crash / power-cut mid-write can't leave torn JSON that
+        _load_cache silently reads as [] → an empty cold-start map.
+        (QA audit 2026-07-06.)"""
+        tmp = self._cache_file.with_suffix(self._cache_file.suffix + '.tmp')
         try:
-            with open(self._cache_file, 'w') as f:
+            with open(tmp, 'w') as f:
                 json.dump(geojson, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self._cache_file)
         except Exception as e:
             logger.debug(f"Cache save error: {e}")
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
 
     def _get_source_summary(
         self, tcp: List, mqtt: List, tracker: List, aredn: List = None,

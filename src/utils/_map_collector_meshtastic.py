@@ -58,6 +58,28 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# A lastHeard more than this many seconds in the FUTURE is implausible (clock
+# skew / forged stamp) → treated as unknown, not fresh. (QA audit 2026-07-06.)
+_FUTURE_SKEW_TOLERANCE_S = 300
+
+
+def _canonical_meshtastic_id(id_val, num):
+    """Canonical ``!hex`` meshtastic node id.
+
+    Prefer an explicit ``!hex`` string; else format the numeric node number as
+    ``!{num:08x}``; else stringify. A numeric ``num`` must NEVER become the id
+    verbatim — the decimal string breaks dedup against the same node's ``!hex``
+    id from other sources (fleet-wide numeric-key class). (QA audit 2026-07-06.)"""
+    if isinstance(id_val, str) and id_val.startswith('!'):
+        return id_val
+    try:
+        n = int(num)
+    except (TypeError, ValueError):
+        n = 0
+    if n:
+        return f"!{n:08x}"
+    return str(id_val) if id_val not in (None, '') else 'unknown'
+
 
 class MeshtasticDataCollectorMixin:
     """Meshtastic data collection — HTTP / TCP / CLI / direct-radio paths."""
@@ -274,13 +296,15 @@ class MeshtasticDataCollectorMixin:
 
         Returns ``(features, total_nodes, timed_out)``.
         """
-        result = {"features": [], "no_position": [], "total": 0}
+        result = {"features": [], "no_position": [], "total": 0,
+                  "lock_contended": False}
 
         def _worker():
             # Full lifecycle under the connection-manager lock. acquire_lock
             # is bounded (5s); a concurrent/abandoned holder makes us fail-fast.
             if not manager.acquire_lock(timeout=5.0):
                 logger.debug("Could not acquire %s lock (in use)", source)
+                result["lock_contended"] = True
                 return
             try:
                 manager._wait_for_cooldown()
@@ -310,6 +334,18 @@ class MeshtasticDataCollectorMixin:
                 "no nodes this cycle (cache + other sources unaffected). Worker "
                 "finishes + holds the lock so concurrent collects fail-fast.",
                 source, timeout,
+            )
+            return [], 0, True
+        if result["lock_contended"]:
+            # A prior cycle's worker still holds the connection lock — almost
+            # always an abandoned worker on a wedged meshtasticd keeping a
+            # PhoneAPI TCP open (up to ~300s). Report WEDGED (timed_out=True) so
+            # _collect_meshtasticd SKIPS the CLI fallback; otherwise it opens
+            # ANOTHER `meshtastic --info` PhoneAPI stream against the same wedged
+            # daemon every cycle — the #17/#75 leak. (QA audit 2026-07-06.)
+            logger.warning(
+                "%s: prior collect still holds the connection lock (wedged "
+                "daemon?) — reporting wedged, skipping CLI fallback", source,
             )
             return [], 0, True
         # Clean join — publish from THIS thread. The worker never touches self's
@@ -432,18 +468,23 @@ class MeshtasticDataCollectorMixin:
         user = data.get('user', {})
         device_metrics = data.get('deviceMetrics', {})
 
-        # Determine online status from lastHeard (configurable threshold)
+        # Determine online status from lastHeard. Wall clock is forgeable
+        # (RTC-less Pis, NTP steps, hostile sender): a future lastHeard makes
+        # (now - last_heard) negative → "online" forever + a "-42s ago" string.
+        # Treat a meaningfully-future stamp as unknown; a small negative (benign
+        # skew) rounds to "0s ago". (QA audit 2026-07-06.)
         last_heard = data.get('lastHeard', 0)
-        if last_heard and (now - last_heard) <= online_threshold_seconds:
-            is_online = True
-        elif last_heard:
-            is_online = False  # Heard too long ago
-        else:
-            is_online = False  # Never heard
+        age_seconds = int(now - last_heard) if last_heard else None
+        if age_seconds is not None and age_seconds < -_FUTURE_SKEW_TOLERANCE_S:
+            last_heard = 0
+            age_seconds = None
+
+        is_online = (age_seconds is not None
+                     and age_seconds <= online_threshold_seconds)
 
         # Format last_seen as human-readable
-        if last_heard:
-            age_seconds = int(now - last_heard)
+        if age_seconds is not None:
+            age_seconds = max(0, age_seconds)
             if age_seconds < 60:
                 last_seen = f"{age_seconds}s ago"
             elif age_seconds < 3600:
@@ -455,14 +496,8 @@ class MeshtasticDataCollectorMixin:
         else:
             last_seen = "unknown"
 
-        # Format node_id
-        node_num = data.get('num', 0)
-        if isinstance(node_id, str) and node_id.startswith('!'):
-            formatted_id = node_id
-        elif node_num:
-            formatted_id = f"!{node_num:08x}"
-        else:
-            formatted_id = str(node_id)
+        # Format node_id (canonical !hex)
+        formatted_id = _canonical_meshtastic_id(node_id, data.get('num', 0))
 
         # Extract environment sensor data from meshtasticd telemetry
         env_metrics = data.get('environmentMetrics', {})
@@ -498,22 +533,19 @@ class MeshtasticDataCollectorMixin:
         user = data.get('user', {})
         device_metrics = data.get('deviceMetrics', {})
 
-        # Format node_id
-        node_num = data.get('num', 0)
-        if isinstance(node_id, str) and node_id.startswith('!'):
-            formatted_id = node_id
-        elif node_num:
-            formatted_id = f"!{node_num:08x}"
-        else:
-            formatted_id = str(node_id)
+        # Format node_id (canonical !hex)
+        formatted_id = _canonical_meshtastic_id(node_id, data.get('num', 0))
 
-        # Determine online status from last_heard timestamp
+        # Determine online status (SSOT clamps a forged/future stamp).
         last_heard = data.get('lastHeard', 0)
         is_online = self._is_node_online(last_heard, source="meshtastic")
 
-        # Format last_seen
-        if last_heard:
-            age_seconds = int(now - last_heard)
+        # Format last_seen — clamp a future/forged stamp to unknown, not "-42s ago".
+        age_seconds = int(now - last_heard) if last_heard else None
+        if age_seconds is not None and age_seconds < -_FUTURE_SKEW_TOLERANCE_S:
+            age_seconds = None
+        if age_seconds is not None:
+            age_seconds = max(0, age_seconds)
             if age_seconds < 60:
                 last_seen = f"{age_seconds}s ago"
             elif age_seconds < 3600:
@@ -599,7 +631,8 @@ class MeshtasticDataCollectorMixin:
                             device_metrics = data.get('deviceMetrics', {})
                             cli_last_heard = data.get('lastHeard', 0)
                             feature = self._make_feature(
-                                node_id=data.get('num', data.get('id', 'unknown')),
+                                node_id=_canonical_meshtastic_id(
+                                    data.get('id') or user.get('id'), data.get('num')),
                                 name=user.get('longName', ''),
                                 lat=lat, lon=lon,
                                 network='meshtastic',
