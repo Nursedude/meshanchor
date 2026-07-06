@@ -51,9 +51,14 @@ if [ -z "$BOXES" ]; then
   done
 fi
 
-# Watchdog state path — overridable (HONEST_WD_PATH) ONLY so the gate's own
-# severity logic can be exercised against fixtures; production is the default.
-WD_PATH="${HONEST_WD_PATH:-/var/lib/meshanchor/watchdog.json}"
+# Watchdog signals — MeshAnchor emits silence as BLACKOUT rows in
+# fleet_history.db, surfaced live at /fleet/blackouts. There is NO watchdog.json
+# writer (that path was a MeshForge port artifact — reader with no writer,
+# honest_failure #4). The endpoint path + the daemon that populates it are
+# overridable ONLY so the gate's own logic can be exercised against fixtures;
+# production is the default.
+BLACKOUTS_PATH="${HONEST_BLACKOUTS_PATH:-/fleet/blackouts}"
+WD_UNIT="${HONEST_WD_UNIT:-meshanchor-fleet-watchdog}"
 RUN_TESTS=1
 STRICT=0
 for arg in "$@"; do
@@ -162,53 +167,42 @@ else: print("%.3f"%r if isinstance(r,(int,float)) else "shape?")' 2>/dev/null)
   else ok "live conf_rate<=1.0" "$checked checked;$det"; fi
 fi
 
-# 6. Watchdog — classify by severity. WEDGE = real breakage (FAIL); DEGRADED =
-#    surfaced concern (WARN). Unreachable/stale/unparseable = UNKNOWN (never
-#    read as clean — the false-green this tool exists to prevent).
-if [ -n "${HONEST_WD_STALE_S:-}" ]; then WD_STALE_S="$HONEST_WD_STALE_S"
-elif [ -n "${HONEST_WD_PATH:-}" ]; then WD_STALE_S=0
-else WD_STALE_S=300; fi
-
+# 6. Watchdog — MeshAnchor emits silence as BLACKOUT rows (fleet_history.db,
+#    surfaced live at /fleet/blackouts), NOT a watchdog.json file. An ACTIVE
+#    blackout (http_dead / daemon_dead / frozen / no_data) is real silence =
+#    FAIL. Guard the false-green: a DEAD watchdog daemon can't record blackouts,
+#    so empty-active from a dead watchdog is UNKNOWN, never clean (absence-of-
+#    signal ≠ healthy, honest_failure #2). Unreachable/unparseable = UNKNOWN.
 if [ -z "$BOXES" ]; then
-  unk "watchdog signals" "no fleet configured — cannot read $WD_PATH across the fleet"
+  unk "watchdog signals" "no fleet configured — cannot poll $BLACKOUTS_PATH across the fleet"
 else
-  wedge_t=0; deg_t=0; clean=0; unreach=0; sigdesc=""
+  active_t=0; clean=0; unverif=0; sigdesc=""
   btotal=$(echo $BOXES | wc -w)
   for b in $BOXES; do
-    # Box's OWN clock + watchdog.json in ONE round-trip → same-clock freshness
-    # (cross-machine wall-clock is forgeable: honest_failure #6).
-    raw=$($SSH "$b" "date +%s 2>/dev/null; echo '---WDSEP---'; cat $WD_PATH 2>/dev/null" 2>/dev/null)
-    rnow=$(printf '%s\n' "$raw" | sed -n '1p')
-    w=$(printf '%s\n' "$raw" | awk 'f{print} /^---WDSEP---$/{f=1}')
-    if [ -z "$w" ]; then unreach=$((unreach+1)); sigdesc="$sigdesc $b:unreach"; continue; fi
-    p=$(printf '%s' "$w" | python3 -c 'import sys,json
+    # ONE round-trip: is the watchdog daemon alive, and the live blackout state.
+    raw=$($SSH "$b" "systemctl is-active $WD_UNIT 2>/dev/null; echo '---BOSEP---'; curl -s --max-time 8 http://localhost:5000$BLACKOUTS_PATH 2>/dev/null" 2>/dev/null)
+    wdstate=$(printf '%s\n' "$raw" | sed -n '1p')
+    body=$(printf '%s\n' "$raw" | awk 'f{print} /^---BOSEP---$/{f=1}')
+    if [ "$wdstate" != "active" ]; then
+      unverif=$((unverif+1)); sigdesc="$sigdesc $b:watchdog-${wdstate:-unknown}"; continue
+    fi
+    if [ -z "$body" ]; then unverif=$((unverif+1)); sigdesc="$sigdesc $b:unreach"; continue; fi
+    p=$(printf '%s' "$body" | python3 -c 'import sys,json
 try: d=json.load(sys.stdin)
 except Exception: print("PARSE"); sys.exit()
-s=d.get("signals",[])
-wg=sum(1 for x in s if x.get("severity")=="wedge")
-dg=len(s)-wg
-ts=d.get("ts")
-tsf=("%.3f"%ts) if isinstance(ts,(int,float)) else "NOTS"
-cl=",".join("%s(%s)"%(x.get("class","?"),x.get("severity","?")) for x in s)
-print("%d %d %s %s"%(wg,dg,tsf,cl))' 2>/dev/null)
-    if [ -z "$p" ] || [ "$p" = "PARSE" ]; then
-      unreach=$((unreach+1)); sigdesc="$sigdesc $b:unparseable"; continue
+a=d.get("active")
+if not isinstance(a,list): print("SHAPE"); sys.exit()
+print("%d %s"%(len(a), ",".join(str(x.get("kind","?")) for x in a)))' 2>/dev/null)
+    if [ -z "$p" ] || [ "$p" = "PARSE" ] || [ "$p" = "SHAPE" ]; then
+      unverif=$((unverif+1)); sigdesc="$sigdesc $b:unparseable"; continue
     fi
-    wg=$(printf '%s' "$p" | awk "{print \$1}"); dg=$(printf '%s' "$p" | awk "{print \$2}")
-    ts=$(printf '%s' "$p" | awk "{print \$3}"); cl=$(printf '%s' "$p" | cut -d" " -f4-)
-    if [ "$WD_STALE_S" -gt 0 ] && [ "$ts" != "NOTS" ] && [ -n "$rnow" ]; then
-      age=$(awk "BEGIN{printf \"%d\", $rnow - $ts}" 2>/dev/null)
-      if [ -n "$age" ] && [ "$age" -gt "$WD_STALE_S" ] 2>/dev/null; then
-        unreach=$((unreach+1)); sigdesc="$sigdesc $b:stale(${age}s)"; continue
-      fi
-    fi
-    if [ "${wg:-0}" = 0 ] && [ "${dg:-0}" = 0 ]; then clean=$((clean+1))
-    else sigdesc="$sigdesc $b:[$cl]"; wedge_t=$((wedge_t+wg)); deg_t=$((deg_t+dg)); fi
+    n=$(printf '%s' "$p" | awk "{print \$1}"); kinds=$(printf '%s' "$p" | cut -d' ' -f2-)
+    if [ "${n:-0}" = 0 ]; then clean=$((clean+1))
+    else active_t=$((active_t+n)); sigdesc="$sigdesc $b:[$kinds]"; fi
   done
-  if [ "$wedge_t" -gt 0 ]; then bad "watchdog (wedge)" "$wedge_t WEDGE + $deg_t degraded across fleet:$sigdesc"
-  elif [ "$unreach" -gt 0 ]; then unk "watchdog signals" "$clean/$btotal clean, $unreach unreachable/stale:$sigdesc"
-  elif [ "$deg_t" -gt 0 ]; then warnf "watchdog (degraded)" "$deg_t degraded, 0 wedge:$sigdesc"
-  else ok "watchdog signals" "$clean/$btotal clean, 0 signals"; fi
+  if [ "$active_t" -gt 0 ]; then bad "watchdog (blackout)" "$active_t active blackout(s) across fleet:$sigdesc"
+  elif [ "$unverif" -gt 0 ]; then unk "watchdog signals" "$clean/$btotal clean, $unverif unverifiable (dead watchdog / unreachable):$sigdesc"
+  else ok "watchdog signals" "$clean/$btotal clean, 0 active blackouts"; fi
 fi
 
 echo
