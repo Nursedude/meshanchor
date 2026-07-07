@@ -612,7 +612,7 @@ MeshAnchor was **extracted from MeshForge main** at commit `7e4fa02`. The extrac
 Two sister projects with the same DNA, different home radios:
 
 ```
-MeshForge (v0.6.1-beta)           MeshAnchor (v0.1.0-alpha)
+MeshForge (v0.6.2-beta)           MeshAnchor (v0.1.0-alpha)
   Primary: Meshtastic               Primary: MeshCore
   Gateway to: MeshCore/RNS          Gateway to: Meshtastic/RNS
   Field-tested: Yes                  Field-tested: One box — needs YOU
@@ -627,7 +627,7 @@ MeshAnchor is part of a 5-repository ecosystem:
 | Repository | Purpose | Version |
 |------------|---------|---------|
 | **[meshanchor](https://github.com/Nursedude/meshanchor)** (this repo) | MeshCore-primary NOC — gateway, TUI, RF tools, diagnostics | 0.1.0-alpha |
-| **[meshforge](https://github.com/Nursedude/meshforge)** | Meshtastic-primary NOC — same architecture, different home radio | 0.6.1-beta |
+| **[meshforge](https://github.com/Nursedude/meshforge)** | Meshtastic-primary NOC — same architecture, different home radio | 0.6.2-beta |
 | **meshanchor-maps** | Visualization plugin — Leaflet/D3.js topology, health scoring | 0.7.0 |
 | **meshing_around_meshanchor** | Bot alerting — 12 alert types, complements meshing-around bot | 0.5.0 |
 | **[RNS-Management-Tool](https://github.com/Nursedude/RNS-Management-Tool)** | Cross-platform RNS ecosystem installer | 0.3.2 |
