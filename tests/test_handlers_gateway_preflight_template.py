@@ -291,3 +291,92 @@ class TestRunMeshtasticInfo:
         from handlers import _gateway_preflight_template as tmpl
         with patch("subprocess.run", side_effect=FileNotFoundError()):
             assert tmpl.run_meshtastic_info() is None
+
+
+# ── check_template_drift_best + unobservable≠drift (ported from MeshForge 2026-07-09) ──
+
+
+def _leg(preset, cnum, name):
+    return {
+        "name": name,
+        "meshtastic": {
+            "modem_preset": {"expected": preset, "severity": "fail"},
+            "channel_num": {"expected": cnum, "severity": "fail"},
+        },
+    }
+
+
+_LEGS = [_leg("LONG_FAST", 20, "longfast"), _leg("SHORT_TURBO", 8, "shortturbo")]
+
+
+class TestBestMatchTemplates:
+    """A fleet may deliberately run multiple radio profiles; each box is
+    judged against its best-matching template, never false-failed by the
+    other leg."""
+
+    def test_each_leg_matches_its_own_template(self):
+        from handlers import _gateway_preflight_template as tmpl
+        live = {"meshtastic": {"modem_preset": "SHORT_TURBO", "channel_num": 8}}
+        results, chosen, total = tmpl.check_template_drift_best(live, _LEGS)
+        assert chosen == "shortturbo" and total == 2
+        assert all(r[0] != tmpl._FAIL for r in results)
+        live = {"meshtastic": {"modem_preset": "LONG_FAST", "channel_num": 20}}
+        results, chosen, _ = tmpl.check_template_drift_best(live, _LEGS)
+        assert chosen == "longfast"
+        assert all(r[0] != tmpl._FAIL for r in results)
+
+    def test_matching_no_template_stays_loud(self):
+        from handlers import _gateway_preflight_template as tmpl
+        live = {"meshtastic": {"modem_preset": "MEDIUM_SLOW", "channel_num": 3}}
+        results, chosen, _ = tmpl.check_template_drift_best(live, _LEGS)
+        assert chosen in ("longfast", "shortturbo")
+        assert sum(1 for r in results if r[0] == tmpl._FAIL) == 2
+
+    def test_no_templates_is_graceful_noop(self):
+        from handlers import _gateway_preflight_template as tmpl
+        results, chosen, total = tmpl.check_template_drift_best({}, [])
+        assert results == [] and chosen is None and total == 0
+
+
+class TestUnobservableIsNotDrift:
+    """honest_failure_modes #1/#2: a failed radio query or absent gateway.json
+    must read 'cannot verify', never manufacture drift FAILs."""
+
+    def test_unobservable_radio_is_warn(self):
+        from handlers import _gateway_preflight_template as tmpl
+        template = {
+            "meshtastic": {
+                "region": {"expected": "US", "severity": "fail"},
+                "bridge_channel_uplink_enabled": {"expected": True, "severity": "fail"},
+            },
+        }
+        results = tmpl.check_template_drift(template, {"meshtastic": {}})
+        assert all(r[0] == tmpl._WARN for r in results), results
+        assert all("unobservable" in r[1] for r in results)
+
+    def test_absent_gateway_config_is_warn(self):
+        from handlers import _gateway_preflight_template as tmpl
+        template = {"gateway": {"bridge_mode": {"expected": "mqtt_bridge", "severity": "fail"}}}
+        results = tmpl.check_template_drift(template, {"gateway": {}})
+        assert results[0][0] == tmpl._WARN
+
+    def test_present_but_null_field_is_observed_drift(self):
+        """gateway.json was READ and lacks the field: OBSERVED misconfiguration
+        keeps FAILING (key-presence, not value-None — the distinction the
+        MeshForge fix re-review caught)."""
+        from handlers import _gateway_preflight_template as tmpl
+        template = {"gateway": {"bridge_mode": {"expected": "mqtt_bridge", "severity": "fail"}}}
+        live = {"gateway": {"bridge_mode": None, "mqtt_channel": "meshanchor"}}
+        results = tmpl.check_template_drift(template, live)
+        assert results[0][0] == tmpl._FAIL
+        assert "unobservable" not in results[0][1]
+
+    def test_observed_empty_channels_still_fail(self):
+        from handlers import _gateway_preflight_template as tmpl
+        template = {
+            "meshtastic": {
+                "bridge_channel_uplink_enabled": {"expected": True, "severity": "fail"},
+            },
+        }
+        results = tmpl.check_template_drift(template, {"meshtastic": {"bridge_channels": []}})
+        assert results[0][0] == tmpl._FAIL
