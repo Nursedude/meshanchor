@@ -11,6 +11,12 @@ from typing import Dict, Any, Optional, Tuple
 from handler_protocol import BaseHandler
 from utils.safe_import import safe_import
 from utils.pip_install import pip_install
+from updates.meshtasticd_apt import (
+    apt_update,
+    disable_repo_lines,
+    get_meshtasticd_apt_state,
+    run_meshtasticd_upgrade,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +113,8 @@ class UpdatesHandler(BaseHandler):
             lines.append(f"{info.name}:")
             lines.append(f"  Installed: {installed}")
             lines.append(f"  Latest:    {latest}{status}")
+            if getattr(info, "notes", None):
+                lines.append(f"  Note:      {info.notes}")
             if info.error:
                 lines.append(f"  Error:     {info.error}")
             lines.append("")
@@ -167,7 +175,19 @@ class UpdatesHandler(BaseHandler):
                 f"Running: {info.update_command}\n\nPlease wait..."
             )
 
-            success, msg = self._run_update_command(key, info.update_command)
+            if key == 'meshtasticd':
+                # apt path with the re-derived success gate (a pinned/held
+                # package never reaches here — update_available is False).
+                success, msg = run_meshtasticd_upgrade()
+                if success and _HAS_SERVICE_CHECK:
+                    restart_ok, restart_msg = _apply_config_and_restart('meshtasticd')
+                    if not restart_ok:
+                        success = False
+                        msg = (f"package updated ({msg}) but the service "
+                               f"restart FAILED: {restart_msg} — check "
+                               "meshtasticd in Service Control")
+            else:
+                success, msg = self._run_update_command(key, info.update_command)
             results.append((info.name, success, msg))
 
         lines = ["UPDATE RESULTS", "=" * 40, ""]
@@ -181,38 +201,98 @@ class UpdatesHandler(BaseHandler):
         self.ctx.dialog.msgbox("Update Complete", "\n".join(lines), width=60)
 
     def _update_meshtasticd(self):
-        """Update meshtasticd package."""
-        try:
-            versions = _check_all_versions()
-            info = versions.get('meshtasticd')
-        except Exception as e:
-            self.ctx.dialog.msgbox("Error", f"Failed to check version:\n{e}")
-            return
+        """Update meshtasticd via the apt state machine (2026-07-10 audit,
+        ported from MeshForge).
 
-        if not info:
-            self.ctx.dialog.msgbox("Error", "Could not get meshtasticd version info.")
-            return
+        Reads the truth apt acts on (candidate, hold, dry-run installability)
+        instead of GitHub tags, walks the operator through the real blockers
+        (deliberate pin -> explicit unhold; mismatched OBS repo -> guided
+        repair), and only ever claims success from a re-derived version.
+        """
+        self.ctx.dialog.infobox("meshtasticd", "Reading apt package state...")
+        state = get_meshtasticd_apt_state(simulate=True)
 
-        if not info.update_available:
+        if not state.apt_available:
             self.ctx.dialog.msgbox(
-                "No Update",
-                f"meshtasticd is already at the latest version.\n\n"
-                f"Installed: {info.installed}\n"
-                f"Latest: {info.latest}"
+                "apt Unavailable",
+                "This system does not use apt — meshtasticd updates must be\n"
+                "managed by your platform's package manager."
+            )
+            return
+        if state.error and not (state.installed or state.candidate):
+            self.ctx.dialog.msgbox(
+                "Error", f"Could not read meshtasticd apt state:\n\n{state.error}")
+            return
+        if not state.installed:
+            self.ctx.dialog.msgbox(
+                "Not Installed",
+                "meshtasticd is not installed via apt on this box.\n\n"
+                "Install it from the official Meshtastic apt repository."
             )
             return
 
+        # Gate on the dpkg-derived comparison, not string inequality — a
+        # candidate that merely DIFFERS (e.g. a manually installed .deb newer
+        # than any repo) is not an update.
+        if not state.update_available:
+            self.ctx.dialog.msgbox(
+                "No Update",
+                "meshtasticd is already at the newest version apt can\n"
+                f"install on this box.\n\n"
+                f"Installed:     {state.installed}\n"
+                f"apt candidate: {state.candidate or 'unknown'}"
+                + ("\n\nNote: package is on apt hold (deliberate pin)."
+                   if state.held else "")
+            )
+            return
+
+        # Deliberate pin: require an explicit, default-no decision to lift it.
+        unhold = False
+        if state.held:
+            if not self.ctx.dialog.yesno(
+                "meshtasticd is PINNED",
+                f"meshtasticd is on apt hold at {state.installed} — on this\n"
+                "fleet a hold is a DELIBERATE pin (canary/baseline roll).\n\n"
+                f"apt candidate: {state.candidate}\n\n"
+                "Unhold, update to the candidate, then RE-APPLY the hold at\n"
+                "the new version?",
+                default_no=True,
+            ):
+                return
+            unhold = True
+
+        # Dry-run said the candidate cannot install (the mismatched-repo
+        # class): show apt's real error and offer the guided repair.
+        if state.candidate_installable is False:
+            if not self._repair_broken_candidate(state):
+                return
+            # Re-derive after the repair — never proceed on the old state.
+            self.ctx.dialog.infobox("meshtasticd", "Re-checking apt state after repair...")
+            state = get_meshtasticd_apt_state(simulate=True)
+            if state.candidate_installable is False or not state.candidate:
+                self.ctx.dialog.msgbox(
+                    "Still Blocked",
+                    "The candidate is still not installable after the repair:\n\n"
+                    f"{(state.blocking_detail or 'unknown blocker')[:500]}"
+                )
+                return
+
         if not self.ctx.dialog.yesno(
             "Update meshtasticd",
-            f"Update meshtasticd from {info.installed} to {info.latest}?\n\n"
-            f"Command: {info.update_command}\n\n"
-            "Note: The meshtasticd service will be restarted after the update."
+            f"Update meshtasticd {state.installed} -> {state.candidate}?\n\n"
+            "Runs: apt-get update, then\n"
+            "apt-get install --only-upgrade -y meshtasticd\n"
+            + ("(hold will be lifted for the update and re-applied)\n"
+               if unhold else "")
+            + "\nNote: The meshtasticd service will be restarted after the update."
         ):
             return
 
-        self.ctx.dialog.infobox("Updating meshtasticd", "Running apt update and upgrade...\n\nThis may take a while...")
+        self.ctx.dialog.infobox(
+            "Updating meshtasticd",
+            "Running apt-get update + only-upgrade...\n\nThis may take a while...")
 
-        success, msg = self._run_update_command('meshtasticd', info.update_command)
+        success, msg = run_meshtasticd_upgrade(unhold=unhold, rehold=unhold)
 
         if success:
             if _HAS_SERVICE_CHECK:
@@ -222,10 +302,11 @@ class UpdatesHandler(BaseHandler):
                 self.ctx.report_action(
                     restart_ok,
                     "Update Complete",
-                    "meshtasticd has been updated successfully!\n\n"
+                    f"{msg}\n\n"
                     "The service has been restarted.",
                     "Updated — Restart FAILED",
-                    "meshtasticd was updated but did NOT restart cleanly:\n"
+                    f"{msg}\n\n"
+                    "...but meshtasticd did NOT restart cleanly:\n"
                     f"{restart_msg}\n\n"
                     "The radio daemon may be down or running the old version.\n"
                     "Check: systemctl status meshtasticd",
@@ -244,6 +325,60 @@ class UpdatesHandler(BaseHandler):
                 "Update Failed",
                 f"Failed to update meshtasticd.\n\n{msg}"
             )
+
+    def _repair_broken_candidate(self, state) -> bool:
+        """Guided fix for an unsatisfiable apt candidate.
+
+        The known class: a distro-mismatched Meshtastic OBS repo (e.g. a
+        ``Debian_Testing`` line on a Debian 13 box) publishes the SAME version
+        string built against a newer libc; apt binds the candidate to the
+        uninstallable stanza and every upgrade dies with "held broken
+        packages". Repair = comment out the mismatched line(s) (backup kept)
+        and refresh apt, IN-APP. Returns True when a repair was applied and
+        the caller should re-derive state.
+        """
+        blocker = (state.blocking_detail or 'unknown dependency problem')[:400]
+
+        if not state.mismatched_repos:
+            self.ctx.dialog.msgbox(
+                "Candidate Not Installable",
+                f"apt cannot install {state.candidate}:\n\n{blocker}\n\n"
+                "No distro-mismatched Meshtastic repo was found, so this\n"
+                "needs manual investigation:\n"
+                "  apt-cache policy meshtasticd\n"
+                "  ls /etc/apt/sources.list.d/"
+            )
+            return False
+
+        repo_list = "\n".join(f"  {r.path}:{r.lineno}" for r in state.mismatched_repos)
+        if not self.ctx.dialog.yesno(
+            "Mismatched Repo Detected",
+            f"apt cannot install {state.candidate}:\n\n{blocker[:200]}\n\n"
+            "Likely cause — Meshtastic repo(s) for the WRONG distro release\n"
+            "(their builds need newer system libraries than this box has):\n\n"
+            f"{repo_list}\n\n"
+            "Disable these line(s) (a .meshforge-bak backup is kept) and\n"
+            "refresh apt?"
+        ):
+            return False
+
+        self.ctx.dialog.infobox("Repairing", "Disabling mismatched repo line(s)...")
+        ok, detail = disable_repo_lines(state.mismatched_repos)
+        if not ok:
+            self.ctx.dialog.msgbox(
+                "Repair Failed", f"Could not disable the repo line(s):\n\n{detail}")
+            return False
+
+        self.ctx.dialog.infobox("Repairing", "Refreshing apt package lists...")
+        ok, detail = apt_update()
+        if not ok:
+            self.ctx.dialog.msgbox(
+                "apt Refresh Problem",
+                "Repo line(s) disabled, but the apt refresh reported:\n\n"
+                f"{detail[:400]}\n\n"
+                "Continuing with the freshest lists available."
+            )
+        return True
 
     def _update_cli(self):
         """Update Meshtastic CLI."""
