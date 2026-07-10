@@ -886,3 +886,30 @@ class TestCheckServiceCache:
         import it from `utils.service_check` directly."""
         from utils import service_check
         assert 'clear_service_cache' in service_check.__all__
+
+
+class TestFrontierReviewFixes20260709:
+    """Pin for the 2026-07-09 Pri-4 pass (ported from MeshForge): _sudo_write's
+    root path is atomic (temp+rename), so a mid-write failure never leaves a
+    truncated systemd unit / /etc config."""
+
+    def test_sudo_write_root_path_atomic_and_correct(self, tmp_path):
+        from src.utils.service_check import _sudo_write
+        target = tmp_path / "sub" / "my.service"
+        with patch('os.geteuid', return_value=0):
+            ok, msg = _sudo_write(str(target), "[Unit]\nDescription=x\n")
+        assert ok is True
+        assert target.read_text() == "[Unit]\nDescription=x\n"
+        assert (target.stat().st_mode & 0o777) == 0o644
+        assert list((tmp_path / "sub").glob(".my.service.*")) == []
+
+    def test_sudo_write_root_no_partial_on_write_error(self, tmp_path):
+        from src.utils.service_check import _sudo_write
+        target = tmp_path / "existing.conf"
+        target.write_text("ORIGINAL")
+        with patch('os.geteuid', return_value=0), \
+             patch('os.fsync', side_effect=OSError("disk full")):
+            ok, _ = _sudo_write(str(target), "NEW CONTENT")
+        assert ok is False
+        assert target.read_text() == "ORIGINAL"
+        assert list(tmp_path.glob(".existing.conf.*")) == []

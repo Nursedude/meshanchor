@@ -25,7 +25,9 @@ Usage:
         show_fix(status.fix_hint)
 """
 
+import contextlib
 import os
+import tempfile
 import re
 import socket
 import subprocess
@@ -1034,11 +1036,28 @@ def _sudo_write(file_path: str, content: str, timeout: int = 10) -> Tuple[bool, 
     """
     try:
         if os.geteuid() == 0:
-            # Already root — write directly
-            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, 'w') as f:
-                f.write(content)
-            logger.debug(f"Wrote {file_path} (as root)")
+            # Already root — write atomically (temp in the same dir + rename).
+            # A direct open('w') truncates first: a crash or ENOSPC mid-write
+            # leaves a half-written systemd unit / /etc config that fails to
+            # parse on the next daemon-reload — a silent brick of the very
+            # service this call provisions (2026-07-09 Pri-4, ported from
+            # MeshForge). os.replace is atomic within one filesystem.
+            dest = Path(file_path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(dest.parent), prefix=f".{dest.name}.", suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.chmod(tmp_path, 0o644)
+                os.replace(tmp_path, file_path)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
+            logger.debug(f"Wrote {file_path} (as root, atomic)")
             return True, f"Wrote {file_path}"
 
         # Not root — use sudo tee to write with elevation
