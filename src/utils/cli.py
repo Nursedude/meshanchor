@@ -73,6 +73,45 @@ def find_meshtastic_cli():
     return None
 
 
+
+def diagnose_meshtastic_cli(cli_path=None):
+    """Classify HOW the resolved meshtastic CLI is installed.
+
+    The 2026-07-10 MeshForge audit found a box where ``~/.local/bin/
+    meshtastic`` was a pip ``--user`` console script (system-python shebang)
+    SHADOWING the pipx-managed shim — so ``pipx upgrade`` rewrote a venv the
+    wrapper never executes and the running CLI silently stayed put (the
+    read/write split at the binary level). This diagnosis lets the updater
+    target the writer that actually owns what runs.
+
+    Returns a dict:
+        path    — resolved CLI path (None when not found)
+        kind    — 'missing' | 'pipx' | 'pip-script' | 'other'
+        shebang — the interpreter line when the CLI is a script, else None
+    """
+    path = cli_path or find_meshtastic_cli()
+    if not path:
+        return {'path': None, 'kind': 'missing', 'shebang': None}
+
+    try:
+        with open(path, 'rb') as f:
+            first_line = f.readline(200)
+    except OSError:
+        return {'path': path, 'kind': 'other', 'shebang': None}
+
+    if not first_line.startswith(b'#!'):
+        return {'path': path, 'kind': 'other', 'shebang': None}
+
+    shebang = first_line.decode('utf-8', errors='replace').strip()
+    if '/pipx/venvs/' in shebang:
+        kind = 'pipx'
+    elif 'python' in shebang:
+        kind = 'pip-script'
+    else:
+        kind = 'other'
+    return {'path': path, 'kind': kind, 'shebang': shebang}
+
+
 def is_meshtastic_cli_installed():
     """Check if meshtastic CLI is installed
 

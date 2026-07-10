@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 from utils.safe_import import safe_import
 
+# Shared SSOT for the fleet version floor (requirements/core.txt) — the SAME
+# parser + below-floor test the MeshForge twin and the watchdog probes use,
+# so no consumer can disagree about the baseline (ported 2026-07-10).
+from utils.requirements_floor import read_floor, version_below
+
 # Module-level safe imports
 _version_mod, _HAS_VERSION = safe_import('__version__', '__version__')
 from utils.cli import find_meshtastic_cli
@@ -47,6 +52,13 @@ class VersionInfo:
     # context (pin state, candidate waiting behind the pin, ...).
     held: bool = False
     notes: Optional[str] = None
+    # When this component is gated against the REVIEWED fleet baseline rather
+    # than raw PyPI-latest, ``fleet_floor`` is that baseline (from
+    # requirements/core.txt) and ``update_available`` means "installed BELOW
+    # the floor" — a real laggard — not "PyPI moved past the floor" (a
+    # reviewed bump, surfaced informationally in ``pypi_latest``).
+    fleet_floor: Optional[str] = None
+    pypi_latest: Optional[str] = None
 
 
 def parse_version(version_str: str) -> tuple:
@@ -366,6 +378,55 @@ def get_latest_firmware_version() -> Optional[str]:
     return get_latest_meshtasticd_version()
 
 
+def _apply_fleet_floor(info: VersionInfo, pypi_latest) -> None:
+    """Gate ``info.update_available`` on the REVIEWED fleet floor, not PyPI-latest.
+
+    For a fleet pinned to a reviewed baseline (``requirements/core.txt:
+    meshtastic>=X``), a box is a real laggard only when it is installed BELOW
+    that floor. Comparing against raw PyPI-latest produces phantom "update
+    available" the moment PyPI moves past the reviewed baseline (the
+    2026-06-17 MeshForge phantom-update class; ported 2026-07-10). The floor
+    is a LOCAL file read, so the gating decision also works offline.
+
+    Honest failure mode: if the floor can't be read we refuse to claim either
+    "up to date" OR a phantom update — ``update_available`` stays False and
+    the blindness is recorded in ``error``.
+    """
+    info.pypi_latest = pypi_latest
+    floor = read_floor('meshtastic')
+    if not floor:
+        info.update_available = False
+        note = 'fleet baseline (requirements/core.txt) unavailable'
+        info.error = f"{info.error}; {note}" if info.error else note
+        return
+    info.fleet_floor = floor
+    info.latest = floor
+    info.update_available = bool(info.installed and version_below(info.installed, floor))
+
+
+def get_meshanchor_git_snapshot():
+    """git-layer truth for the MeshAnchor checkout (patchable seam).
+
+    Cached for the module TTL — check_all_versions runs on TUI startup, and
+    a `git fetch` per call would hammer the network. Returns None when the
+    git layer errors out, so the caller falls back to the version-string
+    compare rather than trusting a half-read state.
+    """
+    cache_key = 'meshanchor_git_state'
+    if cache_key in _version_cache:
+        cached = _version_cache[cache_key]
+        if datetime.now() - cached['timestamp'] < _cache_ttl:
+            return cached['state']
+    try:
+        from updates.meshanchor_git import get_meshanchor_git_state
+        state = get_meshanchor_git_state(fetch=True)
+    except Exception as e:
+        logger.debug(f"git state read failed: {e}")
+        return None
+    _version_cache[cache_key] = {'state': state, 'timestamp': datetime.now()}
+    return state
+
+
 def get_meshtasticd_apt_snapshot():
     """apt-layer truth for meshtasticd (installed/candidate/held), no simulation.
 
@@ -386,12 +447,30 @@ def check_all_versions() -> Dict[str, VersionInfo]:
     """Check all component versions and return status"""
     results = {}
 
-    # MeshAnchor itself
+    # MeshAnchor itself — judged by GIT truth (HEAD vs origin/main), not
+    # release version strings: this repo ships continuously by commit, and a
+    # version string that only moves on releases NEVER showed an update
+    # (2026-07-10 MeshForge follow-up, ported). Version-string compare
+    # remains the non-git fallback.
     meshanchor = VersionInfo(name='MeshAnchor')
     meshanchor.installed = get_meshanchor_version()
-    meshanchor.latest = get_latest_meshanchor_version()
-    if meshanchor.installed and meshanchor.latest:
-        meshanchor.update_available = compare_versions(meshanchor.installed, meshanchor.latest)
+    git_state = get_meshanchor_git_snapshot()
+    if git_state is not None and git_state.is_git_repo and git_state.head:
+        head = (git_state.head or '')[:8]
+        remote = (git_state.remote_head or '')[:8]
+        meshanchor.installed = f"{meshanchor.installed or '?'} @ {head}"
+        meshanchor.latest = f"{meshanchor.installed.split(' @ ')[0]} @ {remote or '?'}"
+        meshanchor.update_available = git_state.update_available
+        if git_state.fetch_ok is False:
+            meshanchor.notes = 'remote unverified (git fetch failed — offline?)'
+        elif git_state.behind:
+            meshanchor.notes = f'{git_state.behind} commit(s) behind origin/main'
+        elif git_state.ahead:
+            meshanchor.notes = f'{git_state.ahead} commit(s) AHEAD of origin/main (dev box)'
+    else:
+        meshanchor.latest = get_latest_meshanchor_version()
+        if meshanchor.installed and meshanchor.latest:
+            meshanchor.update_available = compare_versions(meshanchor.installed, meshanchor.latest)
     meshanchor.update_command = 'meshanchor-update'  # Special command handled by TUI
     results['meshanchor'] = meshanchor
 
@@ -432,24 +511,28 @@ def check_all_versions() -> Dict[str, VersionInfo]:
     meshtasticd.update_command = 'sudo apt-get install --only-upgrade -y meshtasticd'
     results['meshtasticd'] = meshtasticd
 
-    # Meshtastic CLI
+    # Meshtastic CLI — gated against the fleet floor, not PyPI-latest.
     cli = VersionInfo(name='Meshtastic CLI')
     cli.installed = get_meshtastic_cli_version()
-    cli.latest = get_latest_meshtastic_cli_version()
-    if cli.installed and cli.latest:
-        cli.update_available = compare_versions(cli.installed, cli.latest)
-    cli.update_command = 'pipx upgrade meshtastic'
-    cli.install_command = 'pipx install meshtastic'
+    _apply_fleet_floor(cli, get_latest_meshtastic_cli_version())
+    # Display/manual-copy form: the writer targets the reviewed floor, never
+    # PyPI-latest (`pipx upgrade` overshoots the pin the moment PyPI moves).
+    if cli.fleet_floor:
+        cli.update_command = f'pipx install --force meshtastic=={cli.fleet_floor}'
+        cli.install_command = f'pipx install meshtastic=={cli.fleet_floor}'
+    else:
+        cli.update_command = 'pipx install --force meshtastic'
+        cli.install_command = 'pipx install meshtastic'
     results['cli'] = cli
 
-    # Meshtastic Python Library (protobuf definitions)
+    # Meshtastic Python Library (protobuf definitions) — fleet-floor gated.
     lib = VersionInfo(name='Meshtastic Library')
     lib.installed = get_meshtastic_lib_version()
-    lib.latest = get_latest_meshtastic_cli_version()  # Same PyPI package
-    if lib.installed and lib.latest:
-        lib.update_available = compare_versions(lib.installed, lib.latest)
-    lib.update_command = 'pip3 install --upgrade meshtastic'
-    lib.install_command = 'pip3 install meshtastic'
+    _apply_fleet_floor(lib, get_latest_meshtastic_cli_version())  # same PyPI pkg (cached)
+    _lib_spec = (f'meshtastic=={lib.fleet_floor}' if lib.fleet_floor
+                 else 'meshtastic')
+    lib.update_command = f'pip3 install --break-system-packages --upgrade {_lib_spec}'
+    lib.install_command = f'pip3 install --break-system-packages {_lib_spec}'
     results['meshtastic_lib'] = lib
 
     # Node Firmware
@@ -484,6 +567,8 @@ def get_version_summary() -> Dict[str, Any]:
             'update_command': info.update_command,
             'held': info.held,
             'notes': info.notes,
+            'fleet_floor': info.fleet_floor,
+            'pypi_latest': info.pypi_latest,
         }
         summary['components'].append(component)
 

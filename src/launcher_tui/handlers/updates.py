@@ -11,11 +11,19 @@ from typing import Dict, Any, Optional, Tuple
 from handler_protocol import BaseHandler
 from utils.safe_import import safe_import
 from utils.pip_install import pip_install
+from utils.requirements_floor import read_floor
 from updates.meshtasticd_apt import (
     apt_update,
     disable_repo_lines,
     get_meshtasticd_apt_state,
     run_meshtasticd_upgrade,
+)
+from updates.meshanchor_git import (
+    get_meshanchor_git_state,
+    meshanchor_services_to_restart,
+    repo_root,
+    requirements_changed,
+    run_meshanchor_git_update,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,11 +116,22 @@ class UpdatesHandler(BaseHandler):
                 updates_available.append(key)
 
             installed = info.installed or "Not installed"
-            latest = info.latest or "Unknown"
 
             lines.append(f"{info.name}:")
             lines.append(f"  Installed: {installed}")
-            lines.append(f"  Latest:    {latest}{status}")
+            # Floor-gated components (meshtastic lib/cli) are judged against
+            # the REVIEWED fleet baseline, not PyPI-latest — label it as such
+            # so the operator isn't told "behind" when the box is at the
+            # baseline and PyPI simply moved (the phantom-update class).
+            floor = getattr(info, "fleet_floor", None)
+            if floor:
+                lines.append(f"  Fleet floor: {floor}{status}")
+                pypi = getattr(info, "pypi_latest", None)
+                if pypi and pypi != floor:
+                    lines.append(f"  (PyPI {pypi} — reviewed bump only, not auto)")
+            else:
+                latest = info.latest or "Unknown"
+                lines.append(f"  Latest:    {latest}{status}")
             if getattr(info, "notes", None):
                 lines.append(f"  Note:      {info.notes}")
             if info.error:
@@ -175,6 +194,18 @@ class UpdatesHandler(BaseHandler):
                 f"Running: {info.update_command}\n\nPlease wait..."
             )
 
+            if key == 'meshtastic_lib':
+                # Through the pip helper: PEP 668 --break-system-packages,
+                # floor pinning, and the rnsd dual-install (#24).
+                success, msg = self._pip_install_meshtastic(upgrade=True)
+                results.append((info.name, success, msg))
+                continue
+            if key == 'cli':
+                # pipx in the pipx that owns the resolved CLI, pinned to the
+                # reviewed floor — never root's pipx, never PyPI-latest.
+                success, msg = self._pipx_upgrade_cli()
+                results.append((info.name, success, msg))
+                continue
             if key == 'meshtasticd':
                 # apt path with the re-derived success gate (a pinned/held
                 # package never reaches here — update_available is False).
@@ -381,7 +412,8 @@ class UpdatesHandler(BaseHandler):
         return True
 
     def _update_cli(self):
-        """Update Meshtastic CLI."""
+        """Update Meshtastic CLI — floor-pinned, owner-aware, shim-repairing
+        (ported from MeshForge, 2026-07-10)."""
         try:
             versions = _check_all_versions()
             info = versions.get('cli')
@@ -397,40 +429,127 @@ class UpdatesHandler(BaseHandler):
             if self.ctx.dialog.yesno(
                 "Install Meshtastic CLI",
                 "Meshtastic CLI is not installed.\n\n"
-                f"Install command: {info.install_command}\n\n"
+                "It will be installed with pipx, pinned to the fleet\n"
+                f"baseline ({info.fleet_floor or 'requirements/core.txt'}), "
+                "in the operator's pipx home.\n\n"
                 "Install now?"
             ):
                 self.ctx.dialog.infobox("Installing", "Installing Meshtastic CLI via pipx...")
-                success, msg = self._run_update_command('cli', info.install_command)
+                success, msg = self._pipx_upgrade_cli()
                 if success:
                     self.ctx.dialog.msgbox("Installed", "Meshtastic CLI installed successfully!")
                 else:
                     self.ctx.dialog.msgbox("Failed", f"Installation failed:\n{msg}")
             return
 
+        # Ownership check BEFORE any version verdict: a pip --user script
+        # shadowing the pipx shim means pipx upgrades a venv that never runs —
+        # every future update silently no-ops (the read/write split at the
+        # binary level, found live 2026-07-10 on the MeshForge fleet).
+        from utils.cli import diagnose_meshtastic_cli
+        diag = diagnose_meshtastic_cli()
+        if diag['kind'] == 'pip-script':
+            if self.ctx.dialog.yesno(
+                "CLI Install Fragmented",
+                f"The meshtastic CLI at\n  {diag['path']}\n"
+                "is a pip console script, NOT the pipx-managed shim — so\n"
+                "pipx upgrades land in a venv this script never executes,\n"
+                "and CLI updates silently do nothing.\n\n"
+                "Repair now? (pipx install --force at the fleet baseline —\n"
+                "makes pipx the single owner of the CLI)"
+            ):
+                self.ctx.dialog.infobox("Repairing CLI", "Running pipx install --force...")
+                success, msg = self._pipx_upgrade_cli()
+                if success:
+                    self.ctx.dialog.msgbox(
+                        "Repaired",
+                        "The CLI is now pipx-owned at the fleet baseline.")
+                else:
+                    self.ctx.dialog.msgbox("Repair Failed", f"{msg}")
+            return
+
         if not info.update_available:
             self.ctx.dialog.msgbox(
                 "No Update",
-                f"Meshtastic CLI is already at the latest version.\n\n"
+                f"Meshtastic CLI is at the fleet baseline.\n\n"
                 f"Installed: {info.installed}\n"
-                f"Latest: {info.latest}"
+                f"Baseline:  {info.latest}"
             )
             return
 
         if not self.ctx.dialog.yesno(
             "Update Meshtastic CLI",
-            f"Update CLI from {info.installed} to {info.latest}?\n\n"
-            f"Command: {info.update_command}"
+            f"Update CLI from {info.installed} to the fleet baseline "
+            f"{info.latest}?\n\n"
+            "Runs: pipx install --force meshtastic==<baseline>\n"
+            "(in the pipx that owns the running CLI)"
         ):
             return
 
-        self.ctx.dialog.infobox("Updating CLI", "Running pipx upgrade...")
-        success, msg = self._run_update_command('cli', info.update_command)
+        self.ctx.dialog.infobox("Updating CLI", "Running pipx install --force...")
+        success, msg = self._pipx_upgrade_cli()
 
         if success:
             self.ctx.dialog.msgbox("Update Complete", "Meshtastic CLI updated successfully!")
         else:
             self.ctx.dialog.msgbox("Update Failed", f"Failed to update CLI.\n\n{msg}")
+
+    def _pipx_upgrade_cli(self):
+        """Install/upgrade/repair the meshtastic CLI: floor-pinned, owner-aware.
+
+        1. TARGET the reviewed fleet baseline, never PyPI-latest — a bare
+           `pipx upgrade` overshoots the reviewed pin the moment PyPI moves.
+           No readable floor -> refuse loudly rather than blind-upgrade.
+        2. Run pipx as the OWNER of what actually runs: under sudo a bare
+           pipx call writes ROOT's pipx home while the resolved CLI lives in
+           the operator's — the upgrade no-ops forever (read/write split).
+
+        `pipx install --force meshtastic==<floor>` also REPAIRS the
+        fragmented-shim case (a pip --user script shadowing the pipx shim).
+        Ported from MeshForge 2026-07-10.
+        """
+        import os
+        import pwd
+        from utils.cli import find_meshtastic_cli
+
+        floor = read_floor('meshtastic')
+        if not floor:
+            return False, (
+                "fleet baseline (requirements/core.txt) unreadable — "
+                "refusing a blind upgrade past the reviewed pin"
+            )
+
+        cli_path = find_meshtastic_cli()
+        if cli_path:
+            try:
+                owner_uid = os.stat(cli_path).st_uid
+                owner_name = pwd.getpwuid(owner_uid).pw_name
+            except (OSError, KeyError) as e:
+                return False, f"could not resolve CLI owner ({cli_path}): {e}"
+        else:
+            from utils.paths import get_real_username
+            owner_name = get_real_username()
+            try:
+                owner_uid = pwd.getpwnam(owner_name).pw_uid
+            except KeyError as e:
+                return False, f"could not resolve user {owner_name}: {e}"
+
+        base = ['pipx', 'install', '--force', f'meshtastic=={floor}']
+        if owner_uid == os.geteuid():
+            cmd = base
+        else:
+            cmd = ['sudo', '-u', owner_name, '-H'] + base
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                logger.info("Installed meshtastic==%s CLI in %s's pipx", floor, owner_name)
+                return True, result.stdout
+            return False, result.stderr or result.stdout or f"Exit code: {result.returncode}"
+        except subprocess.TimeoutExpired:
+            return False, "pipx install timed out after 5 minutes"
+        except Exception as e:
+            return False, str(e)
 
     def _update_meshtastic_lib(self):
         """Update Meshtastic Python library (protobuf definitions)."""
@@ -523,7 +642,21 @@ class UpdatesHandler(BaseHandler):
         # system pip with --break-system-packages auto-applied) via the ONE
         # hardened helper: ensures pip exists, checks the return code, and
         # verifies meshtastic actually IMPORTS afterward.
-        primary = pip_install(['meshtastic'], upgrade=upgrade,
+        # Target the reviewed fleet baseline, not PyPI-latest; refuse a blind
+        # upgrade when the floor is unreadable (bootstrap installs may proceed
+        # unpinned). Ported from MeshForge 2026-07-10.
+        floor = read_floor('meshtastic')
+        if floor:
+            spec = f'meshtastic=={floor}'
+        elif upgrade:
+            return False, (
+                "fleet baseline (requirements/core.txt) unreadable — "
+                "refusing a blind upgrade past the reviewed pin"
+            )
+        else:
+            spec = 'meshtastic'
+
+        primary = pip_install([spec], upgrade=upgrade,
                               verify_import='meshtastic', timeout=120)
         if not primary.ok:
             return False, primary.detail
@@ -540,7 +673,7 @@ class UpdatesHandler(BaseHandler):
                 "Also installing system-wide for rnsd..."
             )
             rnsd_result = pip_install(
-                ['meshtastic'], python='python3', sudo=True, break_system=True,
+                [spec], python='python3', sudo=True, break_system=True,
                 ignore_installed=True, upgrade=upgrade,
                 verify_import='meshtastic', timeout=120,
             )
@@ -599,14 +732,23 @@ class UpdatesHandler(BaseHandler):
         )
 
     def _update_meshanchor(self):
-        """Update MeshAnchor itself (git pull + pip install)."""
-        from pathlib import Path
-        from utils.paths import get_real_user_home
+        """Update MeshAnchor itself — git truth, verified, per-step honest.
 
-        meshanchor_dir = Path(__file__).parent.parent.parent.parent
+        2026-07-10 redesign ("I have not successfully updated MeshAnchor"):
+        the old flow compared release version strings (which only move on
+        releases, so a continuously-shipped repo never showed an update),
+        ran a merging `git pull` as root, and closed with "Update Complete"
+        while the RUNNING services kept executing old code. Now: state =
+        HEAD vs origin/main after a real fetch (as the repo owner),
+        ``--ff-only`` with dirty/diverged surfaced honestly, deps step only
+        when requirements changed, the active meshforge services are
+        restarted with per-unit verified results, and the closing dialog is
+        a per-step status report — never a blanket success.
+        """
+        self.ctx.dialog.infobox("MeshAnchor", "Reading git state (fetching origin)...")
+        state = get_meshanchor_git_state(fetch=True)
 
-        git_dir = meshanchor_dir / '.git'
-        if not git_dir.exists():
+        if not state.is_git_repo:
             self.ctx.dialog.msgbox(
                 "Not a Git Repository",
                 "MeshAnchor is not installed via git.\n\n"
@@ -614,104 +756,166 @@ class UpdatesHandler(BaseHandler):
                 "curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh | sudo bash"
             )
             return
+        if state.fetch_ok is False:
+            self.ctx.dialog.msgbox(
+                "Cannot Verify Remote",
+                "git fetch failed, so the remote state is UNKNOWN — refusing\n"
+                "to claim either 'up to date' or 'update available'.\n\n"
+                f"{state.error or ''}"
+            )
+            return
+        if state.dirty:
+            self.ctx.dialog.msgbox(
+                "Local Changes Present",
+                "The working tree has uncommitted local modifications —\n"
+                "refusing to update over them.\n\n"
+                "Review with: git -C " + (state.repo_dir or '') + " status"
+            )
+            return
+        if state.ahead:
+            self.ctx.dialog.msgbox(
+                "Local Branch Ahead",
+                f"This checkout is {state.ahead} commit(s) AHEAD of\n"
+                "origin/main — a fast-forward update is impossible.\n\n"
+                "Push the local commits (git push origin main) or reset\n"
+                "deliberately; the updater will not merge for you."
+            )
+            return
+        if not state.update_available:
+            self.ctx.dialog.msgbox(
+                "Up To Date",
+                "MeshAnchor is at origin/main.\n\n"
+                f"HEAD: {(state.head or 'unknown')[:12]}\n"
+                "(verified against a live fetch)"
+            )
+            return
 
+        services = meshanchor_services_to_restart()
+        svc_note = (", ".join(services) if services
+                    else "none active")
         if not self.ctx.dialog.yesno(
             "Update MeshAnchor",
-            "This will:\n\n"
-            "1. Pull latest code from GitHub (git pull)\n"
-            "2. Install/update Python dependencies\n"
-            "3. Update systemd service files\n\n"
+            f"origin/main is {state.behind} commit(s) ahead.\n"
+            f"  {(state.head or '')[:12]} -> {(state.remote_head or '')[:12]}\n\n"
+            "This will:\n"
+            "1. Fast-forward the checkout (as the repo owner)\n"
+            "2. Update Python dependencies (only if requirements changed)\n"
+            "3. Refresh systemd unit files\n"
+            f"4. Restart the active MeshAnchor services ({svc_note})\n\n"
             "Continue?"
         ):
             return
 
-        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 1/3: Pulling latest code from GitHub...")
+        steps = []  # (step, ok/None=skipped, detail)
 
+        # Step 1: git fast-forward, success re-derived from HEAD.
+        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 1/4: git fast-forward...")
+        old_head = state.head
+        ok, detail = run_meshanchor_git_update()
+        steps.append(("git", ok, detail))
+        if not ok:
+            self._show_update_report(steps, aborted=True)
+            return
+
+        # Step 2: deps — only when a requirements file changed old..new
+        # (unknown diff = run the step; skipping on unknown is the
+        # silent-failure direction).
+        new_state = get_meshanchor_git_state(fetch=False)
+        req_changed = requirements_changed(old_head, new_state.head or 'HEAD')
+        if req_changed is False:
+            steps.append(("deps", None, "skipped — no requirements change"))
+        else:
+            self.ctx.dialog.infobox("Updating MeshAnchor",
+                                    "Step 2/4: updating Python dependencies...")
+            requirements_file = repo_root() / 'requirements.txt'
+            if requirements_file.exists():
+                result = pip_install([], requirements_file=requirements_file,
+                                     timeout=300)
+                steps.append(("deps", result.ok,
+                              result.detail[:200] if not result.ok else "installed"))
+            else:
+                steps.append(("deps", False, "requirements.txt not found"))
+
+        # Step 3: unit files (best-effort, witnessed).
+        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 3/4: refreshing unit files...")
+        ok, detail = self._refresh_service_files()
+        steps.append(("unit files", ok, detail))
+
+        # Step 4: restart the services that host the updated code — the gap
+        # that made updates look like no-ops (running daemons kept old code).
+        if services and _HAS_SERVICE_CHECK:
+            for svc in services:
+                self.ctx.dialog.infobox("Updating MeshAnchor",
+                                        f"Step 4/4: restarting {svc}...")
+                r_ok, r_msg = _apply_config_and_restart(svc)
+                steps.append((f"restart {svc}", r_ok,
+                              "restarted" if r_ok else r_msg[:200]))
+        elif services:
+            steps.append(("restarts", False,
+                          "service control unavailable — restart manually: "
+                          + ", ".join(services)))
+        else:
+            steps.append(("restarts", None, "no active MeshAnchor services"))
+
+        self._show_update_report(steps)
+
+    def _refresh_service_files(self) -> Tuple[bool, str]:
+        """Copy updated systemd unit files into place (system + user)."""
+        from pathlib import Path
+        from utils.paths import get_real_user_home
+        import shutil
+
+        meshforge_dir = repo_root()
+        copied = []
         try:
-            result = subprocess.run(
-                ['git', 'pull', 'origin', 'main'],
-                cwd=str(meshanchor_dir),
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            git_output = result.stdout + result.stderr
-
-            if result.returncode != 0:
-                self.ctx.dialog.msgbox(
-                    "Git Pull Failed",
-                    f"Failed to pull updates:\n\n{git_output[:500]}"
-                )
-                return
-
-        except subprocess.TimeoutExpired:
-            self.ctx.dialog.msgbox("Error", "Git pull timed out after 60 seconds.")
-            return
-        except Exception as e:
-            self.ctx.dialog.msgbox("Error", f"Git pull failed: {e}")
-            return
-
-        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 2/3: Installing Python dependencies...")
-
-        requirements_file = meshanchor_dir / 'requirements.txt'
-        if not requirements_file.exists():
-            self.ctx.dialog.msgbox("Error", "requirements.txt not found!")
-            return
-
-        # Route through the hardened helper: SSOT venv-vs-system resolution
-        # (`get_meshanchor_venv_dir`) + ensure_pip + return-code check, replacing
-        # the hand-rolled venv gate.
-        result = pip_install([], requirements_file=requirements_file, timeout=300)
-        if not result.ok:
-            self.ctx.dialog.msgbox(
-                "Pip Install Failed",
-                f"Failed to install dependencies:\n\n{result.detail[:500]}"
-            )
-            return
-
-        self.ctx.dialog.infobox("Updating MeshAnchor", "Step 3/3: Updating service files...")
-
-        svc_msgs = []
-        try:
-            svc_src = meshanchor_dir / 'scripts' / 'meshanchor.service'
+            svc_src = meshforge_dir / 'scripts' / 'meshanchor.service'
             svc_dst = Path('/etc/systemd/system/meshanchor.service')
             if svc_src.exists() and svc_dst.exists():
-                import shutil
                 shutil.copy2(str(svc_src), str(svc_dst))
-                svc_msgs.append("meshanchor.service")
+                copied.append("meshanchor.service")
 
             user_svc_dir = get_real_user_home() / '.config' / 'systemd' / 'user'
-            templates_dir = meshanchor_dir / 'templates' / 'systemd'
+            templates_dir = meshforge_dir / 'templates' / 'systemd'
             if templates_dir.exists():
                 user_svc_dir.mkdir(parents=True, exist_ok=True)
                 for tmpl in templates_dir.glob('*-user.service'):
                     svc_name = tmpl.name.replace('-user.service', '.service')
-                    dst = user_svc_dir / svc_name
-                    import shutil
-                    shutil.copy2(str(tmpl), str(dst))
-                    svc_msgs.append(svc_name)
+                    shutil.copy2(str(tmpl), str(user_svc_dir / svc_name))
+                    copied.append(svc_name)
 
-            if svc_msgs:
+            if copied:
                 daemon_reload()
         except (OSError, PermissionError) as e:
-            svc_msgs.append(f"(warning: {e})")
+            return False, f"{', '.join(copied)} then failed: {e}"
         except Exception as e:
-            # Surface unexpected service-step failures in the completion dialog
-            # instead of "Update Complete" implying the step ran clean (S7).
-            svc_msgs.append(f"(service update error: {e})")
+            return False, f"unit-file refresh error: {e}"
+        return True, ", ".join(copied) if copied else "none to refresh"
 
-        svc_info = ""
-        if svc_msgs:
-            svc_info = f"\nServices updated: {', '.join(svc_msgs)}\n"
-
+    def _show_update_report(self, steps, aborted: bool = False):
+        """Per-step honest completion report — never a blanket 'Complete'."""
+        lines = ["MESHANCHOR UPDATE " + ("ABORTED" if aborted else "REPORT"),
+                 "=" * 40, ""]
+        any_fail = aborted
+        for name, ok, detail in steps:
+            if ok is None:
+                mark = "SKIP"
+            elif ok:
+                mark = "OK  "
+            else:
+                mark = "FAIL"
+                any_fail = True
+            lines.append(f"[{mark}] {name}: {detail}")
+        lines.append("")
+        if any_fail:
+            lines.append("One or more steps did NOT complete — the box may be")
+            lines.append("running mixed old/new code. Fix the failed step and")
+            lines.append("re-run this update.")
+        else:
+            lines.append("All steps verified. Restart this TUI to load the")
+            lines.append("new code in the menu you are looking at: meshanchor")
         self.ctx.dialog.msgbox(
-            "Update Complete",
-            "MeshAnchor has been updated!\n\n"
-            f"Git: {git_output.strip()[:200]}\n"
-            f"{svc_info}\n"
-            "Please restart MeshAnchor to apply changes.\n\n"
-            "Run: meshanchor"
-        )
+            "Update " + ("Failed" if any_fail else "Applied"),
+            "\n".join(lines), width=70)
 
     def _run_update_command(self, component: str, command: str) -> Tuple[bool, str]:
         """Execute an update command safely."""
