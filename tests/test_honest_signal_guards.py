@@ -567,3 +567,45 @@ class TestScheduledRunningPanelVisibility:
             "ephemeral Claude /loop crons must be labeled session-only, not "
             "presented as a durable schedule"
         )
+
+
+class TestLinterLineOffsetContext20260709:
+    """2026-07-09 frontier review of the gates (ported from MeshForge). The
+    lookahead/lookback rules resolved a line's position via content.find(line)
+    — the FIRST textual occurrence — so a real violation on a LATER duplicate
+    line was judged against an earlier twin and silently passed. lint_file now
+    threads the true per-line offset."""
+
+    def _lint(self, tmp_path, body):
+        d = tmp_path / "src" / "monitoring"
+        d.mkdir(parents=True)
+        fp = d / "dupe_lines.py"
+        fp.write_text(body)
+        return lint.MeshAnchorLinter().lint_file(str(fp))
+
+    def test_mf010_caught_on_second_identical_sleep(self, tmp_path):
+        body = (
+            "import time\n"
+            "class C:\n"
+            "    def helper(self):\n"
+            "        time.sleep(1)\n"
+            "    def _poll_loop(self):\n"
+            "        time.sleep(1)\n"
+        )
+        mf010 = [i for i in self._lint(tmp_path, body) if i.code == "MF010"]
+        assert len(mf010) == 1, f"expected the loop sleep flagged, got {mf010}"
+        assert mf010[0].line == 6
+
+    def test_mf004_caught_on_second_identical_subprocess(self, tmp_path):
+        body = (
+            "import subprocess\n"
+            "def a(cmd):\n"
+            "    result = subprocess.run(\n"
+            "        cmd, timeout=5)\n"
+            "def b(cmd):\n"
+            "    result = subprocess.run(\n"
+            "        cmd)\n"
+        )
+        mf004 = [i for i in self._lint(tmp_path, body) if i.code == "MF004"]
+        assert len(mf004) == 1, f"expected the untimed call flagged, got {mf004}"
+        assert mf004[0].line == 6
