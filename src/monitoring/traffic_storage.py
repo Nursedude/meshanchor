@@ -187,8 +187,16 @@ class TrafficCapture:
         # Find appropriate dissector
         packet = None
         for dissector in self._dissectors:
-            if dissector.can_dissect(data, metadata):
-                packet = dissector.dissect(data, metadata)
+            try:
+                if dissector.can_dissect(data, metadata):
+                    packet = dissector.dissect(data, metadata)
+                    break
+            except Exception as e:
+                with self._lock:
+                    self._stats["dissect_errors"] = \
+                        self._stats.get("dissect_errors", 0) + 1
+                logger.debug(f"Dissector {type(dissector).__name__} "
+                             f"failed, falling back to basic packet: {e}")
                 break
 
         if packet is None:
@@ -337,7 +345,9 @@ class TrafficCapture:
 
                     packets.append(packet)
 
-                except (json.JSONDecodeError, KeyError) as e:
+                except Exception as e:
+                    # One bad stored row must only cost that row (a
+                    # tree-rebuild TypeError used to kill the whole query).
                     logger.debug(f"Error parsing packet: {e}")
 
         return packets

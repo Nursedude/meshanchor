@@ -268,6 +268,7 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
         try:
             config_path.write_text(json.dumps(self._config, indent=2))
+            config_path.chmod(0o600)  # may carry broker credentials
             return True
         except Exception as e:
             logger.error(f"Failed to save MQTT nodeless config: {e}")
@@ -602,7 +603,20 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
                 self._last_cleanup = now
 
         except Exception as e:
-            logger.debug(f"Error processing MQTT message: {e}")
+            # Witnessed swallow (2026-07-09, ported from MeshForge): a
+            # repeating handler bug used to be invisible at debug level
+            # while messages_received kept climbing.
+            with self._stats_lock:
+                self._stats["processing_errors"] = \
+                    self._stats.get("processing_errors", 0) + 1
+            now_ts = time.time()
+            if now_ts - getattr(self, "_last_processing_error_warn", 0) > 60:
+                self._last_processing_error_warn = now_ts
+                logger.warning(
+                    f"MQTT message processing error (witnessed in stats as "
+                    f"processing_errors): {e}")
+            else:
+                logger.debug(f"Error processing MQTT message: {e}")
 
     def _persist_map_cache(self):
         """Write current node GeoJSON to disk for map data service.
