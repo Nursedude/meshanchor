@@ -734,18 +734,13 @@ at index 0 (bot activates), `[MC:` prefix kept so the re-emit loop guard
 raw, must not be reparsed. Field-verified: cmd→command list, wx→6-chunk
 forecast round-trip, chat→correctly ignored.
 
-**Completion (`0b24b605`, 2026-05-24)**: the original fix missed the PARALLEL
-LXMF broadcast path. `format_broadcast_text` (`lxmf_broadcast_bridge.py`) has
-the same empty-`source_address` shape → rendered channel broadcasts as
-`[ch0:?] meshanchor p4: wx`; downstream Meshtastic gateways re-inject that to
-the mesh and the bot ignores the buried command (same bug). Symptom: `wx`
-failed whenever RF dropped the good `[MC:p4]` copy and only this copy arrived
-(`cmd`/`test` worked because their good copy survived). Same
-`parse_meshcore_channel_header` lift applied in `format_broadcast_text` (empty
-source + `is_broadcast` only) → `[ch0:p4] wx`. BOTH paths now actionable, so
-RF redundancy is a benefit. Field-verified wx→6-chunk forecast. 3 tests.
-LESSON: when fixing a bug, audit for PARALLEL code paths with the same shape
-— one bridge can reach a destination via multiple routes.
+**Completion (`0b24b605`, 2026-05-24)**: the original fix missed the PARALLEL LXMF
+broadcast path — `format_broadcast_text` (`lxmf_broadcast_bridge.py`) had the same
+empty-`source_address` shape, so when RF dropped the good `[MC:p4]` copy the bot
+saw the buried command and ignored it (`cmd`/`test` survived on their good copy).
+Same `parse_meshcore_channel_header` lift applied there → `[ch0:p4] wx`; both paths
+now actionable. Field-verified wx→6-chunk forecast, 3 tests. LESSON: when fixing a
+bug, audit for PARALLEL code paths with the same shape.
 
 ---
 
@@ -787,21 +782,27 @@ fact. Any `stats["errors"] += 1` (or similar) MUST be paired with a log at
 the appropriate level. Audit reflex: `grep -n 'errors.*+= 1' src/gateway/*.py`
 → confirm each has a companion `logger.warning/error` on the same path.
 
-**Soak (25×60s, meshanchor-server)** validating all three (#38–#40): daemon
-PID unchanged, NRestarts=0, 100% connectivity (moc:9443/rns/meshcore), egress
-`errors`=0 under load, loop guard no runaway, `reemit.errors` flat (the 2
-were one-time transients).
+**Soak (25×60s, meshanchor-server)** validated #38–#40: PID stable,
+NRestarts=0, 100% connectivity, egress `errors`=0, reemit flat.
 
 ---
 
 ## Issue #79: Deploy-restart gap — repo-code daemons stale after a pull (ported from MeshForge, 2026-06-15)
 
-Ported from MeshForge #79: a deploy path that refreshes a unit FILE but never RESTARTS
-the daemon leaves it on OLD code after `git pull`. MA's only pull-deploy path is
-`scripts/update.sh` (no `fleet_sync.sh`). **Fix** (`update.sh`): a sudo→user-bus
-`run_user_systemctl` + `try-restart meshanchor-echo` (USER, `lab.lxmf_echo`) + a
-`CODE_CHANGED`-gated `try-restart` of SYSTEM `meshanchor` + `meshanchor-map` (so a
-docs-only pull does not bounce the NOC). Interactive tmux panes + external wrappers
-(meshcore-chat/nomadnet/meshchatx/rnsd/meshtasticd) are NOT auto-restarted. **Guard**
-`TestDeployRestartHook` (§3b-ii, red-test-first) enforces every repo-code daemon is
-restart-wired. `845269ed`/`8d354b31`.
+A deploy that refreshes a unit FILE but never RESTARTS the daemon leaves it on OLD
+code after `git pull`. MA's only pull-deploy path is `scripts/update.sh`; the fix
+wires a `try-restart` of `meshanchor-echo` (user) + a `CODE_CHANGED`-gated restart
+of SYSTEM `meshanchor`/`-map` (docs-only pulls don't bounce the NOC). Interactive
+tmux panes + external wrappers are NOT auto-restarted. Guard `TestDeployRestartHook`
+(§3b-ii, red-test-first). `845269ed`/`8d354b31`. Full body: MeshForge #79.
+
+---
+
+## Open flake: suite ~1/11 false FAIL under random test order (GH #144, 2026-07-11)
+
+Full suite intermittently `1 failed, 5622 passed` under pytest-randomly (~1/11;
+10 clean). **Pre-existing, NOT the PSK-guard port `11334e53`** — almost certainly
+the `test_status_bar` suite-order pollution already noted in Issue #37 (2026-05-20),
+predating the port ~7 weeks. Undiagnosable until `honest_status.sh` logs the seed +
+`FAILED` id (discards both today). Fix: capture a seed → isolate the polluting
+test's state. [GH #144](https://github.com/Nursedude/meshanchor/issues/144).
