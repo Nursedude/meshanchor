@@ -132,7 +132,19 @@ if [ "$RUN_TESTS" = 1 ]; then
   summ=$(grep -E "[0-9]+ (passed|failed|error)" /tmp/.hs_pytest_ma | tail -1)
   nfail=$(grep -cE "^FAILED|^ERROR" /tmp/.hs_pytest_ma)
   if [ "$rc" = 0 ] && [ "$nfail" = 0 ]; then ok "full suite" "$summ (exit 0)"
-  else bad "full suite" "exit $rc, $nfail FAILED/ERROR — $summ"; fi
+  else
+    # Surface the failing test id(s) (already in the captured file, just not
+    # shown before) AND preserve the log to a durable path — NOT /tmp (RTC-less
+    # Pis clear it on reboot), overwrite-on-failure-ONLY so a later green run
+    # can't clobber it. Every honest_status run samples the suite under
+    # concurrent load (CI + ssh probes) — the exact trigger for the rare timing
+    # flake (GH #144) — so this is how its traceback finally gets captured.
+    names=$(grep -E "^FAILED|^ERROR" /tmp/.hs_pytest_ma | sed -E 's/^(FAILED|ERROR) //; s/ -.*//' | head -3 | paste -sd' ' -)
+    fdir="${XDG_STATE_HOME:-$HOME/.local/state}/meshanchor/hs_failures"; saved=""
+    mkdir -p "$fdir" 2>/dev/null && cp /tmp/.hs_pytest_ma "$fdir/last_failure.log" 2>/dev/null \
+      && saved=" — saved $fdir/last_failure.log"
+    bad "full suite" "exit $rc, $nfail FAILED/ERROR${names:+ ($names)}$saved — $summ"
+  fi
 else
   unk "full suite" "skipped (--quick) — not verified"
 fi
