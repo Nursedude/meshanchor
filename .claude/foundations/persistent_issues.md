@@ -798,11 +798,13 @@ tmux panes + external wrappers are NOT auto-restarted. Guard `TestDeployRestartH
 
 ---
 
-## Open flake: suite ~1/11 false FAIL under random test order (GH #144, 2026-07-11)
+## Open flake: suite intermittently 1-test FAIL under load (GH #144, 2026-07-11)
 
-Full suite intermittently `1 failed, 5622 passed` under pytest-randomly (~1/11;
-10 clean). **Pre-existing, NOT the PSK-guard port `11334e53`** — almost certainly
-the `test_status_bar` suite-order pollution already noted in Issue #37 (2026-05-20),
-predating the port ~7 weeks. Undiagnosable until `honest_status.sh` logs the seed +
-`FAILED` id (discards both today). Fix: capture a seed → isolate the polluting
-test's state. [GH #144](https://github.com/Nursedude/meshanchor/issues/144).
+Full suite intermittently `1 failed, 5622 passed`, ~1/11 runs (seen in
+`honest_status.sh`: suite runs alongside CI + ssh → load).
+**Pre-existing, NOT the PSK port `11334e53`.** **CORRECTION 2026-07-11: a TIMING/RACE
+flake, NOT suite-order pollution** — MA has no `pytest-randomly` (`--randomly-seed`
+unrecognized), so order is DETERMINISTIC and there is NO seed; the earlier
+`test_status_bar`/Issue-#37 attribution is unsupported. Repro: loop `pytest tests/`
+under load, capture the `FAILED` id + traceback (honest_status discards both; culprit
+unknown). [GH #144](https://github.com/Nursedude/meshanchor/issues/144).
