@@ -7,7 +7,6 @@ Converted from settings_menu_mixin.py as part of the mixin-to-registry migration
 import logging
 
 from handler_protocol import BaseHandler
-from utils.safe_import import safe_import
 
 # utils.map_data_collector is imported where used: at module level it pulls
 # the RNS + meshtastic collector stack into TUI startup for a settings write
@@ -192,7 +191,11 @@ class SettingsHandler(BaseHandler):
         """Save meshtasticd connection settings."""
         try:
             from utils.map_data_collector import MapDataCollector
-        except ImportError:
+        except ImportError as e:
+            # Witness the swallow (honest_failure_modes point 9).
+            logging.getLogger(__name__).warning(
+                "meshtasticd connection not persisted: map collector "
+                "stack unavailable (%s)", e)
             return
         collector = MapDataCollector()
         collector.set_meshtasticd_connection(host, port)
