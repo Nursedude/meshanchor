@@ -19,6 +19,13 @@ from handler_protocol import BaseHandler
 
 logger = logging.getLogger(__name__)
 
+def _rns_cmds():
+    """Deferred import: commands.rns imports the RNS library at module level
+    (~180 ms) — resolved at menu time, never at TUI startup."""
+    from commands import rns
+    return rns
+
+
 # Centralized service checking — first-party, always available
 from utils.service_check import (
     check_systemd_service, check_process_running, check_service,
@@ -35,8 +42,8 @@ from utils._service_iptables import (
 from utils.paths import get_real_user_home
 
 # Import RNS identity helpers
-from commands.rns import get_identity_path
-from commands.rns import create_identities
+# commands.rns is imported where used: at module level it pulls the RNS
+# library (~180 ms) into TUI startup.
 
 # Import propagation module
 from commands import propagation
@@ -148,7 +155,7 @@ class ServiceMenuHandler(BaseHandler):
             pass
 
         # 3. Check gateway identity exists
-        gw_id = get_identity_path()
+        gw_id = _rns_cmds().get_identity_path()
         if not gw_id.exists():
             issues.append("Gateway identity not created yet")
 
@@ -228,10 +235,10 @@ class ServiceMenuHandler(BaseHandler):
                 print("  Bridge may fail to connect.\n")
 
         # Create gateway identity if missing
-        gw_id = get_identity_path()
+        gw_id = _rns_cmds().get_identity_path()
         if not gw_id.exists():
             print("[3] Creating gateway identity...")
-            result = create_identities()
+            result = _rns_cmds().create_identities()
             if result.success:
                 print(f"  {result.message}\n")
             else:

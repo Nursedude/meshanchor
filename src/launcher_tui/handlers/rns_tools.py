@@ -22,7 +22,8 @@ import subprocess
 
 from handler_protocol import BaseHandler
 from backend import clear_screen
-from commands.rns import get_identity_path
+# commands.rns is imported where used: at module level it pulls the RNS
+# library (~180 ms) into TUI startup.
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,7 @@ class RNSToolsHandler(BaseHandler):
     def _show_gateway_identity(self):
         clear_screen()
         print("=== Gateway Identity ===\n")
+        from commands.rns import get_identity_path
         identity_path = get_identity_path()
         if not identity_path.exists():
             print(f"  No gateway identity found at:\n    {identity_path}\n")

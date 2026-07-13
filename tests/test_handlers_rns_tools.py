@@ -263,7 +263,7 @@ class TestRNSToolsGatewayIdentity:
         h = _make_handler()
         # Patch the canonical resolver to point at a path that doesn't exist
         fake_path = Path("/tmp/_meshanchor_test_does_not_exist/gateway_identity")
-        with patch("handlers.rns_tools.get_identity_path", return_value=fake_path), \
+        with patch("commands.rns.get_identity_path", return_value=fake_path), \
              patch.object(h.ctx, 'wait_for_enter'), \
              patch("subprocess.run") as mock_run:
             h._show_gateway_identity()
@@ -276,7 +276,7 @@ class TestRNSToolsGatewayIdentity:
         fake_identity = tmp_path / "gateway_identity"
         fake_identity.write_bytes(b"\x00" * 32)
         fake_proc = MagicMock(returncode=0, stdout="hash\n", stderr="")
-        with patch("handlers.rns_tools.get_identity_path", return_value=fake_identity), \
+        with patch("commands.rns.get_identity_path", return_value=fake_identity), \
              patch.object(h.ctx, 'wait_for_enter'), \
              patch("subprocess.run", return_value=fake_proc) as mock_run:
             h._show_gateway_identity()

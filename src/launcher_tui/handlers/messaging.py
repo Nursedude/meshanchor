@@ -13,15 +13,15 @@ from utils.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 
-(send_message, get_messages, get_conversations, get_stats,
- start_receiving, stop_receiving, get_rx_status,
- diagnose, get_routing_info, clear_messages,
- _HAS_MESSAGING) = safe_import(
-    'commands.messaging',
-    'send_message', 'get_messages', 'get_conversations', 'get_stats',
-    'start_receiving', 'stop_receiving', 'get_rx_status',
-    'diagnose', 'get_routing_info', 'clear_messages',
-)
+def _messaging():
+    """Deferred import: commands.messaging pulls the meshtastic package
+    (~200 ms) — resolved at menu time, never at TUI startup. Returns the
+    module, or None when unavailable."""
+    try:
+        from commands import messaging
+        return messaging
+    except ImportError:
+        return None
 
 
 class MessagingHandler(BaseHandler):
@@ -121,7 +121,7 @@ class MessagingHandler(BaseHandler):
         self.ctx.wait_for_enter()
 
     def _messaging_send(self):
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             self.ctx.dialog.msgbox("Unavailable", "Messaging module not available.\nFile: src/commands/messaging.py")
             return
 
@@ -163,7 +163,7 @@ class MessagingHandler(BaseHandler):
         print(f"  Text:    {text[:60]}{'...' if len(text) > 60 else ''}")
         print()
 
-        result = send_message(
+        result = _messaging().send_message(
             content=text,
             destination=dest,
             network=network,
@@ -183,12 +183,12 @@ class MessagingHandler(BaseHandler):
         clear_screen()
         print("=== Recent Messages ===\n")
 
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             print("  Messaging module not available.")
             self.ctx.wait_for_enter()
             return
 
-        result = get_messages(limit=20)
+        result = _messaging().get_messages(limit=20)
 
         if not result.success:
             print(f"  Error: {result.message}")
@@ -223,12 +223,12 @@ class MessagingHandler(BaseHandler):
         clear_screen()
         print("=== Conversations ===\n")
 
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             print("  Messaging module not available.")
             self.ctx.wait_for_enter()
             return
 
-        result = get_conversations()
+        result = _messaging().get_conversations()
 
         if not result.success:
             print(f"  Error: {result.message}")
@@ -258,12 +258,12 @@ class MessagingHandler(BaseHandler):
         clear_screen()
         print("=== Messaging Statistics ===\n")
 
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             print("  Messaging module not available.")
             self.ctx.wait_for_enter()
             return
 
-        result = get_stats()
+        result = _messaging().get_stats()
 
         if not result.success:
             print(f"  Error: {result.message}")
@@ -287,11 +287,11 @@ class MessagingHandler(BaseHandler):
         self.ctx.wait_for_enter()
 
     def _messaging_rx_control(self):
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             self.ctx.dialog.msgbox("Unavailable", "Messaging module not available.")
             return
 
-        status = get_rx_status()
+        status = _messaging().get_rx_status()
         is_running = status.data.get('running', False) if status.success else False
 
         if is_running:
@@ -300,7 +300,7 @@ class MessagingHandler(BaseHandler):
                 "Message receiver is running.\n\nStop listening?"
             )
             if action:
-                result = stop_receiving()
+                result = _messaging().stop_receiving()
                 self.ctx.dialog.msgbox("RX Stopped", result.message)
         else:
             action = self.ctx.dialog.yesno(
@@ -308,7 +308,7 @@ class MessagingHandler(BaseHandler):
                 "Message receiver is not running.\n\nStart listening for messages?"
             )
             if action:
-                result = start_receiving()
+                result = _messaging().start_receiving()
                 if result.success:
                     self.ctx.dialog.msgbox("RX Started", result.message)
                 else:
@@ -318,12 +318,12 @@ class MessagingHandler(BaseHandler):
         clear_screen()
         print("=== Messaging Diagnostics ===\n")
 
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             print("  Messaging module not available.")
             self.ctx.wait_for_enter()
             return
 
-        result = diagnose()
+        result = _messaging().diagnose()
 
         if result.success:
             print(f"  Status: \033[0;32mHealthy\033[0m")
@@ -348,12 +348,12 @@ class MessagingHandler(BaseHandler):
         clear_screen()
         print("=== Messaging Routing Info ===\n")
 
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             print("  Messaging module not available.")
             self.ctx.wait_for_enter()
             return
 
-        result = get_routing_info()
+        result = _messaging().get_routing_info()
 
         if not result.success:
             print(f"  Error: {result.message}")
@@ -369,7 +369,7 @@ class MessagingHandler(BaseHandler):
         self.ctx.wait_for_enter()
 
     def _messaging_cleanup(self):
-        if not _HAS_MESSAGING:
+        if _messaging() is None:
             self.ctx.dialog.msgbox("Unavailable", "Messaging module not available.")
             return
 
@@ -383,7 +383,7 @@ class MessagingHandler(BaseHandler):
         if not confirm:
             return
 
-        result = clear_messages(older_than_days=30)
+        result = _messaging().clear_messages(older_than_days=30)
         if result.success:
             self.ctx.dialog.msgbox("Cleanup Complete", result.message)
         else:

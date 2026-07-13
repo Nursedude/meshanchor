@@ -39,12 +39,30 @@ get_knowledge_base, _HAS_KNOWLEDGE = safe_import(
 ClaudeAssistant, _HAS_ASSISTANT = safe_import(
     'utils.claude_assistant', 'ClaudeAssistant'
 )
-CoverageMapGenerator, MapNode, _HAS_COVERAGE_MAP = safe_import(
-    'utils.coverage_map', 'CoverageMapGenerator', 'MapNode'
-)
-MapDataCollector, get_all_ips, _HAS_MAP_SERVICE = safe_import(
-    'utils.map_data_service', 'MapDataCollector', 'get_all_ips'
-)
+def _load_coverage_map_generator():
+    """Deferred import: utils.coverage_map needs folium (optional dep).
+
+    Returns the class, or None when folium is missing (minimal-deps profile).
+    """
+    try:
+        from utils.coverage_map import CoverageMapGenerator
+        return CoverageMapGenerator
+    except ImportError:
+        return None
+
+
+def _load_map_data_collector():
+    """Deferred import: utils.map_data_service transitively pulls the RNS +
+    meshtastic collector stack (~680 ms, ~680 modules — the single largest
+    TUI startup cost when this lived at module level). The cost belongs to
+    the map menus, not the launcher. Returns the class, or None when the
+    map stack is missing.
+    """
+    try:
+        from utils.map_data_service import MapDataCollector
+        return MapDataCollector
+    except ImportError:
+        return None
 TileCache, HAWAII_BOUNDS, _HAS_TILE_CACHE = safe_import(
     'utils.tile_cache', 'TileCache', 'HAWAII_BOUNDS'
 )
@@ -837,7 +855,8 @@ class AIToolsHandler(BaseHandler):
 
         self.ctx.dialog.infobox("Generating", "Creating coverage map...")
 
-        if not _HAS_COVERAGE_MAP:
+        CoverageMapGenerator = _load_coverage_map_generator()
+        if CoverageMapGenerator is None:
             self.ctx.dialog.msgbox(
                 "Error",
                 "Coverage map generator not available.\n\n"
@@ -854,7 +873,8 @@ class AIToolsHandler(BaseHandler):
             if choice == "all":
                 # Use MapDataCollector to get nodes from ALL sources
                 # (meshtasticd, MQTT, node_cache.json, RNS cache)
-                if not _HAS_MAP_SERVICE:
+                MapDataCollector = _load_map_data_collector()
+                if MapDataCollector is None:
                     self.ctx.dialog.msgbox("Error", "MapDataCollector not available.")
                     return
                 collector = MapDataCollector()
@@ -955,7 +975,8 @@ class AIToolsHandler(BaseHandler):
         Returns:
             GeoJSON FeatureCollection filtered to the specified source.
         """
-        if not _HAS_MAP_SERVICE:
+        MapDataCollector = _load_map_data_collector()
+        if MapDataCollector is None:
             return {"type": "FeatureCollection", "features": []}
 
         try:
@@ -1028,7 +1049,8 @@ class AIToolsHandler(BaseHandler):
         """Generate a node density heatmap and open in browser."""
         self.ctx.dialog.infobox("Generating", "Creating node density heatmap...")
 
-        if not _HAS_COVERAGE_MAP:
+        CoverageMapGenerator = _load_coverage_map_generator()
+        if CoverageMapGenerator is None:
             self.ctx.dialog.msgbox(
                 "Error",
                 "Coverage map generator not available.\n\n"
@@ -1037,7 +1059,8 @@ class AIToolsHandler(BaseHandler):
             )
             return
 
-        if not _HAS_MAP_SERVICE:
+        MapDataCollector = _load_map_data_collector()
+        if MapDataCollector is None:
             self.ctx.dialog.msgbox("Error", "MapDataCollector not available.")
             return
 

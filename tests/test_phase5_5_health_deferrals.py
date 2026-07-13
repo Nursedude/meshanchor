@@ -358,7 +358,7 @@ class TestBridgePreflightProfileGate:
                   side_effect=fake_check_service),
             patch("launcher_tui.handlers.service_menu.subprocess.run",
                   return_value=MagicMock(returncode=1, stdout="", stderr="")),
-            patch("launcher_tui.handlers.service_menu.get_identity_path",
+            patch("commands.rns.get_identity_path",
                   return_value=MagicMock(exists=lambda: True)),
             patch("gateway.config.GatewayConfig.load",
                   return_value=MagicMock(validate=lambda: (True, []))),
