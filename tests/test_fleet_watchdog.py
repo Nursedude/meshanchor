@@ -3,7 +3,9 @@
 S5a — silence detector. Kinds:
   no_data     — heartbeat table empty.
   http_dead   — most recent heartbeat older than stale_threshold_s.
-  frozen      — uptime_s not strictly increasing across last N heartbeats.
+  frozen      — an OBSERVED uptime_s stuck (not advancing) across last N
+                heartbeats, or the uptime source dark for the whole window;
+                a lone missing sample is insufficient evidence, not a freeze.
   daemon_dead — meshanchor-daemon.service inactive ≥ 2 consecutive checks
                 (added 2026-05-09 after BLACKOUT smoke surfaced the gap).
 
@@ -158,6 +160,58 @@ def test_frozen_abstains_when_too_few_heartbeats(db):
         frozen_window_cycles=3,
     )
     assert out[wd.KIND_FROZEN] is None
+
+
+def test_frozen_abstains_on_transient_missing_uptime(db):
+    """A single degraded cycle (one NULL uptime_s among fresh, ADVANCING
+    heartbeats) must NOT fire frozen. The collector writes a heartbeat
+    even when a /fleet/slo fetch times out, storing uptime_s=None; reading
+    that lone gap as a freeze was the flapping "uptime_s missing" false
+    blackout (honest_failure_modes #1/#2 — absence of a sample is not
+    evidence of a stuck counter)."""
+    _heartbeat(db, ts=1000.0, uptime_s=10.0)    # observed, advancing
+    _heartbeat(db, ts=1060.0, uptime_s=None)    # one degraded cycle
+    _heartbeat(db, ts=1120.0, uptime_s=130.0)   # observed, advancing
+    out = wd.detect_silence(
+        db_path=db, now=1130.0,
+        stale_threshold_s=180.0,
+        frozen_window_cycles=3,
+    )
+    assert out[wd.KIND_FROZEN] is None
+    assert out[wd.KIND_HTTP_DEAD] is None
+
+
+def test_frozen_abstains_on_partial_missing_window(db):
+    """Even a partial window that LOOKS stuck (present values identical)
+    is insufficient evidence when a sample is missing — a holey window
+    can't establish non-advancement. Abstain rather than accuse."""
+    _heartbeat(db, ts=1000.0, uptime_s=100.0)
+    _heartbeat(db, ts=1060.0, uptime_s=None)    # gap
+    _heartbeat(db, ts=1120.0, uptime_s=100.0)
+    out = wd.detect_silence(
+        db_path=db, now=1130.0,
+        stale_threshold_s=180.0,
+        frozen_window_cycles=3,
+    )
+    assert out[wd.KIND_FROZEN] is None
+
+
+def test_frozen_surfaces_when_all_uptime_missing(db):
+    """When EVERY heartbeat in the window carries no uptime_s while the
+    heartbeats keep landing (fresh ts → invisible to http_dead), the
+    uptime source is dark — a real signal we must not swallow (#9). Fires
+    frozen with the honest 'missing' reason."""
+    _heartbeat(db, ts=1000.0, uptime_s=None)
+    _heartbeat(db, ts=1060.0, uptime_s=None)
+    _heartbeat(db, ts=1120.0, uptime_s=None)
+    out = wd.detect_silence(
+        db_path=db, now=1130.0,
+        stale_threshold_s=180.0,
+        frozen_window_cycles=3,
+    )
+    assert out[wd.KIND_FROZEN] is not None
+    assert "missing" in out[wd.KIND_FROZEN]
+    assert out[wd.KIND_HTTP_DEAD] is None
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -187,9 +187,9 @@ def detect_silence(
             f"(threshold {stale_threshold_s:.0f}s)"
         )
 
-    # Frozen check: pull the last N heartbeats and require uptime_s to
-    # be strictly increasing across them. If we don't have N rows yet,
-    # we abstain — too early to call it.
+    # Frozen check: pull the last N heartbeats and judge uptime_s
+    # advancement across them. If we don't have N rows yet, we abstain —
+    # too early to call it.
     recent = fleet_history.query_heartbeat_history(
         since=now - stale_threshold_s * 6,  # generous window
         until=now,
@@ -199,21 +199,37 @@ def detect_silence(
     if len(recent) >= frozen_window_cycles:
         tail = recent[-frozen_window_cycles:]
         uptimes = [r.get("uptime_s") for r in tail]
-        # Frozen = uptime_s stuck at the SAME value across every
-        # heartbeat in the window. Distinguishing rules:
-        #   - All None: data shape is wrong, abstain.
-        #   - Decreasing somewhere: that's a daemon restart, NOT frozen
-        #     (uptime resets to ~0 on a fresh start). The HTTP-dead
-        #     check upstream covers the gap during the restart.
-        #   - All identical: the daemon hasn't ticked. THAT is frozen.
-        #   - Otherwise: mixed / increasing — healthy, abstain.
-        if any(u is None for u in uptimes):
+        present = [u for u in uptimes if u is not None]
+        # A definitive "frozen" verdict must rest on POSITIVE evidence —
+        # an uptime_s we actually observed and saw NOT advance — never on
+        # the mere ABSENCE of a value. A single degraded cycle drops a
+        # NULL uptime_s into an otherwise-fresh heartbeat: the collector
+        # records a row even when the /fleet/slo fetch times out (Pi-class
+        # /fleet/slo can miss its budget under load), storing
+        # slo.get("uptime_s")=None honestly rather than a fabricated 0.
+        # Reading that lone gap as a freeze manufactures a false blackout
+        # (honest_failure_modes #1/#2: absence of a sample is not evidence
+        # of a stuck counter — the flapping "missing" pages this fixes).
+        # Cases:
+        #   - EVERY sample missing across the full window: the uptime
+        #     source has been dark the whole window while heartbeats keep
+        #     landing (their fresh ts hides it from http_dead) — a real
+        #     signal we must NOT swallow (#9). Surface it, honestly named.
+        #   - SOME (not all) missing: a partial/transient gap — too few
+        #     observed samples to judge advancement; abstain.
+        #   - All present, one unique value: the daemon hasn't ticked.
+        #     THAT is frozen.
+        #   - All present, decreasing (restart) or increasing: healthy;
+        #     abstain (http_dead covers the restart gap).
+        if not present:
             out[KIND_FROZEN] = "uptime_s missing in recent heartbeats"
+        elif len(present) < frozen_window_cycles:
+            pass  # partial gap — insufficient evidence, do not accuse
         else:
-            unique = {round(u, 3) for u in uptimes}
+            unique = {round(u, 3) for u in present}
             if len(unique) == 1:
                 out[KIND_FROZEN] = (
-                    f"uptime_s stuck at {uptimes[0]:.1f}s across last "
+                    f"uptime_s stuck at {present[0]:.1f}s across last "
                     f"{frozen_window_cycles} heartbeats"
                 )
 
