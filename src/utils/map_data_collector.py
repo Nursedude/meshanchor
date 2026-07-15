@@ -27,11 +27,6 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# A last_heard more than this many seconds in the FUTURE is implausible (clock
-# skew / a hostile injected stamp) and must not read as "online". (QA audit
-# 2026-07-06.)
-_ONLINE_FUTURE_SKEW_TOLERANCE_S = 300
-
 # --- Imports ---
 from utils.safe_import import safe_import
 
@@ -49,6 +44,7 @@ _msgpack, _HAS_MSGPACK = safe_import('msgpack')
 from utils._map_collector_rns import RNSDataCollectorMixin
 from utils._map_collector_meshtastic import MeshtasticDataCollectorMixin
 from utils._map_collector_meshcore_public import MeshCorePublicCollectorMixin
+from utils._map_collector_config import MapCollectorConfigMixin
 from utils.meshcore_positions import get_position_store
 
 
@@ -56,6 +52,7 @@ class MapDataCollector(
     MeshtasticDataCollectorMixin,
     RNSDataCollectorMixin,
     MeshCorePublicCollectorMixin,
+    MapCollectorConfigMixin,
 ):
     """Collects node data from all available sources into unified GeoJSON.
 
@@ -209,214 +206,6 @@ class MapDataCollector(
             except Exception as e:
                 logger.debug(f"Node history disabled: {e}")
 
-    @staticmethod
-    def _is_valid_coordinate(lat, lon) -> bool:
-        """Validate geographic coordinates.
-
-        Rejects:
-        - None values
-        - NaN or Infinity
-        - Out-of-range (lat must be -90..90, lon must be -180..180)
-        - Default zero (both lat AND lon are exactly 0 — unset GPS)
-
-        Accepts:
-        - Nodes near the equator/prime meridian where only ONE coord is near zero
-        - Any valid coordinate pair within range
-        """
-        if lat is None or lon is None:
-            return False
-        try:
-            lat = float(lat)
-            lon = float(lon)
-        except (TypeError, ValueError):
-            return False
-        if not math.isfinite(lat) or not math.isfinite(lon):
-            return False
-        if lat < -90 or lat > 90 or lon < -180 or lon > 180:
-            return False
-        # Reject default-zero GPS (both exactly 0.0 = unset), but allow
-        # nodes where only one axis is near zero (legitimate equator/meridian)
-        if lat == 0.0 and lon == 0.0:
-            return False
-        return True
-
-    def get_node_cache_max_age_seconds(self) -> int:
-        """Get max age for node_cache.json in seconds."""
-        if self._settings:
-            hours = self._settings.get("node_cache_max_age_hours", self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS)
-        else:
-            hours = self.DEFAULT_NODE_CACHE_MAX_AGE_HOURS
-        return int(hours * 3600)
-
-    def get_rns_cache_max_age_seconds(self) -> int:
-        """Get max age for RNS temp cache in seconds."""
-        if self._settings:
-            hours = self._settings.get("rns_cache_max_age_hours", self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS)
-        else:
-            hours = self.DEFAULT_RNS_CACHE_MAX_AGE_HOURS
-        return int(hours * 3600)
-
-    def set_node_cache_max_age_hours(self, hours: int) -> None:
-        """Set max age for node_cache.json in hours."""
-        if self._settings:
-            self._settings.set("node_cache_max_age_hours", hours)
-            self._settings.save()
-            logger.info(f"Node cache max age set to {hours} hours")
-
-    def set_rns_cache_max_age_hours(self, hours: int) -> None:
-        """Set max age for RNS temp cache in hours."""
-        if self._settings:
-            self._settings.set("rns_cache_max_age_hours", hours)
-            self._settings.save()
-            logger.info(f"RNS cache max age set to {hours} hours")
-
-    def get_online_threshold_seconds(self) -> int:
-        """Get online status threshold in seconds.
-
-        Nodes heard within this threshold are considered online.
-        Default: 15 minutes (900 seconds).
-        """
-        if self._settings:
-            minutes = self._settings.get("online_status_threshold_minutes", self.DEFAULT_ONLINE_THRESHOLD_MINUTES)
-        else:
-            minutes = self.DEFAULT_ONLINE_THRESHOLD_MINUTES
-        return int(minutes * 60)
-
-    def set_online_threshold_minutes(self, minutes: int) -> None:
-        """Set online status threshold in minutes.
-
-        Args:
-            minutes: Consider nodes online if heard within this many minutes.
-                    Use higher values for networks with longer update intervals.
-        """
-        if self._settings:
-            self._settings.set("online_status_threshold_minutes", minutes)
-            self._settings.save()
-            logger.info(f"Online status threshold set to {minutes} minutes")
-
-    def get_source_threshold_seconds(self, source: str) -> int:
-        """Get online threshold for a specific network source.
-
-        Per-source thresholds allow different timeout windows per network type:
-        - meshtastic: 15 min (frequent heartbeats)
-        - mqtt: 15 min (real-time broker)
-        - rns: 30 min (announces less frequently)
-        - aredn: 60 min (scans are infrequent)
-
-        Falls back to the global online_status_threshold_minutes setting.
-
-        Args:
-            source: Network source type ("meshtastic", "mqtt", "rns", "aredn")
-
-        Returns:
-            Threshold in seconds
-        """
-        key = f"{source}_threshold_minutes"
-        defaults = {
-            "meshtastic": self.DEFAULT_MESHTASTIC_THRESHOLD_MINUTES,
-            "mqtt": self.DEFAULT_MQTT_THRESHOLD_MINUTES,
-            "rns": self.DEFAULT_RNS_THRESHOLD_MINUTES,
-            "aredn": self.DEFAULT_AREDN_THRESHOLD_MINUTES,
-        }
-        default = defaults.get(source, self.DEFAULT_ONLINE_THRESHOLD_MINUTES)
-        if self._settings:
-            minutes = self._settings.get(key, default)
-        else:
-            minutes = default
-        return int(minutes * 60)
-
-    @staticmethod
-    def _coerce_epoch(v) -> float:
-        """Best-effort convert a timestamp to a Unix-epoch float.
-
-        Accepts int/float, a numeric string, or an ISO-8601 string; returns 0.0
-        (== "unknown") for anything unparseable, and NEVER raises. A source cache
-        can carry a timestamp as an ISO string; passing that into a `<= 0`
-        comparison raises TypeError, which a collector's `except` turns into a
-        DROPPED node — worse than rendering it offline. (QA audit 2026-07-06.)"""
-        if v is None or isinstance(v, bool):
-            return 0.0
-        if isinstance(v, (int, float)):
-            return float(v)
-        if isinstance(v, str):
-            s = v.strip()
-            if not s:
-                return 0.0
-            try:
-                return float(s)
-            except ValueError:
-                pass
-            try:
-                from datetime import datetime
-                return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
-            except ValueError:
-                return 0.0
-        return 0.0
-
-    def _is_node_online(self, last_heard, source: str = "meshtastic") -> bool:
-        """Determine if a node is online based on last_heard timestamp.
-
-        Single source of truth for online status determination.
-        Uses per-source thresholds for accurate status across network types.
-
-        Args:
-            last_heard: Unix timestamp (0/None/unparseable = unknown). Coerced
-                defensively — a non-numeric value must never raise out of the SSOT.
-            source: Network source type for threshold lookup
-
-        Returns:
-            True if the node was heard within the source's threshold window
-        """
-        last_heard = self._coerce_epoch(last_heard)
-        if not last_heard or last_heard <= 0:
-            return False
-        age = time.time() - last_heard
-        # A forgeable/hostile FUTURE timestamp (clock skew or an injected "last
-        # seen 2099") makes age negative → online forever. Reject anything
-        # meaningfully in the future; a small negative (benign skew) still counts
-        # as fresh. (QA audit 2026-07-06.)
-        if age < -_ONLINE_FUTURE_SKEW_TOLERANCE_S:
-            return False
-        threshold = self.get_source_threshold_seconds(source)
-        return age < threshold
-
-    def get_meshtasticd_host(self) -> str:
-        """Get meshtasticd host setting."""
-        if self._settings:
-            return self._settings.get("meshtasticd_host", self.DEFAULT_MESHTASTICD_HOST)
-        return self.DEFAULT_MESHTASTICD_HOST
-
-    def get_meshtasticd_port(self) -> int:
-        """Get meshtasticd port setting."""
-        if self._settings:
-            return int(self._settings.get("meshtasticd_port", self.DEFAULT_MESHTASTICD_PORT))
-        return self.DEFAULT_MESHTASTICD_PORT
-
-    def get_meshtasticd_tcp_collect_timeout_seconds(self) -> float:
-        """Wall-clock cap for the meshtasticd TCP collect (connect + nodedb sync).
-
-        Bounds how long a wedged daemon can hold ``_collect_lock``. See
-        ``DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS`` for the why.
-        """
-        if self._settings:
-            return float(self._settings.get(
-                "meshtasticd_tcp_collect_timeout_seconds",
-                self.DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS,
-            ))
-        return float(self.DEFAULT_MESHTASTICD_TCP_COLLECT_TIMEOUT_SECONDS)
-
-    def set_meshtasticd_connection(self, host: str, port: int) -> bool:
-        """Set meshtasticd connection. True iff persisted; False on missing
-        settings backend (no-op) or failed save (#74 caller-honesty)."""
-        if not self._settings:
-            logger.warning("set_meshtasticd_connection(%s:%s): no settings backend; not persisted", host, port)
-            return False
-        self._settings.set("meshtasticd_host", host)
-        self._settings.set("meshtasticd_port", port)
-        ok = self._settings.save()
-        if ok:
-            logger.info(f"Meshtasticd connection set to {host}:{port}")
-        return ok
 
     def get_nodes_without_position(self) -> List[Dict]:
         """Get list of nodes that have no GPS position.
