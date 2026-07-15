@@ -135,9 +135,11 @@ class TestLiveRepoContract:
         assert stale == [], stale
 
     def test_baseline_never_grows_check(self):
-        """The frozen counts must match the 2026-07-13 freeze exactly —
-        editing an entry upward is the forbidden move this test pins."""
+        """The frozen counts must match the freeze exactly — editing an entry
+        upward is the forbidden move this test pins. prometheus_exporter.py was
+        split out (2026-07-14, HTTP handler → metrics_http_handler.py) and its
+        entry deleted; a deletion via a real split is the sanctioned way the
+        baseline moves."""
         assert lint.MF025_BASELINE == {
             'src/utils/map_data_collector.py': 1554,
-            'src/utils/prometheus_exporter.py': 1534,
         }

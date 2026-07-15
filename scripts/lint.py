@@ -859,10 +859,11 @@ def check_bounded_collect_chokepoint(repo_root: str = '.') -> List[LintIssue]:
 # ─────────────────────────────────────────────────────────────────────────
 MF025_LINE_LIMIT = 1_500
 
-# Frozen 2026-07-13. Entries may only shrink or be deleted.
+# Frozen 2026-07-13. Entries may only shrink or be deleted — NEVER add one to
+# grant headroom; split the file. prometheus_exporter.py split its HTTP handler
+# into metrics_http_handler.py (2026-07-14) → dropped under the cap → entry DELETED.
 MF025_BASELINE = {
     'src/utils/map_data_collector.py': 1554,
-    'src/utils/prometheus_exporter.py': 1534,
 }
 
 
