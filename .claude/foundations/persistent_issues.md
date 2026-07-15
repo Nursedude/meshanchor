@@ -31,6 +31,7 @@ Full history in `persistent_issues_archive.md`.
 | #19 RNS path_table discovery | `path_table` not `destinations`; delayed re-checks. Body in archive | — |
 | #27 rnsd is OPTIONAL | Two independent transports (MQTT, RNS); preset bridging needs only mosquitto. Body in archive | — |
 | GTK Issues (#2, #11, #13–#15) | GTK4 removed in v0.5.x | — |
+| #34 map handler thread pile-up | Slow-peer `/fleet/rollup` piled 526 handler threads; `/fleet/slo` timed out while `/healthz` stayed fast. In-flight semaphore cap-8 (#128) is the gating fix; restart `meshanchor-map` to recover. Body in archive | commits `8fa73309`+`3787d977` |
 
 ---
 
@@ -278,111 +279,6 @@ keep raw `MeshCore.create_serial`/`serial.Serial(...)` out of the tree.
 Supervisor IPC contract in `src/supervisor/protocol.py` (NDJSON, Unix
 socket at `/run/meshcore-radio/meshcore-radio.sock`) for cross-process
 consumers. **Full writeup**: `persistent_issues_archive.md` Issue #33.
-
----
-
-## Issue #34: meshanchor-map handler thread leakage under slow-peer rollup (2026-05-16)
-
-**Observed**: meshanchor-server's `meshanchor-map.service` ran for ~4 h
-(09:31 → 13:30 HST) and degraded into a state where:
-- Main thread saturated at ~110 % CPU continuously.
-- **526 sleeping handler threads** accumulated (against the design
-  one-thread-per-request shape of ThreadingHTTPServer + `daemon_threads=True`).
-- `/healthz` stayed fast (200 in ~2 ms; zero-work fast path) while
-  `/api/status`, `/fleet/health`, and `/fleet/slo` all timed out (5-15 s,
-  HTTP 000 / no response). RSS 760 MB.
-- BrokenPipeError visible in the journal — clients disconnect mid-response,
-  but the server's handler thread keeps running.
-
-**Trigger**: same wall-clock window as the moc1 rnsd-RPC wedge recurrence
-(MeshForge `project_rnsd_rpc_listener_wedge` #3, 2026-05-16). The
-fleet-rollup endpoint polls every peer in `~/.config/meshanchor/fleet.json`
-serially with `PEER_HTTP_TIMEOUT_S = 3.0` (`src/monitoring/fleet_rollup.py`).
-With ~7 peers in fleet.json and one peer wedged, each `/fleet/rollup` call
-holds a handler thread for 21 s worst-case. Dashboard polls at ~5 s; the
-arrival rate exceeds the drain rate, threads pile up indefinitely.
-
-**Why daemon_threads=True wasn't enough**: that flag only governs
-shutdown — daemon threads die when the server stops. While running,
-handlers stay alive until `do_GET` returns. A handler blocked in
-`urllib.request.urlopen()` against a wedged peer pins the thread for
-the full timeout window. Multiple endpoints (`/fleet/health`,
-`/fleet/slo`, `/fleet/rollup`) all share this pattern.
-
-**Symptom shape on the rollup itself**: per the operator's `/fleet`
-dashboard, peer rows show `peer fetch: timeout: timed out` — which is
-the *handler's* outbound urllib timeout against the wedged peer, NOT a
-connection-refused or DNS failure. Distinguishing this shape from the
-moc1 case (where moc1 itself was the wedged peer) matters: the moc1
-case is "this host is the cause," the MA-server case is "this host is
-downstream of the cause but its handlers are stuck upstream of
-recovery."
-
-**Immediate recovery** (verified 2026-05-16 13:30 HST):
-```bash
-ssh meshanchor-server 'sudo systemctl restart meshanchor-map.service'
-```
-Post-restart: 11 threads, `/fleet/slo` returns in 870 ms.
-
-**Open follow-ups** (tracked as GitHub issues 2026-05-16):
-1. [#126](https://github.com/Nursedude/meshanchor/issues/126) — concurrent
-   peer fetches in `collect_fleet_rollup`. Worst-case latency goes from
-   `N × timeout` to `timeout`.
-2. [#127](https://github.com/Nursedude/meshanchor/issues/127) — tighten
-   `PEER_HTTP_TIMEOUT_S` from 3.0 s to 1.5 s. Healthy peers respond in
-   sub-200 ms; a wedged peer never recovers within the 1.5-3 s window.
-3. ✅ [#128](https://github.com/Nursedude/meshanchor/issues/128)
-   **SHIPPED 2026-05-16 (commits `8fa73309` + `3787d977`)** —
-   in-flight semaphore on `/fleet/{rollup,slo,health,activity}`.
-   Default cap 8 (raised from initial 4 after the first deploy
-   produced visible 429 errors on natural dashboard load — the fast
-   tick polls 2 gated endpoints every 5 s, the slow tick polls 1
-   gated endpoint every 15 s, so 3 gated handlers can be in flight
-   simultaneously every 15 s when ticks align; cap=4 left no
-   headroom). Excess requests return 429 + `Retry-After: 2`.
-   Dashboard `fetchJson` treats 429 as a `TRANSIENT_BUSY` sentinel
-   and skips render-and-error-card update (`web/fleet.html`
-   commit `3787d977`) so transient cap-hits no longer surface as
-   user-facing errors. Synthetic 10-parallel `/fleet/rollup` burst:
-   8 × 200 + 2 × 429. 4-minute 4-parallel-per-second soak: thread
-   count stable at 12-13 (previously climbed past 200 in minutes);
-   `/fleet/slo` 200 in 300 ms under load.
-   `meshanchor_map_fleet_heavy_busy_total` exposes the 429 counter
-   for over-polling alerts. **This is the gating fix.** Daily restart
-   timer (commit `c9cb1a5a`) can be retired once multi-day soak
-   confirms steady-state stability.
-4. [#129](https://github.com/Nursedude/meshanchor/issues/129) — port
-   MeshForge's `cascade_detector` to MA. Surfaces the pre-failure shape
-   one cadence after the threshold so MA-server alarms *before* its
-   rollup-handler threads start piling up. Audit `MapServer.start()` +
-   `start_background()` BOTH — MF shipped 79f5d7b with the call only
-   in `start_background()` (commit 368e591 caught it).
-5. [#130](https://github.com/Nursedude/meshanchor/issues/130) — fix
-   `non_self_peers()` to filter self by host+port, not just by name.
-   Discovered 2026-05-16 (post-restart recurrence of #34): MA-server's
-   fleet.json carried a `"name": "meshanchor-server-self"` self entry
-   that the filter missed, so every `/fleet/rollup` HTTP-polled its
-   own listener — doubling the thread arrival rate and recreating the
-   pile-up in ~8 min after each restart. Local mitigation: dropped the
-   self entry from `~/.config/meshanchor/fleet.json` on MA-server
-   (post-mitigation: /fleet/rollup 4s steady, 13 threads, blackout
-   banner cleared).
-6. [#131](https://github.com/Nursedude/meshanchor/issues/131) —
-   pile-up recurs even with healthy peers. Second post-restart
-   recurrence 2026-05-16 ~14:25 HST: 228 threads in 36 min with all 5
-   fleet peers responding in 91-260 ms (no wedged peer, no
-   self-loopback). Sustained dashboard polling alone is enough on
-   Pi-class hardware to saturate the GIL and starve handler threads.
-   Strengthens [#128](https://github.com/Nursedude/meshanchor/issues/128)
-   (in-flight semaphore) as the *gating* fix — #126 and #127 reduce
-   per-rollup latency but neither caps concurrent in-flight handlers.
-   Restart cadence today: 13:30 -> 13:50 (re-piled, fixed self-loop) ->
-   14:25 (re-piled w/ healthy peers). **Recurrence is expected until
-   #128 lands**; rely on `meshforge-map-restart.timer`-equivalent
-   weekly + ad-hoc operator restart in the meantime.
-
-**Cross-refs**: MF `project_rnsd_rpc_listener_wedge.md` (the upstream
-cause class — recurrent on moc1).
 
 ---
 
@@ -795,6 +691,14 @@ wires a `try-restart` of `meshanchor-echo` (user) + a `CODE_CHANGED`-gated resta
 of SYSTEM `meshanchor`/`-map` (docs-only pulls don't bounce the NOC). Interactive
 tmux panes + external wrappers are NOT auto-restarted. Guard `TestDeployRestartHook`
 (§3b-ii, red-test-first). `845269ed`/`8d354b31`. Full body: MeshForge #79.
+
+---
+
+## fleet_watchdog frozen-flap — "uptime_s missing" fired on a single missing sample (2026-07-15)
+
+`meshanchor-fleet-watchdog` (`monitoring/fleet_watchdog.py`) paged a `frozen: uptime_s missing in recent heartbeats` BLACKOUT off `any(u is None)` across the last 3 heartbeats — flapping ~10×/day on .29 from just **14 NULL uptime_s rows in 10,132 heartbeats (0.14%)**. Root cause = honest_failure_modes class: `fleet_collector.collect_once` records a heartbeat even when a `/fleet/slo` fetch times out (`slo={}` → `uptime_s=NULL`, stored honestly, never a fake 0); its fresh `ts` hides the row from `http_dead`; the watchdog then read that lone degraded sample as a definitive freeze. **Cure** (commit `bdad6e02`): FROZEN now needs POSITIVE evidence — judge advancement on OBSERVED (non-None) values; a partial/transient gap ABSTAINS (a missing sample is not a stuck counter, #1/#2); only a FULL window of all-None still surfaces the "missing" signal (uptime source dark — do not swallow, #9); stuck-value + daemon-restart cases unchanged. Tests: 3 added, red-first (`tests/test_fleet_watchdog.py`).
+
+**Quick check** — a lone `frozen` blackout while `/fleet/slo` still serves a healthy `uptime_s` is THIS false-positive class (restart NOT needed, it self-clears): `curl -s localhost:5000/fleet/blackouts?active_only=1`; in the DB, rare `NULL uptime_s` heartbeat rows interspersed with good ones (`SELECT COUNT(*) FROM heartbeat WHERE uptime_s IS NULL`). Single-instance watchdog — runs only on `meshanchor-server` (.29). MeshAnchor-only (no MF fleet_watchdog twin).
 
 ---
 
