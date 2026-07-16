@@ -25,6 +25,7 @@ Checks:
 - MF024: version SSOT vs pyproject/README badge+heading drift (delegates to scripts/version_consistency_check.py; ported from MeshForge 2026-07-07)
 - MA022: bare/exit-code-masked pip & swallowed apt in shell installers (must route through scripts/lib/install_common.sh — pip-presence + PEP 668 + checked rc; install-hardening arc, ported from MeshForge MF022)
 - MF025: file-size ratchet — src/ python files over 1,500 lines (frozen 2026-07-13 baseline for the 2 known offenders, which may only shrink; split the file, never raise the cap; ported from MeshForge MF025)
+- MF026: config/state torn-write guard — os.O_TRUNC banned + non-atomic config `open("w")` ratcheted vs a frozen baseline (route through utils.paths.atomic_write_text; ported from MeshForge MF026)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -903,6 +904,84 @@ def check_file_size_ratchet(files: List[str], repo_root: Optional[str] = None) -
     return issues
 
 
+# MF026: config/state persistence must be ATOMIC. Ported from MeshForge (which
+# ported it from the meshing_around_meshforge client repo, 2026-07-16 MED3): a
+# CONFIG or STATE file written with a truncating in-place write (os.O_TRUNC, or
+# `open(path, "w")` + json/yaml.dump / .write) is left torn or empty if the box
+# loses power mid-write — a real event on the fleet's SD-card Pis. Route through
+# `utils.paths.atomic_write_text` (temp-in-same-dir + fsync + os.replace).
+#
+# Two legs: (1) `os.O_TRUNC` BANNED outright. (2) `open(<config path>, "w")` is
+# ratcheted against a FROZEN baseline (MF025-style); the hints separate real
+# config writes from the repo's benign report/cache/pid/log writes. Baseline only
+# SHRINKS; a NEW config write fails. A genuinely-atomic line (writes a temp it
+# then os.replace()s) may carry a trailing `# atomic-write-ok` marker.
+MF026_OTRUNC = re.compile(r'\bos\.O_TRUNC\b')
+MF026_OPENW = re.compile(r'open\(([^,]+),\s*["\']w["\']')
+MF026_HINT = re.compile(r'(conf|config|overlay|state|settings|deployment|acl|credential|psk)', re.I)
+MF026_EXCL = re.compile(
+    r'(output|tmp|temp|cache|pid|log|report|\.html|\.csv|\.geojson|\.png|'
+    r'nodes_path|edges_path|visuali[sz]|export|history|snapshot|status)', re.I)
+MF026_MARKER = '# atomic-write-ok'
+
+# Frozen 2026-07-16. Entries may only SHRINK (route the write through
+# atomic_write_text and drop the entry) — never add one to grant headroom.
+MF026_BASELINE = {
+    'src/gateway/config.py': 1,
+    'src/launcher.py': 1,
+    'src/launcher_tui/handlers/ai_tools.py': 1,
+    'src/launcher_tui/handlers/mqtt.py': 1,
+    'src/monitor.py': 1,
+    'src/plugins/eas_alerts.py': 1,
+    'src/utils/webhooks.py': 1,
+}
+
+
+def check_config_atomicity(files: List[str], repo_root: Optional[str] = None) -> List[LintIssue]:
+    """MF026: torn-write guard for config/state persistence (see notes above)."""
+    if repo_root is None:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    issues: List[LintIssue] = []
+    for f in files:
+        rel = os.path.relpath(f, repo_root) if os.path.isabs(f) else f
+        rel = rel.replace(os.sep, '/')
+        if not rel.startswith('src/') or not rel.endswith('.py'):
+            continue
+        if not os.path.isfile(f):
+            continue
+        try:
+            with open(f, 'r', encoding='utf-8', errors='ignore') as fh:
+                lines = fh.read().splitlines()
+        except (IOError, OSError):
+            continue
+        config_writes = 0
+        for i, line in enumerate(lines, 1):
+            if MF026_MARKER in line:
+                continue
+            if MF026_OTRUNC.search(line):
+                issues.append(LintIssue(
+                    rel, i, Severity.ERROR, "MF026",
+                    "os.O_TRUNC truncating write — route through "
+                    "utils.paths.atomic_write_text (temp + os.replace).",
+                ))
+                continue
+            m = MF026_OPENW.search(line)
+            if m and MF026_HINT.search(m.group(1)) and not MF026_EXCL.search(m.group(1)):
+                config_writes += 1
+        baseline = MF026_BASELINE.get(rel, 0)
+        if config_writes > baseline:
+            frozen = rel in MF026_BASELINE
+            issues.append(LintIssue(
+                rel, 0, Severity.ERROR, "MF026",
+                f"{config_writes} non-atomic config/state open('w') write(s) — "
+                f"baseline {baseline}. Route new config/state writes through "
+                f"utils.paths.atomic_write_text (temp + fsync + os.replace). The "
+                f"baseline only shrinks"
+                + (" (this file has a frozen baseline)." if frozen else "."),
+            ))
+    return issues
+
+
 def main():
     parser = argparse.ArgumentParser(description='MeshAnchor Linter')
     parser.add_argument('files', nargs='*', help='Files to lint')
@@ -956,6 +1035,10 @@ def main():
     # whole-tree and --staged modes — a file blowing past the cap must fail
     # in the same commit that grew it.
     issues.extend(check_file_size_ratchet(files))
+
+    # MF026: config/state torn-write guard (O_TRUNC ban + non-atomic config
+    # open('w') ratchet). Ported from MeshForge; cheap per-file scan, both modes.
+    issues.extend(check_config_atomicity(files))
 
     # MF023: bounded-collect chokepoint. Scans one fixed file (cheap), so run
     # it in both whole-tree and --staged modes — an unbounded interface create
