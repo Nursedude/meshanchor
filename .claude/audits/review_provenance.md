@@ -41,3 +41,20 @@
    re-review in the row.
 4. A PORT from MeshForge covers only the ported findings — say so, so the rest
    of the MA file stays legibly "never-reviewed."
+
+## Frontier worklist — queued upshift ranges (added 2026-07-16 with the upshift-witness gate port)
+
+> The model advisor's upshift path lands HERE: when a session judges work
+> review-shaped but isn't running on a frontier-class model, it appends a row
+> instead of faking the pass (enforced by `scripts/review_provenance_check.py`
+> in the pre-push hook — twin of MeshForge's, ported 2026-07-16 after its
+> first live firing there). Next frontier session: pick from the top. Remove
+> a row only by running the pass (its results become a row in the table above).
+>
+> Note: the 2026-07-13→16 Opus-interregnum range of THIS repo
+> (`417d57ad..a1f32f93`) was already reviewed by the MeshForge-side pass
+> (MF ledger row 2026-07-16) — MA scope was in that row, twin-first.
+
+| Pri | Scope | Why it's frontier-shaped |
+|-----|-------|--------------------------|
+| — | _(add new upshift rows here as sessions surface review-shaped work)_ | |

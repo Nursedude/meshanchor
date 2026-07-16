@@ -50,4 +50,21 @@ if [ "$rc" -ne 0 ]; then
     echo "  git push --no-verify"
     exit 1
 fi
+
+# Upshift-witness — compiles model_advisor's "queue, don't fake the frontier
+# pass" behavior into a deterministic gate (scripts/review_provenance_check.py,
+# twin-ported byte-identical from MeshForge 2026-07-16 after its first live
+# firing there): leg 1 (review-claim commits must leave a provenance row) and
+# leg 2 (a non-frontier session can't stamp a frontier-tier row) block; leg 3
+# is an advisory nudge. Fails OPEN (warn, exit 0) on anything unobservable.
+# The script prints its own remediation incl. the sanctioned rule-6 unblock
+# and the --no-verify override, so the hook just relays its exit code.
+if [ -f "$REPO_ROOT/scripts/review_provenance_check.py" ]; then
+    echo "Pre-push: upshift-witness (review provenance)..."
+    if ! python3 "$REPO_ROOT/scripts/review_provenance_check.py"; then
+        echo ""
+        echo "Upshift-witness gate FAILED (see above)."
+        exit 1
+    fi
+fi
 exit 0
