@@ -5,6 +5,29 @@
 
 ---
 
+## RNS/LXMF substrate: 1.3.8/1.0.1 merge arc — CANARY LIVE on moc3 (2026-07-17)
+
+MeshForge is the LEAD repo for the RNS-reliability arc; full record lives there
+(`meshforge/.claude/research/rns_138_merge_eval_2026_07_16.md` + its
+persistent_issues fork section). MA-relevant facts:
+
+- **moc3 (an MF-only box, no MA presence) canaries rns `1.3.8+mf.0` / lxmf
+  `1.0.1+mf.0`** — interop proven (cross-version LXMF round-trips incl. via a
+  public transport node). Its `rns_version_drift` page is DELIBERATE.
+- **Do NOT bump MA's `requirements/rns.txt` pin until the fleet roll.** The
+  MF-FORK-PIN block is byte-locked to MF's by `parity_check` — at roll time
+  BOTH repos' pins move in the SAME window, or `parity_drift` fires.
+- **Roll gate on MA boxes (meshanchor-server + any MA checkout)**: the RPC
+  wire format changed pickle→msgpack between `1.2.5+mf.5` and `1.3.8+mf.0`,
+  so flip rnsd + EVERY RNS-importing process together, rnsd-first — MA daemons
+  (`meshanchor`, `meshanchor-map`) are rnsd clients and restart with the box.
+  Also flip **pipx venvs** (nomadnet's venv on moc3 was silently stock rns
+  1.1.4, invisible to the drift probe — enumerate every box's venvs at roll).
+  LXMF 1.0.1 is byte-identical-adopt, no `canonical_message`/FIELD impact;
+  MF+MA share the installed LXMF so both move together by construction.
+
+---
+
 ## Archived / Fully Resolved Issues
 
 The following are **RESOLVED** with automated prevention (linter + regression tests).
