@@ -217,7 +217,10 @@ def _mini_short(snap: NocSnapshot) -> str:
     if snap.mini_stale:
         return f"mini:stale{_age(snap.mini_age_s)}"
     if snap.mini_error_count:
-        return f"mini:err{snap.mini_error_count}"
+        subjects = ",".join(
+            e.split(":", 1)[0] for e in snap.mini_source_errors[:3])
+        return (f"mini:err{snap.mini_error_count}"
+                + (f"({subjects})" if subjects else ""))
     return f"mini:{len(snap.mini_active)}act"
 
 

@@ -102,6 +102,7 @@ class NocSnapshot:
     mini_stale: bool = False
     mini_active: List[Dict[str, Any]] = field(default_factory=list)
     mini_error_count: Optional[int] = None
+    mini_source_errors: List[str] = field(default_factory=list)
     mini_reason: Optional[str] = None
 
     # fleet posture (optional; from an injected /api/status dict)
@@ -183,6 +184,12 @@ def _fill_mini(snap: NocSnapshot, path: Path) -> Optional[dict]:
     snap.mini_stale = stale
     snap.mini_active = active
     snap.mini_error_count = payload.get("error_count")
+    # MeshForge mini >= 3085ee5d names the failing sources ("subject: detail");
+    # older state files simply lack the key — count stays authoritative.
+    raw_errs = payload.get("source_errors")
+    snap.mini_source_errors = (
+        [str(e) for e in raw_errs] if isinstance(raw_errs, list) else []
+    )
     snap.mini_ok = not stale
     if stale and age is not None:
         snap.mini_reason = f"stale {age:.0f}s (threshold {MINI_STALE_S:.0f}s)"

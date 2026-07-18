@@ -82,6 +82,22 @@ def test_status_partial_federation_ok_unknown():
     assert "fed:?/4" in out
 
 
+def test_status_names_mini_source_errors():
+    # MeshForge mini >= 3085ee5d names failing sources; the status token
+    # surfaces the subjects so a transient is identifiable, capped at 3.
+    snap = _snap(
+        mini_error_count=1,
+        mini_source_errors=["watchdog: /var/lib/meshforge/watchdog.json "
+                            "unreadable: not found"])
+    assert "mini:err1(watchdog)" in answer("status", snap)
+    many = _snap(mini_error_count=5,
+                 mini_source_errors=[f"s{i}: boom" for i in range(5)])
+    assert "mini:err5(s0,s1,s2)" in answer("status", many)
+    # older state file (no source_errors key) -> bare count, no parens
+    assert "mini:err2" in answer("status", _snap(mini_error_count=2))
+    assert "mini:err2(" not in answer("status", _snap(mini_error_count=2))
+
+
 # --------------------------------------------------------------------------- #
 # whatsup
 # --------------------------------------------------------------------------- #
@@ -383,6 +399,17 @@ def test_read_snapshot_reads_files_and_derives_box(tmp_path):
     assert snap.mini_installed and snap.mini_ok
     assert len(snap.mini_active) == 1 and snap.mini_active[0]["rule_id"] == "r1"
     assert snap.box == "boxA"
+    assert snap.mini_source_errors == []  # key absent -> empty, never None
+
+
+def test_read_snapshot_parses_named_source_errors(tmp_path):
+    (tmp_path / "mini_dudeai_state.json").write_text(json.dumps(
+        {"host": "boxA", "last_tick_ts": 9_990.0, "error_count": 1,
+         "source_errors": ["watchdog: state unreadable: not found"],
+         "rules": {}}))
+    snap = read_snapshot(home=tmp_path, watchdog_path=tmp_path / "wd.json",
+                         now=10_000.0)
+    assert snap.mini_source_errors == ["watchdog: state unreadable: not found"]
 
 
 def test_read_snapshot_marks_stale(tmp_path):
