@@ -285,7 +285,7 @@ class MapRequestHandler(
             "/api/radio/info", "/api/radio/nodes",
             "/api/radio/channels", "/api/radio/status",
             "/fleet", "/fleet.html",
-            "/fleet/health", "/fleet/slo", "/fleet/activity",
+            "/fleet/health", "/fleet/slo", "/api/fleet/truth", "/fleet/activity",
             "/fleet/rollup", "/fleet/federation",
             "/fleet/history", "/fleet/blackouts",
             "/fleet/logs", "/fleet/tests", "/fleet/run-test",
@@ -441,6 +441,8 @@ class MapRequestHandler(
             self._serve_fleet_health()
         elif self.path == '/fleet/slo' or self.path == '/fleet/slo/':
             self._serve_fleet_slo()
+        elif self.path == '/api/fleet/truth' or self.path == '/api/fleet/truth/':
+            self._serve_fleet_truth()
         elif self.path == '/fleet/activity' or self.path == '/fleet/activity/':
             self._serve_fleet_activity()
         elif self.path == '/fleet/rollup' or self.path == '/fleet/rollup/':

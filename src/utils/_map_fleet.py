@@ -220,6 +220,27 @@ class FleetEndpointsMixin:
         self._serve_json(slo_view(snap))
 
     @heavy_gate
+    def _serve_fleet_truth(self) -> None:
+        """Serve the honest fleet-truth SSOT (`/api/fleet/truth`).
+
+        The tri-state (healthy/failed/DARK) whole-domain truth layer, built
+        by the SHARED `utils.fleet_truth` builder (byte-identical with
+        MeshForge, pinned by the lead repo's parity_check) over MeshAnchor's
+        own fan-out (`fleet.json` peers — the domain-specific collector).
+        Default-dark: a peer that can't be reached is a DARK box, an
+        incomplete fan-out forces the verdict non-green, and "no data" can
+        never read healthy. Carries peer display names + a resolution label
+        only — never the configured host (may be a raw IP; MF014/MF015).
+        """
+        from monitoring.fleet_config import DEFAULT_PEER_PORT
+        from utils.fleet_truth_collector import get_fleet_truth
+        try:
+            port = int(getattr(self.server, "server_port", 0)) or DEFAULT_PEER_PORT
+        except (TypeError, ValueError):
+            port = DEFAULT_PEER_PORT
+        self._serve_json(get_fleet_truth(self_port=port))
+
+    @heavy_gate
     def _serve_fleet_activity(self) -> None:
         """Live-feed surface for the dashboard's lower panel."""
         from monitoring.fleet_aggregator import activity_view
