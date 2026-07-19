@@ -74,6 +74,31 @@ class TestCollectSnapshots:
         assert len(self_rows) == 1
 
 
+class TestIpNameMasking:
+    def test_ip_shaped_peer_name_never_becomes_the_alias(self):
+        """2026-07-19 adversarial review (MF014/MF015): an IP-shaped NAME in
+        fleet.json must not surface as the box alias."""
+        import re
+
+        class FakePeer:
+            name = "203.0.113.9"
+            def base_url(self):
+                return "http://203.0.113.9:5001"
+
+        class FakeCfg:
+            def non_self_peers(self, *, hostname=None):
+                return [FakePeer()]
+
+        with patch.object(c, "_http_get_json", return_value=None), \
+             patch("monitoring.fleet_config.load_fleet_config",
+                   return_value=FakeCfg()):
+            snaps, _ = c.collect_snapshots(self_port=5001)
+        peer_rows = [s for s in snaps if s["resolution_method"] == "config"]
+        assert len(peer_rows) == 1
+        assert peer_rows[0]["alias"].startswith("ip-entry-")
+        assert not re.search(r"\d+\.\d+\.\d+\.\d+", repr(peer_rows[0]))
+
+
 class TestCache:
     def setup_method(self):
         c._cache["truth"] = None

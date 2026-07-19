@@ -22,7 +22,10 @@ Honesty properties carried over from the lead implementation:
 """
 from __future__ import annotations
 
+import hashlib
+import http.client
 import json
+import re
 import socket
 import threading
 import time
@@ -38,6 +41,38 @@ logger = get_logger(__name__)
 PEER_TIMEOUT_S = 3.0     # same budget as the MF twin; Pi-class /fleet/slo fits
 CACHE_TTL_S = 12.0
 MAX_WORKERS = 16
+# Bounded read (2026-07-19 adversarial review): a byte-dripping or huge-body
+# peer must not hang the fan-out (the lock is held across it) nor buffer
+# unbounded bytes. Both caps are far above any legitimate truth-fan-out body.
+MAX_BODY_BYTES = 8 * 1024 * 1024
+READ_DEADLINE_S = 10.0
+
+_IPV4_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+
+
+def _mask_ip_alias(alias: str) -> str:
+    """An IP-shaped fleet.json peer NAME must never surface as the box alias
+    (MF014/MF015 — the schema carries names, never addresses). Deterministic
+    non-reversible label so the operator can still correlate entries."""
+    return "ip-entry-" + hashlib.sha1(alias.encode()).hexdigest()[:6]
+
+
+def _read_bounded(resp, max_bytes: int, deadline_s: float) -> bytes:
+    """Read a response with a total-wall deadline and a size cap. The socket
+    timeout bounds each recv; this bounds the WHOLE read (drip-feed peers)."""
+    deadline = time.monotonic() + deadline_s
+    chunks: List[bytes] = []
+    total = 0
+    while True:
+        if time.monotonic() > deadline:
+            raise TimeoutError("bounded read deadline exceeded")
+        chunk = resp.read(65536)
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError("response exceeds size cap")
+        chunks.append(chunk)
 
 # MeshAnchor has no SIGNAL_CLASSES-style closed enum (its watchdog speaks
 # blackout-rows-by-kind, not per-class signals). Empty = the builder's
@@ -51,10 +86,11 @@ def _http_get_json(url: str, timeout: float) -> Optional[Dict[str, Any]]:
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (LAN)
-            body = r.read()
+            body = _read_bounded(r, MAX_BODY_BYTES, READ_DEADLINE_S)
         data = json.loads(body)
         return data if isinstance(data, dict) else None
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+    except (urllib.error.URLError, http.client.HTTPException, OSError,
+            ValueError, TimeoutError) as e:
         logger.debug("fleet_truth fetch failed %s: %s", url, e)
         return None
 
@@ -88,7 +124,10 @@ def collect_snapshots(*, self_port: int) -> "tuple[List[Dict[str, Any]], int]":
     declared = len(peers) + 1  # + self
 
     jobs = [(self_host, f"http://127.0.0.1:{self_port}", "self")] + [
-        (p.name, p.base_url(), "config") for p in peers
+        # MF014/MF015: an IP-shaped peer NAME must not become the served alias.
+        (_mask_ip_alias(p.name) if _IPV4_RE.match(p.name) else p.name,
+         p.base_url(), "config")
+        for p in peers
     ]
     snapshots: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as ex:
@@ -117,10 +156,13 @@ def get_fleet_truth(*, self_port: int, ttl_s: float = CACHE_TTL_S,
     """Return the current fleet-truth document, refreshing via fan-out when
     the TTL has expired. Thread-safe single-flight. Never raises — a build
     error yields a self-describing dark document rather than a 500."""
-    now = time.time()
+    # TTL runs on the MONOTONIC clock (2026-07-19 review): RTC-less Pis take
+    # NTP steps, and a wall-clock TTL would serve a frozen doc as fresh for
+    # the whole backstep (honest_failure_modes #6).
+    now_mono = time.monotonic()
     with _lock:
         cached = _cache["truth"]
-        if not force and cached is not None and (now - _cache["built_at"]) < ttl_s:
+        if not force and cached is not None and (now_mono - _cache["built_at"]) < ttl_s:
             return cached
         try:
             from utils.fleet_truth import build_fleet_truth
@@ -131,10 +173,16 @@ def get_fleet_truth(*, self_port: int, ttl_s: float = CACHE_TTL_S,
                 noc_host=socket.gethostname(),
                 hosts_declared=declared, ttl_s=ttl_s,
             )
+            # Membership transparency (2026-07-19 adversarial review): an
+            # empty fleet.json peers list means a 1-box view — surface the
+            # mode so a healthy fleet-of-one can't masquerade as a watched
+            # fleet (a lost/empty config is indistinguishable from a
+            # deliberately standalone box; say which world we're in).
+            truth["fanout"]["membership"] = "fleet" if declared > 1 else "standalone"
         except Exception as e:
             logger.error("fleet_truth build failed: %s", e)
             truth = {
-                "schema": "fleet_truth/v1", "generated_at": now,
+                "schema": "fleet_truth/v1", "generated_at": time.time(),
                 "noc_host": socket.gethostname(),
                 "fleet_state": "dark",
                 "fanout": {"hosts_declared": None, "hosts_answered": 0,
@@ -143,5 +191,5 @@ def get_fleet_truth(*, self_port: int, ttl_s: float = CACHE_TTL_S,
                 "boxes": [], "structural_dark": [],
             }
         _cache["truth"] = truth
-        _cache["built_at"] = time.time()
+        _cache["built_at"] = time.monotonic()
         return truth
