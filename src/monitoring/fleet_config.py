@@ -28,10 +28,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,57 @@ DEFAULT_FEDERATION_FRESH_WINDOW_S = 7200
 """Show federation peers heard within this window. 2h is enough to
 cover routine LXMF announce intervals without flooding the panel with
 stale entries on a quiet network."""
+
+
+# ── Positive self-identity check (2026-07-19 non_self_peers fix) ─────────
+_IPV4_LITERAL_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+
+# Memoized per-host verdicts — resolution can be slow on dead DNS and
+# non_self_peers sits in the dashboard poll path. TTL keeps a NIC/DNS
+# change from sticking forever.
+_SELF_IP_CACHE: Dict[str, Tuple[float, bool]] = {}
+_SELF_IP_CACHE_TTL_S = 300.0
+
+
+def _resolve_ips(host: str) -> List[str]:
+    """Best-effort resolution of ``host`` to IPs; [] on failure (identity
+    unknown). An IP literal resolves to itself instantly — no DNS."""
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        return sorted({i[4][0] for i in infos})
+    except OSError:
+        return []
+
+
+def _ip_is_local(ip: str) -> bool:
+    """Positive ownership test: binding to an address this box owns
+    succeeds; binding to a remote address fails (EADDRNOTAVAIL). No
+    packets are sent."""
+    fam = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    try:
+        s = socket.socket(fam, socket.SOCK_DGRAM)
+        try:
+            s.bind((ip, 0))
+            return True
+        finally:
+            s.close()
+    except OSError:
+        return False
+
+
+def _host_is_self(host: str) -> bool:
+    """True only when ``host`` POSITIVELY resolves to an address this box
+    owns. Resolution failure → False (identity unknown ≠ self): the caller
+    then KEEPS the peer, so a genuinely remote box can never be silently
+    dropped by a name-shape guess — the never-a-dropped-row contract."""
+    now = time.monotonic()
+    hit = _SELF_IP_CACHE.get(host)
+    if hit is not None and (now - hit[0]) < _SELF_IP_CACHE_TTL_S:
+        return hit[1]
+    ips = _resolve_ips(host)
+    verdict = any(_ip_is_local(ip) for ip in ips)
+    _SELF_IP_CACHE[host] = (now, verdict)
+    return verdict
 
 
 @dataclass
@@ -106,17 +159,29 @@ class FleetConfig:
     def non_self_peers(self, *, hostname: Optional[str] = None) -> List[PeerConfig]:
         """Peers excluding any that match this host — the rollup
         endpoint runs `collect_local_snapshot()` for self separately,
-        so we'd double-count if `host` resolves to localhost."""
+        so we'd double-count if `host` resolves to localhost.
+
+        Self-detection is by POSITIVE identity, not name shape (2026-07-19
+        adversarial-review fix): the old bare-name stripper silently DROPPED
+        a genuinely remote peer whose bare name matched this host (e.g. peer
+        ``noc.remote-site.lan`` polled from a box named ``noc``) — violating
+        the truth schema's never-a-dropped-row promise — while an IP-written
+        self entry slipped through and double-counted. Ambiguous shapes
+        (bare-name collision, IP-literal host) now get an identity check:
+        does the host resolve to an address THIS box owns (bind test)? When
+        identity cannot be established (resolution failure), the peer is
+        KEPT — a true-self kept shows up as a visible duplicate row, while a
+        true-remote dropped simply vanishes; fail-visible wins.
+        """
         my_host = (hostname or socket.gethostname()).lower()
         out = []
         for peer in self.peers:
             ph = (peer.host or "").lower()
             if ph in (my_host, "localhost", "127.0.0.1", "::1", ""):
                 continue
-            # Strip a `.local`/domain suffix and compare bare names too;
-            # mDNS hosts often differ by suffix only (`volcanoai.local`
-            # vs `VolcanoAI`).
-            if ph.split(".", 1)[0] == my_host.split(".", 1)[0]:
+            bare_collision = ph.split(".", 1)[0] == my_host.split(".", 1)[0]
+            ip_literal = bool(_IPV4_LITERAL_RE.match(ph)) or ":" in ph
+            if (bare_collision or ip_literal) and _host_is_self(ph):
                 continue
             out.append(peer)
         return out

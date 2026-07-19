@@ -87,7 +87,15 @@ def test_partial_peer_entries_dropped(tmp_path):
     assert bad.port == DEFAULT_PEER_PORT
 
 
-def test_non_self_peers_filters_local_hostname(tmp_path):
+def test_non_self_peers_filters_local_hostname(tmp_path, monkeypatch):
+    """Exact-name/loopback legs need no resolution; a suffix-differing
+    mDNS twin (MyHost.local) is excluded only because it POSITIVELY
+    resolves to a local address (2026-07-19 identity-based fix)."""
+    from monitoring import fleet_config as fc
+    fc._SELF_IP_CACHE.clear()
+    monkeypatch.setattr(fc, "_resolve_ips",
+                        lambda h: ["127.0.0.1"] if h == "myhost.local" else [])
+    monkeypatch.setattr(fc, "_ip_is_local", lambda ip: ip == "127.0.0.1")
     p = tmp_path / "fleet.json"
     p.write_text(json.dumps({
         "peers": [
@@ -100,6 +108,62 @@ def test_non_self_peers_filters_local_hostname(tmp_path):
     cfg = load_fleet_config(p)
     remote = cfg.non_self_peers(hostname="MyHost")
     assert [p.name for p in remote] == ["remote"]
+
+
+def test_non_self_peers_keeps_remote_with_colliding_bare_name(tmp_path, monkeypatch):
+    """THE dropped-row fix: a genuinely remote peer whose bare name matches
+    this host (noc.remote-site.lan polled from a box named 'noc') must be
+    KEPT — the old suffix-stripper silently dropped it."""
+    from monitoring import fleet_config as fc
+    fc._SELF_IP_CACHE.clear()
+    monkeypatch.setattr(fc, "_resolve_ips", lambda h: ["198.51.100.20"])
+    monkeypatch.setattr(fc, "_ip_is_local", lambda ip: False)  # remote
+    p = tmp_path / "fleet.json"
+    p.write_text(json.dumps({
+        "peers": [{"name": "site-noc", "host": "noc.remote-site.lan", "port": 5001}],
+    }))
+    cfg = load_fleet_config(p)
+    assert [x.name for x in cfg.non_self_peers(hostname="noc")] == ["site-noc"]
+
+
+def test_non_self_peers_excludes_ip_written_self_entry(tmp_path, monkeypatch):
+    """The double-count fix: a self entry written by IP is excluded once the
+    bind test confirms the address is local."""
+    from monitoring import fleet_config as fc
+    fc._SELF_IP_CACHE.clear()
+    monkeypatch.setattr(fc, "_resolve_ips", lambda h: [h])
+    monkeypatch.setattr(fc, "_ip_is_local", lambda ip: ip == "192.0.2.10")
+    p = tmp_path / "fleet.json"
+    p.write_text(json.dumps({
+        "peers": [
+            {"name": "self-by-ip", "host": "192.0.2.10", "port": 5001},
+            {"name": "remote-by-ip", "host": "192.0.2.99", "port": 5001},
+        ],
+    }))
+    cfg = load_fleet_config(p)
+    assert [x.name for x in cfg.non_self_peers(hostname="MyHost")] == ["remote-by-ip"]
+
+
+def test_non_self_peers_resolution_failure_keeps_peer(tmp_path, monkeypatch):
+    """Identity unknown ≠ self: when the colliding name cannot be resolved,
+    the peer is KEPT — a true-self kept is a visible duplicate; a
+    true-remote dropped vanishes silently. Fail-visible wins."""
+    from monitoring import fleet_config as fc
+    fc._SELF_IP_CACHE.clear()
+    monkeypatch.setattr(fc, "_resolve_ips", lambda h: [])  # DNS dead
+    p = tmp_path / "fleet.json"
+    p.write_text(json.dumps({
+        "peers": [{"name": "maybe-twin", "host": "noc.other.lan", "port": 5001}],
+    }))
+    cfg = load_fleet_config(p)
+    assert [x.name for x in cfg.non_self_peers(hostname="noc")] == ["maybe-twin"]
+
+
+def test_ip_is_local_bind_probe_real():
+    """The real primitive: loopback binds (local), TEST-NET cannot."""
+    from monitoring import fleet_config as fc
+    assert fc._ip_is_local("127.0.0.1") is True
+    assert fc._ip_is_local("203.0.113.1") is False
 
 
 def test_env_override_redirects_path(tmp_path, monkeypatch):
