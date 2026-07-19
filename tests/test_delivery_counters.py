@@ -203,32 +203,65 @@ class TestPerProtocolBreakdown:
 
 
 class TestConfirmationRate:
-    def test_rate_is_none_when_no_sends(self):
+    """MF #74 port (2026-07-19): the old cross-population `confirmed/sent`
+    read 7.625 (">762% confirmed") LIVE on meshanchor-server — caught by
+    honest_status's conf_rate<=1.0 leg the first time it could verify. The
+    honest rate is confirmed/(confirmed+delivery-failures): bounded [0,1],
+    None on no terminal data, with the unconfirmable blind spot surfaced
+    as its own number instead of averaged into the scalar."""
+
+    def test_rate_is_none_when_no_terminal_outcomes(self):
         c = DeliveryCounters()
         c.record(DeliveryState.QUEUED, "1", protocol="rns")
         assert c.snapshot()["confirmation_rate"] is None
 
-    def test_rate_is_zero_when_sends_but_no_confirms(self):
+    def test_in_flight_sends_are_no_data_not_zero_percent(self):
+        """Sends with no terminal outcome yet must read None, not 0% (=
+        total failure) — and surface as unconfirmable, not vanish."""
         c = DeliveryCounters()
-        c.record(DeliveryState.SENT, "1", protocol="rns")
-        c.record(DeliveryState.SENT, "2", protocol="rns")
-        assert c.snapshot()["confirmation_rate"] == 0.0
+        c.record(DeliveryState.SENT, "1", protocol="meshcore")
+        c.record(DeliveryState.SENT, "2", protocol="meshcore")
+        snap = c.snapshot()
+        assert snap["confirmation_rate"] is None
+        assert snap["unconfirmable_sent"] == 2
+        assert snap["confirmable_protocols"] == []
 
     def test_rate_is_one_when_every_send_confirmed(self):
         c = DeliveryCounters()
         c.record(DeliveryState.SENT, "1", protocol="rns")
         c.record(DeliveryState.CONFIRMED, "1", protocol="rns")
-        assert c.snapshot()["confirmation_rate"] == 1.0
+        snap = c.snapshot()
+        assert snap["confirmation_rate"] == 1.0
+        assert snap["confirmable_protocols"] == ["rns"]
 
-    def test_rate_above_one_when_legacy_confirms_have_no_send(self):
-        """Counters are observability — they don't pretend a stale
-        confirm wasn't real. Operators reading rate > 1 know to look
-        at the call site that's stamping confirms without sends."""
+    def test_rate_is_bounded_even_with_confirms_exceeding_sent(self):
+        """THE 7.625 fix: confirms exceeding the in-flight sent count can
+        never read as >100% — the rate is over terminal outcomes only."""
         c = DeliveryCounters()
         c.record(DeliveryState.SENT, "1", protocol="rns")
         c.record(DeliveryState.CONFIRMED, "1", protocol="rns")
         c.record(DeliveryState.CONFIRMED, "2", protocol="rns")
-        assert c.snapshot()["confirmation_rate"] == 2.0
+        rate = c.snapshot()["confirmation_rate"]
+        assert rate == 1.0
+        assert rate <= 1.0  # the honest_status conf_rate<=1.0 invariant
+
+    def test_delivery_failures_pull_the_rate_down(self):
+        c = DeliveryCounters()
+        c.record(DeliveryState.SENT, "1", protocol="rns")
+        c.record(DeliveryState.CONFIRMED, "1", protocol="rns")
+        c.record(DeliveryState.DROPPED, "2", protocol="rns",
+                 drop_reason=DropReason.RETRIES_EXHAUSTED)
+        assert c.snapshot()["confirmation_rate"] == pytest.approx(0.5)
+
+    def test_benign_predelivery_drops_do_not_count_as_failures(self):
+        """dedup/queue_shed drops never reached a delivery attempt — they
+        must not read as delivery failure."""
+        c = DeliveryCounters()
+        c.record(DeliveryState.SENT, "1", protocol="rns")
+        c.record(DeliveryState.CONFIRMED, "1", protocol="rns")
+        c.record(DeliveryState.DROPPED, "2", protocol="rns",
+                 drop_reason=DropReason.DEDUP)
+        assert c.snapshot()["confirmation_rate"] == 1.0
 
 
 # ── Ring buffer ──────────────────────────────────────────────────────
@@ -330,7 +363,9 @@ class TestStateTransitionContract:
             DeliveryState.CONFIRMED,
         ]
         assert states_b == [DeliveryState.QUEUED, DeliveryState.SENT]
-        assert c.snapshot()["confirmation_rate"] == 0.5
+        # MF #74 port: "b" is still IN FLIGHT — not a terminal outcome, so it
+        # neither confirms nor fails; the rate covers terminal events only.
+        assert c.snapshot()["confirmation_rate"] == 1.0
 
     def test_queue_retried_message_can_reach_confirmed(self):
         """The Fork-D-fixed gap: messages reaching RNS via the persistent

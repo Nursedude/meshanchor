@@ -454,8 +454,14 @@ class TestNodeTracking:
 class TestDeviceDetection:
     """Test serial device scanning."""
 
+    # NOTE: detect_meshcore_devices() checks os.path.exists('/dev/ttyMeshCore')
+    # BEFORE the glob scan. On a box with the real udev symlink (e.g.
+    # meshanchor-server) that leg leaks the real device into the result unless
+    # the exists check is sealed too — patch it where it's looked up.
+
+    @patch('utils.meshcore_connection.os.path.exists', return_value=False)
     @patch('glob.glob')
-    def test_detect_devices(self, mock_glob):
+    def test_detect_devices(self, mock_glob, mock_exists):
         """Detect USB serial devices."""
         mock_glob.side_effect = [
             ['/dev/ttyUSB0', '/dev/ttyUSB1'],
@@ -466,12 +472,32 @@ class TestDeviceDetection:
         assert '/dev/ttyUSB1' in devices
         assert '/dev/ttyACM0' in devices
 
+    @patch('utils.meshcore_connection.os.path.exists', return_value=False)
     @patch('glob.glob')
-    def test_no_devices(self, mock_glob):
+    def test_no_devices(self, mock_glob, mock_exists):
         """No devices found returns empty list."""
         mock_glob.return_value = []
         devices = detect_meshcore_devices()
         assert devices == []
+
+    @patch('utils.meshcore_connection.os.path.realpath')
+    @patch('utils.meshcore_connection.os.path.exists', return_value=True)
+    @patch('glob.glob')
+    def test_ttymeshcore_symlink_listed_first_and_target_deduped(
+        self, mock_glob, mock_exists, mock_realpath
+    ):
+        """When the udev symlink exists it leads the list and its realpath
+        target is skipped from the raw scan — pinned with mocks so the leg
+        keeps coverage without real hardware."""
+        mock_glob.side_effect = [
+            [],                                # /dev/ttyUSB*
+            ['/dev/ttyACM0', '/dev/ttyACM1'],  # /dev/ttyACM*
+        ]
+        mock_realpath.side_effect = lambda p: {
+            '/dev/ttyMeshCore': '/dev/ttyACM0',
+        }.get(p, p)
+        devices = detect_meshcore_devices()
+        assert devices == ['/dev/ttyMeshCore', '/dev/ttyACM1']
 
 
 # =============================================================================

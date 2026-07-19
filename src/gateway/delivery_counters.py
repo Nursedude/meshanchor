@@ -175,6 +175,75 @@ class DeliveryEvent:
 # ── Defaults ─────────────────────────────────────────────────────────
 
 
+# Terminal DELIVERY-failure reasons — the denominator's failure half for the
+# honest confirmation view. Deliberately excludes benign pre-delivery drops
+# (dedup, queue_pressure, queue_shed, evicted_overflow, invalid_payload):
+# those messages never reached a delivery attempt, so counting them would
+# read as delivery failure. PORT of MeshForge's #74 display cure (twin file,
+# UNTRACKED-diverged tier — keep the reason set aligned when either side
+# grows a DropReason).
+DELIVERY_FAILURE_REASONS = frozenset({
+    DropReason.RNS_DELIVERY_FAILED.value,
+    DropReason.RETRIES_EXHAUSTED.value,
+    DropReason.DESTINATION_UNREACHABLE.value,
+    DropReason.DELIVERY_TIMEOUT.value,
+    DropReason.NON_RETRIABLE_ERROR.value,
+    DropReason.CIRCUIT_OPEN.value,
+    DropReason.WEDGED.value,
+})
+
+
+def compute_confirmation_view(
+    state_totals: Dict[str, int],
+    state_by_protocol: Dict[str, Dict[str, int]],
+    drop_reasons: Dict[str, int],
+) -> Dict[str, Any]:
+    """Honest confirmation accounting from raw counters (MF Issue #74 port,
+    2026-07-19 — the pre-port ``confirmed / sent`` read 7.625 = ">762%
+    confirmed" LIVE on meshanchor-server, caught by honest_status's
+    conf_rate<=1.0 leg the first time it could verify).
+
+    ``confirmed / sent`` is a CROSS-POPULATION ratio: ``confirmed`` counts
+    terminal outcomes over the whole history while ``sent`` is the CURRENT
+    in-flight count — the quotient is unbounded and a valid-looking value
+    masks the real question (of the messages that reached a terminal
+    delivery outcome, how many confirmed?).
+
+    Honest replacement (identical semantics to the MF twin):
+      - ``confirmation_rate`` = confirmed / (confirmed + delivery-failures)
+        — bounded [0,1], None when no confirmable terminal events yet ("no
+        data" must not read as 0% = total failure).
+      - ``unconfirmable_sent`` = in-flight sends on protocols that have
+        never recorded a confirmation — the blind spot surfaced as its own
+        number, never averaged into a healthy-looking scalar.
+      - ``confirmable_protocols`` = what the rate actually covers.
+    """
+    def _pos_int(v) -> int:
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+    confirmed = _pos_int((state_totals or {}).get(DeliveryState.CONFIRMED.value, 0))
+    confirmed_by_proto = (state_by_protocol or {}).get(
+        DeliveryState.CONFIRMED.value, {}) or {}
+    sent_by_proto = (state_by_protocol or {}).get(
+        DeliveryState.SENT.value, {}) or {}
+
+    confirmable = sorted(p for p, c in confirmed_by_proto.items() if _pos_int(c) > 0)
+    confirmable_set = set(confirmable)
+    failures = sum(
+        _pos_int((drop_reasons or {}).get(r, 0)) for r in DELIVERY_FAILURE_REASONS
+    )
+    terminal = confirmed + failures
+    rate = confirmed / terminal if terminal > 0 else None
+    unconfirmable_sent = sum(
+        _pos_int(v) for p, v in sent_by_proto.items() if p not in confirmable_set
+    )
+    return {
+        "confirmation_rate": rate,
+        "confirmable_protocols": confirmable,
+        "unconfirmable_sent": unconfirmable_sent,
+    }
+
+
 RING_BUFFER_CAP = 500
 """Maximum rows retained in the events table. Sized for ~1 hour of
 healthy gateway traffic on a 5-box fleet (a few dozen msgs/min peak);
@@ -651,9 +720,10 @@ class DeliveryCounters:
             elif key == "meta.last_write_error_ts":
                 db_write_error_ts = value / 1000.0
 
-        sent = state_totals.get(DeliveryState.SENT.value, 0)
-        confirmed = state_totals.get(DeliveryState.CONFIRMED.value, 0)
-        confirmation_rate = confirmed / sent if sent > 0 else None
+        # Honest confirmation accounting (MF #74 port, 2026-07-19): the old
+        # cross-population `confirmed / sent` read 7.625 live on this fleet.
+        confirmation = compute_confirmation_view(
+            state_totals, state_by_protocol, drop_reasons)
 
         # events_rows comes back newest-first from the DESC ORDER BY;
         # the snapshot contract is newest-LAST so the operator can
@@ -718,7 +788,7 @@ class DeliveryCounters:
             "state_totals": state_totals,
             "drop_reasons": drop_reasons,
             "state_by_protocol": state_by_protocol,
-            "confirmation_rate": confirmation_rate,
+            **confirmation,
             "recent": recent,
             "first_event_ts": first_event_ts,
             "last_event_ts": last_event_ts,

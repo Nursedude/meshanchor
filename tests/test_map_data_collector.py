@@ -31,11 +31,16 @@ def _stub_external_collectors():
     Stub them all to ``[]`` so per-test feature-count assertions stay deterministic.
     """
     base = "src.utils.map_data_collector.MapDataCollector"
+    # _collect_rns_direct talks to the LIVE rnsd shared instance when one is
+    # running (path-table RPC + on-disk position cache) — on a box with a real
+    # rnsd (e.g. meshanchor-server) it can inject real features. Seal it like
+    # the other live sources.
     with patch(f"{base}._collect_meshcore_public", return_value=[]), \
          patch(f"{base}._collect_node_tracker", return_value=[]), \
          patch(f"{base}._collect_aredn", return_value=[]), \
          patch(f"{base}._collect_meshforge_maps", return_value=[]), \
          patch(f"{base}._collect_mqtt", return_value=[]), \
+         patch(f"{base}._collect_rns_direct", return_value=[]), \
          patch(f"{base}._load_cache", return_value=[]):
         yield
 
@@ -61,6 +66,29 @@ def _make_meshcore_node(node_id, name, position=None, is_online=True,
 
 class TestMeshCoreSource:
     """MeshCore is the primary radio source in MeshAnchor."""
+
+    @pytest.fixture(autouse=True)
+    def _seal_local_box_state(self):
+        """Seal the remaining box-local boundaries collect() reads.
+
+        On meshanchor-server (real radio + live meshanchor-daemon),
+        _collect_meshcore_self() fetches GET /radio and injects a synthetic
+        'meshcore:<real 64-hex pubkey>' feature that is NOT part of the
+        injected tracker mock — the real leak behind 'assert 2 == 1'.
+        Patch _fetch_daemon_radio_state (the seam TestMeshCoreSelfFeature
+        already uses) to None = daemon unreachable. Likewise
+        get_position_store() reads the operator's on-disk
+        meshcore_positions.json, which can promote placed/ghost features.
+        Cannot live in the module autouse fixture: TestMeshCoreSelfFeature /
+        TestFetchDaemonRadioState exercise those seams for real.
+        """
+        store = MagicMock()
+        store.list.return_value = {}
+        with patch.object(MapDataCollector, "_fetch_daemon_radio_state",
+                          return_value=None), \
+             patch('src.utils.map_data_collector.get_position_store',
+                   return_value=store):
+            yield
 
     def test_position_less_meshcore_node_surfaces_in_side_panel(self):
         """MeshCore advertisements without GPS land in nodes_without_position."""
