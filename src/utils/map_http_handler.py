@@ -284,7 +284,7 @@ class MapRequestHandler(
             "/api/websocket/status", "/api/proxy/status",
             "/api/radio/info", "/api/radio/nodes",
             "/api/radio/channels", "/api/radio/status",
-            "/fleet", "/fleet.html",
+            "/fleet", "/fleet.html", "/fleet/monitor",
             "/fleet/health", "/fleet/slo", "/api/fleet/truth", "/fleet/truth",
             "/fleet/activity",
             "/fleet/rollup", "/fleet/federation",
@@ -436,7 +436,11 @@ class MapRequestHandler(
         # ─────────────────────────────────────────────────────────────
         # Fleet Monitor API — engineering-grade NOC dashboard surface
         # ─────────────────────────────────────────────────────────────
+        # /fleet = the truth page on EVERY NOC box (same URL, same meaning —
+        # operator 2026-07-19); the 1.0 Fleet Monitor moved to /fleet/monitor.
         elif self.path == '/fleet' or self.path == '/fleet/' or self.path == '/fleet.html':
+            self._serve_fleet_truth_page()
+        elif self.path == '/fleet/monitor' or self.path == '/fleet/monitor/':
             self._serve_fleet_dashboard()
         elif self.path == '/fleet/health' or self.path == '/fleet/health/':
             self._serve_fleet_health()
