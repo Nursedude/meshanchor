@@ -82,6 +82,11 @@ __all__ = [
     'stop_service',              # Stop a systemd service
     'restart_service',           # Restart a systemd service
     'apply_config_and_restart',  # Reload daemon + restart service
+    # Systemd unit-state query primitives (role-engine port, 2026-07-18)
+    'check_systemd_service',     # (is_running, is_enabled) tuple
+    'is_service_unit_installed', # unit FILE exists on this box
+    'is_service_masked',         # unit is masked
+    'mask_service',              # mask a unit (one-rnsd-per-box invariant)
     # Privilege elevation & file I/O
     '_sudo_cmd',            # Prefix command with sudo when not root
     '_sudo_write',          # Write file content with privilege elevation
@@ -677,6 +682,125 @@ def is_service_enabled(
     except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
         logger.debug("is_service_enabled(%s) failed: %s", service_name, e)
         return False
+
+
+def check_systemd_service(
+    service_name: str, user: bool = False
+) -> Tuple[bool, bool]:
+    """Return ``(is_running, is_enabled)`` for a systemd unit.
+
+    Read-only; ``is-active``/``is-enabled`` return code == 0 is the signal.
+    Ported from the MeshForge role engine (2026-07-18) so ``provision_role``
+    can observe live unit state with the same interface on both apps.
+
+    Args:
+        service_name: Service unit name (with or without .service suffix).
+        user: When True, query the user-scope manager (``systemctl --user``).
+
+    Returns:
+        Tuple of (is_running, is_enabled).
+    """
+    is_running = False
+    is_enabled = False
+    base = ['systemctl', '--user'] if user else ['systemctl']
+    try:
+        result = subprocess.run(
+            base + ['is-active', service_name],
+            capture_output=True, text=True, timeout=5,
+        )
+        is_running = result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    try:
+        result = subprocess.run(
+            base + ['is-enabled', service_name],
+            capture_output=True, text=True, timeout=5,
+        )
+        is_enabled = result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return is_running, is_enabled
+
+
+def is_service_unit_installed(
+    service_name: str, timeout: int = 5, user: bool = False
+) -> bool:
+    """Return True iff the systemd unit FILE exists on this box.
+
+    Orthogonal to active/enabled state — an installed unit might be disabled,
+    masked, or failed; this reports True for all of those and False only when
+    there is no unit file to load. Uses ``systemctl cat`` (read-only), which
+    exits 0 whenever it can resolve a unit file. Ported from MeshForge
+    (2026-07-18) for the role engine's absent/present distinction.
+    """
+    argv = (
+        ['systemctl', '--user', 'cat', service_name]
+        if user else ['systemctl', 'cat', service_name]
+    )
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout,
+        )
+        return result.returncode == 0
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+        logger.debug("is_service_unit_installed(%s) failed: %s", service_name, e)
+        return False
+
+
+def is_service_masked(
+    service_name: str, timeout: int = 5, user: bool = False
+) -> bool:
+    """Return True iff the unit is currently masked.
+
+    Read-only (``systemctl is-enabled`` prints ``masked`` for a masked unit);
+    lets callers make masking idempotent. Returns False on any error or
+    non-masked state. Ported from MeshForge (2026-07-18).
+    """
+    argv = (
+        ['systemctl', '--user', 'is-enabled', service_name]
+        if user else ['systemctl', 'is-enabled', service_name]
+    )
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout,
+        )
+        return result.stdout.strip() == 'masked'
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+        logger.debug("is_service_masked(%s) failed: %s", service_name, e)
+        return False
+
+
+def mask_service(
+    service_name: str, timeout: int = 30, user: bool = False
+) -> Tuple[bool, str]:
+    """Mask a systemd unit so it cannot be started by anyone.
+
+    Stronger than ``disable_service``: a masked unit (symlinked to /dev/null)
+    refuses ``start``/``restart`` from every source (timer, dependency, manual).
+    The durable fix for a rival RNS host on a box where it must never own the
+    listener (one rnsd per box). Uses MeshAnchor's ``_sudo_cmd`` elevation.
+    Ported from MeshForge (2026-07-18).
+    """
+    argv = ['systemctl', '--user', 'mask', service_name] if user \
+        else _sudo_cmd(['systemctl', 'mask', service_name])
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or f"mask {service_name} failed"
+            logger.error("mask %s failed: %s", service_name, error_msg)
+            return False, f"mask {service_name} failed: {error_msg}"
+        logger.info("Successfully masked %s", service_name)
+        return True, f"{service_name} masked"
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout while masking %s", service_name)
+        return False, f"Timeout while masking {service_name}"
+    except FileNotFoundError:
+        return False, "systemctl not found - is this a systemd system?"
+    except Exception as e:  # noqa: BLE001 — report, never raise into converge
+        logger.error("Error masking %s: %s", service_name, e)
+        return False, f"Error: {e}"
 
 
 def daemon_reload(timeout: int = 30) -> Tuple[bool, str]:

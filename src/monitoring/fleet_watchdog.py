@@ -82,7 +82,16 @@ KIND_NO_DATA = "no_data"
 KIND_HTTP_DEAD = "http_dead"
 KIND_FROZEN = "frozen"
 KIND_DAEMON_DEAD = "daemon_dead"
-ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN, KIND_DAEMON_DEAD)
+KIND_ROLE_DRIFT = "role_drift"
+ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN, KIND_DAEMON_DEAD,
+             KIND_ROLE_DRIFT)
+
+ROLE_DRIFT_HYSTERESIS_CYCLES = 2
+"""How many consecutive cycles of confirmed role drift open the
+role_drift blackout. Role catalog (git) and unit state (converge /
+restarts) deploy independently, so a single cycle can catch a deploy
+window; two cycles = ~60s at the default interval before firing (same
+rationale + shape as DAEMON_HYSTERESIS_CYCLES / MeshForge's debounce_ticks)."""
 
 
 # Module-level hysteresis state for daemon_dead. The watchdog runs as
@@ -91,10 +100,18 @@ ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN, KIND_DAEMON_DEAD)
 # disallowed by the systemd unit (single instance).
 _daemon_state: Dict[str, int] = {"inactive_streak": 0}
 
+# Same pattern for role_drift (independent counter).
+_role_drift_state: Dict[str, int] = {"drift_streak": 0}
+
 
 def _reset_daemon_state() -> None:
     """Test helper — resets the daemon_dead streak counter to 0."""
     _daemon_state["inactive_streak"] = 0
+
+
+def _reset_role_drift_state() -> None:
+    """Test helper — resets the role_drift streak counter to 0."""
+    _role_drift_state["drift_streak"] = 0
 
 
 def _check_daemon_active() -> Optional[bool]:
@@ -143,6 +160,35 @@ def _daemon_dead_reason() -> Optional[str]:
     return None
 
 
+def _role_drift_reason() -> Optional[str]:
+    """Evaluate the role-drift signal (INDEPENDENT of heartbeat data) and advance
+    the hysteresis streak. Returns a reason when confirmed over
+    ``ROLE_DRIFT_HYSTERESIS_CYCLES`` consecutive cycles, else None.
+
+    A drift verdict (reason string) advances the streak; a clean OR indeterminate
+    verdict (evaluate_role_drift -> None: converged, no role, or tool/catalog
+    unavailable) RESETS it — never accumulate toward alarm on an unobservable
+    cycle (honest_failure #2). Like _daemon_dead_reason, this is evaluated even
+    when the heartbeat table is empty, so a reset table can't wrongly close a
+    genuinely-active role_drift blackout."""
+    try:
+        from utils.role_drift import evaluate_role_drift
+        reason = evaluate_role_drift()
+    except Exception as e:  # never let the role probe sink a watchdog cycle
+        logger.debug("evaluate_role_drift raised: %s", e)
+        return None
+    if reason is None:
+        _role_drift_state["drift_streak"] = 0
+        return None
+    _role_drift_state["drift_streak"] += 1
+    if _role_drift_state["drift_streak"] >= ROLE_DRIFT_HYSTERESIS_CYCLES:
+        return (
+            f"{reason} | confirmed over "
+            f"{_role_drift_state['drift_streak']} consecutive checks"
+        )
+    return None  # divergence seen, not yet confirmed across cycles
+
+
 def detect_silence(
     *,
     now: Optional[float] = None,
@@ -169,8 +215,9 @@ def detect_silence(
         out[KIND_NO_DATA] = "heartbeat table is empty"
         # daemon_dead is independent of heartbeat data — evaluate it even here,
         # else an empty/reset table would wrongly close a valid daemon_dead
-        # blackout (B-F2, honest_failure #2).
+        # blackout (B-F2, honest_failure #2). role_drift is likewise independent.
         out[KIND_DAEMON_DEAD] = _daemon_dead_reason()
+        out[KIND_ROLE_DRIFT] = _role_drift_reason()
         return out
 
     # Guard the ts cast + clamp a future/negative age. A malformed heartbeat ts
@@ -241,6 +288,10 @@ def detect_silence(
     # "false positive on a 5s daemon restart" — the streak counter
     # advances only on confirmed-inactive reads.
     out[KIND_DAEMON_DEAD] = _daemon_dead_reason()
+
+    # Role drift: independent of heartbeat data (reads the converge SSOT's
+    # dry-run plan for this box's declared role). Hysteresis inside.
+    out[KIND_ROLE_DRIFT] = _role_drift_reason()
 
     return out
 

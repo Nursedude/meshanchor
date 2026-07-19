@@ -1,0 +1,65 @@
+# MeshAnchor fleet role definitions — the MeshCore-side companion to
+# MeshForge's docs/fleet_roles.yaml (sister repo, ported 2026-07-18).
+#
+# GENERIC + DUPLICABLE. Contains NO instance values (hostnames, LAN IPs, LXMF
+# hashes, MeshCore node IDs, coordinates) — those live in ~/.config/meshanchor
+# and are never committed (MF014/MF015). This is the source of truth for what
+# each MeshAnchor role runs; scripts/provision_role.py converges a box to it and
+# monitoring.fleet_watchdog raises a `role_drift` blackout when a box diverges.
+#
+# Service values: enabled | disabled | absent.
+#   enabled  = unit installed, enabled+active
+#   disabled = unit installed but deliberately enabled=false/inactive (not a fault)
+#   absent   = unit not installed for this role
+version: 0
+updated: "2026-07-18"
+
+# Hard rules that hold on every MeshAnchor node.
+invariants:
+  one_rnsd_per_box: "Only rnsd hosts RNS; every other RNS user (meshanchor-daemon) joins via share_instance=Yes. On a MeshAnchor NOC box rnsd legitimately owns the @rns listener and meshanchor-daemon is a client — no rival to mask here (contrast the MeshForge side, where a MeshForge box masks a rival meshanchor-daemon)."
+  fail_loud_restart_clean: "Watchdog on every node; services systemd-supervised with Restart=."
+  born_correct_permissions: "Every box runs services as the NON-ROOT operator user and owns its RNS config tree + app data-roots. Established at install + enforced on every converge via the shared utils.fleet_foundation SSOT (byte-parity-tracked with MeshForge)."
+
+# The born-correct permission FOUNDATION. Executable SSOT is
+# src/utils/fleet_foundation.py (carried byte-identical from MeshForge, parity-
+# tracked); this block is its DECLARED model. Applied at converge by
+# `scripts/provision_role.py --apply`.
+foundation:
+  topology: fleet                    # fleet (operator user + parity) | standalone
+  service_user: operator             # services run as the NON-ROOT operator user.
+                                     # Per-box RESOLVED (get_real_username()); NEVER
+                                     # a literal username here (MF014).
+  data_roots:                        # app data dirs the non-root services must own
+    meshanchor:
+      - "~/.config/meshanchor"
+      - "~/.local/share/meshanchor"
+      - "~/.cache/meshanchor"
+      - "/opt/meshanchor"
+
+roles:
+
+  # ── Provisionable Linux NOC box ─────────────────────────────────────────
+  meshanchor-noc:
+    board_tier: pi4_min_4gb
+    install_profile: full
+    repo: meshanchor
+    services:
+      rnsd: enabled                  # this box hosts the shared RNS instance
+      mosquitto: enabled
+      meshanchor-daemon: enabled     # the MeshCore<->RNS/LXMF back end
+      meshanchor-map: enabled        # NOC web map (:5000)
+      meshanchor-fleet-collector: enabled  # always-on /fleet/* writer
+      meshanchor-fleet-watchdog: enabled   # silence + role-drift watchdog
+      meshtasticd: disabled          # MeshCore-primary; meshtasticd egress-only/off
+      meshanchor-gateway: disabled   # RF bridge deliberately off on the NOC
+
+# ── MeshCore RADIO node types (documented, NOT provisioned here) ───────────
+# These are MeshCore FIRMWARE roles on the LoRa hardware (they show on the NOC
+# :5000 map), not Linux systemd boxes — the provisioner SKIPS them. Listed for a
+# complete picture of the MeshCore fleet topology, mirroring how MeshForge's
+# catalog documents external/firmware roles (e.g. `bot`).
+mesh_node_types:
+  usb:    "USB-attached companion radio (host-tethered client)."
+  client: "Companion/client node — phone/host paired, no infrastructure role."
+  room:   "Room Server — MeshCore chat-room/BBS host."
+  server: "Repeater/server node — infrastructure relay."

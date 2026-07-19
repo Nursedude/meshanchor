@@ -54,6 +54,30 @@ def get_real_user_home() -> Path:
     return Path.home()
 
 
+def chown_to_operator(*paths) -> None:
+    """Hand root-created config artifacts back to the real operator.
+
+    Under sudo a file written by root in the operator's home stays root-owned,
+    which breaks every later user-mode reader/writer. Any writer that persists
+    to ``get_real_user_home()`` while possibly running as root must call this.
+    Best-effort: a chown failure leaves the file root-usable, never raises.
+    Ported from MeshForge (2026-07-18) for the role engine's ``write_role``.
+    """
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if not sudo_user or sudo_user == 'root' or '/' in sudo_user \
+            or '..' in sudo_user:
+        return
+    try:
+        import pwd
+        pw = pwd.getpwnam(sudo_user)
+        for p in paths:
+            p = Path(p)
+            if p.exists() and p.stat().st_uid == 0:
+                os.chown(str(p), pw.pw_uid, pw.pw_gid)
+    except (KeyError, OSError):
+        pass  # non-critical: still root-usable
+
+
 def get_real_username() -> str:
     """
     Get the real username, even when running as root via sudo.
