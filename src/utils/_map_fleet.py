@@ -188,6 +188,40 @@ class FleetEndpointsMixin:
         self.end_headers()
         self.wfile.write(data)
 
+    def _serve_fleet_truth_page(self) -> None:
+        """Serve the honest fleet-truth NOC visual (`/fleet/truth` →
+        web/fleet_truth.html).
+
+        Ported from MeshForge's Phase-3 page (MF `7085f4e4`): a faithful
+        projection of `/api/fleet/truth` — reads ONLY that endpoint,
+        renders default-dark (any state that isn't exactly healthy/failed
+        is DARK/grey), carries no raw IPs (MF014/MF015). Additive route:
+        the legacy `/fleet` Fleet Monitor dashboard stays untouched.
+        Ungated like `_serve_fleet_dashboard` — static file, no collection.
+        """
+        from pathlib import Path
+        if self.web_dir:
+            file_path = Path(self.web_dir) / "fleet_truth.html"
+        else:
+            file_path = Path(__file__).parent.parent.parent / "web" / "fleet_truth.html"
+        try:
+            file_path = file_path.resolve()
+        except Exception:
+            self.send_error(400, "Invalid path")
+            return
+        if not file_path.exists():
+            self.send_error(404, "fleet_truth.html not found")
+            return
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.end_headers()
+        self.wfile.write(data)
+
     @heavy_gate
     def _serve_fleet_health(self) -> None:
         """Full snapshot — services + boundaries + daemon health + radio
