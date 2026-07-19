@@ -335,15 +335,20 @@ def reconcile_blackouts(
 # Active paging (ntfy) — the "don't fall silent" charter, actively
 # ──────────────────────────────────────────────────────────────────────
 
-# Priority + tags per blackout kind. role_drift is latent legibility debt
-# (degraded), so it pages at "default"; the silence kinds are operationally
-# urgent. ntfy priorities: min < low < default < high < urgent.
+# Priority per blackout kind. The silence kinds are operational OUTAGES → page
+# loud, matching MeshForge's ntfy tier. role_drift is latent legibility debt
+# (degraded), NOT an outage: MeshForge deliberately does NOT page it (routes it
+# to a side-effect-free escalation feed — "degraded, not an outage"). MeshAnchor
+# has no escalation-feed tier, so it pages role_drift at "min" — quiet-but-visible
+# in ntfy history, honoring the "degraded != alarm" intent without going fully
+# dashboard-dark. (2026-07-18, reconciling the MF<->MA paging-policy divergence.)
+# ntfy priorities: min < low < default < high < urgent.
 _KIND_PRIORITY = {
     KIND_NO_DATA: "high",
     KIND_HTTP_DEAD: "high",
     KIND_FROZEN: "high",
     KIND_DAEMON_DEAD: "urgent",
-    KIND_ROLE_DRIFT: "default",
+    KIND_ROLE_DRIFT: "min",
 }
 _KIND_TAGS = {
     KIND_NO_DATA: ["warning"],

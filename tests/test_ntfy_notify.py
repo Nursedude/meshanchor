@@ -80,7 +80,9 @@ class TestWatchdogPaging:
         assert pub.call_count == 1
         args, kwargs = pub.call_args
         assert "role_drift" in args[0] and "drift reason" in args[1]
-        assert kwargs["priority"] == "default"
+        # role_drift is degraded/latent debt, paged quietly (MF deliberately
+        # does not page it at all; MA has no escalation-feed tier so pages min).
+        assert kwargs["priority"] == "min"
 
     def test_pages_cleared_on_closed(self):
         decisions = {k: None for k in wd.ALL_KINDS}
