@@ -272,3 +272,41 @@ class TestDashboardServiceStatus:
         h.ctx.wait_for_enter = MagicMock()
         h._service_status_display()
         h.ctx.wait_for_enter.assert_called_once()
+
+
+class TestDataPathHttpTriState:
+    """MF Issue #76 consumer fix (ported from MF f07480d2): the data-path
+    check must not map the structural json_api_absent state (live webserver,
+    /json/* 404s — permanent on every meshtasticd box) to a FAIL. Dormant on
+    MA while utils.meshtastic_http is absent, but the classifier is pinned so
+    the block is honest the day the module lands."""
+
+    def test_json_api_absent_is_na_not_fail(self):
+        h = _make_dashboard()
+        client = MagicMock()
+        client.json_api_absent = True
+        client.port = 9443
+        status, detail = h._classify_http_unavailable(client)
+        assert status == "N/A"
+        assert "Issue #76" in detail
+        assert "webserver alive" in detail
+
+    def test_webserver_down_is_fail(self):
+        h = _make_dashboard()
+        client = MagicMock()
+        client.json_api_absent = False
+        client.port = 9443
+        status, detail = h._classify_http_unavailable(client)
+        assert status == "FAIL"
+        assert "No webserver answered" in detail
+
+    def test_client_without_flag_treated_as_down(self):
+        """A client predating the tri-state (no json_api_absent attr) must
+        not crash and must stay on the conservative FAIL path."""
+        h = _make_dashboard()
+
+        class Bare:
+            port = 9443
+
+        status, _ = h._classify_http_unavailable(Bare())
+        assert status == "FAIL"
