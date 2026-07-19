@@ -74,10 +74,20 @@ def _read_bounded(resp, max_bytes: int, deadline_s: float) -> bytes:
             raise ValueError("response exceeds size cap")
         chunks.append(chunk)
 
-# MeshAnchor has no SIGNAL_CLASSES-style closed enum (its watchdog speaks
-# blackout-rows-by-kind, not per-class signals). Empty = the builder's
-# coverage map reports total 0 — honest, never inferred.
-SIGNAL_CLASSES: List[str] = []
+# MeshAnchor's closed signal enum IS its blackout-kind enum (2026-07-19
+# status enrichment): the fleet-watchdog evaluates every kind each cycle and
+# /api/status.watchdog now reports per-kind coverage. Import failure → []
+# (coverage honestly empty), never a guess.
+def _signal_classes() -> List[str]:
+    try:
+        from monitoring.fleet_watchdog import ALL_KINDS
+        return list(ALL_KINDS)
+    except Exception as e:
+        logger.debug("blackout-kind enum unavailable: %s", e)
+        return []
+
+
+SIGNAL_CLASSES: List[str] = _signal_classes()
 
 
 def _http_get_json(url: str, timeout: float) -> Optional[Dict[str, Any]]:

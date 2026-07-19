@@ -137,9 +137,12 @@ class TestCache:
         assert "boom" in t["fanout"].get("error", "")
         assert t["schema"] == "fleet_truth/v1"
 
-    def test_signal_classes_empty_honest_zero_coverage(self):
-        """MA has no closed signal enum yet — the truth doc must carry 0-total
-        coverage, never invented classes."""
+    def test_signal_classes_are_blackout_kinds_and_blockless_status_reads_dark(self):
+        """MA's closed enum = its blackout kinds (2026-07-19 enrichment). A
+        box whose status carries NO watchdog block gets every kind dark —
+        never inferred green."""
+        from monitoring.fleet_watchdog import ALL_KINDS
+
         def fake_collect(*, self_port):
             return ([{"alias": "self-box", "resolution_method": "self",
                       "status": {"app": {}}, "slo": {"overall_status": "ready"},
@@ -147,4 +150,7 @@ class TestCache:
 
         with patch.object(c, "collect_snapshots", side_effect=fake_collect):
             t = c.get_fleet_truth(self_port=5001, force=True)
-        assert t["boxes"][0]["coverage"]["total"] == 0
+        cov = t["boxes"][0]["coverage"]
+        assert cov["total"] == len(ALL_KINDS)
+        assert cov["green"] == 0
+        assert cov["dark"] == len(ALL_KINDS)

@@ -90,6 +90,80 @@ def _build_app_block() -> Dict[str, Any]:
     return block
 
 
+FLEET_WATCHDOG_UNIT = "meshanchor-fleet-watchdog"
+
+
+def watchdog_block_from_blackouts(*, now: Optional[float] = None) -> Dict[str, Any]:
+    """MA-native ``/api/status.watchdog`` block from the blackout organ.
+
+    Speaks the fleet-truth block contract ({installed, ok, reason, signals,
+    coverage}) in MeshAnchor's OWN idiom: the fleet-watchdog's blackout KINDS
+    are MA's closed signal enum, active blackout rows are the signals, and
+    coverage marks every kind clean/active per read.
+
+    Honesty guards (the honest_status precedent — an empty blackout table
+    must never read green on its own):
+    - organ liveness comes from the UNIT state (a dead fleet-watchdog can't
+      record blackouts): not-installed → installed:false (benign absence);
+      inactive → ok:false with a real-fault reason (FAILED downstream);
+      state check itself failing → an "unobservable" reason (DARK downstream,
+      never healthy and never an invented fault).
+    - the blackout store failing to read → "unobservable" reason (DARK).
+    - RESIDUAL (accepted, same as honest_status): a wedged-but-active
+      watchdog process serving stale rows is invisible to the unit check.
+    """
+    import time as _time
+    wall_now = now if now is not None else _time.time()
+
+    try:
+        from utils.service_check import ServiceState, check_service
+        st = check_service(FLEET_WATCHDOG_UNIT)
+    except Exception as exc:  # service layer itself broken — cannot observe
+        return {"installed": True, "ok": False,
+                "reason": f"watchdog unit state unobservable: {exc}"}
+
+    if st.state == ServiceState.NOT_INSTALLED:
+        return {"installed": False,
+                "reason": "fleet-watchdog unit not installed on this box"}
+    if not st.available:
+        return {"installed": True, "ok": False,
+                "reason": "fleet-watchdog unit inactive — blackout detection down"}
+
+    try:
+        from monitoring.fleet_history import query_active_blackouts
+        active_rows = query_active_blackouts()
+    except Exception as exc:
+        return {"installed": True, "ok": False,
+                "reason": f"blackout store unobservable: {exc}"}
+
+    from monitoring.fleet_watchdog import ALL_KINDS, KIND_ROLE_DRIFT
+    signals = []
+    for r in active_rows:
+        if not isinstance(r, dict) or not r.get("kind"):
+            continue
+        signals.append({
+            "class": r["kind"],
+            "subject": "fleet",
+            "severity": "degraded" if r["kind"] == KIND_ROLE_DRIFT else "wedge",
+            "detail": r.get("reason") or "",
+            "first_seen": r.get("ts_started"),
+        })
+    active_kinds = {s["class"] for s in signals}
+    coverage = {
+        k: ({"disp": "active"} if k in active_kinds else {"disp": "clean"})
+        for k in ALL_KINDS
+    }
+    return {
+        "installed": True,
+        "ok": not signals,
+        "ts": wall_now,
+        "age_s": 0.0,
+        "probe_count": len(ALL_KINDS),
+        "signals": signals,
+        "coverage": coverage,
+    }
+
+
 class StatusEndpointsMixin:
     """``/api/status`` endpoint + its radio connectivity reader."""
 
@@ -128,6 +202,20 @@ class StatusEndpointsMixin:
 
         # Include radio connection status
         status["radio"] = self._get_radio_status_summary()
+
+        # Cross-domain observability blocks (fleet-truth arc, 2026-07-19).
+        # Both NOCs' /api/fleet/truth builders read these; without them every
+        # MA box's watchdog/mini cells read unobservable-DARK and taint the
+        # box roll-up. The watchdog block speaks MA's NATIVE organ (blackout
+        # kinds), not a clone of MF's probe watchdog; mini is an explicit
+        # benign absence (installed:false) — MA has no mini-dudeai, and
+        # saying so is the difference between absent-dark (benign) and
+        # unobservable-dark (taints).
+        status["watchdog"] = watchdog_block_from_blackouts()
+        status["mini_dudeai"] = {
+            "installed": False,
+            "reason": "mini-dudeai is a MeshForge organ — MeshAnchor has no local sub-agent",
+        }
 
         # Response-cache observability (Issues #70/#71). Surfaces hit/miss/
         # coalesced counts per heavy endpoint so operators can confirm the
