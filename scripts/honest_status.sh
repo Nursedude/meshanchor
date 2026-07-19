@@ -69,6 +69,15 @@ for arg in "$@"; do
 done
 
 SSH="ssh -o ConnectTimeout=8 -o BatchMode=yes"
+
+# Consumer-of-record interpreter (calibrated_claims rule 7, 2026-07-19): on a
+# box whose MA services run from the repo venv (meshanchor-server), bare
+# python3 is NOT the interpreter hosting the code — it may lack pytest
+# entirely (the suite leg read FAIL "No module named pytest") and would test
+# a different dependency set even when it has one. Prefer the venv python
+# when present; fall back to system python3 (the VolcanoAI/dev shape).
+PY="python3"
+[ -x "$REPO/venv/bin/python" ] && PY="$REPO/venv/bin/python"
 pass=0; fail=0; unknown=0; warns=0
 ok()    { printf '  %-22s \033[32mPASS\033[0m    %s\n' "$1" "$2"; pass=$((pass+1)); }
 bad()   { printf '  %-22s \033[31mFAIL\033[0m    %s\n' "$1" "$2"; fail=$((fail+1)); }
@@ -128,7 +137,7 @@ fi
 
 # 3. Full local suite — real exit code + count (file-routed, never a streamed tail).
 if [ "$RUN_TESTS" = 1 ]; then
-  python3 -m pytest "$REPO/tests/" -q -p no:cacheprovider >/tmp/.hs_pytest_ma 2>&1; rc=$?
+  "$PY" -m pytest "$REPO/tests/" -q -p no:cacheprovider >/tmp/.hs_pytest_ma 2>&1; rc=$?
   summ=$(grep -E "[0-9]+ (passed|failed|error)" /tmp/.hs_pytest_ma | tail -1)
   nfail=$(grep -cE "^FAILED|^ERROR" /tmp/.hs_pytest_ma)
   if [ "$rc" = 0 ] && [ "$nfail" = 0 ]; then ok "full suite" "$summ (exit 0)"
@@ -150,7 +159,7 @@ else
 fi
 
 # 4. Lint — real exit code.
-python3 "$REPO/scripts/lint.py" --all >/tmp/.hs_lint_ma 2>&1; rc=$?
+"$PY" "$REPO/scripts/lint.py" --all >/tmp/.hs_lint_ma 2>&1; rc=$?
 if [ "$rc" = 0 ]; then ok "lint" "exit 0"
 else bad "lint" "exit $rc — $(grep -E '\[E\]' /tmp/.hs_lint_ma | tail -1)"; fi
 
