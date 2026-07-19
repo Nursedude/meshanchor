@@ -332,6 +332,62 @@ def reconcile_blackouts(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Active paging (ntfy) — the "don't fall silent" charter, actively
+# ──────────────────────────────────────────────────────────────────────
+
+# Priority + tags per blackout kind. role_drift is latent legibility debt
+# (degraded), so it pages at "default"; the silence kinds are operationally
+# urgent. ntfy priorities: min < low < default < high < urgent.
+_KIND_PRIORITY = {
+    KIND_NO_DATA: "high",
+    KIND_HTTP_DEAD: "high",
+    KIND_FROZEN: "high",
+    KIND_DAEMON_DEAD: "urgent",
+    KIND_ROLE_DRIFT: "default",
+}
+_KIND_TAGS = {
+    KIND_NO_DATA: ["warning"],
+    KIND_HTTP_DEAD: ["warning"],
+    KIND_FROZEN: ["snowflake"],
+    KIND_DAEMON_DEAD: ["rotating_light"],
+    KIND_ROLE_DRIFT: ["gear"],
+}
+
+
+def _notify_blackout_transitions(
+    decisions: Dict[str, Optional[str]], summary: Dict[str, Any],
+) -> None:
+    """Page ntfy on blackout OPEN/CLOSE transitions (not steady state).
+
+    ``reconcile_blackouts`` reports ``opened``/``closed`` only on the edge (it is
+    idempotent per kind), so this fires exactly once per transition — a persistent
+    blackout never re-pages. A no-op when ntfy isn't configured (dashboard-only).
+    Never raises: paging must not sink a watchdog cycle."""
+    try:
+        from utils.ntfy_notify import publish
+    except Exception as e:  # import failure must not break the loop
+        logger.debug("ntfy_notify import failed: %s", e)
+        return
+    for kind in ALL_KINDS:
+        change = summary.get(kind)
+        if change == "opened":
+            reason = decisions.get(kind) or kind
+            publish(
+                f"[meshanchor-watchdog] {kind}",
+                f"{kind}: {reason}",
+                priority=_KIND_PRIORITY.get(kind, "high"),
+                tags=_KIND_TAGS.get(kind, ["warning"]),
+            )
+        elif change == "closed":
+            publish(
+                f"[meshanchor-watchdog] cleared: {kind}",
+                f"{kind}: condition cleared",
+                priority="min",
+                tags=["white_check_mark"],
+            )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Loop
 # ──────────────────────────────────────────────────────────────────────
 
@@ -368,6 +424,7 @@ def run_loop(
                 db_path=db_path,
             )
             summary = reconcile_blackouts(decisions, db_path=db_path)
+            _notify_blackout_transitions(decisions, summary)
             cycles += 1
             active_kinds = [k for k, v in decisions.items() if v is not None]
             level = logger.warning if active_kinds else logger.info
