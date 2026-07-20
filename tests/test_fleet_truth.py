@@ -108,6 +108,35 @@ class TestCoverage:
         cov = ft.merge_coverage({"installed": False}, ["a", "b", "c"])
         assert cov["dark"] == 3 and cov["green"] == 0
 
+    # ── server-vs-fleet code skew (byte-locked with MeshForge; the #79
+    # deploy-restart gap in its truth-API skin, 2026-07-20)
+    def test_class_reported_by_box_is_never_dropped(self):
+        """A long-running NOC server imports its class enum once at start, so
+        after a deploy that adds a kind it keeps publishing the OLD short list
+        while boxes already report the new one. Iterating the server's list
+        alone silently dropped those and still published `total` as complete.
+        The box's own report wins."""
+        wd = {"installed": True, "ok": True, "signals": [],
+              "coverage": {"a": "clean",
+                           "brand_new_kind": {"disp": "inert", "reason": "absent here"}}}
+        cov = ft.merge_coverage(wd, ["a"])
+        assert "brand_new_kind" in cov["classes"]
+        assert cov["classes"]["brand_new_kind"]["reason"] == "absent here"
+        assert cov["unknown_to_server"] == ["brand_new_kind"]
+        assert cov["total"] == 2
+
+    def test_empty_enum_is_not_reported_as_skew(self):
+        """THE MeshAnchor-specific trap. MA passes an EMPTY class list when the
+        blackout-kind import fails (its honest-zero fallback). Ungated, every
+        reported class would read 'unknown to server', pin the verdict DARK and
+        blame a stale deploy — one degraded state wearing another's diagnosis."""
+        wd = {"installed": True, "ok": True, "signals": [],
+              "coverage": {"a": "clean", "b": "inert"}}
+        cov = ft.merge_coverage(wd, [])
+        assert cov["unknown_to_server"] == []
+        assert cov["total"] == 0
+        assert cov["green"] == cov["red"] == cov["dark"] == 0
+
 
 # ── build_box_truth ──────────────────────────────────────────────────────
 class TestBoxTruth:
@@ -171,6 +200,26 @@ class TestFleetTruth:
         assert t["fleet_state"] == ft.HEALTHY
         assert t["counts"]["healthy"] == 2
         assert t["fanout"]["stale"] is False
+
+    def test_server_class_skew_rolls_up_and_forces_non_green(self):
+        """Byte-locked with MeshForge: a per-box unknown_to_server list is
+        true-but-buried, so it rolls up top-level and taints the verdict DARK
+        (not FAILED — nothing is broken out there, we just cannot see all of
+        it from here, and unobservable must never read healthy)."""
+        snap = self._healthy_snap("noc-a")
+        snap["status"]["watchdog"] = {
+            "installed": True, "ok": True, "signals": [],
+            "coverage": {"brand_new_kind": "inert"}}
+        t = ft.build_fleet_truth([snap], now=NOW, signal_classes=["no_data"],
+                                 noc_host="noc-a")
+        assert t["server_class_skew"] == {"brand_new_kind": ["noc-a"]}
+        assert t["fleet_state"] == ft.DARK
+
+    def test_no_skew_leaves_the_verdict_alone(self):
+        t = ft.build_fleet_truth([self._healthy_snap("noc-a")], now=NOW,
+                                 signal_classes=[], noc_host="noc-a")
+        assert t["server_class_skew"] == {}
+        assert t["fleet_state"] == ft.HEALTHY
 
     def test_incomplete_fanout_forces_non_green(self):
         snaps = [self._healthy_snap("noc-a")]  # 1 answered
