@@ -233,6 +233,34 @@ class TestFleetTruth:
         assert t["fleet_state"] == ft.HEALTHY
         assert "lxmf_propagation_unused" in t["boxes"][0]["coverage"]["classes"]
 
+    # ── accepted blind spots (byte-locked with MeshForge, 2026-07-20) ──
+    def _maples_snap(self, alias="peer-gw", *, expected=False):
+        return {"alias": alias, "resolution_method": "ssh_spool",
+                "answered_at": NOW, "error": None,
+                "http_surface_expected": expected,
+                "status": {"app": {"name": "meshanchor", "role": "gateway-only"},
+                           "watchdog": {"installed": True, "ok": True, "signals": []}},
+                "slo": None}
+
+    def test_role_declared_maples_box_does_not_darken_the_fleet(self):
+        """A box whose declared role runs no map server has no HTTP truth
+        surface, so mini + services are unobservable BY DESIGN. Configured as
+        designed must not pin the fleet DARK forever."""
+        t = ft.build_fleet_truth([self._maples_snap()], now=NOW,
+                                 signal_classes=[], noc_host="noc-a")
+        assert t["fleet_state"] == ft.HEALTHY
+        subs = t["boxes"][0]["subsystems"]
+        assert subs["mini"]["state"] == ft.DARK          # disclosed, not green
+        assert subs["mini"]["accepted_blind"] is True
+        assert t["accepted_blind_spots"][ "peer-gw" ]
+
+    def test_undeclared_dark_box_still_taints(self):
+        """Anti-silence guard: without a declaration nothing changes."""
+        t = ft.build_fleet_truth([self._maples_snap(expected=None)], now=NOW,
+                                 signal_classes=[], noc_host="noc-a")
+        assert t["fleet_state"] == ft.DARK
+        assert t["accepted_blind_spots"] == {}
+
     def test_no_skew_leaves_the_verdict_alone(self):
         t = ft.build_fleet_truth([self._healthy_snap("noc-a")], now=NOW,
                                  signal_classes=[], noc_host="noc-a")
