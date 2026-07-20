@@ -215,6 +215,24 @@ class TestFleetTruth:
         assert t["server_class_skew"] == {"brand_new_kind": ["noc-a"]}
         assert t["fleet_state"] == ft.DARK
 
+    def test_foreign_app_peer_is_not_a_stale_code_accusation(self):
+        """CAUGHT LIVE on MeshForge's first deploy, 2026-07-20: this very box
+        (meshanchor-server) instantly reported no_data/http_dead/frozen/
+        daemon_dead to the MF NOC — MeshAnchor's OWN vocabulary, not classes
+        that NOC was behind on. Ungated, a heterogeneous fleet pins itself DARK
+        forever on a false 'your code is stale' diagnosis. Mirrored here so the
+        byte-locked file cannot regress from this side."""
+        snap = self._healthy_snap("mf-peer")
+        snap["status"]["app"] = {"name": "meshforge"}      # foreign to MA
+        snap["status"]["watchdog"] = {
+            "installed": True, "ok": True, "signals": [],
+            "coverage": {"lxmf_propagation_unused": "inert"}}
+        t = ft.build_fleet_truth([snap], now=NOW, signal_classes=["no_data"],
+                                 noc_host="noc-a")
+        assert t["server_class_skew"] == {}
+        assert t["fleet_state"] == ft.HEALTHY
+        assert "lxmf_propagation_unused" in t["boxes"][0]["coverage"]["classes"]
+
     def test_no_skew_leaves_the_verdict_alone(self):
         t = ft.build_fleet_truth([self._healthy_snap("noc-a")], now=NOW,
                                  signal_classes=[], noc_host="noc-a")
