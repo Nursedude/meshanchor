@@ -554,3 +554,117 @@ class TestNewProbesRegistered:
         registered = set(probe._checks.keys())
         assert "queue_backlog" in registered
         assert "delivery_confirmation_stall" in registered
+
+
+class TestUserTimerUnitFailingProbe:
+    """MeshForge probe_user_timer_unit_failing parity port (2026-07-19).
+
+    The shape no 'is it running' check can see: a timer-triggered oneshot is
+    inactive between firings BY DESIGN and never crashloops. MF's kiai box ran
+    a failing tracer timer for a week in silence.
+    """
+
+    @staticmethod
+    def _home(tmp_path, timers):
+        wants = (tmp_path / "home" / ".config" / "systemd" / "user"
+                 / "timers.target.wants")
+        wants.mkdir(parents=True)
+        for name, body in timers.items():
+            (wants / name).write_text(body or "[Timer]\nOnCalendar=hourly\n")
+        return str(tmp_path / "home")
+
+    @staticmethod
+    def _ts(table):
+        def fn(unit, pattern):
+            return table.get(unit, {}).get(pattern)
+        return fn
+
+    def _probe(self):
+        from utils.active_health_probe import ActiveHealthProbe
+        return ActiveHealthProbe()
+
+    def test_unhealthy_when_every_firing_fails(self, tmp_path):
+        now = 1_000_000.0
+        home = self._home(tmp_path, {"meshanchor-tracer.timer": None})
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=home, now=now,
+            ts_fn=self._ts({"meshanchor-tracer.service": {
+                "Failed with result": [now - 1800, now - 1200, now - 600],
+                "Finished ": []}}))
+        assert r.healthy is False
+        assert "user_timer_unit_failing" in r.reason
+        assert "meshanchor-tracer.service" in r.reason
+
+    def test_healthy_when_it_recovered(self, tmp_path):
+        """Failures then a SUCCESS is a blip, not an outage — this is what
+        makes it an outcome check rather than an error counter."""
+        now = 1_000_000.0
+        home = self._home(tmp_path, {"meshanchor-tracer.timer": None})
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=home, now=now,
+            ts_fn=self._ts({"meshanchor-tracer.service": {
+                "Failed with result": [now - 1800, now - 1200],
+                "Finished ": [now - 300]}}))
+        assert r.healthy is True
+
+    def test_healthy_on_single_blip(self, tmp_path):
+        now = 1_000_000.0
+        home = self._home(tmp_path, {"meshanchor-tracer.timer": None})
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=home, now=now,
+            ts_fn=self._ts({"meshanchor-tracer.service": {
+                "Failed with result": [now - 600], "Finished ": []}}))
+        assert r.healthy is True
+
+    def test_healthy_after_remediation(self, tmp_path):
+        """Recency gate: post-fix history must not keep alarming."""
+        now = 1_000_000.0
+        home = self._home(tmp_path, {"meshanchor-tracer.timer": None})
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=home, now=now, recency_s=3600.0,
+            ts_fn=self._ts({"meshanchor-tracer.service": {
+                "Failed with result": [now - 9000, now - 8000],
+                "Finished ": []}}))
+        assert r.healthy is True
+
+    def test_unobservable_journal_is_flagged_in_reason(self, tmp_path):
+        """HealthResult is binary, so unobservable must read healthy — but the
+        reason has to say so, or 'could not look' is indistinguishable from
+        'looked and it was fine'."""
+        home = self._home(tmp_path, {"meshanchor-tracer.timer": None})
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=home, now=1_000_000.0,
+            ts_fn=self._ts({"meshanchor-tracer.service": {
+                "Failed with result": None, "Finished ": None}}))
+        assert r.healthy is True
+        assert r.reason == "journal_unobservable"
+
+    def test_healthy_with_no_timers_enrolled(self, tmp_path):
+        (tmp_path / "home" / ".config" / "systemd" / "user").mkdir(parents=True)
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=str(tmp_path / "home"), now=1_000_000.0,
+            ts_fn=self._ts({}))
+        assert r.healthy is True
+        assert r.reason == "no_user_timers_enrolled"
+
+    def test_honours_unit_override(self, tmp_path):
+        """A timer with an explicit Unit= must be judged on THAT service, else
+        the check silently watches a unit that doesn't exist and reads healthy
+        forever."""
+        now = 1_000_000.0
+        home = self._home(tmp_path, {
+            "wrapper.timer":
+                "[Timer]\nOnCalendar=hourly\nUnit=real-job.service\n"})
+        r = self._probe().check_user_timer_unit_failing(
+            user_home=home, now=now,
+            ts_fn=self._ts({"real-job.service": {
+                "Failed with result": [now - 900, now - 300],
+                "Finished ": []}}))
+        assert r.healthy is False
+        assert "real-job.service" in r.reason
+
+    def test_registered_in_factory(self):
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_unmanaged_services", return_value=set()):
+            probe = ahp.create_gateway_health_probe()
+        assert "user_timer_units" in set(probe._checks.keys())

@@ -132,6 +132,93 @@ def _read_fd_usage(pid: int, *, proc_root: str = "/proc"):
     return open_count, soft
 
 
+# ── user-timer failure detection (MeshForge parity port, 2026-07-19) ──
+# systemd's user manager logs both of these about a unit under the
+# ``USER_UNIT=`` journal field, which root can select WITHOUT sudo or the
+# user bus. Verified empirically on the fleet before this was trusted: had
+# the success line lacked that field, success-detection would have been
+# silently dead and the check would alarm after every recovery.
+_USER_TIMER_FAIL_PATTERN = "Failed with result"
+_USER_TIMER_OK_PATTERN = "Finished "
+_USER_TIMER_UNIT_RE = re.compile(r"(?mi)^\s*Unit\s*=\s*(\S+)\s*$")
+
+
+def _journal_user_unit_ts(
+    user_unit: str,
+    pattern: str,
+    lookback: str,
+    journalctl_path: str = "journalctl",
+) -> Optional[List[float]]:
+    """Epoch timestamps of ``USER_UNIT=<user_unit>`` journal lines matching
+    ``pattern`` within ``lookback``.
+
+    ``-u <unit>`` selects the SYSTEM journal namespace and is structurally
+    blind to user units (rc 0 but EMPTY from a root context) — the
+    ``USER_UNIT=`` field selector is the read that actually works.
+
+    Returns the parsed list (``[]`` = genuinely no matching lines) or
+    **None** on journalctl unavailable / timeout / rc∉(0,1) — the honest
+    *unobservable* answer, which a caller must never collapse into ``[]``.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                journalctl_path, "-q", f"USER_UNIT={user_unit}",
+                "--since", f"-{lookback}", "-g", pattern,
+                "-o", "short-unix", "--no-pager",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if proc.returncode not in (0, 1):
+        return None
+    out: List[float] = []
+    for ln in proc.stdout.splitlines():
+        if not ln:
+            continue
+        head = ln.split(None, 1)[0]
+        try:
+            out.append(float(head))
+        except ValueError:
+            continue
+    return out
+
+
+def _enabled_user_timers(user_home: str) -> Optional[Dict[str, str]]:
+    """Map ``timer unit -> triggered service unit`` for the operator's enabled
+    user timers (``~/.config/systemd/user/timers.target.wants/``).
+
+    The service is ``Unit=`` from ``[Timer]`` when set, else systemd's default
+    of the same stem with ``.service``. ``None`` means the directory exists but
+    is unreadable — *unobservable*, which the caller must not read as "no
+    timers"; an absent directory is a real, observed empty enrollment (``{}``).
+    """
+    wants = Path(user_home) / ".config" / "systemd" / "user" / "timers.target.wants"
+    if not wants.is_dir():
+        return {}
+    try:
+        names = [p.name for p in wants.iterdir() if p.name.endswith(".timer")]
+    except OSError:
+        return None
+
+    out: Dict[str, str] = {}
+    for timer in names:
+        service = timer[: -len(".timer")] + ".service"
+        # Best-effort Unit= override; an unreadable timer file falls back to
+        # the stem default rather than dropping the timer from the map — the
+        # conservative choice is to keep WATCHING it under its likely name.
+        try:
+            body = (wants / timer).read_text(errors="replace")
+            m = _USER_TIMER_UNIT_RE.search(body)
+            if m and m.group(1).endswith(".service"):
+                service = m.group(1)
+        except OSError:
+            pass
+        out[timer] = service
+    return out
+
+
 class HealthState(Enum):
     """Health state for a monitored service."""
     UNKNOWN = "unknown"    # Not yet checked
@@ -963,6 +1050,122 @@ class ActiveHealthProbe:
             ),
         )
 
+    def check_user_timer_unit_failing(
+        self,
+        *,
+        user_home: Optional[str] = None,
+        lookback: str = "3h",
+        min_failures: int = 2,
+        recency_s: float = 3600.0,
+        journalctl_path: str = "journalctl",
+        ts_fn=None,
+        now: Optional[float] = None,
+    ) -> HealthResult:
+        """Unhealthy when an enabled USER *timer's* job fails on every firing.
+
+        MeshForge ``probe_user_timer_unit_failing`` parity port (2026-07-19).
+        Origin incident is MF-side but the blind spot is identical on both
+        NOCs: a timer-triggered oneshot is **inactive between firings by
+        design**, so nothing that judges "is it running" can judge it, and it
+        never crashloops, so restart-counter detectors miss it too. On
+        MeshForge, kiai's ``meshforge-tracer.timer`` fired every 10 minutes
+        for a week while its job exited 2 every time, and no probe on either
+        repo could have seen it.
+
+        Outcome-based rather than an error count: a timer's service is judged
+        failing only when it has ``min_failures`` ``Failed with result``
+        events inside ``lookback``, the newest fresher than ``recency_s``,
+        **and no successful run since that newest failure**. Fails-then-
+        succeeds is a blip and stays quiet; a remediated job stops alarming
+        immediately instead of ringing off its own history.
+
+        Reads are bus-free and root-readable: enrollment from
+        ``~/.config/systemd/user/timers.target.wants/`` symlinks, outcomes
+        from the ``USER_UNIT=`` journal field (no sudo, no user bus).
+
+        Self-guards healthy-with-reason, following the fd-exhaustion
+        precedent, so boxes with no user timers never false-alarm: no
+        resolvable operator, no timers enrolled, wants dir unreadable, or the
+        journal unobservable for every enrolled timer.
+
+        NOTE (calibrated — the MF twin is stricter): MeshForge's version is
+        tri-state and HOLDS its debounce streak across an unobservable tick,
+        so a journalctl wedge cannot clear an in-flight outage. ``HealthResult``
+        is binary, so here an unobservable journal necessarily reads healthy
+        (``journal_unobservable``) and the probe's own ``fails`` hysteresis is
+        what rides out a single bad tick. The reason string is deliberately
+        greppable so an operator can tell "observed clean" from "could not
+        look".
+        """
+        now = time.time() if now is None else now
+
+        if user_home is None:
+            operator = None
+            try:
+                from utils.fleet_test_runner import _find_operator_user
+                operator = _find_operator_user()
+            except Exception:
+                operator = None
+            if operator is None:
+                return HealthResult(healthy=True, reason="no_operator_user")
+            uid, name = operator
+            try:
+                import pwd as _pwd
+                user_home = _pwd.getpwuid(uid).pw_dir
+            except (ImportError, KeyError):
+                user_home = f"/home/{name}"
+
+        timers = _enabled_user_timers(user_home)
+        if timers is None:
+            return HealthResult(healthy=True, reason="user_timers_unreadable")
+        if not timers:
+            return HealthResult(healthy=True, reason="no_user_timers_enrolled")
+
+        if ts_fn is None:
+            def ts_fn(unit, pattern):
+                return _journal_user_unit_ts(
+                    unit, pattern, lookback, journalctl_path=journalctl_path)
+
+        failing = []
+        observed_any = False
+        for timer, service in sorted(timers.items()):
+            fails = ts_fn(service, _USER_TIMER_FAIL_PATTERN)
+            oks = ts_fn(service, _USER_TIMER_OK_PATTERN)
+            if fails is None or oks is None:
+                continue                       # unobservable for THIS unit
+            observed_any = True
+            if len(fails) < min_failures:
+                continue
+            newest_fail = max(fails)
+            if (now - newest_fail) > recency_s:
+                continue                       # already remediated
+            if oks and max(oks) > newest_fail:
+                continue                       # recovered after the failures
+            failing.append((service, len(fails)))
+
+        if not observed_any:
+            return HealthResult(healthy=True, reason="journal_unobservable")
+        if not failing:
+            return HealthResult(
+                healthy=True,
+                reason=f"user_timers_ok_{len(timers)}",
+            )
+
+        listed = ", ".join(f"{svc} ({n}x in {lookback})" for svc, n in failing)
+        return HealthResult(
+            healthy=False,
+            reason=(
+                f"user_timer_unit_failing: timer-triggered user job(s) "
+                f"failing every firing: {listed}. No successful run since the "
+                f"newest failure. These are invisible to every 'is it running' "
+                f"check — a oneshot is inactive between firings by design and "
+                f"never crashloops. Inspect: systemctl --user status <unit> ; "
+                f"journalctl --user -u <unit> -n 50. Usual cause is a missing "
+                f"input (config/peers file), which fails every cadence forever "
+                f"without alerting anyone."
+            ),
+        )
+
     def check_systemd_service(self, service_name: str) -> HealthResult:
         """
         Check if a systemd service is active and running.
@@ -1186,6 +1389,17 @@ def create_gateway_health_probe(
     probe.register_check(
         "delivery_confirmation_stall",
         lambda: probe.check_delivery_confirmation_stall(),
+    )
+
+    # Timer-triggered user jobs that fail on EVERY firing (MeshForge
+    # probe_user_timer_unit_failing parity port, 2026-07-19). Registered
+    # UNCONDITIONALLY following the fd-exhaustion precedent — it self-guards
+    # healthy on a box with no user timers enrolled. This is the one shape no
+    # "is it running" check can see: a oneshot is inactive between firings by
+    # design, and it never crashloops. MF's kiai incident ran a week silent.
+    probe.register_check(
+        "user_timer_units",
+        lambda: probe.check_user_timer_unit_failing(),
     )
 
     # Wire state changes to EventBus for push-based status updates

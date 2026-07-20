@@ -304,7 +304,11 @@ class TestActiveHealthProbe:
         # the two unconditional fd-exhaustion probes (#73 parity port) +
         # the two unconditional delivery-observability probes (MF Issue
         # #74 probe port, 2026-06-06) + the unconditional dep version-floor
-        # probe (MF probe_dep_version_drift parity, 2026-07-03).
+        # probe (MF probe_dep_version_drift parity, 2026-07-03) + the
+        # unconditional user-timer failure probe (MF
+        # probe_user_timer_unit_failing parity, 2026-07-19 — the one shape no
+        # "is it running" check can see: a timer-triggered oneshot is inactive
+        # between firings by design and never crashloops).
         assert set(names) == {
             "meshtasticd",
             "rnsd",
@@ -316,6 +320,7 @@ class TestActiveHealthProbe:
             "queue_backlog",
             "delivery_confirmation_stall",
             "dep_floor",
+            "user_timer_units",
         }
 
 
