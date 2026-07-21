@@ -546,6 +546,34 @@ class TestNodeTrackerCache:
             assert 'cached_1' in tracker._nodes
             assert tracker._nodes['cached_1'].name == 'Cached Node'
 
+    def test_load_cache_restores_service_type(self, tmp_path):
+        """service_type must survive the save/load round-trip.
+
+        Twin of the MeshForge regression found live 2026-07-21: to_dict()
+        wrote service_type but _load_cache() restored the other fields and
+        silently dropped it, so every restart erased the RNS service type of
+        every known node until it announced again (honest_failure_modes #4 —
+        a writer with no matching reader).
+        """
+        cache_file = tmp_path / "node_cache.json"
+        cache_data = {
+            'version': 1,
+            'nodes': [{
+                'id': 'rns_3968a2eeac25e2e7',
+                'network': 'rns',
+                'name': 'propagation node',
+                'rns_hash': '3968a2eeac25e2e7a7961f25842d3d85',
+                'service_type': 'LXMF_PROPAGATION',
+                'last_seen': '2026-07-21T03:37:44.163446',
+            }]
+        }
+        cache_file.write_text(json.dumps(cache_data))
+
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file):
+            tracker = UnifiedNodeTracker()
+
+            assert tracker._nodes['rns_3968a2eeac25e2e7'].service_type == 'LXMF_PROPAGATION'
+
     def test_load_cache_handles_missing_file(self, tmp_path):
         """Test loading when cache file doesn't exist."""
         cache_file = tmp_path / "nonexistent.json"
