@@ -8,6 +8,61 @@ sys.path.insert(0, 'src')
 import unittest
 from datetime import datetime
 
+try:
+    import msgpack  # noqa: F401
+    _HAS_MSGPACK = True
+except ImportError:
+    _HAS_MSGPACK = False
+
+
+@unittest.skipUnless(_HAS_MSGPACK, "msgpack required to build propagation fixtures")
+class TestLXMFPropagationAnnounceParsing(unittest.TestCase):
+    """Propagation announces are NOT the delivery shape (twin of MeshForge).
+
+    Found live on MeshForge 2026-07-21: a propagation node announcing the
+    ordinary name ``WH6GXZ MeshForge PN`` was logged as ``name=j_v((`` —
+    raw msgpack header bytes rendered as a display name, because the parser
+    only understood the delivery app_data shape. The real name lives in
+    element 6, ``metadata[PN_META_NAME]``. honest_failure_modes #1.
+    """
+
+    PN_META_NAME = 0x01
+
+    @staticmethod
+    def _pn_app_data(name=b"WH6GXZ MeshForge PN", node_state=True, with_name=True):
+        metadata = {TestLXMFPropagationAnnounceParsing.PN_META_NAME: name} if with_name else {}
+        return msgpack.packb([False, 1784600000, node_state, 256, 10240,
+                              [16, 3, 18], metadata])
+
+    def test_propagation_name_comes_from_metadata(self):
+        from gateway.rns_services import LXMFParser
+        info = LXMFParser.parse(self._pn_app_data(), 'lxmf.propagation')
+        self.assertEqual(info.display_name, 'WH6GXZ MeshForge PN')
+        self.assertEqual(info.service_type.name, 'LXMF_PROPAGATION')
+
+    def test_propagation_never_renders_msgpack_bytes_as_a_name(self):
+        from gateway.rns_services import LXMFParser
+        info = LXMFParser.parse(self._pn_app_data(), 'lxmf.propagation')
+        # Pin the property, not samples of the noise.
+        self.assertIn(info.display_name, ('', 'WH6GXZ MeshForge PN'))
+
+    def test_propagation_without_a_name_is_empty_not_garbage(self):
+        from gateway.rns_services import LXMFParser
+        info = LXMFParser.parse(self._pn_app_data(with_name=False), 'lxmf.propagation')
+        self.assertEqual(info.display_name, '')
+
+    def test_propagation_surfaces_state_and_stamp_cost(self):
+        from gateway.rns_services import LXMFParser
+        info = LXMFParser.parse(self._pn_app_data(), 'lxmf.propagation')
+        self.assertTrue(info.metadata.get('propagation_enabled'))
+        self.assertEqual(info.metadata.get('stamp_cost'), 16)
+
+    def test_malformed_propagation_data_does_not_raise(self):
+        from gateway.rns_services import LXMFParser
+        for bad in (b'\x97\x00', b'not msgpack', b'\xff\xfe'):
+            info = LXMFParser.parse(bad, 'lxmf.propagation')
+            self.assertEqual(info.service_type.name, 'LXMF_PROPAGATION')
+
 
 class TestRNSServiceTypes(unittest.TestCase):
     """Test RNS service type definitions"""

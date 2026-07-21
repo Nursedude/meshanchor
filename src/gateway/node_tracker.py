@@ -519,6 +519,23 @@ class UnifiedNodeTracker:
         if new.short_name:
             existing.short_name = new.short_name
 
+        # Refresh RNS service classification from this announce. This merge
+        # used to ignore service_* entirely, so the field was only ever set
+        # when a node was CREATED — an announce from an already-known node
+        # left it untouched, making service_type unrecoverable once lost.
+        # Found live in MeshForge 2026-07-21 (ported here as the twin):
+        # a propagation node's cache entry got a fresh last_seen while
+        # service_type stayed None. UNKNOWN never displaces a real
+        # classification (RNS aspect filters are not exclusive), but is still
+        # recorded when nothing better is known.
+        if new.service_type:
+            if new.service_type != "UNKNOWN" or not existing.service_type:
+                existing.service_type = new.service_type
+        if new.service_aspect:
+            existing.service_aspect = new.service_aspect
+        if new.service_capabilities:
+            existing.service_capabilities = list(new.service_capabilities)
+
         # Update position if newer
         if new.position.is_valid():
             existing.position = new.position

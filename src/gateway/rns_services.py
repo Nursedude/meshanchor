@@ -133,6 +133,15 @@ class LXMFParser(ServiceParser):
         if not app_data or len(app_data) == 0:
             return info
 
+        # A propagation announce is a DIFFERENT wire shape from a delivery
+        # announce and the name scan below cannot read it — it would return
+        # raw msgpack header bytes as a "display name" (the `name=j_v((`
+        # mojibake found live on MeshForge 2026-07-21). Route it to its own
+        # parser and return; never fall through.
+        if info.service_type == RNSServiceType.LXMF_PROPAGATION:
+            LXMFParser._parse_propagation_announce(app_data, info)
+            return info
+
         # Find msgpack boundary
         msgpack_start = LXMFParser._find_msgpack_start(app_data)
 
@@ -153,6 +162,69 @@ class LXMFParser(ServiceParser):
             LXMFParser._parse_msgpack_telemetry(app_data[msgpack_start:], info)
 
         return info
+
+    # LXMF propagation-node metadata keys (LXMF/LXMF.py). Only what we read.
+    PN_META_NAME = 0x01
+
+    @staticmethod
+    def _parse_propagation_announce(app_data: bytes, info: 'ServiceInfo') -> None:
+        """Fill ``info`` from an ``lxmf.propagation`` announce, in place.
+
+        Wire shape is ``LXMRouter.get_propagation_node_app_data()`` —
+        ``msgpack([...])`` with 7 positional elements::
+
+            0 legacy-PN flag (bool)      4 per-sync limit
+            1 node timebase (int)        5 [stamp_cost, flex, peering_cost]
+            2 propagation node state     6 metadata dict (name lives here)
+            3 per-transfer limit (KB)
+
+        Element 0 is a BOOLEAN, which is why the delivery path produced
+        garbage: it treats the leading bytes as a name.
+
+        Honest failure modes: anything unreadable is LEFT UNSET. An absent,
+        malformed or non-UTF-8 name yields ``""`` (rendered "unnamed"), never
+        a decoded byte smear — absence is an observation, inventing a name
+        from noise is a lie (honest_failure_modes #1).
+        """
+        if not _HAS_MSGPACK:
+            return
+        try:
+            data = msgpack.unpackb(app_data, raw=True, strict_map_key=False)
+        except Exception:
+            return
+        if not isinstance(data, (list, tuple)) or len(data) < 7:
+            return
+
+        metadata = data[6]
+        if isinstance(metadata, dict):
+            raw_name = metadata.get(LXMFParser.PN_META_NAME)
+            if isinstance(raw_name, (bytes, bytearray)):
+                try:
+                    decoded = bytes(raw_name).decode('utf-8')
+                except UnicodeDecodeError:
+                    decoded = ''
+                else:
+                    decoded = ''.join(
+                        c for c in decoded.strip('\x00').strip() if c.isprintable()
+                    )
+                if decoded:
+                    info.display_name = decoded[:64]
+            elif isinstance(raw_name, str):
+                cleaned = ''.join(c for c in raw_name.strip() if c.isprintable())
+                if cleaned:
+                    info.display_name = cleaned[:64]
+
+        if isinstance(data[2], bool):
+            info.metadata['propagation_enabled'] = data[2]
+
+        stamp = data[5]
+        if isinstance(stamp, (list, tuple)) and stamp and isinstance(stamp[0], int):
+            info.metadata['stamp_cost'] = stamp[0]
+
+        for key, idx in (('per_transfer_limit_kb', 3), ('per_sync_limit', 4),
+                         ('timebase', 1)):
+            if isinstance(data[idx], int) and not isinstance(data[idx], bool):
+                info.metadata[key] = data[idx]
 
     @staticmethod
     def _find_msgpack_start(app_data: bytes) -> int:
