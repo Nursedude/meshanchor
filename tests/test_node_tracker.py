@@ -501,6 +501,58 @@ class TestUnifiedNodeTracker:
             assert len(tracker.get_all_nodes()) == 100
 
 
+class TestSelfReportedNameReplacesStaleName:
+    """A node's announced name must be able to correct a stale cached one.
+
+    Twin of MeshForge 2026-07-21: _merge_node only replaced a name when the
+    existing one was empty or started with "!", so a name recorded once was
+    permanent — when the propagation parser was fixed, the cache kept serving
+    the old mojibake while the log showed the correct name. The guard itself
+    is right (an unparseable announce falls back to a hash placeholder); the
+    missing distinction was PROVENANCE.
+    """
+
+    def _tracker(self, tmp_path):
+        cache_file = tmp_path / "node_cache.json"
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file):
+            with patch.object(UnifiedNodeTracker, '_load_cache'):
+                return UnifiedNodeTracker()
+
+    def test_self_reported_name_replaces_stale_garbage(self, tmp_path):
+        tracker = self._tracker(tmp_path)
+        tracker.add_node(UnifiedNode(id="rns_abc", network="rns", name="j^x("))
+
+        fresh = UnifiedNode(id="rns_abc", network="rns", name="WH6GXZ MeshForge PN")
+        fresh.name_is_self_reported = True
+        tracker.add_node(fresh)
+
+        assert tracker._nodes["rns_abc"].name == "WH6GXZ MeshForge PN"
+
+    def test_placeholder_never_overwrites_a_good_name(self, tmp_path):
+        tracker = self._tracker(tmp_path)
+        good = UnifiedNode(id="rns_abc", network="rns", name="WH6GXZ MeshForge PN")
+        good.name_is_self_reported = True
+        tracker.add_node(good)
+
+        tracker.add_node(UnifiedNode(id="rns_abc", network="rns", name="3968a2ee"))
+
+        assert tracker._nodes["rns_abc"].name == "WH6GXZ MeshForge PN"
+
+    def test_meshtastic_style_merge_is_unchanged(self, tmp_path):
+        tracker = self._tracker(tmp_path)
+        tracker.add_node(UnifiedNode(id="mesh_1", network="meshtastic", name="Real Name"))
+        tracker.add_node(UnifiedNode(id="mesh_1", network="meshtastic", name="Other"))
+
+        assert tracker._nodes["mesh_1"].name == "Real Name"
+
+    def test_placeholder_still_fills_an_empty_name(self, tmp_path):
+        tracker = self._tracker(tmp_path)
+        tracker.add_node(UnifiedNode(id="rns_abc", network="rns", name=""))
+        tracker.add_node(UnifiedNode(id="rns_abc", network="rns", name="3968a2ee"))
+
+        assert tracker._nodes["rns_abc"].name == "3968a2ee"
+
+
 class TestNodeTrackerCache:
     """Tests for cache save/load functionality."""
 

@@ -514,7 +514,17 @@ class UnifiedNodeTracker:
             existing.rns_hash = new.rns_hash
 
         # Update name if we have a better one
-        if new.name and (not existing.name or existing.name.startswith("!")):
+        # A SELF-REPORTED name (announced by the node about itself) always
+        # wins, so a node can correct a stale/garbled cached name — without
+        # this, a name recorded once was permanent and a parser fix stayed
+        # invisible in the cache/UI. The original rule stays for everything
+        # else: an unparseable announce falls back to a hash-derived
+        # placeholder, which must never overwrite a good name.
+        if new.name and (
+            getattr(new, "name_is_self_reported", False)
+            or not existing.name
+            or existing.name.startswith("!")
+        ):
             existing.name = new.name
         if new.short_name:
             existing.short_name = new.short_name
