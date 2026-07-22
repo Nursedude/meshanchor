@@ -159,7 +159,7 @@ def test_build_engine_ticks_clean_over_live_db(tmp_path, monkeypatch):
     # the health surface read clean — no false source_error, and self-observe
     # sees live==seed → no false drift.
     assert state.get("error_count", 0) == 0
-    assert state.get("rule_count") == 8
+    assert state.get("rule_count") == 9
     # tick() writes state; the run loop writes the brief via _write_brief_safe.
     assert (home / "mini_dudeai_state.json").exists()
     engine._write_brief_safe(state)

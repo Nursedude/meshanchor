@@ -13,6 +13,8 @@ Plus reconcile_blackouts: open-on-detect + close-on-recover, idempotent.
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from unittest.mock import patch
 
@@ -446,3 +448,85 @@ def test_daemon_dead_evaluated_on_empty_heartbeat_table(db):
     assert out[wd.KIND_NO_DATA] is not None       # table is empty
     assert out[wd.KIND_DAEMON_DEAD] is not None   # still evaluated, not skipped
     wd._daemon_state["inactive_streak"] = 0
+
+
+# ── mini_dead: EXTERNAL watcher for total mini-dudeai death (WS-A) ───────────
+# The mini's own within-tick MiniSelfSource cannot detect total death (a source
+# can't run if its loop is dead). fleet_watchdog closes that gap by watching the
+# operator's mini_dudeai_state.json freshness — inert on a box with no mini.
+
+def _write_mini_state(home, last_tick_ts):
+    (home / "mini_dudeai_state.json").write_text(
+        json.dumps({"last_tick_ts": last_tick_ts}))
+
+
+def test_mini_dead_listed_in_all_kinds():
+    """Regression guard — reconcile_blackouts + _notify iterate ALL_KINDS, so
+    the constant membership is what wires mini_dead through the lifecycle."""
+    assert wd.KIND_MINI_DEAD in wd.ALL_KINDS
+    assert wd.KIND_MINI_DEAD == "mini_dead"
+    assert wd.KIND_MINI_DEAD in wd._KIND_PRIORITY and wd.KIND_MINI_DEAD in wd._KIND_TAGS
+
+
+def test_mini_dead_none_when_state_absent(tmp_path):
+    # No mini installed on this box → not applicable (declared-absent ≠ dead).
+    wd._reset_mini_dead_state()
+    with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+        assert wd._mini_dead_reason(now=10_000.0) is None
+    assert wd._mini_dead_state["stale_streak"] == 0
+
+
+def test_mini_dead_none_when_state_fresh(tmp_path):
+    wd._reset_mini_dead_state()
+    _write_mini_state(tmp_path, last_tick_ts=10_000.0)
+    with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+        assert wd._mini_dead_reason(now=10_060.0) is None   # 60s < 300s
+    assert wd._mini_dead_state["stale_streak"] == 0
+
+
+def test_mini_dead_hysteresis_then_fires(tmp_path):
+    wd._reset_mini_dead_state()
+    _write_mini_state(tmp_path, last_tick_ts=10_000.0)
+    with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+        first = wd._mini_dead_reason(now=10_500.0)    # 500s stale, streak → 1
+        second = wd._mini_dead_reason(now=10_530.0)   # streak → 2 ⇒ fire
+    assert first is None
+    assert second is not None
+    assert "second brain" in second and "stale" in second
+
+
+def test_mini_dead_silent_on_graceful_stop(tmp_path):
+    # A clean-exit marker newer than the last tick = the operator stopped it on
+    # purpose (the engine stamps it on SIGTERM) → not a death, no false page.
+    wd._reset_mini_dead_state()
+    _write_mini_state(tmp_path, last_tick_ts=10_000.0)
+    marker = tmp_path / "mini_dudeai_clean_exit"
+    marker.write_text("stopped")
+    os.utime(marker, (10_050.0, 10_050.0))            # newer than last tick
+    with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+        assert wd._mini_dead_reason(now=10_500.0) is None
+        assert wd._mini_dead_reason(now=10_530.0) is None
+    assert wd._mini_dead_state["stale_streak"] == 0
+
+
+def test_mini_dead_indeterminate_on_unreadable_state(tmp_path):
+    # Malformed state → indeterminate: never accuse AND never clear — leave the
+    # streak unchanged (a transient read error must not move the verdict).
+    wd._reset_mini_dead_state()
+    wd._mini_dead_state["stale_streak"] = 1
+    (tmp_path / "mini_dudeai_state.json").write_text("{not valid json")
+    with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+        assert wd._mini_dead_reason(now=10_500.0) is None
+    assert wd._mini_dead_state["stale_streak"] == 1
+
+
+def test_mini_dead_evaluated_on_empty_heartbeat_table(db, tmp_path):
+    # Independent of heartbeat data — an empty table must still evaluate mini_dead
+    # (else reconcile would wrongly CLOSE a genuinely-active mini_dead blackout).
+    wd._reset_mini_dead_state()
+    _write_mini_state(tmp_path, last_tick_ts=10_000.0)
+    with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+        wd.detect_silence(db_path=db, now=10_500.0)           # streak → 1
+        out = wd.detect_silence(db_path=db, now=10_530.0)     # streak → 2 ⇒ fire
+    assert out[wd.KIND_MINI_DEAD] is not None
+    assert out[wd.KIND_NO_DATA] == "heartbeat table is empty"   # empty-table path

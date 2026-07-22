@@ -21,6 +21,13 @@ Periodically reads the most recent heartbeat row(s) and classifies:
   reads the map's still-incrementing uptime, but the back end is
   silent.
 
+- **Mini-dead** — the operator's ``mini_dudeai`` (the second brain, WS-A)
+  is present but its ``mini_dudeai_state.json`` stopped advancing for
+  ≥ ``MINI_DEAD_STALE_S``. The EXTERNAL watcher for total mini death, which
+  the mini's own within-tick MiniSelfSource structurally cannot see (a source
+  can't run if its loop is dead). Inert on a box with no mini installed;
+  silent on a graceful stop (clean-exit marker).
+
 These flavors of silence are non-negotiable: a healthy HTTP layer over
 a dead daemon is the failure mode that's hardest to catch by accident,
 and the operator's "things don't fall silent" requirement is what
@@ -83,8 +90,20 @@ KIND_HTTP_DEAD = "http_dead"
 KIND_FROZEN = "frozen"
 KIND_DAEMON_DEAD = "daemon_dead"
 KIND_ROLE_DRIFT = "role_drift"
+KIND_MINI_DEAD = "mini_dead"
 ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN, KIND_DAEMON_DEAD,
-             KIND_ROLE_DRIFT)
+             KIND_ROLE_DRIFT, KIND_MINI_DEAD)
+
+MINI_DEAD_STALE_S = 300.0
+"""mini_dudeai_state.json older than this ⇒ the second brain is dead/wedged.
+5 min ≈ 10 missed 30s ticks — long enough to ride out a mini restart, short
+enough to catch a real wedge. This is the EXTERNAL watcher for total mini
+death, which the mini's own within-tick MiniSelfSource structurally cannot see
+(WS-A: a source can't run if the loop that runs it is dead)."""
+
+MINI_DEAD_HYSTERESIS_CYCLES = 2
+"""Consecutive stale reads before mini_dead fires — same debounce shape as
+DAEMON_HYSTERESIS_CYCLES; rides out a mini restart mid-cycle."""
 
 ROLE_DRIFT_HYSTERESIS_CYCLES = 2
 """How many consecutive cycles of confirmed role drift open the
@@ -103,6 +122,9 @@ _daemon_state: Dict[str, int] = {"inactive_streak": 0}
 # Same pattern for role_drift (independent counter).
 _role_drift_state: Dict[str, int] = {"drift_streak": 0}
 
+# Same pattern for mini_dead (independent counter).
+_mini_dead_state: Dict[str, int] = {"stale_streak": 0}
+
 
 def _reset_daemon_state() -> None:
     """Test helper — resets the daemon_dead streak counter to 0."""
@@ -112,6 +134,11 @@ def _reset_daemon_state() -> None:
 def _reset_role_drift_state() -> None:
     """Test helper — resets the role_drift streak counter to 0."""
     _role_drift_state["drift_streak"] = 0
+
+
+def _reset_mini_dead_state() -> None:
+    """Test helper — resets the mini_dead streak counter to 0."""
+    _mini_dead_state["stale_streak"] = 0
 
 
 def _check_daemon_active() -> Optional[bool]:
@@ -189,6 +216,71 @@ def _role_drift_reason() -> Optional[str]:
     return None  # divergence seen, not yet confirmed across cycles
 
 
+def _mini_dead_reason(now: float) -> Optional[str]:
+    """Evaluate the mini_dead signal — is the operator's mini_dudeai (the
+    second brain) present but no longer ticking? The mini's OWN within-tick
+    MiniSelfSource cannot detect total death (a source can't run if its loop is
+    dead), so this EXTERNAL watcher closes that gap (WS-A). Independent of
+    heartbeat data (like daemon_dead / role_drift), so it is evaluated even when
+    the heartbeat table is empty.
+
+    Self-guards, in order (each an honest_failure_modes #2 boundary — a degraded
+    or absent observation must NOT read as a positive 'dead' verdict):
+      * state file ABSENT → the mini is not installed on this box → None
+        (declared-absent ≠ dead), streak reset.
+      * state unreadable / no ``last_tick_ts`` → indeterminate → None, streak
+        left unchanged (a transient read error must neither accuse nor clear).
+      * fresh (age ≤ threshold) → alive → None, streak reset.
+      * stale BUT a clean-exit marker newer than the last tick → the operator
+        stopped it gracefully (the engine stamps that marker on SIGTERM) → None,
+        streak reset. Paging an intentional stop would be the false-alarm this
+        guard exists to prevent.
+    Only a present, past-threshold-stale state with no fresh clean-exit,
+    confirmed over the hysteresis window, returns a reason.
+    """
+    import json
+    import os
+    try:
+        from utils.paths import get_real_user_home
+        home = get_real_user_home()
+        state_path = os.path.join(str(home), "mini_dudeai_state.json")
+        clean_path = os.path.join(str(home), "mini_dudeai_clean_exit")
+    except Exception as e:  # home resolution failed — can't observe, don't accuse
+        logger.debug("mini_dead home resolution raised: %s", e)
+        return None
+    if not os.path.exists(state_path):
+        _mini_dead_state["stale_streak"] = 0
+        return None  # mini not installed here — not applicable
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            doc = json.load(f)
+        last_tick = float(doc.get("last_tick_ts", 0.0) or 0.0)
+    except (OSError, ValueError, TypeError) as e:
+        logger.debug("mini_dead state read raised: %s", e)
+        return None  # indeterminate — leave streak unchanged
+    if last_tick <= 0.0:
+        _mini_dead_state["stale_streak"] = 0
+        return None  # never ticked / no timestamp — not a death signal
+    age = max(0.0, now - last_tick)  # clamp a future ts (clock step), as http_dead does
+    if age <= MINI_DEAD_STALE_S:
+        _mini_dead_state["stale_streak"] = 0
+        return None  # fresh — the loop is alive
+    try:
+        if os.path.exists(clean_path) and os.stat(clean_path).st_mtime >= last_tick:
+            _mini_dead_state["stale_streak"] = 0
+            return None  # graceful stop — not a death
+    except OSError:
+        pass  # marker unreadable → treat as no graceful stop, fall through
+    _mini_dead_state["stale_streak"] += 1
+    if _mini_dead_state["stale_streak"] >= MINI_DEAD_HYSTERESIS_CYCLES:
+        return (
+            f"mini_dudeai state is {age:.0f}s stale (threshold "
+            f"{MINI_DEAD_STALE_S:.0f}s) with no fresh clean-exit — the second "
+            f"brain is dead or wedged"
+        )
+    return None  # stale seen, not yet confirmed across cycles
+
+
 def detect_silence(
     *,
     now: Optional[float] = None,
@@ -218,6 +310,7 @@ def detect_silence(
         # blackout (B-F2, honest_failure #2). role_drift is likewise independent.
         out[KIND_DAEMON_DEAD] = _daemon_dead_reason()
         out[KIND_ROLE_DRIFT] = _role_drift_reason()
+        out[KIND_MINI_DEAD] = _mini_dead_reason(now)
         return out
 
     # Guard the ts cast + clamp a future/negative age. A malformed heartbeat ts
@@ -293,6 +386,10 @@ def detect_silence(
     # dry-run plan for this box's declared role). Hysteresis inside.
     out[KIND_ROLE_DRIFT] = _role_drift_reason()
 
+    # mini_dead: independent of heartbeat data (reads the operator's mini
+    # state file). Inert on a box with no mini installed. Hysteresis inside.
+    out[KIND_MINI_DEAD] = _mini_dead_reason(now)
+
     return out
 
 
@@ -349,6 +446,9 @@ _KIND_PRIORITY = {
     KIND_FROZEN: "high",
     KIND_DAEMON_DEAD: "urgent",
     KIND_ROLE_DRIFT: "min",
+    # The second brain being dead is serious (we lose cadence observation) but
+    # NOT a platform outage like daemon_dead — the NOC keeps serving. "high".
+    KIND_MINI_DEAD: "high",
 }
 _KIND_TAGS = {
     KIND_NO_DATA: ["warning"],
@@ -356,6 +456,7 @@ _KIND_TAGS = {
     KIND_FROZEN: ["snowflake"],
     KIND_DAEMON_DEAD: ["rotating_light"],
     KIND_ROLE_DRIFT: ["gear"],
+    KIND_MINI_DEAD: ["brain"],
 }
 
 

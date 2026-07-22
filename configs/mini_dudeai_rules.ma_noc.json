@@ -114,6 +114,22 @@
       "annotation": "BootHealthSource — the box reset without a clean-exit marker (unplanned power event or crash). Planned reboots stay silent (the engine stamps the marker on graceful stop). Check dmesg/journal for the cause."
     },
     {
+      "id": "ma_mini_dead_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "mini_dead",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "propose_escalation",
+        "title": "MeshAnchor mini dead/wedged",
+        "message": "{subject}: {detail}",
+        "priority": "low"
+      },
+      "cooldown_s": 3600,
+      "annotation": "fleet_watchdog mini_dead — the mini's own state file went stale (the second brain died/wedged). The EXTERNAL watcher (fleet_watchdog) already pages this at 'high'; this rule is escalate-only to avoid a double-page if a recovered mini later processes the still-open blackout. If the mini is dead it can't process this at all — that is exactly why fleet_watchdog, not the mini, is the primary pager for mini_dead."
+    },
+    {
       "id": "ma_rules_seed_drift_any",
       "match": {
         "kind": "signal_class",
