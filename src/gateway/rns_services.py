@@ -51,6 +51,11 @@ class ServiceInfo:
     service_type: RNSServiceType
     aspect: str
     display_name: str = ""
+    #: False when display_name came from a HEURISTIC decode (byte-scan /
+    #: errors='ignore' blob) rather than a structured parse — such a name may
+    #: fill an empty slot but must never CORRECT a cached one (MeshForge
+    #: 2026-07-21 review W2, ported as the twin).
+    display_name_is_parsed: bool = True
     description: str = ""
     capabilities: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -145,7 +150,17 @@ class LXMFParser(ServiceParser):
         # Find msgpack boundary
         msgpack_start = LXMFParser._find_msgpack_start(app_data)
 
-        # Extract display name (before msgpack or entire data)
+        # Extract display name (before msgpack or entire data).
+        #
+        # Both legs of this scan are HEURISTIC (msgpack-marker prefix /
+        # whole-blob errors='ignore' decode) — they can render arbitrary
+        # bytes as a printable "name", exactly the mechanism that produced
+        # the ``j_v((`` mojibake. Since self-reported names now OVERWRITE
+        # cached ones, a heuristic guess must never carry that authority
+        # (MeshForge 2026-07-21 review W2). MeshForge's structured
+        # strategies 1-2 (LXMRouter msgpack list / length prefix) are not
+        # ported here; only the structured propagation parser above leaves
+        # display_name_is_parsed True.
         name_bytes = app_data[:msgpack_start] if msgpack_start > 0 else app_data
         if 0 < len(name_bytes) < 128:
             try:
@@ -154,6 +169,7 @@ class LXMFParser(ServiceParser):
                     clean_name = ''.join(c for c in decoded if c.isprintable())
                     if clean_name:
                         info.display_name = clean_name[:64]
+                        info.display_name_is_parsed = False
             except UnicodeDecodeError:
                 pass
 
@@ -317,6 +333,7 @@ class NomadParser(ServiceParser):
                 # First line is usually the node/page name
                 lines = decoded.split('\n')
                 info.display_name = lines[0][:64] if lines else ""
+                info.display_name_is_parsed = False
                 if len(lines) > 1:
                     info.description = '\n'.join(lines[1:])[:256]
         except Exception as e:
@@ -346,6 +363,7 @@ class GenericParser(ServiceParser):
             clean = ''.join(c for c in decoded if c.isprintable())
             if clean and len(clean) >= 2:
                 info.display_name = clean[:64]
+                info.display_name_is_parsed = False
         except Exception:
             pass
 

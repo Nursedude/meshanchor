@@ -297,3 +297,33 @@ class TestFleetTruth:
     def test_schema_tag(self):
         t = ft.build_fleet_truth([], now=NOW, signal_classes=[], noc_host="noc-a")
         assert t["schema"] == "fleet_truth/v1"
+
+
+# ── 2026-07-21 re-review of the 07-19 fix (ported from the MF twin) ────
+class TestStaleCoverageAndCiConclusions:
+    def test_stale_block_coverage_not_presented_as_current(self):
+        """The 07-19 staleness gate covered signals[] but NOT coverage{} — a
+        frozen watchdog's last coverage map rendered as current green for
+        exactly the classes that were firing when it froze. A stale block's
+        reported dispositions are as unobservable as its signals."""
+        wd = {"installed": True, "ok": False,
+              "reason": "stale (age 7200s)",
+              "signals": [{"class": "cpu_hot", "severity": "degraded",
+                           "subject": "s", "detail": "d"}],
+              "coverage": {"cpu_hot": "clean", "disk_full": "clean"}}
+        cov = ft.merge_coverage(wd, ["cpu_hot", "disk_full"])
+        assert cov["green"] == 0
+        assert cov["red"] == 0
+        assert cov["dark"] == 2
+        assert cov["classes"]["cpu_hot"]["disp"] == "unknown"
+        assert cov["classes"]["disk_full"]["disp"] == "unknown"
+
+    def test_completed_failure_conclusions_all_read_failed(self):
+        """gh also concludes timed_out / startup_failure / action_required —
+        observed terminal failures; they must not park in non-tainting
+        'not judgeable yet' DARK forever."""
+        for state in ("timed_out", "startup_failure", "action_required"):
+            slo = {"ci_status": {"repos": [{"name": "ma", "state": state}]}}
+            c = ft._ci_cell(slo)
+            assert c["state"] == ft.FAILED, state
+            assert state in c["reason"]
