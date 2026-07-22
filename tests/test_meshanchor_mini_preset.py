@@ -68,6 +68,59 @@ def test_blackout_extractor_skips_malformed_rows():
     assert [d["class"] for d in out] == ["frozen"]
 
 
+# ── MiniSelfSource (self-observation: rule-seed drift) ──────────────────────
+
+def _write_rules(path, ids):
+    path.write_text(json.dumps({"rules": [
+        {"id": i, "match": {"kind": "signal_class", "class": i,
+                            "subject_glob": "*"},
+         "action": {"kind": "propose_escalation", "title": i, "message": "{detail}"}}
+        for i in ids]}))
+
+
+def test_mini_self_source_flags_live_behind_seed(tmp_path):
+    seed = tmp_path / "seed.json"; live = tmp_path / "live.json"
+    _write_rules(seed, ["a", "b", "c"])
+    _write_rules(live, ["a"])                     # missing b, c
+    conds = list(maf.MiniSelfSource(str(live), str(seed)).collect())
+    assert len(conds) == 1
+    c = conds[0]
+    assert c.kind == "signal_class" and c.extras["class"] == "rules_seed_drift"
+    assert c.extras["missing_count"] == 2
+    assert "b" in c.detail and "c" in c.detail
+
+
+def test_mini_self_source_silent_when_in_sync_or_live_ahead(tmp_path):
+    seed = tmp_path / "seed.json"; live = tmp_path / "live.json"
+    _write_rules(seed, ["a", "b"])
+    _write_rules(live, ["a", "b", "extra"])       # in sync + a box-local extra
+    # one-directional: extra live-only rules are legitimate, never fire.
+    assert list(maf.MiniSelfSource(str(live), str(seed)).collect()) == []
+
+
+def test_mini_self_source_silent_when_seed_absent(tmp_path):
+    # No readable seed → 'not applicable here', NOT drift and NOT source_error.
+    live = tmp_path / "live.json"; _write_rules(live, ["a"])
+    assert list(maf.MiniSelfSource(str(live), str(tmp_path / "nope.json"))
+                .collect()) == []
+
+
+def test_mini_self_source_silent_when_live_unreadable(tmp_path):
+    # The engine's own EMPTY-ruleset warning owns an unreadable live file; the
+    # self-source must not double-signal it.
+    seed = tmp_path / "seed.json"; _write_rules(seed, ["a"])
+    assert list(maf.MiniSelfSource(str(tmp_path / "nope.json"), str(seed))
+                .collect()) == []
+
+
+def test_repo_seed_is_self_consistent_with_source():
+    # The shipped ma_noc seed carries the rules_seed_drift rule that this source's
+    # class matches — a box seeded from it reports its own drift (post-bootstrap).
+    seed = candidate.seed_rules_path(REPO_ROOT, "ma_noc")
+    ids = maf._rule_ids(seed)
+    assert "ma_rules_seed_drift_any" in ids
+
+
 # ── the seed ────────────────────────────────────────────────────────────────
 
 def test_ma_noc_seed_validates_and_covers_every_blackout_kind():
@@ -103,9 +156,10 @@ def test_build_engine_ticks_clean_over_live_db(tmp_path, monkeypatch):
     monkeypatch.setenv("MINI_DUDEAI_NTFY_TOPIC", "test-topic-not-sent")
     engine = maf.build_engine(home=str(home), db_path=db, enable_boot_health=False)
     state = engine.tick()
-    # the health surface read clean — no false source_error
+    # the health surface read clean — no false source_error, and self-observe
+    # sees live==seed → no false drift.
     assert state.get("error_count", 0) == 0
-    assert state.get("rule_count") == 7
+    assert state.get("rule_count") == 8
     # tick() writes state; the run loop writes the brief via _write_brief_safe.
     assert (home / "mini_dudeai_state.json").exists()
     engine._write_brief_safe(state)

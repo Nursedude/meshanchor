@@ -35,6 +35,7 @@ MINI_DUDEAI_NTFY_TOPIC (or pass ntfy_topic= when calling build_engine).
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
 from typing import Iterable
@@ -44,7 +45,7 @@ from ..actions import (
 )
 from ..engine import RuleEngine
 from ..sources import BootHealthSource
-from ..sources.base import ExtractorSource
+from ..sources.base import Condition, ExtractorSource, Source
 
 # blackout kind → the condition severity we stamp (informational; the seed rule
 # carries the real ntfy priority). daemon_dead is the box-down tell.
@@ -113,6 +114,76 @@ class BlackoutDbSource(ExtractorSource):
         return list(rows or []), None
 
 
+def _repo_root() -> str:
+    """/opt/meshanchor — four levels up from this file (…/src/mini_dudeai/
+    presets/meshanchor_fleet.py). Where configs/ lives."""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                        "..", "..", "..", ".."))
+
+
+def _rule_ids(path: str):
+    """The set of valid rule ids in a rules document, or None if unreadable.
+    Reuses the byte-locked candidate validator — no re-implemented parsing."""
+    from ..candidate import validate_rules_document
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return None
+    valid, _errors = validate_rules_document(doc)
+    return {r.get("id") for r in valid if r.get("id")}
+
+
+class MiniSelfSource(Source):
+    """The mini watching its OWN rule-seed integrity, from inside its tick.
+
+    MeshForge routes mini self-observation through its external watchdog
+    (watchdog_probes_mini → watchdog.json). MeshAnchor's fleet_watchdog has a
+    fixed closed kind set, so — deliberately, to avoid touching it — the MA mini
+    self-observes the one thing it can honestly check from within: did this box
+    fall behind the role seed? If the repo seed (configs/mini_dudeai_rules.<seed>)
+    gained a rule for a new failure class but the live ~/mini_dudeai_rules.json
+    was never re-seeded, the box silently misses it. This makes that gap a signal.
+
+    ONE-DIRECTIONAL (live-behind-seed only): extra live-only rules are legitimate
+    box-local additions and never fire. Self-guards to SILENCE (no condition, no
+    source_error) when either file is unreadable or the seed is absent — a
+    missing seed is 'not applicable here', NOT drift and NOT an error
+    (honest_failure_modes #2: absence through no-config ≠ a positive signal).
+    NOTE this cannot catch total mini-death (the source runs inside the tick);
+    that needs an external watcher — a documented WS-A follow-up.
+    """
+
+    def __init__(self, rules_path: str, seed_path: str,
+                 name: str = "mini_self") -> None:
+        self.rules_path = rules_path
+        self.seed_path = seed_path
+        self.name = name
+
+    def collect(self) -> Iterable[Condition]:
+        seed_ids = _rule_ids(self.seed_path)
+        if not seed_ids:
+            return  # no readable seed → not applicable (silence, not error)
+        live_ids = _rule_ids(self.rules_path)
+        if live_ids is None:
+            return  # live rules unreadable — the engine's own EMPTY-ruleset
+            #         warning owns that; don't double-signal here.
+        missing = seed_ids - live_ids
+        if not missing:
+            return
+        yield Condition(
+            kind="signal_class",
+            subject=socket.gethostname(),
+            detail=(f"live mini rules behind the {os.path.basename(self.seed_path)} "
+                    f"seed — MISSING {len(missing)} rule(s): "
+                    f"{', '.join(sorted(missing))}. Re-seed: cp the repo seed to "
+                    f"~/mini_dudeai_rules.json (or promote)."),
+            source=self.name,
+            extras={"class": "rules_seed_drift", "severity": "info",
+                    "missing_count": len(missing)},
+        )
+
+
 def build_engine(
     home: str | None = None,
     rules_path: str | None = None,
@@ -121,9 +192,11 @@ def build_engine(
     brief_path: str | None = None,
     annotate_path: str | None = None,
     db_path: str | None = None,
+    seed_path: str | None = None,
     ntfy_topic: str | None = None,
     enable_blackout: bool | None = None,
     enable_boot_health: bool | None = None,
+    enable_self_observe: bool | None = None,
 ) -> RuleEngine:
     """Wire the engine the way a MeshAnchor NOC box runs it.
 
@@ -146,6 +219,9 @@ def build_engine(
     if enable_boot_health is None:
         enable_boot_health = os.environ.get(
             "MINI_DUDEAI_ENABLE_BOOT_HEALTH", "1") != "0"
+    if enable_self_observe is None:
+        enable_self_observe = os.environ.get(
+            "MINI_DUDEAI_ENABLE_SELF_OBSERVE", "1") != "0"
     from .._util import resolve_home
     home = home or resolve_home()
     rules_path = rules_path or os.path.join(home, "mini_dudeai_rules.json")
@@ -163,9 +239,17 @@ def build_engine(
             "~/.config/meshanchor/mini_dudeai.env, loaded by the systemd unit via "
             "EnvironmentFile= (MF014 keeps them out of the repo).")
 
+    # The role seed to check the live rules against (repo canonical). Default is
+    # the ma_noc seed; overridable for tests / a differently-seeded box.
+    if seed_path is None:
+        seed_path = os.path.join(
+            _repo_root(), "configs", "mini_dudeai_rules.ma_noc.json")
+
     sources = []
     if enable_blackout:
         sources.append(BlackoutDbSource(db_path=db_path))
+    if enable_self_observe:
+        sources.append(MiniSelfSource(rules_path=rules_path, seed_path=seed_path))
     clean_exit_path = os.path.join(home, "mini_dudeai_clean_exit")
     if enable_boot_health:
         sources.append(BootHealthSource(

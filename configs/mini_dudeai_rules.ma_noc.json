@@ -114,6 +114,22 @@
       "annotation": "BootHealthSource — the box reset without a clean-exit marker (unplanned power event or crash). Planned reboots stay silent (the engine stamps the marker on graceful stop). Check dmesg/journal for the cause."
     },
     {
+      "id": "ma_rules_seed_drift_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "rules_seed_drift",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "propose_escalation",
+        "title": "MeshAnchor mini rules behind seed",
+        "message": "{subject}: {detail}",
+        "priority": "min"
+      },
+      "cooldown_s": 21600,
+      "annotation": "MiniSelfSource — the live ~/mini_dudeai_rules.json is missing rule(s) the repo seed carries (box deployed/bumped but never re-seeded). Escalate-only (operator-paced): re-seed from configs/mini_dudeai_rules.ma_noc.json or promote the candidate. This rule matches its OWN class, so a box missing THIS rule can't report its own drift until re-seeded once — expected bootstrap gap."
+    },
+    {
       "id": "ma_source_error_any",
       "match": {
         "kind": "source_error",
