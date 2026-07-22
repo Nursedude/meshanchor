@@ -23,12 +23,17 @@ What is wired here (and what is NOT, and why):
   * BlackoutDbSource → the fleet_history DB → kind="signal_class".
   * BootHealthSource → ~/mini_dudeai_clean_exit → kind="unexpected_reboot".
   * NtfyAction / ProposeEscalationAction / FileAnnotateAction / NoopAction.
-  * federation + digest are OFF: MeshAnchor's :5000 /api/status shape is not
-    yet confirmed to match MeshForge's federation.peer_status, and wiring a
-    source against an unconfirmed surface would emit a source_error every tick
-    and pin src_errors — the declared-absent-vs-error confusion the whole
-    honest-failure-modes discipline exists to stop. Turn them on deliberately
-    once the MA endpoint is confirmed (a follow-up increment).
+  * federation + digest are OFF. MeshAnchor DOES expose federation.peer_status
+    (oracle/snapshot.py reads it), but its per-peer HEALTH TELL is a boolean
+    ``p["ok"]`` — NOT MeshForge's ``in_backoff`` / ``backoff_multiplier`` /
+    ``last_error``+``reachable`` schema — so MeshForge's FederationPeerSource does
+    NOT port verbatim; an MA source would emit on ``ok is False``. Still
+    UNCONFIRMED against a LIVE endpoint: the MA status URL/port (meshanchor-map)
+    and the full peer field set. Wiring a source against a schema seen only
+    through a reader's partial lens risks a source_error every tick (the
+    declared-absent-vs-error trap honest-failure-modes exists to stop), so this
+    stays a follow-up that needs a real /api/status sample first — deliberately
+    not shipped speculatively.
 
 The fleet ntfy topic is NOT hard-coded in source (MF014). Operator must set
 MINI_DUDEAI_NTFY_TOPIC (or pass ntfy_topic= when calling build_engine).
