@@ -95,6 +95,21 @@
       "annotation": "fleet_watchdog role_drift — the box's live units diverge from its declared role (deployment.json / fleet_roles.yaml). Fix: provision_role.py --apply. Escalate-only (low urgency, operator-paced)."
     },
     {
+      "id": "ma_federation_peer_unhealthy_any",
+      "match": {
+        "kind": "federation_peer_unhealthy",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "propose_escalation",
+        "title": "MeshAnchor federation peer unhealthy",
+        "message": "{subject}: {detail}",
+        "priority": "low"
+      },
+      "cooldown_s": 3600,
+      "annotation": "FederationPeerSource — a peer this box's MA map federates with is in_backoff or errored (per-vantage: how meshanchor-server sees its peers). Escalate-only (degraded, not an outage — matches MeshForge's map-running-box policy). Only active when MINI_DUDEAI_ENABLE_FEDERATION=1 (opt-in, on the map-running server)."
+    },
+    {
       "id": "ma_unexpected_reboot_any",
       "match": {
         "kind": "unexpected_reboot",

@@ -23,17 +23,16 @@ What is wired here (and what is NOT, and why):
   * BlackoutDbSource → the fleet_history DB → kind="signal_class".
   * BootHealthSource → ~/mini_dudeai_clean_exit → kind="unexpected_reboot".
   * NtfyAction / ProposeEscalationAction / FileAnnotateAction / NoopAction.
-  * federation + digest are OFF. MeshAnchor DOES expose federation.peer_status
-    (oracle/snapshot.py reads it), but its per-peer HEALTH TELL is a boolean
-    ``p["ok"]`` — NOT MeshForge's ``in_backoff`` / ``backoff_multiplier`` /
-    ``last_error``+``reachable`` schema — so MeshForge's FederationPeerSource does
-    NOT port verbatim; an MA source would emit on ``ok is False``. Still
-    UNCONFIRMED against a LIVE endpoint: the MA status URL/port (meshanchor-map)
-    and the full peer field set. Wiring a source against a schema seen only
-    through a reader's partial lens risks a source_error every tick (the
-    declared-absent-vs-error trap honest-failure-modes exists to stop), so this
-    stays a follow-up that needs a real /api/status sample first — deliberately
-    not shipped speculatively.
+  * FederationPeerSource → the MA map's /api/status.federation.peer_status →
+    kind="federation_peer_unhealthy" (per peer in_backoff / errored). OPT-IN
+    (default OFF; MINI_DUDEAI_ENABLE_FEDERATION=1) because it polls the map and
+    would source_error every tick on a box without one — enable it ONLY on
+    meshanchor-server (which runs the MA map + the mini). Schema CONFIRMED live
+    2026-07-22 against a running map (each peer: ok / in_backoff /
+    backoff_multiplier / last_error / consecutive_failures / peer_name) — the
+    earlier "p['ok'] only" reading was a consumer's partial lens; the full shape
+    matches MeshForge's, so its source ports with just the ok-vs-reachable fix.
+  * digest is OFF (federator-only artifact, meaningless here).
 
 The fleet ntfy topic is NOT hard-coded in source (MF014). Operator must set
 MINI_DUDEAI_NTFY_TOPIC (or pass ntfy_topic= when calling build_engine).
@@ -119,6 +118,60 @@ class BlackoutDbSource(ExtractorSource):
         return list(rows or []), None
 
 
+class FederationPeerSource(Source):
+    """One Condition per UN-healthy federation peer, from the MA map's
+    /api/status.federation.peer_status (MeshAnchor's map_data_service is a
+    code-twin of MeshForge's, so the peer schema is identical — confirmed live
+    2026-07-22 against a running map: each peer carries ok / in_backoff /
+    backoff_multiplier / last_error / consecutive_failures / peer_name).
+
+    A per-VANTAGE reading: it polls THIS box's OWN map, so it reports how the MA
+    server sees its federation peers — box A seeing peer C unhealthy while B sees
+    it fine is path evidence no single vantage produces. Healthy peers emit
+    nothing. The map unreachable → one source_error (the box is blind to
+    federation), NOT silence — absence through a dead channel ≠ all-healthy.
+
+    Ported from MeshForge's FederationPeerSource with the field corrected: the
+    live schema's health flag is ``ok`` (MF's copy checked a non-existent
+    ``reachable`` and so only ever fired on in_backoff; here ``not ok`` works)."""
+
+    def __init__(self, url: str, timeout: float = 6.0,
+                 name: str = "federation") -> None:
+        self.url = url
+        self.timeout = timeout
+        self.name = name
+
+    def collect(self) -> Iterable[Condition]:
+        from .._util import fetch_json
+        data, err = fetch_json(self.url, timeout=self.timeout)
+        if err:
+            yield Condition(
+                kind="source_error", subject="ma_map",
+                detail=f"/api/status unreachable: {err}", source=self.name)
+            return
+        if not isinstance(data, dict):
+            return
+        peers = (data.get("federation") or {}).get("peer_status") or []
+        for p in peers:
+            if not isinstance(p, dict):
+                continue
+            name = p.get("peer_name") or p.get("hostname") or p.get("name") or "?"
+            unhealthy = p.get("in_backoff") or (p.get("last_error")
+                                                and not p.get("ok", True))
+            if unhealthy:
+                yield Condition(
+                    kind="federation_peer_unhealthy",
+                    subject=str(name),
+                    detail=(f"in_backoff={p.get('in_backoff')} "
+                            f"mult={p.get('backoff_multiplier')} "
+                            f"ok={p.get('ok')} last_err={p.get('last_error')!r}"),
+                    source=self.name,
+                    extras={
+                        "backoff_multiplier": p.get("backoff_multiplier"),
+                        "consecutive_failures": p.get("consecutive_failures"),
+                    })
+
+
 def _repo_root() -> str:
     """/opt/meshanchor — four levels up from this file (…/src/mini_dudeai/
     presets/meshanchor_fleet.py). Where configs/ lives."""
@@ -198,10 +251,12 @@ def build_engine(
     annotate_path: str | None = None,
     db_path: str | None = None,
     seed_path: str | None = None,
+    federator_url: str | None = None,
     ntfy_topic: str | None = None,
     enable_blackout: bool | None = None,
     enable_boot_health: bool | None = None,
     enable_self_observe: bool | None = None,
+    enable_federation: bool | None = None,
 ) -> RuleEngine:
     """Wire the engine the way a MeshAnchor NOC box runs it.
 
@@ -227,6 +282,13 @@ def build_engine(
     if enable_self_observe is None:
         enable_self_observe = os.environ.get(
             "MINI_DUDEAI_ENABLE_SELF_OBSERVE", "1") != "0"
+    # federation defaults OFF (env "1" to enable): it polls the MA map's
+    # /api/status, so on a box WITHOUT the map it would emit a source_error every
+    # tick (declared-absent-vs-error trap). Enable it ONLY on meshanchor-server
+    # (the box that runs the MA map + the mini) via the env file.
+    if enable_federation is None:
+        enable_federation = os.environ.get(
+            "MINI_DUDEAI_ENABLE_FEDERATION", "0") != "0"
     from .._util import resolve_home
     home = home or resolve_home()
     rules_path = rules_path or os.path.join(home, "mini_dudeai_rules.json")
@@ -250,11 +312,19 @@ def build_engine(
         seed_path = os.path.join(
             _repo_root(), "configs", "mini_dudeai_rules.ma_noc.json")
 
+    # The MA map's status URL — coexist port 5002 during the MF/MA side-by-side
+    # (the unit comment notes a planned move back to 5000; env-override when it
+    # lands so this preset needs no edit).
+    federator_url = federator_url or os.environ.get(
+        "MINI_DUDEAI_FEDERATOR_URL", "http://localhost:5002/api/status")
+
     sources = []
     if enable_blackout:
         sources.append(BlackoutDbSource(db_path=db_path))
     if enable_self_observe:
         sources.append(MiniSelfSource(rules_path=rules_path, seed_path=seed_path))
+    if enable_federation:
+        sources.append(FederationPeerSource(url=federator_url))
     clean_exit_path = os.path.join(home, "mini_dudeai_clean_exit")
     if enable_boot_health:
         sources.append(BootHealthSource(

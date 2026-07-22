@@ -159,7 +159,7 @@ def test_build_engine_ticks_clean_over_live_db(tmp_path, monkeypatch):
     # the health surface read clean — no false source_error, and self-observe
     # sees live==seed → no false drift.
     assert state.get("error_count", 0) == 0
-    assert state.get("rule_count") == 9
+    assert state.get("rule_count") == 10
     # tick() writes state; the run loop writes the brief via _write_brief_safe.
     assert (home / "mini_dudeai_state.json").exists()
     engine._write_brief_safe(state)
@@ -207,3 +207,79 @@ def test_update_sh_try_restarts_mini_the_deploy_restart_gap():
     # the regression red-test-first (mirrors MeshForge's TestDeployRestartHook).
     update = _read("scripts/update.sh")
     assert "try-restart meshanchor-mini-dudeai.service" in update
+
+
+# ── FederationPeerSource (opt-in; schema confirmed live 2026-07-22) ──────────
+# Polls the MA map's /api/status.federation.peer_status. Peer schema (from a live
+# federator, MA's map_data_service being a code-twin): ok / in_backoff /
+# backoff_multiplier / last_error / consecutive_failures / peer_name / hostname.
+
+from mini_dudeai import _util as _mini_util
+
+
+def _fed_status(peers):
+    return {"federation": {"peer_status": peers}}
+
+
+def test_federation_source_fires_on_in_backoff(monkeypatch):
+    peers = [
+        {"peer_name": "meshforge-moc1", "ok": True, "in_backoff": False,
+         "last_error": None},                              # healthy
+        {"peer_name": "meshforge-moc3", "ok": False, "in_backoff": True,
+         "backoff_multiplier": 10, "last_error": "URLError", "consecutive_failures": 5},
+    ]
+    monkeypatch.setattr(_mini_util, "fetch_json",
+                        lambda url, timeout=6.0: (_fed_status(peers), None))
+    conds = list(maf.FederationPeerSource(url="http://x/api/status").collect())
+    assert len(conds) == 1                                 # only the unhealthy one
+    assert conds[0].kind == "federation_peer_unhealthy"
+    assert conds[0].subject == "meshforge-moc3"
+    assert conds[0].extras["backoff_multiplier"] == 10
+
+
+def test_federation_source_fires_on_error_and_not_ok(monkeypatch):
+    peers = [{"peer_name": "p", "ok": False, "in_backoff": False,
+              "last_error": "timeout"}]
+    monkeypatch.setattr(_mini_util, "fetch_json",
+                        lambda url, timeout=6.0: (_fed_status(peers), None))
+    conds = list(maf.FederationPeerSource(url="http://x").collect())
+    assert len(conds) == 1 and conds[0].subject == "p"
+
+
+def test_federation_source_silent_when_all_healthy(monkeypatch):
+    peers = [{"peer_name": "a", "ok": True, "in_backoff": False, "last_error": None},
+             {"peer_name": "b", "ok": True, "in_backoff": False, "last_error": None}]
+    monkeypatch.setattr(_mini_util, "fetch_json",
+                        lambda url, timeout=6.0: (_fed_status(peers), None))
+    assert list(maf.FederationPeerSource(url="http://x").collect()) == []
+
+
+def test_federation_source_empty_peers_is_silent(monkeypatch):
+    # meshanchor-server may not federate outward (peer_status empty) — that is
+    # silence, not a signal; enabling the source there is harmless.
+    monkeypatch.setattr(_mini_util, "fetch_json",
+                        lambda url, timeout=6.0: (_fed_status([]), None))
+    assert list(maf.FederationPeerSource(url="http://x").collect()) == []
+
+
+def test_federation_source_map_unreachable_is_source_error(monkeypatch):
+    monkeypatch.setattr(_mini_util, "fetch_json",
+                        lambda url, timeout=6.0: (None, "connection refused"))
+    conds = list(maf.FederationPeerSource(url="http://x").collect())
+    assert len(conds) == 1 and conds[0].kind == "source_error"
+
+
+def test_federation_off_by_default(tmp_path, monkeypatch):
+    # Default OFF: a box without the map must not wire a source that would
+    # source_error every tick (declared-absent-vs-error trap).
+    monkeypatch.delenv("MINI_DUDEAI_ENABLE_FEDERATION", raising=False)
+    monkeypatch.setenv("MINI_DUDEAI_NTFY_TOPIC", "t")
+    eng = maf.build_engine(home=str(tmp_path), db_path=tmp_path / "d.db",
+                           enable_boot_health=False, enable_self_observe=False)
+    assert not any(type(s).__name__ == "FederationPeerSource" for s in eng.sources)
+
+
+def test_federation_seed_rule_present():
+    seed = candidate.seed_rules_path(REPO_ROOT, "ma_noc")
+    ids = maf._rule_ids(seed)
+    assert "ma_federation_peer_unhealthy_any" in ids
