@@ -242,9 +242,14 @@ def _mini_dead_reason(now: float) -> Optional[str]:
     import os
     try:
         from utils.paths import get_real_user_home
-        home = get_real_user_home()
-        state_path = os.path.join(str(home), "mini_dudeai_state.json")
-        clean_path = os.path.join(str(home), "mini_dudeai_clean_exit")
+        home = str(get_real_user_home())
+        # The MA mini's OWN namespaced dir — NOT $HOME/mini_dudeai_* (that is the
+        # MeshForge mini's; on a dual-stack box both run, so mini_dead must watch
+        # the MeshAnchor one). Kept in lockstep with meshanchor_fleet.ma_mini_dir
+        # (honest_failure_modes #5: two consumers, one location — test-pinned).
+        ma_dir = os.path.join(home, ".local", "share", "meshanchor", "mini")
+        state_path = os.path.join(ma_dir, "state.json")
+        clean_path = os.path.join(ma_dir, "clean_exit")
     except Exception as e:  # home resolution failed — can't observe, don't accuse
         logger.debug("mini_dead home resolution raised: %s", e)
         return None

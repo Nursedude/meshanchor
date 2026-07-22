@@ -455,9 +455,33 @@ def test_daemon_dead_evaluated_on_empty_heartbeat_table(db):
 # can't run if its loop is dead). fleet_watchdog closes that gap by watching the
 # operator's mini_dudeai_state.json freshness — inert on a box with no mini.
 
+def _ma_mini_dir(home):
+    d = home / ".local" / "share" / "meshanchor" / "mini"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _write_mini_state(home, last_tick_ts):
-    (home / "mini_dudeai_state.json").write_text(
+    (_ma_mini_dir(home) / "state.json").write_text(
         json.dumps({"last_tick_ts": last_tick_ts}))
+
+
+def test_mini_dead_reads_ma_namespaced_state():
+    # honest_failure_modes #5: the watchdog's mini_dead path MUST equal the MA
+    # preset's ma_mini_dir — two consumers, one location. If either moves, this
+    # fails. (The preset is the SSOT for the location.)
+    import os as _os
+    from mini_dudeai.presets.meshanchor_fleet import ma_mini_dir
+    home = "/home/someuser"
+    expect = _os.path.join(ma_mini_dir(home), "state.json")
+    from unittest.mock import patch as _patch
+    with _patch("utils.paths.get_real_user_home", return_value=home):
+        # exercise the reader against a home with NO state → None (not installed),
+        # proving it looks in the MA namespace (a MeshForge-namespace file would
+        # not be found here either, which is the point).
+        wd._reset_mini_dead_state()
+        assert wd._mini_dead_reason(now=1.0) is None
+    assert expect.endswith("/.local/share/meshanchor/mini/state.json")
 
 
 def test_mini_dead_listed_in_all_kinds():
@@ -500,7 +524,7 @@ def test_mini_dead_silent_on_graceful_stop(tmp_path):
     # purpose (the engine stamps it on SIGTERM) → not a death, no false page.
     wd._reset_mini_dead_state()
     _write_mini_state(tmp_path, last_tick_ts=10_000.0)
-    marker = tmp_path / "mini_dudeai_clean_exit"
+    marker = _ma_mini_dir(tmp_path) / "clean_exit"
     marker.write_text("stopped")
     os.utime(marker, (10_050.0, 10_050.0))            # newer than last tick
     with patch("utils.paths.get_real_user_home", return_value=tmp_path):
@@ -514,7 +538,7 @@ def test_mini_dead_indeterminate_on_unreadable_state(tmp_path):
     # streak unchanged (a transient read error must not move the verdict).
     wd._reset_mini_dead_state()
     wd._mini_dead_state["stale_streak"] = 1
-    (tmp_path / "mini_dudeai_state.json").write_text("{not valid json")
+    (_ma_mini_dir(tmp_path) / "state.json").write_text("{not valid json")
     with patch("utils.paths.get_real_user_home", return_value=tmp_path):
         assert wd._mini_dead_reason(now=10_500.0) is None
     assert wd._mini_dead_state["stale_streak"] == 1

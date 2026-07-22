@@ -149,10 +149,14 @@ def test_build_engine_ticks_clean_over_live_db(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     # seed the box's live rules from the repo seed so the tick has something to
-    # match (mirrors what promote_seed_rules does on a real box).
+    # match (mirrors what promote_seed_rules does on a real box) — into the MA
+    # mini's OWN namespaced dir, not $HOME/mini_dudeai_* (the MeshForge mini's).
+    import pathlib
+    ma_dir = pathlib.Path(maf.ma_mini_dir(str(home)))
+    ma_dir.mkdir(parents=True, exist_ok=True)
     seed = candidate.seed_rules_path(REPO_ROOT, "ma_noc")
     with open(seed, encoding="utf-8") as f:
-        (home / "mini_dudeai_rules.json").write_text(f.read())
+        (ma_dir / "rules.json").write_text(f.read())
     monkeypatch.setenv("MINI_DUDEAI_NTFY_TOPIC", "test-topic-not-sent")
     engine = maf.build_engine(home=str(home), db_path=db, enable_boot_health=False)
     state = engine.tick()
@@ -160,10 +164,23 @@ def test_build_engine_ticks_clean_over_live_db(tmp_path, monkeypatch):
     # sees live==seed → no false drift.
     assert state.get("error_count", 0) == 0
     assert state.get("rule_count") == 10
-    # tick() writes state; the run loop writes the brief via _write_brief_safe.
-    assert (home / "mini_dudeai_state.json").exists()
+    # state + brief land in the MA namespace, NOT the MeshForge mini's ($HOME).
+    assert (ma_dir / "state.json").exists()
     engine._write_brief_safe(state)
-    assert (home / "mini_dudeai_brief.md").exists()
+    assert (ma_dir / "brief.md").exists()
+    assert not (home / "mini_dudeai_state.json").exists()   # no collision
+
+
+def test_ma_mini_namespace_is_separate_from_meshforge(tmp_path, monkeypatch):
+    # The whole fix: on a dual-stack box the MA mini must NOT default any runtime
+    # file into $HOME/mini_dudeai_* (the MeshForge mini's namespace + lock).
+    monkeypatch.setenv("MINI_DUDEAI_NTFY_TOPIC", "t")
+    eng = maf.build_engine(home=str(tmp_path), db_path=tmp_path / "d.db",
+                           enable_boot_health=False, enable_self_observe=False)
+    ma_dir = maf.ma_mini_dir(str(tmp_path))
+    for p in (eng.state_store.path, eng.history.path, eng.rules_path,
+              eng.brief_path):
+        assert p.startswith(ma_dir), f"{p} escaped the MA namespace"
 
 
 def test_preset_requires_ntfy_topic(tmp_path, monkeypatch):

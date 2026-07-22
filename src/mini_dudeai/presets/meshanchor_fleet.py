@@ -179,6 +179,15 @@ def _repo_root() -> str:
                                         "..", "..", "..", ".."))
 
 
+def ma_mini_dir(home: str) -> str:
+    """THE MeshAnchor mini's runtime dir — distinct from the MeshForge mini's
+    $HOME/mini_dudeai_* namespace so the two can coexist on a dual-stack box
+    without colliding on the state lock or the rules file. monitoring.
+    fleet_watchdog._mini_dead_reason MUST resolve the same location (it reads
+    ``<dir>/state.json`` + ``<dir>/clean_exit``); the agreement is test-pinned."""
+    return os.path.join(home, ".local", "share", "meshanchor", "mini")
+
+
 def _rule_ids(path: str):
     """The set of valid rule ids in a rules document, or None if unreadable.
     Reuses the byte-locked candidate validator — no re-implemented parsing."""
@@ -291,13 +300,20 @@ def build_engine(
             "MINI_DUDEAI_ENABLE_FEDERATION", "0") != "0"
     from .._util import resolve_home
     home = home or resolve_home()
-    rules_path = rules_path or os.path.join(home, "mini_dudeai_rules.json")
-    state_path = state_path or os.path.join(home, "mini_dudeai_state.json")
-    history_path = history_path or os.path.join(home, "mini_dudeai_history.jsonl")
-    # Per-box brief in $HOME (continuity: ssh any box, mini's posture is fresh).
-    brief_path = brief_path or os.path.join(home, "mini_dudeai_brief.md")
-    annotate_path = annotate_path or os.path.join(
-        home, "mini_dudeai_digest_annotations.md")
+    # The MA mini's runtime files live in their OWN dir — NOT $HOME/mini_dudeai_*,
+    # which is the MeshForge mini's namespace. A dual-stack box (meshanchor-server
+    # runs BOTH minis as the same user) would otherwise collide: the single-writer
+    # state LOCK → a restart-loop, and the shared rules file → one mini clobbering
+    # the other's rules. Keep in lockstep with monitoring.fleet_watchdog's
+    # _mini_dead_reason path (honest_failure_modes #5: two consumers, ONE location
+    # — test-pinned by test_mini_dead_reads_ma_namespaced_state).
+    ma_dir = ma_mini_dir(home)
+    os.makedirs(ma_dir, exist_ok=True)
+    rules_path = rules_path or os.path.join(ma_dir, "rules.json")
+    state_path = state_path or os.path.join(ma_dir, "state.json")
+    history_path = history_path or os.path.join(ma_dir, "history.jsonl")
+    brief_path = brief_path or os.path.join(ma_dir, "brief.md")
+    annotate_path = annotate_path or os.path.join(ma_dir, "digest_annotations.md")
     ntfy_topic = ntfy_topic or os.environ.get("MINI_DUDEAI_NTFY_TOPIC")
     if not ntfy_topic:
         raise ValueError(
@@ -325,12 +341,12 @@ def build_engine(
         sources.append(MiniSelfSource(rules_path=rules_path, seed_path=seed_path))
     if enable_federation:
         sources.append(FederationPeerSource(url=federator_url))
-    clean_exit_path = os.path.join(home, "mini_dudeai_clean_exit")
+    clean_exit_path = os.path.join(ma_dir, "clean_exit")
     if enable_boot_health:
         sources.append(BootHealthSource(
             state_path=state_path,
             clean_exit_path=clean_exit_path,
-            assessment_path=os.path.join(home, "mini_dudeai_boot_assessment.json"),
+            assessment_path=os.path.join(ma_dir, "boot_assessment.json"),
             power_log_path=os.path.join(home, "power_history.log"),
             name="boot_health",
         ))
