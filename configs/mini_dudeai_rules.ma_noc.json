@@ -1,0 +1,135 @@
+{
+  "_comment": "mini-dudeai MeshAnchor NOC seed — the MA twin of MeshForge's federator/gateway seeds. MeshAnchor's fleet-watchdog (monitoring/fleet_watchdog.py) records blackouts to SQLite (monitoring/fleet_history.py, table blackout_events); the meshanchor_fleet preset's BlackoutDbSource projects each ACTIVE blackout to a signal_class Condition whose extras.class is the blackout kind ∈ {no_data, http_dead, frozen, daemon_dead, role_drift}. These rules match on that class exactly as MeshForge's seeds match watchdog signal classes. Boot-health (unexpected_reboot) and source_error (health-surface blindness) are wired the same as MeshForge. Per-box file at ~/mini_dudeai_rules.json; the daemon promotes ~/mini_dudeai_rules.json.candidate over it on the next tick. Repo canonical for backup + re-deploy parity. Observation-only: mini proposes, it never ratifies.",
+  "rules": [
+    {
+      "id": "ma_daemon_dead_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "daemon_dead",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "ntfy",
+        "title": "[RED] MeshAnchor daemon dead",
+        "message": "{subject}: {detail}",
+        "priority": "urgent",
+        "tags": [
+          "rotating_light",
+          "meshanchor"
+        ]
+      },
+      "cooldown_s": 1800,
+      "annotation": "fleet_watchdog daemon_dead — the meshanchor-daemon/fleet-watchdog is inactive. Recovery: systemctl status the unit, restart if wedged; check journal for the crash cause."
+    },
+    {
+      "id": "ma_no_data_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "no_data",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "ntfy",
+        "title": "[RED] MeshAnchor no data",
+        "message": "{subject}: {detail}",
+        "priority": "high",
+        "tags": [
+          "warning"
+        ]
+      },
+      "cooldown_s": 1800,
+      "annotation": "fleet_watchdog no_data — no fresh heartbeat/collector data within the stale threshold. Check the collector unit and its data path."
+    },
+    {
+      "id": "ma_http_dead_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "http_dead",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "ntfy",
+        "title": "[RED] MeshAnchor HTTP dead",
+        "message": "{subject}: {detail}",
+        "priority": "high",
+        "tags": [
+          "warning"
+        ]
+      },
+      "cooldown_s": 1800,
+      "annotation": "fleet_watchdog http_dead — the local map/API is not responding. Restart meshanchor-map; if it recurs, look for the GIL-bound serialization wedge class (MeshForge #70/#71 twin)."
+    },
+    {
+      "id": "ma_frozen_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "frozen",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "ntfy",
+        "title": "[RED] MeshAnchor data frozen",
+        "message": "{subject}: {detail}",
+        "priority": "high",
+        "tags": [
+          "warning"
+        ]
+      },
+      "cooldown_s": 1800,
+      "annotation": "fleet_watchdog frozen — heartbeat present but the underlying data has not advanced across the frozen window. A live-but-stuck producer; check the collector's source, not just its liveness."
+    },
+    {
+      "id": "ma_role_drift_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "role_drift",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "propose_escalation",
+        "title": "MeshAnchor role drift",
+        "message": "{subject}: {detail}",
+        "priority": "min"
+      },
+      "cooldown_s": 3600,
+      "annotation": "fleet_watchdog role_drift — the box's live units diverge from its declared role (deployment.json / fleet_roles.yaml). Fix: provision_role.py --apply. Escalate-only (low urgency, operator-paced)."
+    },
+    {
+      "id": "ma_unexpected_reboot_any",
+      "match": {
+        "kind": "unexpected_reboot",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "ntfy",
+        "title": "[RED] MeshAnchor unexpected reboot",
+        "message": "{subject}: {detail}",
+        "priority": "urgent",
+        "tags": [
+          "rotating_light",
+          "reboot"
+        ]
+      },
+      "cooldown_s": 1800,
+      "annotation": "BootHealthSource — the box reset without a clean-exit marker (unplanned power event or crash). Planned reboots stay silent (the engine stamps the marker on graceful stop). Check dmesg/journal for the cause."
+    },
+    {
+      "id": "ma_source_error_any",
+      "match": {
+        "kind": "source_error",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "ntfy",
+        "title": "MeshAnchor mini source blind",
+        "message": "{subject}: {detail}",
+        "priority": "high",
+        "tags": [
+          "warning"
+        ]
+      },
+      "cooldown_s": 3600,
+      "annotation": "A mini source could not read its health surface (e.g. the blackout DB is unreadable). Blindness is page-worthy — absence of blackouts read through a broken channel must NOT be mistaken for health (honest_failure_modes #2)."
+    }
+  ]
+}
