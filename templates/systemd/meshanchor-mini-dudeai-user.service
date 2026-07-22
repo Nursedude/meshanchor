@@ -1,0 +1,56 @@
+# MeshAnchor — mini-dudeai observation-only rule/cadence loop (systemd-user)
+# =========================================================================
+#
+# The MeshCore-side twin of MeshForge's mini-dudeai (second-brain arc WS-A,
+# 2026-07-22). The engine core is byte-identical across the two repos
+# (MeshForge parity_check BYTE_IDENTICAL tier); this box runs the MA-native
+# preset `meshanchor_fleet`, which reads MeshAnchor's fleet_watchdog blackout
+# DB (monitoring/fleet_history, ~/.local/share/meshanchor/fleet_history.db)
+# and projects active blackouts to escalations per configs/
+# mini_dudeai_rules.ma_noc.json. Observation-only: it proposes, never ratifies.
+#
+# Runs as a USER unit (like meshanchor-echo) because it reads/writes the
+# operator's $HOME (mini_dudeai_state.json / _brief.md / _history.jsonl) and
+# the operator-owned blackout DB. --preset is pinned to meshanchor_fleet so the
+# byte-locked daemon's MeshForge-specific `--preset auto` resolution is never
+# exercised here.
+#
+# Install (on a MeshAnchor NOC box, as the operator):
+#   cp /opt/meshanchor/templates/systemd/meshanchor-mini-dudeai-user.service \
+#      ~/.config/systemd/user/meshanchor-mini-dudeai.service
+#   # seed the box's live rules from the repo seed (one-time):
+#   #   cp /opt/meshanchor/configs/mini_dudeai_rules.ma_noc.json \
+#   #      ~/mini_dudeai_rules.json
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now meshanchor-mini-dudeai.service
+#
+# Requires ~/.config/meshanchor/mini_dudeai.env with MINI_DUDEAI_NTFY_TOPIC
+# (operator-specific, kept OUT of the repo per MF014). The preset fails loud if
+# the topic is missing.
+#
+# update.sh try-restarts this unit on `git pull` so the running daemon picks up
+# new code (the #79 deploy-restart gap).
+
+[Unit]
+Description=MeshAnchor mini-dudeai — observation-only rule/cadence loop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# cwd = src so `python3 -m mini_dudeai` resolves the package AND the preset's
+# `from monitoring.fleet_history import ...` resolves (sys.path[0] = cwd).
+WorkingDirectory=/opt/meshanchor/src
+# Operator-specific values (ntfy topic) live here, NOT in the repo (MF014).
+# Leading `-` makes it optional so first-boot doesn't fail before it exists;
+# the preset still fails loud if MINI_DUDEAI_NTFY_TOPIC is unset.
+EnvironmentFile=-%h/.config/meshanchor/mini_dudeai.env
+ExecStart=/usr/bin/python3 -m mini_dudeai --preset meshanchor_fleet --interval 30
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshanchor-mini-dudeai
+
+[Install]
+WantedBy=default.target

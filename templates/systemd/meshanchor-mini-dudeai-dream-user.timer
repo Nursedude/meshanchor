@@ -1,0 +1,22 @@
+# MeshAnchor — mini-dudeai nightly dream timer (systemd-user)
+# ==========================================================
+#
+# Fires the synthesis oneshot once nightly. Persistent=true so a missed firing
+# (box rebooted) catches up after boot. RandomizedDelaySec spreads the fleet's
+# nightly load. Install alongside the dream service (see that unit's header).
+#
+# To change cadence, edit OnCalendar and run:
+#   systemctl --user daemon-reload && systemctl --user restart \
+#       meshanchor-mini-dudeai-dream.timer
+
+[Unit]
+Description=Nightly trigger for MeshAnchor mini-dudeai synthesis (dreams)
+Requires=meshanchor-mini-dudeai-dream.service
+
+[Timer]
+OnCalendar=*-*-* 03:23:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

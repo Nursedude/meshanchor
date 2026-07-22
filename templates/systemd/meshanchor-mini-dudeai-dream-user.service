@@ -1,0 +1,28 @@
+# MeshAnchor — mini-dudeai nightly synthesis ("dreams", systemd-user oneshot)
+# ==========================================================================
+#
+# Distills the last 24h of the mini daemon's own telemetry into candidate
+# memory-deltas + a dreams file. Observation-only — never writes canonical
+# memory; a cloud session ratifies deltas. Triggered by the sibling timer, NOT
+# part of the hot 30s tick loop.
+#
+# Install (as the operator, alongside the main unit + its timer):
+#   cp /opt/meshanchor/templates/systemd/meshanchor-mini-dudeai-dream-user.service \
+#      ~/.config/systemd/user/meshanchor-mini-dudeai-dream.service
+#   cp /opt/meshanchor/templates/systemd/meshanchor-mini-dudeai-dream-user.timer \
+#      ~/.config/systemd/user/meshanchor-mini-dudeai-dream.timer
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now meshanchor-mini-dudeai-dream.timer
+
+[Unit]
+Description=MeshAnchor mini-dudeai nightly synthesis (dreams + candidate deltas)
+After=meshanchor-mini-dudeai.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/meshanchor/src
+EnvironmentFile=-%h/.config/meshanchor/mini_dudeai.env
+ExecStart=/usr/bin/python3 -m mini_dudeai --preset meshanchor_fleet --dream
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meshanchor-mini-dudeai-dream

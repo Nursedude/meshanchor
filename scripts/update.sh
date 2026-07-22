@@ -331,6 +331,11 @@ fi
 if $USER_SVC_UPDATED; then
     if run_user_systemctl daemon-reload 2>/dev/null; then
         run_user_systemctl try-restart meshanchor-echo.service 2>/dev/null || true
+        # mini-dudeai runs MeshAnchor code (the byte-locked engine + the MA
+        # meshanchor_fleet preset), so a pull that changes it must reach the
+        # running daemon — the #79 deploy-restart gap (WS-A). try-restart is a
+        # clean no-op on a box that doesn't run it.
+        run_user_systemctl try-restart meshanchor-mini-dudeai.service 2>/dev/null || true
         echo -e "  ${GREEN}✓ MeshAnchor user daemons refreshed (try-restart)${NC}"
     else
         echo -e "  ${YELLOW}⚠ Could not reach the operator user bus to restart user daemons.${NC}"

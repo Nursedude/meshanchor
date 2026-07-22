@@ -119,3 +119,37 @@ def test_preset_requires_ntfy_topic(tmp_path, monkeypatch):
         assert False, "expected ValueError for missing ntfy topic"
     except ValueError as e:
         assert "MINI_DUDEAI_NTFY_TOPIC" in str(e)
+
+
+# ── deployment wiring (WS-A increment 2) ────────────────────────────────────
+
+def _read(rel):
+    with open(os.path.join(REPO_ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_mini_service_unit_pins_the_ma_preset():
+    unit = _read("templates/systemd/meshanchor-mini-dudeai-user.service")
+    # MUST pin meshanchor_fleet so the byte-locked daemon's MF-specific
+    # `--preset auto` resolution (→ meshforge_fleet, absent on MA) is never hit.
+    assert "--preset meshanchor_fleet" in unit
+    assert "WorkingDirectory=/opt/meshanchor/src" in unit
+    assert "meshforge_fleet" not in unit
+    assert "WantedBy=default.target" in unit          # user unit
+
+
+def test_dream_units_present_and_wired():
+    svc = _read("templates/systemd/meshanchor-mini-dudeai-dream-user.service")
+    tmr = _read("templates/systemd/meshanchor-mini-dudeai-dream-user.timer")
+    assert "--preset meshanchor_fleet --dream" in svc
+    assert "Type=oneshot" in svc
+    assert "OnCalendar=" in tmr and "Persistent=true" in tmr
+    assert "Requires=meshanchor-mini-dudeai-dream.service" in tmr
+
+
+def test_update_sh_try_restarts_mini_the_deploy_restart_gap():
+    # The #79 deploy-restart gap (WS-A): a `git pull` that changes mini code must
+    # reach the RUNNING user daemon. update.sh must try-restart it — this pins
+    # the regression red-test-first (mirrors MeshForge's TestDeployRestartHook).
+    update = _read("scripts/update.sh")
+    assert "try-restart meshanchor-mini-dudeai.service" in update
