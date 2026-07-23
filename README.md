@@ -9,7 +9,7 @@
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-5168%20passing-blue.svg" alt="Tests"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-passing-blue.svg" alt="Tests"></a>
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ Where MeshForge treats Meshtastic as the "home" radio, MeshAnchor flips the arch
 
 > **ALPHA SOFTWARE — Field-deployed and accumulating mileage. More testers wanted.**
 >
-> MeshAnchor has **5,168 tests passing** against mocks. The canonical NOC
+> MeshAnchor has **~5,900 tests passing** against mocks (run `python3 -m pytest tests/ --co -q` for the live count). The canonical NOC
 > (`meshanchor-server`, Pi 4B + RAK Heltec V3 in Serial Companion mode) has
 > been running as a continuous deployment since 2026-05-02 and is currently
 > the source of truth for field validation. As of 2026-05-13 it carries:
@@ -51,7 +51,7 @@ Plug in a MeshCore companion radio, run the installer, and you get:
 - **MeshCore CLI passthrough** — TUI surface that drops the operator into [meshcore-cli](https://github.com/meshcore-dev/meshcore-cli) (common verbs, send DM/channel, remote-admin `cmd` bridge to [docs.meshcore.io/cli_commands/](https://docs.meshcore.io/cli_commands/), interactive REPL) with the daemon's radio ownership handed off cleanly so the bridge resumes when the CLI exits
 - **Gateway bridge** — bidirectional MeshCore to Meshtastic/RNS message routing via CanonicalMessage
 - **RF engineering tools** — link budget, Fresnel zone, FSPL, coverage maps, space weather (NOAA)
-- **TUI interface** — 85 handler files, MeshCore-primary menu with Optional Gateways submenu, raspi-config style (whiptail/dialog), SSH-friendly
+- **TUI interface** — <!--STAT:handlers-->85<!--/STAT--> handler files, MeshCore-primary menu with Optional Gateways submenu, raspi-config style (whiptail/dialog), SSH-friendly
 - **Live NOC maps** — Leaflet.js browser view with WebSocket updates
 - **meshforge-maps integration** — discovery, browser launch, configurable endpoint, bidirectional data fusion, and double-confirmed lifecycle control for the sister-project mapping service on `:8808`
 - **MQTT monitoring** — nodeless mesh observation, protobuf decode, traffic inspector
@@ -314,7 +314,7 @@ sudo python3 src/launcher_tui/main.py
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| Handler registry | 70 | 85 handler files, Protocol + BaseHandler pattern |
+| Handler registry | 70 | <!--STAT:handlers-->85<!--/STAT--> handler files, Protocol + BaseHandler pattern |
 | whiptail/dialog backend | -- | raspi-config style, SSH-friendly |
 | Deployment profile selector | 76 | 5 profiles, MeshCore-first ordering, auto-detect, full matrix pinned |
 | Startup health checks | 38 | Profile-aware classification (required / optional / not_applicable) |
@@ -342,7 +342,8 @@ sudo python3 src/launcher_tui/main.py
 
 ### Testing Reality Check
 
-MeshAnchor has **5,168 automated tests** across 165 test files. However, automated tests
+MeshAnchor has **~5,900 automated tests** (run `python3 -m pytest tests/ --co -q`
+for the live count) across <!--STAT:testfiles-->198<!--/STAT--> test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.
@@ -717,7 +718,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # 165 test files, 5,168 tests
+tests/                     # <!--STAT:testfiles-->198<!--/STAT--> test files, ~5,900 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
@@ -771,7 +772,8 @@ Gateway-specific templates in `config_templates/`:
 
 ### Test Coverage
 
-**5,168 tests** across 165 test files. Top suites by depth:
+**~5,900 tests** across <!--STAT:testfiles-->198<!--/STAT--> test files. Top suites by depth
+(per-file counts are a 2026-07 snapshot — run `python3 -m pytest tests/<file> --co -q` for the live number):
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
