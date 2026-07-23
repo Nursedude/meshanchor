@@ -24,6 +24,8 @@ block is leaner — no watchdog/mini-dudeai/radio-config stitches yet).
 
 import json
 import logging
+import os
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -34,6 +36,102 @@ from utils.safe_import import safe_import
 _get_connection_manager, _ConnectionMode, _HAS_MESHTASTIC_CONN = safe_import(
     'utils.meshtastic_connection', 'get_connection_manager', 'ConnectionMode'
 )
+
+MINI_STALE_S = 300.0  # 5 min — 10x mini-dudeai's 30s tick (SSOT for the block)
+
+
+def mini_block_from_payload(
+    payload: Any,
+    *,
+    now: Optional[float] = None,
+    stale_after_s: float = MINI_STALE_S,
+) -> Dict[str, Any]:
+    """Shape a raw mini ``state.json`` payload into the
+    ``/api/status.mini_dudeai`` block, re-deriving staleness at read time.
+
+    Ported from MeshForge's ``mini_block_from_payload`` so the MF fleet-truth
+    classifier (which reads THIS box's ``/api/status.mini_dudeai``) sees an
+    identical shape: a stale payload reads ``ok=False`` with a ``stale:``
+    reason, which the classifier maps to DARK — never green-with-old-numbers.
+    """
+    if not isinstance(payload, dict):
+        return {"installed": True, "ok": False,
+                "reason": "malformed_json: not an object"}
+
+    ts = payload.get("last_tick_ts")
+    age_s: Optional[float] = None
+    if isinstance(ts, (int, float)):
+        age_s = max(0.0, (now if now is not None else time.time()) - float(ts))
+    stale = bool(age_s is not None and age_s > stale_after_s)
+
+    rules = payload.get("rules") or {}
+    active = [
+        {"rule_id": rs.get("rule_id"), "subject": rs.get("subject"),
+         "detail": rs.get("last_detail", "")}
+        for rs in rules.values()
+        if isinstance(rs, dict) and rs.get("currently_active")
+    ]
+    top = sorted(
+        ({"rule_id": rs.get("rule_id"), "subject": rs.get("subject"),
+          "fire_count_24h": rs.get("fire_count_24h", 0)}
+         for rs in rules.values()
+         if isinstance(rs, dict) and rs.get("fire_count_24h")),
+        key=lambda r: r["fire_count_24h"], reverse=True,
+    )[:5]
+
+    block = {
+        "installed": True,
+        "ok": not stale,
+        "ts": ts,
+        "last_tick_iso": payload.get("last_tick_iso"),
+        "age_s": age_s,
+        "host": payload.get("host"),
+        "rule_count": payload.get("rule_count"),
+        "error_count": payload.get("error_count"),
+        "active_rules": active,
+        "top_rules_24h": top,
+    }
+    if stale:
+        block["reason"] = (
+            f"stale: last tick {age_s:.0f}s ago "
+            f"(threshold {stale_after_s:.0f}s) — mini-dudeai "
+            f"daemon may have crashed"
+        )
+    return block
+
+
+def read_ma_mini_state_block() -> Dict[str, Any]:
+    """Stitch the MeshAnchor mini's live state into ``/api/status.mini_dudeai``.
+
+    MA runs its OWN mini-dudeai sub-agent (preset ``meshanchor_fleet``),
+    namespaced under ``ma_mini_dir`` so it never collides with a co-located
+    MeshForge mini twin on a dual-stack box. Resolve the state path via the
+    SAME ``ma_mini_dir()`` the mini and ``fleet_watchdog._mini_dead_reason``
+    use (one constant, honest_failure_modes #5) — a hardcoded path here would
+    silently drift from where the daemon writes.
+
+    Degrades to ``installed:False`` ONLY when the state file is genuinely
+    absent (mini not seeded on this box) — it never asserts absence while the
+    daemon is running (the stale-stub bug this replaced, 2026-07-22).
+    """
+    try:
+        from mini_dudeai.presets.meshanchor_fleet import ma_mini_dir
+        from mini_dudeai._util import operator_home
+        path = os.path.join(ma_mini_dir(operator_home()), "state.json")
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        return {"installed": False, "reason": "no_state_file (mini not seeded here)"}
+    except OSError as exc:
+        return {"installed": False, "reason": f"read_error: {exc}"}
+    except Exception as exc:  # noqa: BLE001 — mini pkg import failure ≠ absence
+        return {"installed": False, "reason": f"mini_unavailable: {exc}"}
+
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        return {"installed": True, "ok": False, "reason": f"malformed_json: {exc}"}
+    return mini_block_from_payload(payload)
 
 
 def _read_deployment_role(app_name: str) -> Optional[str]:
@@ -207,15 +305,14 @@ class StatusEndpointsMixin:
         # Both NOCs' /api/fleet/truth builders read these; without them every
         # MA box's watchdog/mini cells read unobservable-DARK and taint the
         # box roll-up. The watchdog block speaks MA's NATIVE organ (blackout
-        # kinds), not a clone of MF's probe watchdog; mini is an explicit
-        # benign absence (installed:false) — MA has no mini-dudeai, and
-        # saying so is the difference between absent-dark (benign) and
-        # unobservable-dark (taints).
+        # kinds), not a clone of MF's probe watchdog. The mini block reports
+        # MA's OWN mini-dudeai sub-agent (preset meshanchor_fleet, twinned
+        # 2026-07-22); before that twinning this was a hardcoded installed:false
+        # stub ("MeshAnchor has no local sub-agent"), which went stale the
+        # moment the mini went live and rendered a running daemon as absent-dark
+        # on both NOCs — the read now observes the real state.json.
         status["watchdog"] = watchdog_block_from_blackouts()
-        status["mini_dudeai"] = {
-            "installed": False,
-            "reason": "mini-dudeai is a MeshForge organ — MeshAnchor has no local sub-agent",
-        }
+        status["mini_dudeai"] = read_ma_mini_state_block()
 
         # Response-cache observability (Issues #70/#71). Surfaces hit/miss/
         # coalesced counts per heavy endpoint so operators can confirm the
