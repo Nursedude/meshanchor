@@ -132,12 +132,20 @@ TIER_LOCAL = "local"
 TIER_FEDERATION = "federation"
 TIER_EXTERNAL = "external"
 
-# State machine values. mark_fanout_enqueued always returns to `healthy`.
-# Automatic degraded/stale/dead transitions land in mark_failed.
+# State machine values. Only a real LXMF recipient proof (mark_confirmed)
+# returns a subscriber to `healthy`; automatic degraded/stale/dead transitions
+# land in mark_failed. An enqueue (mark_fanout_enqueued) is NOT a delivery and
+# no longer launders into `healthy` (finding-2, 2026-07-23).
 STATE_HEALTHY = "healthy"
 STATE_DEGRADED = "degraded"
 STATE_STALE = "stale"
 STATE_DEAD = "dead"
+# A subscriber sent to but NEVER confirmed by a real LXMF recipient proof.
+# Distinct from HEALTHY (which now requires a proof) and DEAD (never claimed
+# without evidence) — the per-subscriber analogue of delivery_counters'
+# ``unconfirmable_sent``: the blind spot made VISIBLE, held not resolved
+# (Issue #74; honest_failure_modes #2).
+STATE_UNCONFIRMED = "unconfirmed"
 
 # Per-tier backoff windows: (floor_seconds, cap_seconds). Backoff after N
 # failures = min(floor * 2^(N-1), cap). Local clients on this pi recover
@@ -160,11 +168,12 @@ class Subscriber:
     """One LXMF identity opted in to the broadcast fan-out."""
     lxmf_hash: str          # 16-char hex destination hash
     added_at: datetime
-    last_delivery: Optional[datetime] = None
+    last_delivery: Optional[datetime] = None   # last ENQUEUE (best-effort)
     tier: str = TIER_EXTERNAL
     state: str = STATE_HEALTHY
     consecutive_failures: int = 0
     last_failure_at: Optional[datetime] = None
+    last_confirmed_at: Optional[datetime] = None  # last REAL recipient proof
 
 
 class SubscriberStore:
@@ -211,6 +220,11 @@ class SubscriberStore:
                 ("state", f"TEXT NOT NULL DEFAULT '{STATE_HEALTHY}'"),
                 ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
                 ("last_failure_at", "TEXT"),
+                # finding-2 (2026-07-23): real recipient-proof anchor. NULL by
+                # default so every pre-existing subscriber becomes UNCONFIRMED
+                # until its next real proof — the old ``last_delivery`` values
+                # were manufactured on enqueue and must NOT read as confirmations.
+                ("last_confirmed_at", "TEXT"),
             ]
             for col_name, col_def in migrations:
                 if col_name in existing_cols:
@@ -234,7 +248,11 @@ class SubscriberStore:
                 "INSERT OR IGNORE INTO subscribers("
                 "lxmf_hash, added_at, tier, state, consecutive_failures"
                 ") VALUES (?, ?, ?, ?, 0)",
-                (lxmf_hash, now, tier, STATE_HEALTHY),
+                # A brand-new subscriber has never been confirmed — UNCONFIRMED
+                # is its honest birth state (finding-2). Starting HEALTHY would
+                # also make every first failure emit a spurious healthy→
+                # unconfirmed transition.
+                (lxmf_hash, now, tier, STATE_UNCONFIRMED),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -251,11 +269,11 @@ class SubscriberStore:
 
     _ALL_COLS = (
         "lxmf_hash, added_at, last_delivery, tier, state, "
-        "consecutive_failures, last_failure_at"
+        "consecutive_failures, last_failure_at, last_confirmed_at"
     )
 
     def _row_to_subscriber(self, row) -> Subscriber:
-        h, added, last, tier, state, fails, failed = row
+        h, added, last, tier, state, fails, failed, confirmed = row
         return Subscriber(
             lxmf_hash=h,
             added_at=_parse_iso(added) or datetime.utcnow(),
@@ -264,6 +282,7 @@ class SubscriberStore:
             state=state or STATE_HEALTHY,
             consecutive_failures=int(fails or 0),
             last_failure_at=_parse_iso(failed),
+            last_confirmed_at=_parse_iso(confirmed),
         )
 
     def list_all(self) -> List[Subscriber]:
@@ -290,16 +309,35 @@ class SubscriberStore:
         return [self._row_to_subscriber(r) for r in rows]
 
     def mark_fanout_enqueued(self, lxmf_hash: str) -> None:
-        """Record a successful fan-out ENQUEUE: timestamp + reset failure counter.
+        """Record a successful fan-out ENQUEUE — a hand-off to the LXMF router.
 
-        NOTE (honest-signal H2, #16): this is the last successful hand-off to the
-        LXMF router, NOT a confirmed delivery — LXMF fan-out is best-effort and a
-        true delivery receipt (if any) arrives asynchronously via the LXMessage
-        delivery callback, not here. It still drops the row back to `healthy` from
-        a prior degraded state because a clean enqueue is the strongest signal we
-        have synchronously; S3's automatic state transitions respect this reset.
-        (Wiring true receipts to a separate confirmed-delivery field is a
-        worthwhile follow-up.)
+        finding-2 (2026-07-23): this is NOT a confirmed delivery. ``handle_outbound``
+        enqueues the LXM asynchronously; the recipient may never receive it. So —
+        unlike the earlier version that reset the counter and dropped the row back
+        to HEALTHY (which made STALE/DEAD unreachable and read dead subscribers as
+        healthy forever) — it must NOT touch the failure counter or state. Only a
+        real LXMF recipient proof (``mark_confirmed``) does that. ``last_delivery``
+        is stamped purely for operator observability; ``desired_state`` no longer
+        keys off it. Resolves the H2/#16 "wire true receipts to a separate
+        confirmed-delivery field" follow-up.
+        """
+        lxmf_hash = lxmf_hash.lower()
+        now = datetime.utcnow().isoformat()
+        with self._lock, connect_tuned(self._db_path) as conn:
+            conn.execute(
+                "UPDATE subscribers SET last_delivery = ? WHERE lxmf_hash = ?",
+                (now, lxmf_hash),
+            )
+            conn.commit()
+
+    def mark_confirmed(self, lxmf_hash: str) -> None:
+        """A REAL LXMF recipient delivery proof (state DELIVERED) arrived.
+
+        The ONLY path back to HEALTHY: stamps the confirmable anchor
+        ``last_confirmed_at``, clears the failure counter, and returns the
+        subscriber to HEALTHY. A propagation-node hand-off (state SENT) is NOT a
+        recipient proof and must NOT call this — it leaves the subscriber
+        UNCONFIRMED (held, surfaced), per honest_failure_modes #2.
         """
         lxmf_hash = lxmf_hash.lower()
         now = datetime.utcnow().isoformat()
@@ -313,9 +351,10 @@ class SubscriberStore:
                 prior_state = row[0]
             conn.execute(
                 "UPDATE subscribers "
-                "SET last_delivery = ?, consecutive_failures = 0, state = ? "
+                "SET last_confirmed_at = ?, last_delivery = ?, "
+                "    consecutive_failures = 0, state = ? "
                 "WHERE lxmf_hash = ?",
-                (now, STATE_HEALTHY, lxmf_hash),
+                (now, now, STATE_HEALTHY, lxmf_hash),
             )
             conn.commit()
         # Recovery transition: only emit when state actually changed.
@@ -327,30 +366,29 @@ class SubscriberStore:
                 "from": prior_state,
                 "to": STATE_HEALTHY,
                 "fails": 0,
-                "reason": "delivery_succeeded",
+                "reason": "delivery_confirmed",
             }))
 
     @staticmethod
     def desired_state(sub: "Subscriber", now: datetime) -> str:
-        """Pure function: target state for a subscriber based on row data.
+        """Pure function: target state — the confirmable-population rule (#74).
 
-        Three rules, evaluated in order from "worst" outward so the most
-        severe degradation wins:
-          1. 7+ days without a success while currently failing → dead.
-          2. 24+ hours without a success while currently failing → stale.
-          3. 3+ consecutive failures (recent) → degraded.
-          4. otherwise → healthy.
-
-        `mark_fanout_enqueued` resets failures to 0 and state to healthy directly,
-        so this function only needs to handle the failure side.
+        A subscriber is judged HEALTHY/STALE/DEAD only once it has produced a
+        real recipient proof (``last_confirmed_at is not None``). Before that we
+        cannot tell "alive but proof-less path" from "dead", so we HOLD at
+        UNCONFIRMED and never claim either extreme (honest_failure_modes #2).
+        Active failures on an unconfirmed subscriber surface as DEGRADED — an
+        honest "having trouble" short of the "was alive, went dark" claim
+        STALE/DEAD make.
         """
+        confirmable = sub.last_confirmed_at is not None
+        if not confirmable:
+            if sub.consecutive_failures >= _DEGRADED_FAIL_THRESHOLD:
+                return STATE_DEGRADED
+            return STATE_UNCONFIRMED
         if sub.consecutive_failures == 0:
             return STATE_HEALTHY
-        last_success = sub.last_delivery or sub.added_at
-        if last_success is None:
-            # No reference point — fall back to "since failures started".
-            last_success = sub.last_failure_at or now
-        since_success = (now - last_success).total_seconds()
+        since_success = (now - sub.last_confirmed_at).total_seconds()
         if since_success >= _DEAD_SINCE_SUCCESS_SEC:
             return STATE_DEAD
         if since_success >= _STALE_SINCE_SUCCESS_SEC:
@@ -462,6 +500,19 @@ class SubscriberStore:
                 "LXMF subscriber %s → state=%s", lxmf_hash[:8], new_state
             )
         return updated
+
+
+# LXMF.LXMessage.DELIVERED (== 0x08). The delivery callback fires for BOTH a
+# true recipient proof (__mark_delivered → state DELIVERED) AND a
+# propagation-node hand-off (__mark_propagated → state SENT), so the callback
+# MUST read lxm.state to tell them apart. Only DELIVERED is a recipient proof.
+_LXM_STATE_DELIVERED_FALLBACK = 8
+
+
+def _lxm_delivered_state(lxmf_module: Any) -> int:
+    """The integer LXMessage.DELIVERED, tolerant of a mocked LXMF in tests."""
+    val = getattr(getattr(lxmf_module, "LXMessage", None), "DELIVERED", None)
+    return val if isinstance(val, int) else _LXM_STATE_DELIVERED_FALLBACK
 
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
@@ -981,48 +1032,64 @@ class LXMFBroadcastBridge:
             )
             lxm = LXMF.LXMessage(destination, self._lxmf_source, body, title)
 
-            # Issue #66 first-wins: wire LXMF delivery callbacks ONLY when
-            # the operator opted in (ack_msg_id is set) and the substrate
-            # is reachable. Captured-by-closure ack_msg_id ensures every
-            # subscriber's callback addresses the same pending-ack record.
-            if ack_msg_id and self._ack_emit_callback is not None:
-                msg_id_capture = ack_msg_id
-                emit = self._ack_emit_callback
+            # finding-2 (2026-07-23): register a delivery/failed callback on
+            # EVERY fan-out (not just the ack_required path) so real LXMF
+            # receipts drive subscriber health honestly. LXMessage holds a
+            # single delivery_callback + single failed_callback, so the health
+            # signal and the Issue #66 first-wins ACK synthesis are folded into
+            # one pair of closures. ``ack_msg_id`` is None unless the operator
+            # opted into ack_required, in which case the same callback also
+            # drives the synthetic ACK back to the originating channel.
+            sub_hash = sub.lxmf_hash
+            delivered_state = _lxm_delivered_state(LXMF)
+            ack_capture = ack_msg_id if self._ack_emit_callback is not None else None
+            emit = self._ack_emit_callback
 
-                def on_delivered(receipt):
+            def on_delivered(lxm_receipt, _hash=sub_hash, _ack=ack_capture,
+                             _emit=emit, _delivered=delivered_state):
+                # Distinguish a true recipient proof (state DELIVERED) from a
+                # propagation-node hand-off (state SENT). Only the former is a
+                # confirmation; the latter leaves the subscriber UNCONFIRMED.
+                state = getattr(lxm_receipt, "state", None)
+                if state == _delivered:
+                    self._subs.mark_confirmed(_hash)
+                # else: propagated only — held as UNCONFIRMED, not HEALTHY.
+                if _ack and _emit is not None:
                     try:
-                        emit(msg_id_capture, "delivered")
+                        _emit(_ack, "delivered")
                     except Exception as e:
                         logger.debug(
                             "ack emit (delivered) failed for %s: %s",
-                            msg_id_capture[:16], e,
+                            _ack[:16], e,
                         )
 
-                def on_failed(receipt):
-                    # Per-subscriber failure is NOT overall failure — the
-                    # substrate's timeout sweep handles "no winner" via
-                    # synthetic [timeout:<id>]. We just log here.
+            def on_failed(lxm_receipt, _hash=sub_hash, _ack=ack_capture):
+                # Per-subscriber failure is NOT overall ack failure — the
+                # substrate's timeout sweep handles "no winner". But it IS this
+                # subscriber's delivery failure, so it must drive health.
+                self._subs.mark_failed(_hash, "lxmf_delivery_failed")
+                if _ack:
                     logger.debug(
                         "LXMF delivery failed to %s for ack %s",
-                        hash_short, msg_id_capture[:16],
+                        hash_short, _ack[:16],
                     )
 
-                try:
-                    lxm.register_delivery_callback(on_delivered)
-                    lxm.register_failed_callback(on_failed)
-                except (AttributeError, TypeError):
-                    logger.debug(
-                        "LXMF callbacks not available — fan-out to %s "
-                        "will not contribute to ack synthesis",
-                        hash_short,
-                    )
+            try:
+                lxm.register_delivery_callback(on_delivered)
+                lxm.register_failed_callback(on_failed)
+            except (AttributeError, TypeError):
+                logger.debug(
+                    "LXMF callbacks not available — fan-out to %s will not "
+                    "contribute delivery confirmation or ack synthesis",
+                    hash_short,
+                )
 
             call_boundary("rnsd.handle_outbound",
                           self._router.handle_outbound, lxm,
                           target=hash_short)
             # handle_outbound ENQUEUES (async); this records the enqueue, not a
-            # confirmed delivery — the on_delivered receipt above is the only true
-            # delivery signal (honest-signal H2, #16).
+            # confirmed delivery — the on_delivered receipt above is the only
+            # true recipient-proof signal (finding-2; honest-signal H2, #16).
             self._subs.mark_fanout_enqueued(sub.lxmf_hash)
             with self._stats_lock:
                 self.stats["fanouts"] += 1
@@ -1051,6 +1118,18 @@ class LXMFBroadcastBridge:
         with self._stats_lock:
             stats_copy = dict(self.stats)
         subs = self._subs.list_all()
+        now = datetime.utcnow()
+
+        # Report the LIVE-derived state, not the stored column, so a subscriber
+        # whose row hasn't been mutated since a threshold crossing (or a pre-fix
+        # row still marked 'healthy' that is really UNCONFIRMED) can never lie in
+        # the status surface (honest_failure_modes #5 — one source of truth).
+        live_states = [SubscriberStore.desired_state(s, now) for s in subs]
+        by_state: Dict[str, int] = {}
+        for st in live_states:
+            by_state[st] = by_state.get(st, 0) + 1
+        confirmable = sum(1 for s in subs if s.last_confirmed_at is not None)
+
         return {
             "running": self._running,
             "destination_hash": self.destination_hash_hex,
@@ -1075,16 +1154,29 @@ class LXMFBroadcastBridge:
                     "last_delivery": (
                         s.last_delivery.isoformat() if s.last_delivery else None
                     ),
+                    # last REAL recipient proof; None => never confirmed (blind spot)
+                    "last_confirmed_at": (
+                        s.last_confirmed_at.isoformat()
+                        if s.last_confirmed_at else None
+                    ),
                     "tier": s.tier,
-                    "state": s.state,
+                    "state": live,
                     "consecutive_failures": s.consecutive_failures,
                     "last_failure_at": (
                         s.last_failure_at.isoformat() if s.last_failure_at else None
                     ),
                 }
-                for s in subs
+                for s, live in zip(subs, live_states)
             ],
             "subscriber_count": len(subs),
+            # Honest confirmation accounting (mirrors #74's
+            # compute_confirmation_view): surface the unconfirmed population as
+            # its own visible number rather than folding it into a healthy scalar.
+            "delivery_confirmation": {
+                "confirmable_subscribers": confirmable,
+                "unconfirmed_subscribers": len(subs) - confirmable,
+                "by_state": by_state,
+            },
             "stats": stats_copy,
         }
 

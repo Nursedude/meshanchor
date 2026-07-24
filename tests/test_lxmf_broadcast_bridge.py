@@ -32,6 +32,7 @@ from gateway.lxmf_broadcast_bridge import (
     STATE_DEGRADED,
     STATE_HEALTHY,
     STATE_STALE,
+    STATE_UNCONFIRMED,
     SubscriberStore,
     TIER_EXTERNAL,
     TIER_FEDERATION,
@@ -629,9 +630,12 @@ class TestSubscriberStoreS1Schema:
         store.add("deadbeef00112233")
         sub = store.list_all()[0]
         assert sub.tier == TIER_EXTERNAL
-        assert sub.state == STATE_HEALTHY
+        # finding-2: a brand-new subscriber has never been confirmed → born
+        # UNCONFIRMED, not the optimistic HEALTHY.
+        assert sub.state == STATE_UNCONFIRMED
         assert sub.consecutive_failures == 0
         assert sub.last_failure_at is None
+        assert sub.last_confirmed_at is None
 
     def test_add_accepts_tier_argument(self, tmp_path):
         store = SubscriberStore(tmp_path / "subs.db")
@@ -714,25 +718,37 @@ class TestSubscriberStoreS1Failure:
         assert sub.consecutive_failures == 3
         assert sub.last_failure_at is not None
 
-    def test_mark_delivered_resets_failure_counter(self, tmp_path):
+    def test_enqueue_does_not_reset_failure_counter(self, tmp_path):
+        """finding-2: an enqueue is NOT a delivery — it must NOT launder failures
+        into HEALTHY. Only a real recipient proof (mark_confirmed) does that."""
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef00112233")
         for _ in range(5):
             store.mark_failed("deadbeef00112233", "reason")
         store.mark_fanout_enqueued("deadbeef00112233")
         sub = store.list_all()[0]
+        assert sub.consecutive_failures == 5
+        assert sub.last_delivery is not None
+        assert sub.last_confirmed_at is None
+
+    def test_confirm_resets_failure_counter(self, tmp_path):
+        store = SubscriberStore(tmp_path / "subs.db")
+        store.add("deadbeef00112233")
+        for _ in range(5):
+            store.mark_failed("deadbeef00112233", "reason")
+        store.mark_confirmed("deadbeef00112233")
+        sub = store.list_all()[0]
         assert sub.consecutive_failures == 0
         assert sub.state == STATE_HEALTHY
-        assert sub.last_delivery is not None
+        assert sub.last_confirmed_at is not None
 
-    def test_mark_delivered_recovers_from_degraded(self, tmp_path):
-        """S1 carries the reset logic so S3's auto-degraded transitions
-        recover cleanly on the next successful fan-out."""
+    def test_confirm_recovers_from_degraded(self, tmp_path):
+        """A real recipient proof recovers a degraded subscriber to healthy."""
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef00112233")
         store.transition_state("deadbeef00112233", STATE_DEGRADED)
         assert store.list_all()[0].state == STATE_DEGRADED
-        store.mark_fanout_enqueued("deadbeef00112233")
+        store.mark_confirmed("deadbeef00112233")
         assert store.list_all()[0].state == STATE_HEALTHY
 
     def test_mark_failed_on_unknown_hash_is_noop(self, tmp_path):
@@ -757,8 +773,10 @@ class TestSubscriberStoreS1Failure:
         store.add("aaaa000000000003")
         store.transition_state("aaaa000000000002", STATE_STALE)
         store.transition_state("aaaa000000000003", STATE_DEAD)
+        # aaaa..1 is left at its birth state UNCONFIRMED (finding-2); the point
+        # of this test is that list_by_state filters on the stored column.
         assert (
-            {s.lxmf_hash for s in store.list_by_state(STATE_HEALTHY)}
+            {s.lxmf_hash for s in store.list_by_state(STATE_UNCONFIRMED)}
             == {"aaaa000000000001"}
         )
         assert (
@@ -825,14 +843,12 @@ class TestFanoutWiresMarkFailed:
         finally:
             b.stop()
 
-    def test_successful_fanout_resets_failure_counter(
+    def test_successful_fanout_enqueues_but_does_not_confirm(
         self, tmp_path, fake_rns_lxmf,
     ):
-        """End-to-end: fail once, success once. Counter resets to 0.
-
-        After S3's backoff lands, two rapid failures in a row would skip
-        the second attempt (in cooldown). We backdate the failure stamp
-        between broadcasts so the second fanout actually fires.
+        """finding-2: a successful fan-out ENQUEUES; it does NOT reset the
+        failure counter (that requires a real recipient proof). The prior
+        failure stands until the async delivery callback fires.
         """
         rns, _lxmf, _router = fake_rns_lxmf
         recall_results = [None, MagicMock()]
@@ -844,8 +860,8 @@ class TestFanoutWiresMarkFailed:
             b.on_meshcore_message(_make_canonical(text="m1", sender="a"))
             assert b._subs.list_all()[0].consecutive_failures == 1
             # Backdate failure stamp so backoff window is satisfied.
-            import sqlite3
-            with sqlite3.connect(str(b._subs._db_path)) as conn:
+            from utils.db_helpers import connect_tuned
+            with connect_tuned(b._subs._db_path) as conn:
                 conn.execute(
                     "UPDATE subscribers SET last_failure_at = ? "
                     "WHERE lxmf_hash = ?",
@@ -854,8 +870,11 @@ class TestFanoutWiresMarkFailed:
                 conn.commit()
             b.on_meshcore_message(_make_canonical(text="m2", sender="a"))
             sub = b._subs.list_all()[0]
-            assert sub.consecutive_failures == 0
+            # Enqueue happened (last_delivery stamped) but the failure counter
+            # is NOT reset and NO confirmation was recorded.
+            assert sub.consecutive_failures == 1
             assert sub.last_delivery is not None
+            assert sub.last_confirmed_at is None
         finally:
             b.stop()
 
@@ -871,9 +890,12 @@ class TestStatusJSONS1Fields:
             b._subs.mark_failed("deadbeef00112233", "reason")
             row = b.get_status()["subscribers"][0]
             assert row["tier"] == TIER_LOCAL
-            assert row["state"] == STATE_HEALTHY
+            # finding-2: never-confirmed + 1 failure reads UNCONFIRMED, not the
+            # optimistic HEALTHY the pre-fix code showed.
+            assert row["state"] == STATE_UNCONFIRMED
             assert row["consecutive_failures"] == 1
             assert row["last_failure_at"] is not None
+            assert row["last_confirmed_at"] is None
         finally:
             b.stop()
 
@@ -893,6 +915,7 @@ from gateway.lxmf_broadcast_bridge import (  # noqa: E402
 def _sub(
     *, fails=0, state=STATE_HEALTHY, tier=TIER_EXTERNAL,
     last_delivery=None, last_failure_at=None, added_at=None,
+    last_confirmed_at=None,
 ):
     """Build a Subscriber row for pure-function state/backoff tests."""
     return Subscriber(
@@ -903,66 +926,77 @@ def _sub(
         state=state,
         consecutive_failures=fails,
         last_failure_at=last_failure_at,
+        last_confirmed_at=last_confirmed_at,
     )
 
 
 class TestDesiredStatePureFunction:
     """SubscriberStore.desired_state is a pure function — easiest to pin in
-    isolation rather than driving it via real DB rows."""
+    isolation rather than driving it via real DB rows.
+
+    finding-2 (2026-07-23): the STALE/DEAD tiers key off ``last_confirmed_at``
+    (a real recipient proof), NOT ``last_delivery`` (an enqueue). A subscriber
+    with no proof yet is UNCONFIRMED, never HEALTHY and never DEAD-by-absence.
+    """
 
     NOW = datetime(2026, 5, 12, 12, 0, 0)
 
-    def test_zero_failures_is_healthy(self):
-        sub = _sub(fails=0)
+    def test_zero_failures_confirmed_is_healthy(self):
+        sub = _sub(fails=0, last_confirmed_at=self.NOW - timedelta(minutes=5))
         assert SubscriberStore.desired_state(sub, self.NOW) == STATE_HEALTHY
 
-    def test_one_failure_recent_success_stays_healthy(self):
+    def test_never_confirmed_zero_failures_is_unconfirmed(self):
+        sub = _sub(fails=0, last_confirmed_at=None)
+        assert SubscriberStore.desired_state(sub, self.NOW) == STATE_UNCONFIRMED
+
+    def test_one_failure_recent_proof_stays_healthy(self):
         sub = _sub(
             fails=1,
-            last_delivery=self.NOW - timedelta(minutes=5),
+            last_confirmed_at=self.NOW - timedelta(minutes=5),
             last_failure_at=self.NOW,
         )
         assert SubscriberStore.desired_state(sub, self.NOW) == STATE_HEALTHY
 
-    def test_three_failures_recent_success_is_degraded(self):
+    def test_three_failures_recent_proof_is_degraded(self):
         sub = _sub(
             fails=3,
-            last_delivery=self.NOW - timedelta(hours=1),
+            last_confirmed_at=self.NOW - timedelta(hours=1),
             last_failure_at=self.NOW,
         )
         assert SubscriberStore.desired_state(sub, self.NOW) == STATE_DEGRADED
 
-    def test_failures_24h_without_success_is_stale(self):
+    def test_failures_24h_without_proof_is_stale(self):
         sub = _sub(
             fails=5,
-            last_delivery=self.NOW - timedelta(hours=25),
+            last_confirmed_at=self.NOW - timedelta(hours=25),
             last_failure_at=self.NOW,
         )
         assert SubscriberStore.desired_state(sub, self.NOW) == STATE_STALE
 
-    def test_failures_7d_without_success_is_dead(self):
+    def test_failures_7d_without_proof_is_dead(self):
         sub = _sub(
             fails=20,
-            last_delivery=self.NOW - timedelta(days=8),
+            last_confirmed_at=self.NOW - timedelta(days=8),
             last_failure_at=self.NOW,
         )
         assert SubscriberStore.desired_state(sub, self.NOW) == STATE_DEAD
 
-    def test_no_last_delivery_falls_back_to_added_at(self):
-        """A never-delivered subscriber uses added_at as the success baseline."""
+    def test_never_confirmed_but_failing_is_degraded_not_dead(self):
+        """Absence of a proof must never by itself read DEAD — active failures
+        surface as DEGRADED even after 10 days for a never-confirmed subscriber."""
         sub = _sub(
             fails=10,
             added_at=self.NOW - timedelta(days=10),
             last_failure_at=self.NOW,
-            last_delivery=None,
+            last_confirmed_at=None,
         )
-        assert SubscriberStore.desired_state(sub, self.NOW) == STATE_DEAD
+        assert SubscriberStore.desired_state(sub, self.NOW) == STATE_DEGRADED
 
     def test_dead_wins_over_degraded(self):
-        """Severity ordering: 7d-no-success outranks the 3-fails threshold."""
+        """Severity ordering: 7d-no-proof outranks the 3-fails threshold."""
         sub = _sub(
             fails=100,
-            last_delivery=self.NOW - timedelta(days=10),
+            last_confirmed_at=self.NOW - timedelta(days=10),
             last_failure_at=self.NOW,
         )
         assert SubscriberStore.desired_state(sub, self.NOW) == STATE_DEAD
@@ -981,22 +1015,24 @@ class TestStateTransitionsInMarkFailed:
         assert sub.consecutive_failures == 3
         assert sub.state == STATE_DEGRADED
 
-    def test_two_failures_stays_healthy(self, tmp_path):
+    def test_two_failures_never_confirmed_is_unconfirmed(self, tmp_path):
+        # finding-2: below the degraded threshold, a never-confirmed subscriber
+        # is UNCONFIRMED (not the optimistic HEALTHY the pre-fix code showed).
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef00112233")
         store.mark_failed("deadbeef00112233", "reason")
         store.mark_failed("deadbeef00112233", "reason")
         sub = store.list_all()[0]
         assert sub.consecutive_failures == 2
-        assert sub.state == STATE_HEALTHY
+        assert sub.state == STATE_UNCONFIRMED
 
-    def test_mark_delivered_after_degraded_returns_to_healthy(self, tmp_path):
+    def test_confirm_after_degraded_returns_to_healthy(self, tmp_path):
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef00112233")
         for _ in range(5):
             store.mark_failed("deadbeef00112233", "reason")
         assert store.list_all()[0].state == STATE_DEGRADED
-        store.mark_fanout_enqueued("deadbeef00112233")
+        store.mark_confirmed("deadbeef00112233")
         sub = store.list_all()[0]
         assert sub.state == STATE_HEALTHY
         assert sub.consecutive_failures == 0
@@ -1246,9 +1282,10 @@ class TestS4StateTransitionMetric:
             store.add("deadbeef00112233")
             for _ in range(3):
                 store.mark_failed("deadbeef00112233", "reason")
-            # Exactly one transition: healthy -> degraded
+            # Exactly one transition: unconfirmed -> degraded (a never-confirmed
+            # subscriber is born UNCONFIRMED; the 3rd failure crosses to degraded).
             calls = [c.args for c in rt.call_args_list]
-            assert calls == [(STATE_HEALTHY, STATE_DEGRADED)]
+            assert calls == [(STATE_UNCONFIRMED, STATE_DEGRADED)]
 
     def test_no_transition_no_metric_call(self, tmp_path):
         """One or two failures don't transition — no metric call."""
@@ -1262,7 +1299,8 @@ class TestS4StateTransitionMetric:
             rt.assert_not_called()
 
     def test_recovery_records_transition(self, tmp_path):
-        """mark_delivered after degraded must record the recovery."""
+        """mark_confirmed (a real recipient proof) after degraded records the
+        recovery. An enqueue must NOT — only a proof recovers to healthy."""
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef00112233")
         for _ in range(3):
@@ -1271,12 +1309,13 @@ class TestS4StateTransitionMetric:
         with patch(
             "gateway.lxmf_broadcast_bridge.record_state_transition"
         ) as rt:
-            store.mark_fanout_enqueued("deadbeef00112233")
+            store.mark_confirmed("deadbeef00112233")
             calls = [c.args for c in rt.call_args_list]
             assert calls == [(STATE_DEGRADED, STATE_HEALTHY)]
 
-    def test_redelivery_to_healthy_no_transition(self, tmp_path):
-        """Already-healthy subscriber: mark_delivered must NOT record."""
+    def test_enqueue_records_no_transition(self, tmp_path):
+        """finding-2: an enqueue changes no state, so it never records a
+        transition (only mark_confirmed / mark_failed do)."""
         store = SubscriberStore(tmp_path / "subs.db")
         store.add("deadbeef00112233")
         with patch(
@@ -1309,7 +1348,9 @@ class TestS4StructuredLogEvents:
                 parsed = data
                 break
         assert parsed is not None, f"no state-transition event in {info_messages}"
-        assert parsed["from"] == STATE_HEALTHY
+        # finding-2: a never-confirmed subscriber is born UNCONFIRMED, so the
+        # transition the 3rd failure emits is unconfirmed -> degraded.
+        assert parsed["from"] == STATE_UNCONFIRMED
         assert parsed["to"] == STATE_DEGRADED
         assert parsed["hash"] == "deadbeef"  # first 8 chars
         assert parsed["reason"] == "test_reason"
