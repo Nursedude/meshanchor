@@ -205,6 +205,32 @@ class TestClawCell:
     def test_claw_less_box_stays_absent_dark(self):
         c = ft._claw_cell({"installed": False})
         assert c["state"] == ft.DARK and c["absent"] is True
+        assert c["claw_present"] is False
+
+    def test_unobservable_box_never_reads_as_a_claw_host(self):
+        # 07-24 audit (MF twin): an unreachable box yields a dark, NON-absent
+        # claw cell — a NOC panel must not invent an edge node from it.
+        for block in (None, {}, {"installed": None}):
+            c = ft._claw_cell(block)
+            assert c["state"] == ft.DARK and c["claw_present"] is False, block
+
+    def test_absent_primary_is_not_counted_as_a_claw(self):
+        # "2 claws healthy" for one claw + a missing primary tick rendered a
+        # MISSING OBSERVATION as a healthy device.
+        block = {"installed": False, "reason": "no_state_file",
+                 "secondaries": [{"installed": True, "ok": True,
+                                  "device": "dudeclaw-02", "age_s": 5}]}
+        c = ft._claw_cell(block)
+        assert c["state"] == ft.HEALTHY
+        assert c["claw_count"] == 1 and c["claw_absent_count"] == 1
+        assert len(c["claws"]) == 2 and c["absent"] is False
+
+    def test_all_claws_absent_is_benign_absence(self):
+        block = {"installed": False, "reason": "no_state_file",
+                 "secondaries": [{"installed": False, "reason": "read_error: gone"}]}
+        c = ft._claw_cell(block)
+        assert c["state"] == ft.DARK and c["absent"] is True
+        assert c["claw_count"] == 0 and c["claw_present"] is False
 
     def test_hard_fault_secondary_makes_cell_failed(self):
         block = self._primary()
