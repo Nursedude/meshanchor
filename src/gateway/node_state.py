@@ -343,6 +343,33 @@ class NodeStateMachine:
         self.transition_to(NodeState.UNREACHABLE, reason)
         return self._state
 
+    def mark_cache_restored(self) -> NodeState:
+        """Reconcile the LIVE state after restoring from persisted cache.
+
+        Gateway-review Pri-3 (2026-07-23, MF twin): a state machine persisted
+        while the node was ONLINE (or any active state) restores that claim
+        verbatim — but crossing a process restart INVALIDATES the liveness
+        verification. The node cache loader forces ``is_online=False`` ("not
+        heard since restart"), so an active restored state makes ``node.state``
+        contradict ``is_online`` and dishonestly reads a not-yet-heard node as
+        live (honest_failure_modes #2: a persisted value outliving the
+        observation that justified it).
+
+        Reset ONLY an active live-state to ``STALE_CACHE`` — the state whose
+        documented meaning is exactly "loaded from cache, not yet verified"
+        (``is_active()`` is False, matching the forced ``is_online=False``).
+        Non-active persisted states (OFFLINE / SUSPECTED_OFFLINE / UNREACHABLE)
+        are already consistent and are preserved as the more-informative label.
+        History and ``_last_response`` survive; the first live
+        ``record_response`` promotes STALE_CACHE → ONLINE.
+        """
+        if self._state.is_active():
+            self.transition_to(
+                NodeState.STALE_CACHE,
+                "Restored from cache — liveness unverified after restart",
+            )
+        return self._state
+
     def _check_weak_signal(self, snr: Optional[float],
                            rssi: Optional[int]) -> bool:
         """Check if current signal indicates weak connectivity."""

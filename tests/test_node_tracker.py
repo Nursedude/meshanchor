@@ -726,7 +726,13 @@ class TestNodeTrackerCache:
     _ROUNDTRIP_VOLATILE = {
         "is_online",       # loader forces offline until re-heard (by design)
         "last_seen_ago",   # rendered age string, wall-clock dependent
-        "state", "state_display", "state_icon",  # derived from is_online
+        # Pri-3 (07-23 review, MF twin): `state` comes from the STATE MACHINE
+        # when one is present (not "derived from is_online" — a false
+        # justification that let a persisted ONLINE contradict the forced
+        # is_online=False). The loader now resets an active restored state to
+        # STALE_CACHE, so these can differ from a node ONLINE at save. Dedicated
+        # invariant: test_active_state_reloads_as_stale_cache_no_contradiction.
+        "state", "state_display", "state_icon",
         "snr_trend", "rssi_trend",  # need ≥2 history samples; N/A here
     }
 
@@ -784,6 +790,64 @@ class TestNodeTrackerCache:
         assert restored.pki_status.public_key == key_a
         assert restored.update_pki_status(key_b) is True   # change detected
         assert restored.pki_status.state == PKIKeyState.CHANGED
+
+    def test_active_state_reloads_as_stale_cache_no_contradiction(self, tmp_path):
+        """Pri-3 (07-23 review, MF twin): a node persisted while ONLINE must NOT
+        reload with state==ONLINE while is_online==False — a not-yet-heard node
+        reading as live. The loader resets an active restored state to
+        STALE_CACHE so state.is_active() and is_online agree, history survives."""
+        from src.gateway.node_state import NodeState
+        from src.gateway.node_models import NODE_STATE_AVAILABLE
+        if not NODE_STATE_AVAILABLE:
+            import pytest
+            pytest.skip("node_state machine not available")
+        cache_file = tmp_path / "node_cache.json"
+
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file):
+            with patch.object(UnifiedNodeTracker, '_load_cache'):
+                tracker = UnifiedNodeTracker()
+                node = UnifiedNode(id="mesh_!live", network="meshtastic", name="n")
+                node.update_seen()  # drive the machine to ONLINE
+                assert node.state == NodeState.ONLINE
+                assert node.is_online is True
+                tracker._nodes[node.id] = node
+                tracker._save_cache()
+
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file):
+            reloaded = UnifiedNodeTracker()
+
+        r = reloaded._nodes["mesh_!live"]
+        assert r.is_online is False
+        assert r.state == NodeState.STALE_CACHE
+        assert r.state.is_active() is False
+        assert r.state.is_active() == r.is_online  # consistent, not contradictory
+        assert len(r._state_machine.get_transitions()) >= 1
+
+    def test_offline_state_is_preserved_on_reload(self, tmp_path):
+        """The reconcile only touches ACTIVE states — a persisted OFFLINE is
+        already consistent with is_online=False and keeps its informative label."""
+        from src.gateway.node_state import NodeState
+        from src.gateway.node_models import NODE_STATE_AVAILABLE
+        if not NODE_STATE_AVAILABLE:
+            import pytest
+            pytest.skip("node_state machine not available")
+        cache_file = tmp_path / "node_cache.json"
+
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file):
+            with patch.object(UnifiedNodeTracker, '_load_cache'):
+                tracker = UnifiedNodeTracker()
+                node = UnifiedNode(id="mesh_!gone", network="meshtastic", name="n")
+                node._state_machine.transition_to(NodeState.OFFLINE, "test")
+                tracker._nodes[node.id] = node
+                tracker._save_cache()
+
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file):
+            reloaded = UnifiedNodeTracker()
+
+        r = reloaded._nodes["mesh_!gone"]
+        assert r.state == NodeState.OFFLINE
+        assert r.is_online is False
+        assert r.state.is_active() == r.is_online
 
     def test_merge_routes_observed_key_through_existing_tofu_state(self, tmp_path):
         """C1 second half: from_meshtastic() TOFUs the key on the THROWAWAY
