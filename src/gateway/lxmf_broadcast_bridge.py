@@ -524,6 +524,18 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _msg_content(msg: Any) -> str:
+    # Pri-12 (gateway review 2026-07-23): CanonicalMessage advertises a bytes
+    # `content` shape too. Without this, a bytes payload flowed into str ops
+    # (lstrip/startswith/format) → TypeError swallowed as a generic callback
+    # error → the message silently failed to fan out. Normalize like the
+    # inbound _on_lxmf_delivery path already does.
+    raw = getattr(msg, "content", "") or ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return raw if isinstance(raw, str) else str(raw)
+
+
 def format_broadcast_text(
     msg: CanonicalMessage, prefix_format: str
 ) -> str:
@@ -535,7 +547,7 @@ def format_broadcast_text(
     """
     channel = msg.metadata.get("channel", 0) if msg.metadata else 0
     sender = msg.source_address or "?"
-    text = msg.content or ""
+    text = _msg_content(msg)
     # MeshCore channel broadcasts bake a "<channel> <sender>: <text>" header
     # into the body and arrive with an empty source_address (sender → "?").
     # Lift the sender out so the LXMF body carries a bare command at index 0
@@ -813,7 +825,7 @@ class LXMFBroadcastBridge:
         # Without this filter the bridge re-fans out the ACK and mints
         # another pending-ack id, looping. Mirrors the symmetric guard
         # in MeshForge's `MeshtasticBroadcastBridge` (commit 8b89347).
-        stripped = msg.content.lstrip()
+        stripped = _msg_content(msg).lstrip()   # Pri-12: bytes→str normalize
         if any(stripped.startswith(p) for p in _SYNTH_ACK_CONTENT_PREFIXES):
             with self._stats_lock:
                 self.stats["filtered_synth_ack"] += 1

@@ -1354,3 +1354,28 @@ class TestS4StructuredLogEvents:
         assert parsed["to"] == STATE_DEGRADED
         assert parsed["hash"] == "deadbeef"  # first 8 chars
         assert parsed["reason"] == "test_reason"
+
+
+class TestMsgContentBytesNormalizationPri12:
+    """Pri-12 (gateway review 2026-07-23): _msg_content must normalize a bytes
+    `content` (the advertised CanonicalMessage second shape) to str, or bytes
+    flow into str ops → TypeError swallowed → the message silently fails to fan
+    out."""
+
+    def test_bytes_content_decoded(self):
+        from gateway.lxmf_broadcast_bridge import _msg_content
+
+        class M:
+            content = b"subscribe"
+        assert _msg_content(M()) == "subscribe"
+
+    def test_str_and_none_unchanged(self):
+        from gateway.lxmf_broadcast_bridge import _msg_content
+
+        class S:
+            content = "already str"
+
+        class N:
+            content = None
+        assert _msg_content(S()) == "already str"
+        assert _msg_content(N()) == ""
