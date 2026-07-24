@@ -183,6 +183,49 @@ class TestBoxTruth:
         assert b["subsystems"]["services"]["state"] == ft.FAILED
 
 
+class TestClawCell:
+    """Byte-locked twin of MeshForge's claw-cell coverage. The claw subsystem
+    cell must account for EVERY dude-claw on a box, not just the primary — a
+    dead/degraded second claw must be visible, never mapped to a valid-looking
+    value (honest_failure_modes). ``_claw_cell`` rolls up worst_of primary +
+    secondaries and carries a per-claw roster. Claw-less on MA boxes → benign
+    absent-dark (the helper degrades gracefully)."""
+
+    def _primary(self, **over):
+        base = {"installed": True, "ok": True, "device": "dudeclaw-01",
+                "age_s": 5, "battery": {"volts": 4.1}}
+        base.update(over)
+        return base
+
+    def test_single_claw_unchanged_backward_compatible(self):
+        c = ft._claw_cell(self._primary())
+        assert c["state"] == ft.HEALTHY
+        assert "claws" not in c and "claw_count" not in c
+
+    def test_claw_less_box_stays_absent_dark(self):
+        c = ft._claw_cell({"installed": False})
+        assert c["state"] == ft.DARK and c["absent"] is True
+
+    def test_hard_fault_secondary_makes_cell_failed(self):
+        block = self._primary()
+        block["secondaries"] = [{"installed": True, "ok": False,
+                                 "device": "dudeclaw-02",
+                                 "reason": "hard_fault: watchdog reset loop"}]
+        c = ft._claw_cell(block)
+        assert c["state"] == ft.FAILED
+        assert c["claw_count"] == 2
+        assert "dudeclaw-02" in c["reason"]
+
+    def test_unreachable_secondary_is_dark_visible_not_hidden(self):
+        block = self._primary()
+        block["secondaries"] = [{"installed": True, "ok": False,
+                                 "device": "dudeclaw-02", "age_s": 9999,
+                                 "reason": "stale: last capture 9999s ago"}]
+        c = ft._claw_cell(block)
+        assert c["state"] == ft.DARK
+        assert c["claw_count"] == 2
+
+
 # ── build_fleet_truth: verdict + fan-out honesty ────────────────────────
 class TestFleetTruth:
     def _healthy_snap(self, alias):
