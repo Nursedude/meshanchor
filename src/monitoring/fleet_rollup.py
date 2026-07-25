@@ -19,7 +19,9 @@ Design rules mirror `fleet_aggregator.py`:
 from __future__ import annotations
 
 import logging
+import math
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -54,6 +56,35 @@ PEER_HTTP_TIMEOUT_S = 3.0
 """Per-peer HTTP fetch timeout. /fleet/health on a healthy peer comes
 back in ~140ms, so 3s is plenty of headroom for a slightly congested
 LAN; a wedged peer doesn't block the whole rollup for long."""
+
+MAX_PEER_WORKERS = 8
+"""Concurrent peer fetches. Bounded rather than unlimited: these run on
+Pi-class boxes, and the fleet's own creed is that observability must not
+cost more than what it observes. 8 covers the current fleet in one wave."""
+
+
+def rollup_worst_case_s(peer_count: int) -> float:
+    """Worst-case wall time for one `collect_fleet_rollup()`.
+
+    THE SERVER OWNS THIS NUMBER. The TUI client budget derives from it
+    rather than hardcoding its own — that exact drift (two consumers of
+    one contract, independently hardcoded) is what put the Fleet Monitor
+    on the WebSocket port and then gave it a 5s budget against a 24s
+    server. Retune the timeouts here and every consumer follows.
+
+    Peers are fetched concurrently in waves of `MAX_PEER_WORKERS`, so the
+    peer term is `ceil(peers / workers) x PEER_HTTP_TIMEOUT_S` — not the
+    old linear `peers x timeout`.
+    """
+    from monitoring.fleet_aggregator import DEFAULT_HTTP_TIMEOUT_S
+
+    peers = max(int(peer_count), 0)
+    waves = math.ceil(peers / MAX_PEER_WORKERS) if peers else 0
+    return (
+        3 * DEFAULT_HTTP_TIMEOUT_S           # local snapshot: 3 daemon fetches
+        + max(waves, 1) * PEER_HTTP_TIMEOUT_S  # peer fan-out, >=1 wave of slack
+        + PEER_HTTP_TIMEOUT_S                # federation view
+    )
 
 
 @dataclass
@@ -351,37 +382,59 @@ def collect_fleet_rollup(
     # the source. self_url paths skip the merge — caller is responsible
     # for serving an already-merged slo.
 
-    for peer in config.non_self_peers(hostname=rollup.self_host):
+    # Peers are fetched CONCURRENTLY (2026-07-25). Serially, rollup latency
+    # was len(peers) x timeout, which blew past every reasonable client
+    # budget once the fleet grew — see rollup_worst_case_s(). Rows are
+    # written back BY INDEX so config order survives: completion order is
+    # nondeterministic, but a grid that reshuffles each poll is unreadable
+    # and row identity is positional in the truth schema.
+    peer_list = list(config.non_self_peers(hostname=rollup.self_host))
+    rows: List[Optional[PeerSnapshot]] = [None] * len(peer_list)
+
+    def _gateway_row(peer) -> PeerSnapshot:
+        # Gateway peers don't run a map service on :5000 (e.g. moc3
+        # is gateway-only — see persistent_issues.md and the MF
+        # project_moc3_hardware_constraint memory). Skip the HTTP
+        # fetch entirely: no error, no chip, no wasted round trip.
+        # The row still lands in the rollup so the dashboard can
+        # show the box's presence; the renderer treats gateway-kind
+        # rows as a distinct visual state instead of an error.
+        return PeerSnapshot(
+            name=peer.name, host=peer.host, port=peer.port, kind=peer.kind,
+            snapshot=None, error=None,
+            fetched_at=time.time(), fetch_duration_s=0.0,
+        )
+
+    def _fetch_row(peer) -> PeerSnapshot:
+        """Never raises: a worker exception must degrade into ITS OWN row,
+        not abort the whole rollup (the never-a-dropped-row promise)."""
+        t0 = time.monotonic()
+        try:
+            body, err, duration = _fetch_peer_snapshot(peer, timeout=timeout)
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("peer %s fetch raised: %s", peer.name, exc)
+            body, err, duration = None, f"{type(exc).__name__}: {exc}", \
+                time.monotonic() - t0
+        return PeerSnapshot(
+            name=peer.name, host=peer.host, port=peer.port, kind=peer.kind,
+            snapshot=body, error=err,
+            fetched_at=time.time(), fetch_duration_s=duration,
+        )
+
+    fetchable = [(i, p) for i, p in enumerate(peer_list) if p.kind != "gateway"]
+    for i, peer in enumerate(peer_list):
         if peer.kind == "gateway":
-            # Gateway peers don't run a map service on :5000 (e.g. moc3
-            # is gateway-only — see persistent_issues.md and the MF
-            # project_moc3_hardware_constraint memory). Skip the HTTP
-            # fetch entirely: no error, no chip, no wasted round trip.
-            # The row still lands in the rollup so the dashboard can
-            # show the box's presence; the renderer treats gateway-kind
-            # rows as a distinct visual state instead of an error.
-            rollup.peers.append(PeerSnapshot(
-                name=peer.name,
-                host=peer.host,
-                port=peer.port,
-                kind=peer.kind,
-                snapshot=None,
-                error=None,
-                fetched_at=time.time(),
-                fetch_duration_s=0.0,
-            ))
-            continue
-        body, err, duration = _fetch_peer_snapshot(peer, timeout=timeout)
-        rollup.peers.append(PeerSnapshot(
-            name=peer.name,
-            host=peer.host,
-            port=peer.port,
-            kind=peer.kind,
-            snapshot=body,
-            error=err,
-            fetched_at=time.time(),
-            fetch_duration_s=duration,
-        ))
+            rows[i] = _gateway_row(peer)
+
+    if fetchable:
+        workers = min(MAX_PEER_WORKERS, len(fetchable))
+        with ThreadPoolExecutor(max_workers=workers,
+                                thread_name_prefix="rollup-peer") as pool:
+            futures = {pool.submit(_fetch_row, p): i for i, p in fetchable}
+            for future in as_completed(futures):
+                rows[futures[future]] = future.result()
+
+    rollup.peers.extend(row for row in rows if row is not None)
 
     if config.federation.scrape_rns_announces:
         # Daemon registry is the canonical source (live RNS announces);

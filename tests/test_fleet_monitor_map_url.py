@@ -94,15 +94,17 @@ class TestFleetMonitorRollupBudget:
     """
 
     def test_rollup_budget_covers_server_worst_case(self):
-        from launcher_tui.handlers.fleet_monitor import _endpoint_timeout
-        from monitoring.fleet_aggregator import DEFAULT_HTTP_TIMEOUT_S
-        from monitoring.fleet_rollup import PEER_HTTP_TIMEOUT_S
+        """Derived from the server's OWN exported bound — never restated here.
 
-        n_peers = 5
-        worst = (3 * DEFAULT_HTTP_TIMEOUT_S          # local snapshot
-                 + n_peers * PEER_HTTP_TIMEOUT_S     # sequential peer fan-out
-                 + PEER_HTTP_TIMEOUT_S)              # federation view
-        assert _endpoint_timeout("/fleet/rollup", peer_count=n_peers) >= worst
+        (This test used to spell out the sequential formula; when the server
+        went concurrent that made the test the fourth independent copy of the
+        contract. It now asks the server.)"""
+        from launcher_tui.handlers.fleet_monitor import _endpoint_timeout
+        from monitoring.fleet_rollup import rollup_worst_case_s
+
+        for n_peers in (1, 5, 12, 40):
+            assert (_endpoint_timeout("/fleet/rollup", peer_count=n_peers)
+                    >= rollup_worst_case_s(n_peers))
 
     def test_budget_scales_with_peer_count(self):
         from launcher_tui.handlers.fleet_monitor import _endpoint_timeout

@@ -65,17 +65,11 @@ def _endpoint_timeout(path: str, peer_count: Optional[int] = None) -> float:
     if not path.startswith("/fleet/rollup"):
         return HTTP_TIMEOUT_S
 
-    from monitoring.fleet_aggregator import DEFAULT_HTTP_TIMEOUT_S
-    from monitoring.fleet_rollup import PEER_HTTP_TIMEOUT_S
+    from monitoring.fleet_rollup import rollup_worst_case_s
 
     # Unknown peer count -> assume a fleet large enough not to under-budget.
     peers = 12 if peer_count is None else max(peer_count, 1)
-    worst_case = (
-        3 * DEFAULT_HTTP_TIMEOUT_S        # local snapshot: 3 daemon fetches
-        + peers * PEER_HTTP_TIMEOUT_S     # sequential peer fan-out
-        + PEER_HTTP_TIMEOUT_S             # federation view
-    )
-    return max(HTTP_TIMEOUT_S, worst_case)
+    return max(HTTP_TIMEOUT_S, rollup_worst_case_s(peers))
 
 
 def _configured_peer_count() -> Optional[int]:
