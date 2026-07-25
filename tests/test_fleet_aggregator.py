@@ -1158,3 +1158,108 @@ def test_failing_crontab_does_not_flip_timer_health(monkeypatch):
     block = fa._schedules_block()
     assert block["healthy"] is True
     assert block["crontab"]["available"] is False
+
+
+def _iso_ma(unix_ts: float) -> str:
+    """Unix ts -> the ISO8601 form ``cron_verdict.sh`` writes (UTC, ``Z``)."""
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(unix_ts, timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+
+
+class TestPerCronVerdictStaleness:
+    """The fleet Cron Verdicts panel must judge each cron by its OWN cadence.
+
+    Ported from the MeshForge twin 2026-07-24: ``VERDICT_STALE_AFTER_S`` (a
+    flat 26h) was applied to EVERY verdict, so a weekly cron rendered an amber
+    ``OK STALE`` badge for ~85% of its cycle even when freshly OK and exactly
+    on schedule. Keep the NUMBERS identical to
+    ``meshforge fleet_snapshot._verdict_stale_after_s``.
+    """
+
+    WEEK_SCHEDULE = "25 3 * * 0"
+    DAY_SCHEDULE = "13 5 * * *"
+
+    def test_weekly_cron_threshold_is_three_weeks(self):
+        assert fa._verdict_stale_after_s(self.WEEK_SCHEDULE) == pytest.approx(
+            3 * 7 * 86400.0)
+
+    def test_daily_cron_threshold_is_three_days(self):
+        assert fa._verdict_stale_after_s(self.DAY_SCHEDULE) == pytest.approx(
+            3 * 86400.0)
+
+    def test_frequent_cron_clamped_by_anti_flap_floor(self):
+        assert fa._verdict_stale_after_s("*/2 * * * *") == pytest.approx(7200.0)
+
+    def test_reboot_cron_never_stale_checkable(self):
+        assert fa._verdict_stale_after_s("@reboot") == float("inf")
+
+    def test_unknown_schedule_keeps_the_flat_fallback(self):
+        # Orphan verdicts carry no schedule; absent evidence must never
+        # TIGHTEN the threshold the orphan filter was built around.
+        for missing in (None, "", "   "):
+            assert fa._verdict_stale_after_s(missing) == float(
+                fa.VERDICT_STALE_AFTER_S)
+
+    def test_weekly_cron_on_cadence_is_not_stale(self):
+        now = 2_000_000_000.0
+        ts = _iso_ma(now - 5.4 * 86400)
+        jobs = fa._parse_cron_verdicts(
+            f"{ts} local_brain_eval OK \n", now,
+            schedules={"local_brain_eval": self.WEEK_SCHEDULE})
+        assert jobs[0]["stale"] is False
+        assert jobs[0]["stale_after_s"] == pytest.approx(3 * 7 * 86400.0)
+
+    def test_same_verdict_was_stale_under_the_flat_threshold(self):
+        now = 2_000_000_000.0
+        ts = _iso_ma(now - 5.4 * 86400)
+        jobs = fa._parse_cron_verdicts(f"{ts} local_brain_eval OK \n", now)
+        assert jobs[0]["stale"] is True
+
+    def test_daily_cron_gone_silent_four_days_is_still_stale(self):
+        # The fix must not blind the panel to a genuinely dead daily cron.
+        now = 2_000_000_000.0
+        ts = _iso_ma(now - 4 * 86400)
+        jobs = fa._parse_cron_verdicts(
+            f"{ts} memory_health OK \n", now,
+            schedules={"memory_health": self.DAY_SCHEDULE})
+        assert jobs[0]["stale"] is True
+
+    def test_verdict_schedules_maps_wired_names_to_schedules(self):
+        crontab = {"available": True, "jobs": [
+            {"schedule": self.WEEK_SCHEDULE,
+             "command": "eval.sh; /opt/meshanchor/scripts/cron_verdict.sh "
+                        "local_brain_eval $?"},
+            {"schedule": "* * * * *", "command": "/h/power.sh"},   # unwired
+        ]}
+        assert fa._verdict_schedules(crontab) == {
+            "local_brain_eval": self.WEEK_SCHEDULE}
+
+    def test_verdict_schedules_empty_when_crontab_unavailable(self):
+        assert fa._verdict_schedules({"available": False, "reason": "x"}) == {}
+
+    def test_duplicate_wiring_keeps_the_loosest_cadence(self):
+        crontab = {"available": True, "jobs": [
+            {"schedule": "*/5 * * * *",
+             "command": "a.sh; /opt/meshanchor/scripts/cron_verdict.sh dup $?"},
+            {"schedule": self.WEEK_SCHEDULE,
+             "command": "b.sh; /opt/meshanchor/scripts/cron_verdict.sh dup $?"},
+        ]}
+        assert fa._verdict_schedules(crontab) == {"dup": self.WEEK_SCHEDULE}
+
+    def test_twin_parity_numbers_match_meshforge(self):
+        """The two NOCs must not disagree about whether a cron is silent.
+
+        MeshForge derives these from its Issue #78 pager; MeshAnchor defines
+        them locally. Same schedule -> same number, or the twins have drifted.
+        """
+        expected = {
+            "25 3 * * 0": 3 * 604800.0, "0 8 * * 1": 3 * 604800.0,
+            "13 5 * * *": 3 * 86400.0, "40 * * * *": 3 * 3600.0,
+            "*/5 * * * *": 7200.0, "0 */2 * * *": 3 * 7200.0,
+            "@daily": 3 * 86400.0, "@weekly": 3 * 604800.0,
+            "17 4 1 * *": 3 * 2592000.0,
+        }
+        for sched, want in expected.items():
+            assert fa._verdict_stale_after_s(sched) == pytest.approx(want), (
+                f"twin threshold drift on {sched!r}")
