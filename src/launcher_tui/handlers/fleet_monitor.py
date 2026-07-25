@@ -39,6 +39,57 @@ keeps the handler portable across hosts without hardcoding a dev port."""
 
 MAP_URL_ENV = "MESHANCHOR_MAP_URL"
 HTTP_TIMEOUT_S = 5.0
+"""Budget for the cheap endpoints (slo / activity / federation), which are
+answered from local state."""
+
+
+def _endpoint_timeout(path: str, peer_count: Optional[int] = None) -> float:
+    """Fetch budget for one `/fleet/*` path.
+
+    `/fleet/rollup` is not a local read: it fetches every configured peer
+    SEQUENTIALLY at `PEER_HTTP_TIMEOUT_S` each (see fleet_rollup's module
+    docstring — "bounded by len(peers) x timeout worst case"), after
+    collecting the local snapshot. A flat 5s client budget cannot cover
+    that, so the Peer Rollup panel timed out unpredictably while the server
+    was working fine (measured 2026-07-25: 2.88s-5.39s with 5 peers).
+
+    The budget is DERIVED from the server's own constants rather than
+    written down a second time — the same drift that put this handler on
+    the WebSocket port. If the server retunes its timeouts or the operator
+    adds peers, this follows automatically.
+
+    `peer_count=None` means the fleet config could not be read; we widen to
+    a conservative floor rather than shrink, because a degraded config must
+    never manufacture a timeout against a healthy server.
+    """
+    if not path.startswith("/fleet/rollup"):
+        return HTTP_TIMEOUT_S
+
+    from monitoring.fleet_aggregator import DEFAULT_HTTP_TIMEOUT_S
+    from monitoring.fleet_rollup import PEER_HTTP_TIMEOUT_S
+
+    # Unknown peer count -> assume a fleet large enough not to under-budget.
+    peers = 12 if peer_count is None else max(peer_count, 1)
+    worst_case = (
+        3 * DEFAULT_HTTP_TIMEOUT_S        # local snapshot: 3 daemon fetches
+        + peers * PEER_HTTP_TIMEOUT_S     # sequential peer fan-out
+        + PEER_HTTP_TIMEOUT_S             # federation view
+    )
+    return max(HTTP_TIMEOUT_S, worst_case)
+
+
+def _configured_peer_count() -> Optional[int]:
+    """How many peers the rollup will fan out to, or None if unreadable.
+
+    Counts every configured peer (not `non_self_peers`) on purpose: the
+    self-identity check does DNS work, and over-counting only widens the
+    budget, which is the safe direction."""
+    try:
+        from monitoring.fleet_config import load_fleet_config
+        return len(load_fleet_config().peers)
+    except Exception as exc:  # noqa: BLE001 - budget must never break a fetch
+        logger.debug("fleet config unreadable, using default budget: %s", exc)
+        return None
 
 
 class FleetMonitorHandler(BaseHandler):
@@ -281,9 +332,10 @@ class FleetMonitorHandler(BaseHandler):
         import os
         base = os.environ.get(MAP_URL_ENV, DEFAULT_MAP_URL).rstrip("/")
         url = f"{base}{path}"
+        timeout = _endpoint_timeout(path, _configured_peer_count())
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read()
             return json.loads(body.decode("utf-8"))
         except urllib.error.HTTPError as e:
@@ -300,6 +352,17 @@ class FleetMonitorHandler(BaseHandler):
                 f"{url}\n\nHTTP {e.code}: {e.reason}\n{hint}\n"
                 f"The service responded, so it IS running — the URL is wrong.\n"
                 f"Override it with {MAP_URL_ENV}.",
+            )
+            return None
+        except TimeoutError as e:
+            # NOT a URLError subclass — this escaped _fetch_json entirely
+            # before 2026-07-25 and crashed the panel instead of reporting.
+            self.ctx.dialog.msgbox(
+                "Fleet Fetch Timed Out",
+                f"{url}\n\nNo response within {timeout:.0f}s ({e}).\n\n"
+                f"The rollup fetches every peer in sequence, so a slow or\n"
+                f"unreachable peer stretches it. Check the peer list in\n"
+                f"~/.config/meshanchor/fleet.json.",
             )
             return None
         except urllib.error.URLError as e:

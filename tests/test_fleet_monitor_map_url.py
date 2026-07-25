@@ -78,6 +78,67 @@ class TestFleetMonitorMapUrl:
         assert parsed.hostname == "127.0.0.1"
 
 
+class TestFleetMonitorRollupBudget:
+    """The fetch budget must cover the server's OWN documented worst case.
+
+    `/fleet/rollup` fetches every configured peer SEQUENTIALLY at
+    `PEER_HTTP_TIMEOUT_S` each (fleet_rollup's module docstring: "bounded by
+    len(peers) x timeout worst case"), plus the local snapshot. With 5 peers
+    that is 3*2 + 5*3 + 3 = 24s against a flat 5s client budget — so the
+    Peer Rollup panel timed out unpredictably (measured 2026-07-25 on
+    meshanchor-server: 2.88s-5.39s, 1 fetch in 4 over budget).
+
+    Third instance of the same class as the port bug: two consumers of one
+    contract, independently hardcoded, drifted. So the budget is DERIVED
+    from the server's constants, never written down a second time.
+    """
+
+    def test_rollup_budget_covers_server_worst_case(self):
+        from launcher_tui.handlers.fleet_monitor import _endpoint_timeout
+        from monitoring.fleet_aggregator import DEFAULT_HTTP_TIMEOUT_S
+        from monitoring.fleet_rollup import PEER_HTTP_TIMEOUT_S
+
+        n_peers = 5
+        worst = (3 * DEFAULT_HTTP_TIMEOUT_S          # local snapshot
+                 + n_peers * PEER_HTTP_TIMEOUT_S     # sequential peer fan-out
+                 + PEER_HTTP_TIMEOUT_S)              # federation view
+        assert _endpoint_timeout("/fleet/rollup", peer_count=n_peers) >= worst
+
+    def test_budget_scales_with_peer_count(self):
+        from launcher_tui.handlers.fleet_monitor import _endpoint_timeout
+        small = _endpoint_timeout("/fleet/rollup", peer_count=2)
+        large = _endpoint_timeout("/fleet/rollup", peer_count=20)
+        assert large > small, "a bigger fleet needs a bigger budget"
+
+    def test_cheap_endpoints_keep_the_short_budget(self):
+        from launcher_tui.handlers.fleet_monitor import (
+            HTTP_TIMEOUT_S, _endpoint_timeout)
+        for path in ("/fleet/slo", "/fleet/activity", "/fleet/federation"):
+            assert _endpoint_timeout(path, peer_count=5) == HTTP_TIMEOUT_S
+
+    def test_unreadable_config_does_not_crash_or_shrink(self):
+        """An unreadable fleet.json must not silently produce a TIGHTER
+        budget than the flat default — degraded config must not manufacture
+        a timeout (honest_failure_modes #1)."""
+        from launcher_tui.handlers.fleet_monitor import (
+            HTTP_TIMEOUT_S, _endpoint_timeout)
+        assert _endpoint_timeout("/fleet/rollup", peer_count=None) >= HTTP_TIMEOUT_S
+
+    def test_fetch_passes_the_derived_budget_to_urlopen(self, handler, monkeypatch):
+        from launcher_tui.handlers.fleet_monitor import _endpoint_timeout
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["timeout"] = timeout
+            raise AssertionError("stop after timeout capture")
+
+        import urllib.request
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(AssertionError):
+            handler._fetch_json("/fleet/rollup")
+        assert captured["timeout"] > _endpoint_timeout("/fleet/slo", peer_count=5)
+
+
 class TestFleetMonitorUrlOverride:
     """The env override stays the portability escape hatch."""
 
