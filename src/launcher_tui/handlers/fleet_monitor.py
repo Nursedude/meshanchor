@@ -27,10 +27,15 @@ from handler_protocol import BaseHandler
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_MAP_URL = "http://127.0.0.1:5001"
-"""Canonical NOC layout. Dev surfaces (e.g. VolcanoAI :5002) override
-through the env var below — keeps the handler portable across hosts
-without hardcoding a development port."""
+DEFAULT_MAP_URL = "http://127.0.0.1:5000"
+"""Canonical NOC layout: the map service serves HTTP (`/fleet/*`) on :5000
+and WebSocket on :5001 — see `MapServer.__init__` and the unit's
+`--port 5000`. This MUST be the HTTP port; pointing it at :5001 makes every
+panel fail with `HTTP 426 Upgrade Required` from the `websockets` server
+(fixed 2026-07-25, pinned by tests/test_fleet_monitor_map_url.py).
+
+Dev surfaces (e.g. VolcanoAI :5002) override through the env var below —
+keeps the handler portable across hosts without hardcoding a dev port."""
 
 MAP_URL_ENV = "MESHANCHOR_MAP_URL"
 HTTP_TIMEOUT_S = 5.0
@@ -281,6 +286,22 @@ class FleetMonitorHandler(BaseHandler):
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
                 body = resp.read()
             return json.loads(body.decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # The server ANSWERED — so the service is up and we asked it the
+            # wrong question. Never tell the operator to go check a daemon
+            # that just replied to us (honest_failure_modes: the error path
+            # must not answer a question it wasn't asked).
+            hint = ""
+            if e.code == 426:
+                hint = ("\nThat port speaks WebSocket, not HTTP. The /fleet/*\n"
+                        "JSON API is on the map service's HTTP port (:5000).\n")
+            self.ctx.dialog.msgbox(
+                "Fleet Fetch Failed",
+                f"{url}\n\nHTTP {e.code}: {e.reason}\n{hint}\n"
+                f"The service responded, so it IS running — the URL is wrong.\n"
+                f"Override it with {MAP_URL_ENV}.",
+            )
+            return None
         except urllib.error.URLError as e:
             self.ctx.dialog.msgbox(
                 "Fleet Fetch Failed",
