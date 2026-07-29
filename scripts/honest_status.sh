@@ -41,9 +41,11 @@ GH_REPO="${MESHANCHOR_GH_REPO:-Nursedude/meshanchor}"
 
 # Fleet host list: explicit env wins; else the MA fleet_hosts file; else empty
 # (fleet legs report UNKNOWN — never a false PASS on an unconfigured fleet).
+# HOME may be UNSET under set -u (cron/daemon context): skip the user tier
+# rather than dying on the unbound variable (MF review port, 2026-07-28).
 BOXES="${HONEST_BOXES:-}"
 if [ -z "$BOXES" ]; then
-  for f in "$HOME/.config/meshanchor/fleet_hosts" /etc/meshanchor/fleet_hosts; do
+  for f in "${HOME:+$HOME/.config/meshanchor/fleet_hosts}" /etc/meshanchor/fleet_hosts; do
     if [ -f "$f" ]; then
       BOXES=$(grep -vE '^\s*#|^\s*$' "$f" 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
       break
@@ -132,18 +134,33 @@ fi
 if [ -z "$BOXES" ]; then
   unk "fleet SHA drift" "no fleet configured (set HONEST_BOXES or ~/.config/meshanchor/fleet_hosts)"
 else
-  matched=0; reached=0; total=0; desc=""
+  matched=0; reached=0; total=0; norepo=0; desc=""
   for b in $BOXES; do
     total=$((total+1))
-    s=$($SSH "$b" "git -C $REPO rev-parse HEAD" 2>/dev/null)
-    if [ -z "$s" ]; then desc="$desc $b:unreach"; continue; fi
+    # THREE states an empty answer used to conflate under one "unreach" label
+    # (MF review port, 2026-07-28): box DOWN (UNKNOWN); box UP with no repo at
+    # $REPO (cannot drift — reported and excluded, never silently dropped);
+    # box UP with the repo but git itself erroring (dubious-ownership refusal
+    # over ssh, git missing, corrupt .git) — that one STAYS in the denominator
+    # as unverified, or the gate prints a PASS that never checked the box.
+    # Repo presence is proven by the .git path, not by empty git output.
+    raw=$($SSH "$b" "echo HSUP; if [ -e $REPO/.git ]; then git -C $REPO rev-parse HEAD 2>/dev/null || echo HSGITERR; else echo HSNOREPO; fi" 2>/dev/null)
+    up=$(printf '%s\n' "$raw" | sed -n '1p')
+    s=$(printf '%s\n' "$raw" | sed -n '2p')
+    if [ "$up" != "HSUP" ]; then desc="$desc $b:unreach"; continue; fi
+    case "$s" in
+      HSNOREPO) norepo=$((norepo+1)); desc="$desc $b:no-repo"; continue ;;
+      HSGITERR|"") desc="$desc $b:git-error(repo present)"; continue ;;
+    esac
     reached=$((reached+1))
     if [ "$s" = "$HEADFULL" ]; then matched=$((matched+1)); else desc="$desc $b:${s:0:7}"; fi
   done
   drifted=$((reached - matched))
-  if [ "$drifted" -gt 0 ]; then bad "fleet SHA drift" "$matched/$total @ $HEAD;$desc"
-  elif [ "$reached" -lt "$total" ]; then unk "fleet SHA drift" "$matched/$reached reachable @ $HEAD;$desc"
-  else ok "fleet SHA drift" "$matched/$total @ $HEAD"; fi
+  expect=$((total - norepo))
+  if [ "$drifted" -gt 0 ]; then bad "fleet SHA drift" "$matched/$expect @ $HEAD;$desc"
+  elif [ "$reached" -lt "$expect" ]; then unk "fleet SHA drift" "$matched/$reached reachable of $expect @ $HEAD;$desc"
+  elif [ "$reached" = 0 ]; then unk "fleet SHA drift" "no box carried $REPO;$desc"
+  else ok "fleet SHA drift" "$matched/$expect @ $HEAD${desc:+;$desc}"; fi
 fi
 
 # 3. Full local suite — file-routed, never a streamed tail.
@@ -181,17 +198,32 @@ if [ "$RUN_TESTS" = 1 ]; then
   "$PY" -m pytest "$REPO/tests/" -q -p no:cacheprovider >$HS_TMP/pytest.log 2>&1; rc=$?
   summ=$(grep -E "[0-9]+ (passed|failed|error)|no tests ran" $HS_TMP/pytest.log | tail -1)
   nfail=$(grep -cE "^FAILED|^ERROR" $HS_TMP/pytest.log)
-  ninternal=$(grep -c "INTERNALERROR" $HS_TMP/pytest.log)
+  # Anchored like its siblings (MF review port, 2026-07-28): pytest emits
+  # "INTERNALERROR>" at line start; an UNanchored count also fired on any log
+  # line that merely CONTAINED the string (the suite's own shell harnesses
+  # print it as fixture output), flipping a green run to bad on display noise.
+  ninternal=$(grep -cE "^INTERNALERROR" $HS_TMP/pytest.log)
+  # ${ninternal:+...} could never suppress the note — grep -c prints "0",
+  # which is non-empty — so every FAIL verdict read ", 0 INTERNALERROR".
+  # Guard numerically, like nfail.
+  intern=""; [ "$ninternal" != 0 ] && intern=", $ninternal INTERNALERROR"
   # Does the summary affirmatively say "passes, and nothing failed"?
   nsumbad=$(printf '%s' "$summ" | grep -cE "[0-9]+ (failed|errors?)")
   nsumok=$(printf '%s' "$summ" | grep -cE "[0-9]+ passed")
   names=$(grep -E "^FAILED|^ERROR" $HS_TMP/pytest.log | sed -E 's/^(FAILED|ERROR) //; s/ -.*//' | head -3 | paste -sd' ' -)
-  if [ -z "$summ" ]; then
-    # pytest died before summarising (crash, OOM, killed). Unobservable is
-    # never a pass, and it is not proven-bad either.
+  if [ -z "$summ" ] && [ "$rc" != 0 ]; then
+    # No summary AND a nonzero code: the suite crashed (OOM-kill, signal),
+    # and the code is real evidence of badness — the measured flap only LOSES
+    # failures toward 0, it never invents a nonzero. Checked BEFORE the
+    # empty-summary branch: ordering it after silently downgraded a proven-bad
+    # run from FAIL to UNKNOWN — "trust the worse signal" applies here too.
+    bad "full suite" "exit $rc with no pytest summary — suite crashed before reporting$(_hs_preserve)"
+  elif [ -z "$summ" ]; then
+    # exit 0 but pytest never summarised. Unobservable is never a pass, and
+    # with a clean exit code it is not proven-bad either.
     unk "full suite" "no pytest summary line — suite did not report (exit $rc)$(_hs_preserve)"
   elif [ "$nfail" != 0 ] || [ "$ninternal" != 0 ] || [ "$nsumbad" != 0 ]; then
-    bad "full suite" "exit $rc, $nfail FAILED/ERROR${ninternal:+, $ninternal INTERNALERROR}${names:+ ($names)}$(_hs_preserve) — $summ"
+    bad "full suite" "exit $rc, $nfail FAILED/ERROR${intern}${names:+ ($names)}$(_hs_preserve) — $summ"
   elif [ "$rc" != 0 ]; then
     # Clean-looking output but a non-zero code: trust the WORSE signal.
     bad "full suite" "exit $rc with no FAILED/ERROR lines — exit code and output disagree$(_hs_preserve) — $summ"
@@ -244,13 +276,22 @@ fi
 if [ -z "$BOXES" ]; then
   unk "watchdog signals" "no fleet configured — cannot poll $BLACKOUTS_PATH across the fleet"
 else
-  active_t=0; clean=0; unverif=0; sigdesc=""
+  active_t=0; clean=0; unverif=0; wdfault=0; sigdesc=""
   btotal=$(echo $BOXES | wc -w)
   for b in $BOXES; do
-    # ONE round-trip: is the watchdog daemon alive, and the live blackout state.
-    raw=$($SSH "$b" "systemctl is-active $WD_UNIT 2>/dev/null; echo '---BOSEP---'; curl -s --max-time 8 http://localhost:5000$BLACKOUTS_PATH 2>/dev/null" 2>/dev/null)
+    # ONE round-trip: is the watchdog daemon alive, the unit's LOAD state, and
+    # the live blackout state. LoadState splits "unit not installed" (stays
+    # unverifiable/UNKNOWN) from "installed but not running" — the latter is a
+    # FAULT (a crashlooping watchdog is broken, not merely unobservable; the
+    # MF #82 class, ported 2026-07-28). Each field is forced to one line so
+    # the positional parse cannot shear.
+    raw=$($SSH "$b" "{ systemctl is-active $WD_UNIT 2>/dev/null || echo absent; } | head -1; { systemctl show $WD_UNIT -p LoadState --value 2>/dev/null || echo unknown; } | head -1; echo '---BOSEP---'; curl -s --max-time 8 http://localhost:5000$BLACKOUTS_PATH 2>/dev/null" 2>/dev/null)
     wdstate=$(printf '%s\n' "$raw" | sed -n '1p')
+    wdload=$(printf '%s\n' "$raw" | sed -n '2p')
     body=$(printf '%s\n' "$raw" | awk 'f{print} /^---BOSEP---$/{f=1}')
+    if [ "$wdload" = "loaded" ] && [ "$wdstate" != "active" ]; then
+      wdfault=$((wdfault+1)); sigdesc="$sigdesc $b:WATCHDOG-UNIT-$wdstate"; continue
+    fi
     if [ "$wdstate" != "active" ]; then
       unverif=$((unverif+1)); sigdesc="$sigdesc $b:watchdog-${wdstate:-unknown}"; continue
     fi
@@ -269,7 +310,8 @@ print("%d %s"%(len(a), ",".join(str(x.get("kind","?")) for x in a)))' 2>/dev/nul
     else active_t=$((active_t+n)); sigdesc="$sigdesc $b:[$kinds]"; fi
   done
   if [ "$active_t" -gt 0 ]; then bad "watchdog (blackout)" "$active_t active blackout(s) across fleet:$sigdesc"
-  elif [ "$unverif" -gt 0 ]; then unk "watchdog signals" "$clean/$btotal clean, $unverif unverifiable (dead watchdog / unreachable):$sigdesc"
+  elif [ "$wdfault" -gt 0 ]; then bad "watchdog (unit down)" "$wdfault box(es) with the watchdog unit installed but not running — a dead watchdog is a fault, not merely unverifiable:$sigdesc"
+  elif [ "$unverif" -gt 0 ]; then unk "watchdog signals" "$clean/$btotal clean, $unverif unverifiable (no watchdog unit / unreachable):$sigdesc"
   else ok "watchdog signals" "$clean/$btotal clean, 0 active blackouts"; fi
 fi
 

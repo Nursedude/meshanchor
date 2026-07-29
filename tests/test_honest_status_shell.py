@@ -20,6 +20,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _HARNESSES = [
     "test_honest_status_preserve.sh",    # suite-failure log preservation
     "test_honest_status_suite_leg.sh",   # suite verdict vs. an untrustworthy rc
+    "test_honest_status_boxes.sh",       # fleet-leg classification (SHA/watchdog)
     "test_pytest_tmp_prune.sh",          # temp-tree pruner (tmpfs = RAM)
 ]
 
