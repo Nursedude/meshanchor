@@ -26,19 +26,18 @@ set -u
 set -o pipefail
 
 LOOKBACK_HOURS="${LOOKBACK_HOURS:-24}"
-FLEET_HOSTS="${FLEET_HOSTS:-}"
-
-if [[ -z "$FLEET_HOSTS" ]]; then
-    if [[ -r "$HOME/.config/meshanchor/fleet_hosts" ]]; then
-        FLEET_HOSTS="$HOME/.config/meshanchor/fleet_hosts"
-    elif [[ -r "/etc/meshanchor/fleet_hosts" ]]; then
-        FLEET_HOSTS="/etc/meshanchor/fleet_hosts"
-    else
-        echo "error: no fleet_hosts file found." >&2
-        echo "  Set \$FLEET_HOSTS or create ~/.config/meshanchor/fleet_hosts" >&2
-        exit 2
-    fi
+# Host list via THE shared resolver (scripts/lib/fleet_hosts.sh, ported from
+# the MF twin's convergence 2026-07-29). The lib honors this script's
+# documented $FLEET_HOSTS override as the legacy alias — and makes it
+# AUTHORITATIVE: a set-but-missing override now errors here instead of
+# silently falling through to the box's real config.
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/fleet_hosts.sh"
+if ! fleet_hosts_resolve; then
+    echo "error: no fleet_hosts file found." >&2
+    echo "  Set \$FLEET_HOSTS or create ~/.config/meshanchor/fleet_hosts" >&2
+    exit 2
 fi
+FLEET_HOSTS="$FLEET_HOSTS_FILE"
 
 if ! [[ "$LOOKBACK_HOURS" =~ ^[0-9]+$ ]]; then
     echo "error: LOOKBACK_HOURS must be a positive integer" >&2
@@ -98,7 +97,7 @@ while IFS= read -r raw; do
             printf '%s | %s\n' "$host" "$line" >> "$TMP"
         done <<< "$result"
     fi
-done < "$FLEET_HOSTS"
+done <<< "$FLEET_HOSTS_LIST"
 
 if [[ "$hosts_seen" -eq 0 ]]; then
     echo "error: no hosts in $FLEET_HOSTS" >&2

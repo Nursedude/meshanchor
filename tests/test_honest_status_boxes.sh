@@ -128,5 +128,16 @@ out="$(HONEST_BOXES="box-good" run)"
 check "a clean fleet still reads watchdog PASS" \
   "$(echo "$out" | grep -E 'watchdog signals' | grep -q 'PASS' && echo ok)"
 
+# ── file-driven fleet legs go through THE shared lib (2026-07-29) ────────
+# honest_status now sources scripts/lib/fleet_hosts.sh instead of carrying
+# its own chain copy; this drives the file path end-to-end (override tier —
+# authoritative, so the box's real /etc config can never leak in).
+printf 'box-good  # the only peer\n' > "$TMP/hostlist"
+out="$(MESHANCHOR_FLEET_HOSTS="$TMP/hostlist" run)"
+check "fleet_hosts file drives the drift leg via the lib (1/1)" \
+  "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q '1/1' && echo ok)"
+check "and the trailing comment parsed to the host, not a garbage token" \
+  "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q 'UNKNOWN\|unreach' && echo '' || echo ok)"
+
 echo "---"
 if [ "$fails" = 0 ]; then echo "ALL PASS"; exit 0; else echo "FAILED"; exit 1; fi

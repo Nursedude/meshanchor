@@ -39,18 +39,15 @@ set -u
 REPO="${MESHANCHOR_REPO:-/opt/meshanchor}"
 GH_REPO="${MESHANCHOR_GH_REPO:-Nursedude/meshanchor}"
 
-# Fleet host list: explicit env wins; else the MA fleet_hosts file; else empty
-# (fleet legs report UNKNOWN — never a false PASS on an unconfigured fleet).
-# HOME may be UNSET under set -u (cron/daemon context): skip the user tier
-# rather than dying on the unbound variable (MF review port, 2026-07-28).
+# Fleet host list: explicit env wins; else THE shared resolver
+# (scripts/lib/fleet_hosts.sh — the second consumer alongside
+# lab_traffic_rollup, so the chain lives once; ported from the MF twin's
+# convergence 2026-07-29); else empty (fleet legs report UNKNOWN — never a
+# false PASS on an unconfigured fleet).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/lib/fleet_hosts.sh"
 BOXES="${HONEST_BOXES:-}"
-if [ -z "$BOXES" ]; then
-  for f in "${HOME:+$HOME/.config/meshanchor/fleet_hosts}" /etc/meshanchor/fleet_hosts; do
-    if [ -f "$f" ]; then
-      BOXES=$(grep -vE '^\s*#|^\s*$' "$f" 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
-      break
-    fi
-  done
+if [ -z "$BOXES" ] && fleet_hosts_resolve; then
+  BOXES="$(printf '%s\n' "$FLEET_HOSTS_LIST" | tr '\n' ' ' | sed 's/ *$//')"
 fi
 
 # Watchdog signals — MeshAnchor emits silence as BLACKOUT rows in
