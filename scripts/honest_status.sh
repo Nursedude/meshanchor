@@ -78,6 +78,17 @@ SSH="ssh -o ConnectTimeout=8 -o BatchMode=yes"
 # when present; fall back to system python3 (the VolcanoAI/dev shape).
 PY="python3"
 [ -x "$REPO/venv/bin/python" ] && PY="$REPO/venv/bin/python"
+# Per-run scratch dir. These were FIXED names (/tmp/.hs_ci_ma.json,
+# .hs_pytest_ma, .hs_lint_ma) — honest_failure_modes #8, "fixed tmp names are
+# a collision, not a convention". The `_ma` suffix keeps this repo out of the
+# MF twin's way but does nothing about TWO MeshAnchor runs overlapping (a cron
+# run and a manual one): they interleave their writes into one file, and the
+# torn result made the MF twin report FAIL on an exit-0 run — a false
+# NOT-GREEN from the gate whose whole job is to not lie about green. Ported
+# from MF 1c6fd0bf, which observed exactly that 2026-07-28.
+HS_TMP="$(mktemp -d -t honest_status_ma.XXXXXX)"
+trap 'rm -rf "$HS_TMP"' EXIT INT TERM
+
 pass=0; fail=0; unknown=0; warns=0
 ok()    { printf '  %-22s \033[32mPASS\033[0m    %s\n' "$1" "$2"; pass=$((pass+1)); }
 bad()   { printf '  %-22s \033[31mFAIL\033[0m    %s\n' "$1" "$2"; fail=$((fail+1)); }
@@ -92,12 +103,12 @@ echo
 # 1. CI conclusion for the EXACT current HEAD (external, harness-immune).
 if command -v gh >/dev/null 2>&1; then
   if gh run list -R "$GH_REPO" --branch main --limit 30 \
-       --json headSha,conclusion,status,databaseId >/tmp/.hs_ci_ma.json 2>/dev/null; then
-    read -r ST CC RID < <(HEADFULL="$HEADFULL" python3 - <<'PY' 2>/dev/null
+       --json headSha,conclusion,status,databaseId >$HS_TMP/ci.json 2>/dev/null; then
+    read -r ST CC RID < <(HEADFULL="$HEADFULL" HS_CI_JSON="$HS_TMP/ci.json" python3 - <<'PY' 2>/dev/null
 import json, os, sys
 sha = os.environ["HEADFULL"]
 try:
-    runs = json.load(open("/tmp/.hs_ci_ma.json"))
+    runs = json.load(open(os.environ["HS_CI_JSON"]))
 except Exception:
     sys.exit()
 for r in runs:
@@ -135,33 +146,69 @@ else
   else ok "fleet SHA drift" "$matched/$total @ $HEAD"; fi
 fi
 
-# 3. Full local suite — real exit code + count (file-routed, never a streamed tail).
+# 3. Full local suite — file-routed, never a streamed tail.
+#
+# PASS needs THREE independent signals to agree (ported from MF 917b36f6): the
+# exit code, the absence of FAILED/ERROR/INTERNALERROR lines, AND a summary
+# line that affirmatively reports passes with no failures or errors. Any
+# disagreement resolves to not-PASS, and an ABSENT or non-committal summary is
+# UNKNOWN — never PASS.
+#
+# WHY: pytest's process exit status is not trustworthy on this fleet. Measured
+# on the MeshForge suite 2026-07-28 — the interpreter exits 0 while pytest's
+# own pytest_sessionfinish hook reports `ExitCode.TESTS_FAILED: 1` with
+# testsfailed=1. Byte-identical output, ~50% of runs, and it VANISHES when a
+# probe adds work at shutdown, so it is a race in interpreter shutdown. pytest
+# computed 1; the kernel reported 0. That is the interpreter and the fleet, not
+# one repo — MeshAnchor runs both.
+#
+# The old gate happened to survive that because it also required nfail==0 and
+# such runs printed FAILED lines. It would NOT have survived the same lost exit
+# code next to an INTERNALERROR (which starts "INTERNALERROR>", matching
+# neither ^FAILED nor ^ERROR) or a crash that printed no summary at all: rc=0
+# + nfail=0 read as PASS. Two signals that agree until the day they don't.
+_hs_preserve() {  # keep the log of any non-green run (NOT /tmp: RTC-less Pis
+                  # clear it on reboot). Overwrite on non-green ONLY, so a
+                  # later green run cannot clobber the evidence. Every run
+                  # samples the suite under concurrent load (CI + ssh probes)
+                  # — the exact trigger for the rare timing flake (GH #144).
+  _hs_fdir="${XDG_STATE_HOME:-$HOME/.local/state}/meshanchor/hs_failures"
+  mkdir -p "$_hs_fdir" 2>/dev/null \
+    && cp $HS_TMP/pytest.log "$_hs_fdir/last_failure.log" 2>/dev/null \
+    && printf ' — saved %s/last_failure.log' "$_hs_fdir"
+}
 if [ "$RUN_TESTS" = 1 ]; then
-  "$PY" -m pytest "$REPO/tests/" -q -p no:cacheprovider >/tmp/.hs_pytest_ma 2>&1; rc=$?
-  summ=$(grep -E "[0-9]+ (passed|failed|error)" /tmp/.hs_pytest_ma | tail -1)
-  nfail=$(grep -cE "^FAILED|^ERROR" /tmp/.hs_pytest_ma)
-  if [ "$rc" = 0 ] && [ "$nfail" = 0 ]; then ok "full suite" "$summ (exit 0)"
+  "$PY" -m pytest "$REPO/tests/" -q -p no:cacheprovider >$HS_TMP/pytest.log 2>&1; rc=$?
+  summ=$(grep -E "[0-9]+ (passed|failed|error)|no tests ran" $HS_TMP/pytest.log | tail -1)
+  nfail=$(grep -cE "^FAILED|^ERROR" $HS_TMP/pytest.log)
+  ninternal=$(grep -c "INTERNALERROR" $HS_TMP/pytest.log)
+  # Does the summary affirmatively say "passes, and nothing failed"?
+  nsumbad=$(printf '%s' "$summ" | grep -cE "[0-9]+ (failed|errors?)")
+  nsumok=$(printf '%s' "$summ" | grep -cE "[0-9]+ passed")
+  names=$(grep -E "^FAILED|^ERROR" $HS_TMP/pytest.log | sed -E 's/^(FAILED|ERROR) //; s/ -.*//' | head -3 | paste -sd' ' -)
+  if [ -z "$summ" ]; then
+    # pytest died before summarising (crash, OOM, killed). Unobservable is
+    # never a pass, and it is not proven-bad either.
+    unk "full suite" "no pytest summary line — suite did not report (exit $rc)$(_hs_preserve)"
+  elif [ "$nfail" != 0 ] || [ "$ninternal" != 0 ] || [ "$nsumbad" != 0 ]; then
+    bad "full suite" "exit $rc, $nfail FAILED/ERROR${ninternal:+, $ninternal INTERNALERROR}${names:+ ($names)}$(_hs_preserve) — $summ"
+  elif [ "$rc" != 0 ]; then
+    # Clean-looking output but a non-zero code: trust the WORSE signal.
+    bad "full suite" "exit $rc with no FAILED/ERROR lines — exit code and output disagree$(_hs_preserve) — $summ"
+  elif [ "$nsumok" = 0 ]; then
+    # e.g. "no tests ran" — a broken invocation, not a green suite.
+    unk "full suite" "summary reports no passing tests — nothing was verified$(_hs_preserve) — $summ"
   else
-    # Surface the failing test id(s) (already in the captured file, just not
-    # shown before) AND preserve the log to a durable path — NOT /tmp (RTC-less
-    # Pis clear it on reboot), overwrite-on-failure-ONLY so a later green run
-    # can't clobber it. Every honest_status run samples the suite under
-    # concurrent load (CI + ssh probes) — the exact trigger for the rare timing
-    # flake (GH #144) — so this is how its traceback finally gets captured.
-    names=$(grep -E "^FAILED|^ERROR" /tmp/.hs_pytest_ma | sed -E 's/^(FAILED|ERROR) //; s/ -.*//' | head -3 | paste -sd' ' -)
-    fdir="${XDG_STATE_HOME:-$HOME/.local/state}/meshanchor/hs_failures"; saved=""
-    mkdir -p "$fdir" 2>/dev/null && cp /tmp/.hs_pytest_ma "$fdir/last_failure.log" 2>/dev/null \
-      && saved=" — saved $fdir/last_failure.log"
-    bad "full suite" "exit $rc, $nfail FAILED/ERROR${names:+ ($names)}$saved — $summ"
+    ok "full suite" "$summ (exit 0)"
   fi
 else
   unk "full suite" "skipped (--quick) — not verified"
 fi
 
 # 4. Lint — real exit code.
-"$PY" "$REPO/scripts/lint.py" --all >/tmp/.hs_lint_ma 2>&1; rc=$?
+"$PY" "$REPO/scripts/lint.py" --all >$HS_TMP/lint.log 2>&1; rc=$?
 if [ "$rc" = 0 ]; then ok "lint" "exit 0"
-else bad "lint" "exit $rc — $(grep -E '\[E\]' /tmp/.hs_lint_ma | tail -1)"; fi
+else bad "lint" "exit $rc — $(grep -E '\[E\]' $HS_TMP/lint.log | tail -1)"; fi
 
 # 5. Live honesty assert — no displayed confirmation_rate may exceed 1.0
 #    (the #74 false-green: a rate reading >1.0 = ">100% confirmed").
