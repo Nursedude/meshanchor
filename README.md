@@ -343,7 +343,7 @@ sudo python3 src/launcher_tui/main.py
 ### Testing Reality Check
 
 MeshAnchor has **~5,900 automated tests** (run `python3 -m pytest tests/ --co -q`
-for the live count) across <!--STAT:testfiles-->204<!--/STAT--> test files. However, automated tests
+for the live count) across <!--STAT:testfiles-->205<!--/STAT--> test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.
@@ -718,7 +718,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # <!--STAT:testfiles-->204<!--/STAT--> test files, ~5,900 tests
+tests/                     # <!--STAT:testfiles-->205<!--/STAT--> test files, ~5,900 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
@@ -772,7 +772,7 @@ Gateway-specific templates in `config_templates/`:
 
 ### Test Coverage
 
-**~5,900 tests** across <!--STAT:testfiles-->204<!--/STAT--> test files. Top suites by depth
+**~5,900 tests** across <!--STAT:testfiles-->205<!--/STAT--> test files. Top suites by depth
 (per-file counts are a 2026-07 snapshot — run `python3 -m pytest tests/<file> --co -q` for the live number):
 
 | Test File | Tests | Covers |

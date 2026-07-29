@@ -26,6 +26,7 @@ Checks:
 - MA022: bare/exit-code-masked pip & swallowed apt in shell installers (must route through scripts/lib/install_common.sh — pip-presence + PEP 668 + checked rc; install-hardening arc, ported from MeshForge MF022)
 - MF025: file-size ratchet — src/ python files over 1,500 lines (frozen 2026-07-13 baseline for the 2 known offenders, which may only shrink; split the file, never raise the cap; ported from MeshForge MF025)
 - MF026: config/state torn-write guard — os.O_TRUNC banned + non-atomic config `open("w")` ratcheted vs a frozen baseline (route through utils.paths.atomic_write_text; ported from MeshForge MF026)
+- MF027: health-check fail-dark guard — check_* except-handler returning HealthResult(healthy=True) with no reason, or None (MA shape of MeshForge MF027; healthy-with-reason convention; build:fix doctrine 2026-07-29)
 
 Usage:
     python3 scripts/lint.py [files...]
@@ -982,6 +983,87 @@ def check_config_atomicity(files: List[str], repo_root: Optional[str] = None) ->
     return issues
 
 
+def check_probe_fail_dark(files: List[str],
+                          repo_root: Optional[str] = None) -> List[LintIssue]:
+    """MF027: a health check's error path must leave a witness, never go dark.
+
+    MeshAnchor shape of the MF twin's MF027 (build:fix doctrine 2026-07-29;
+    the #80 class — degraded state mapped to a valid-looking value). MF's
+    probes tri-state via ``note_disposition``; MA's ``HealthResult`` is
+    binary, and its documented self-guard convention is HEALTHY-WITH-REASON:
+    an unobservable channel returns ``HealthResult(healthy=True,
+    reason="<greppable blindness>")`` so "observed clean" and "could not
+    look" stay distinguishable (see check_user_timer_unit_failing).
+
+    The dark shape here: an ``except`` handler in a ``check_*`` function
+    returning ``HealthResult(healthy=True)`` with NO (or empty) reason — a
+    failed observation byte-identical to observed-healthy at every consumer,
+    forever (honest_failure_modes #2/#9). ``healthy=False`` from a handler
+    is the check FIRING (loud, allowed); a dynamic ``healthy=`` expression
+    is a judgment the lint cannot see (allowed); a bare ``return None`` in a
+    handler is also flagged — callers expect a HealthResult.
+
+    Scope: src/utils/active_health_probe*.py. AST-based; unparseable files
+    are skipped (the syntax error fails the commit elsewhere). Born on a
+    surveyed-clean tree (0 dark / 14 witnessed, 2026-07-29) — a pure pin.
+    """
+    issues: List[LintIssue] = []
+
+    def _dark_healthresult(call: ast.Call) -> bool:
+        fname = getattr(call.func, 'id', getattr(call.func, 'attr', ''))
+        if fname != 'HealthResult':
+            return False
+        healthy = None
+        reason = None
+        if call.args and isinstance(call.args[0], ast.Constant):
+            healthy = call.args[0].value
+        for kw in call.keywords:
+            if kw.arg == 'healthy' and isinstance(kw.value, ast.Constant):
+                healthy = kw.value.value
+            if kw.arg == 'reason':
+                reason = kw.value
+        if healthy is not True:
+            return False        # firing or dynamic — not dark
+        if reason is None:
+            return True         # no reason at all
+        return isinstance(reason, ast.Constant) and not reason.value
+
+    for path in files:
+        base = os.path.basename(path)
+        if not (base.startswith('active_health_probe') and base.endswith('.py')):
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as fh:
+                tree = ast.parse(fh.read())
+        except (OSError, SyntaxError):
+            continue
+        for fn in ast.walk(tree):
+            if not (isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and fn.name.startswith('check_')):
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+                for ret in [n for n in ast.walk(node)
+                            if isinstance(n, ast.Return)]:
+                    dark_none = (ret.value is None
+                                 or (isinstance(ret.value, ast.Constant)
+                                     and ret.value.value is None))
+                    dark_hr = (isinstance(ret.value, ast.Call)
+                               and _dark_healthresult(ret.value))
+                    if dark_none or dark_hr:
+                        issues.append(LintIssue(
+                            path, ret.lineno, Severity.ERROR, 'MF027',
+                            f"{fn.name}: except-handler returns "
+                            f"{'None' if dark_none else 'HealthResult(healthy=True) with no reason'}"
+                            f" — a failed observation reads as healthy at "
+                            f"every consumer, forever (fail-dark; "
+                            f"honest_failure_modes #2/#9). Return healthy-"
+                            f"with-REASON naming the blindness (the "
+                            f"journal_unobservable convention)."))
+    return issues
+
+
 def main():
     parser = argparse.ArgumentParser(description='MeshAnchor Linter')
     parser.add_argument('files', nargs='*', help='Files to lint')
@@ -1044,6 +1126,12 @@ def main():
     # it in both whole-tree and --staged modes — an unbounded interface create
     # sneaking into a serving path must always fail.
     issues.extend(check_bounded_collect_chokepoint())
+
+    # MF027: health-check fail-dark guard (except-handler returning
+    # HealthResult(healthy=True) with no reason, or None). MA shape of the
+    # MF twin's rule; cheap AST pass over active_health_probe* only, both
+    # modes — a dark error path must fail in the commit that writes it.
+    issues.extend(check_probe_fail_dark(files))
 
     # Filter by severity
     severity_order = {'error': 0, 'warning': 1, 'info': 2}

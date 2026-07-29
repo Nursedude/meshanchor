@@ -44,4 +44,25 @@ if git diff --cached --name-only | grep -qE '^src/gateway/(canonical_message|rns
     fi
 fi
 
+# Error-path checklist advisory (2026-07-29, build:fix doctrine; ported from
+# the MF twin): THE defect class (#80 — degraded state mapped to a
+# valid-looking value) is born in the except-handlers of monitor code.
+# Surface the write-time checklist at the exact moment the class can be
+# born — only then, so it never becomes wallpaper. ADVISORY (never blocks):
+# MF027 blocks the mechanical check_*/HealthResult subset; the checklist
+# walk covers what a lint cannot see.
+_added_excepts=$(git diff --cached -U0 -- 'src/utils/active_health_probe*.py' \
+                     'src/mini_dudeai/*.py' 'src/utils/health_score.py' \
+                     'src/utils/shared_health_state.py' \
+                     2>/dev/null | grep -cE '^\+[^+].*\bexcept\b' || true)
+if [ "${_added_excepts:-0}" -gt 0 ]; then
+    echo ""
+    echo "ADVISORY: this commit adds ${_added_excepts} except-handler line(s) in monitor code."
+    echo "  Walk the honest-failure-modes checklist over the diff (30s per item):"
+    echo "  does the degraded value overlap the healthy domain? absence of evidence"
+    echo "  is not recovery; every swallow leaves a witness — HealthResult blindness"
+    echo "  is healthy-with-REASON, never bare healthy=True."
+    echo "  (MF027 catches only dark check_* except-returns — this walk is the rest.)"
+fi
+
 echo "Pre-commit checks passed."
