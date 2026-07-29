@@ -45,16 +45,22 @@ def _acquire_instance_lock(lock_path: str):
 
 
 def _resolve_preset_name(name: str) -> str:
-    """``auto`` follows the box's fleet-membership declaration — the same
-    fleet_hosts SSOT the TUI Fleet Membership wizard writes and every fleet
-    consumer reads (hosts declared → meshforge_fleet, none → standalone).
-    Any other name passes through untouched, so deployed units that pin an
-    explicit preset keep their exact behavior."""
+    """``auto`` follows the box's fleet-membership declaration — the
+    meshanchor-namespaced fleet_hosts SSOT (hosts declared →
+    meshanchor_fleet, none → standalone). Any other name passes through
+    untouched, so deployed units that pin an explicit preset keep their
+    exact behavior.
+
+    ADAPTED from the MF twin 2026-07-29 (daemon is the adapter layer,
+    deliberately not parity-tracked): the verbatim port resolved the
+    MESHFORGE namespace and named the preset ``meshforge_fleet``, which MA
+    does not ship — ``--preset auto`` with any hosts resolved was a
+    guaranteed import crash, masked only by the unit pinning its preset."""
     if name != "auto":
         return name
     from .rollup import resolve_fleet_hosts
     hosts = resolve_fleet_hosts()
-    resolved = "meshforge_fleet" if hosts else "standalone"
+    resolved = "meshanchor_fleet" if hosts else "standalone"
     print(f"mini-dudeai: preset auto -> {resolved} "
           f"({len(hosts)} fleet host(s) declared)")
     return resolved

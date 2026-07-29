@@ -201,12 +201,34 @@ def _read(rel):
 
 def test_mini_service_unit_pins_the_ma_preset():
     unit = _read("templates/systemd/meshanchor-mini-dudeai-user.service")
-    # MUST pin meshanchor_fleet so the byte-locked daemon's MF-specific
-    # `--preset auto` resolution (→ meshforge_fleet, absent on MA) is never hit.
+    # Pinning the preset keeps deployment explicit. (Historically this pin
+    # was ALSO the only thing masking the daemon's verbatim-MF `--preset
+    # auto` resolution, which named meshforge_fleet — a preset MA does not
+    # ship. The daemon was adapted 2026-07-29; auto is now safe and pinned
+    # by test_auto_preset_resolves_to_a_preset_ma_ships.)
     assert "--preset meshanchor_fleet" in unit
     assert "WorkingDirectory=/opt/meshanchor/src" in unit
     assert "meshforge_fleet" not in unit
     assert "WantedBy=default.target" in unit          # user unit
+
+
+def test_auto_preset_resolves_to_a_preset_ma_ships(tmp_path, monkeypatch):
+    """`--preset auto` must never name a preset this repo does not ship —
+    the WS-A port artifact resolved to meshforge_fleet, a guaranteed import
+    crash masked only by the unit pin (fixed 2026-07-29)."""
+    import importlib
+    from mini_dudeai.daemon import _resolve_preset_name
+
+    hosts = tmp_path / "fleet_hosts"
+    hosts.write_text("peer1\n", encoding="utf-8")
+    monkeypatch.setenv("MESHANCHOR_FLEET_HOSTS", str(hosts))
+    monkeypatch.delenv("FLEET_HOSTS", raising=False)
+    resolved = _resolve_preset_name("auto")
+    assert resolved == "meshanchor_fleet"
+    importlib.import_module(f"mini_dudeai.presets.{resolved}")  # must exist
+
+    hosts.unlink()   # override now set-but-missing → authoritative → no fleet
+    assert _resolve_preset_name("auto") == "standalone"
 
 
 def test_dream_units_present_and_wired():

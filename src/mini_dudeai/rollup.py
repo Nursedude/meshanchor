@@ -66,33 +66,31 @@ CLAW_STALE_S = 900.0
 
 
 def resolve_fleet_hosts(env: dict | None = None) -> list[str]:
-    """Fleet remote-host list, same resolution order as fleet_sync.sh:
-    $MESHFORGE_FLEET_HOSTS → ~/.config/meshforge/fleet_hosts → /etc/meshforge/fleet_hosts.
-    One host per line; '#' comments and blanks ignored. [] if no list exists."""
-    env = os.environ if env is None else env
-    if env.get("MESHFORGE_FLEET_HOSTS"):
-        # Explicit override is AUTHORITATIVE: absent/unreadable must yield
-        # [] rather than silently falling through to the box's real config
-        # (degraded state reading as a valid value).
-        candidates = [env["MESHFORGE_FLEET_HOSTS"]]
-    else:
-        home = env.get("HOME") or os.path.expanduser("~")
-        candidates = [
-            os.path.join(home, ".config", "meshforge", "fleet_hosts"),
-            "/etc/meshforge/fleet_hosts",
-        ]
-    for path in candidates:
-        try:
-            with open(path) as f:
-                hosts = []
-                for line in f:
-                    line = line.split("#", 1)[0].strip()
-                    if line:
-                        hosts.append(line)
-                return hosts
-        except OSError:
-            continue
-    return []
+    """MeshAnchor fleet host list — delegates to ``utils.fleet_hosts``, THE
+    MA resolver ($MESHANCHOR_FLEET_HOSTS / legacy $FLEET_HOSTS override,
+    authoritative when set → ~/.config/meshanchor/fleet_hosts →
+    /etc/meshanchor/fleet_hosts). [] if no list exists.
+
+    This WAS the MF twin's function verbatim — it read the MESHFORGE
+    namespace, which does not exist on MA's own boxes (the pane silently
+    degraded to 1-box) and on the manager would have swept the WRONG fleet
+    (WS-A port artifact, fixed 2026-07-29). Kept as a thin wrapper so the
+    daemon and the env-injecting tests keep their seam."""
+    from utils.fleet_hosts import resolve_fleet_hosts as _resolve
+    return _resolve(env=env)
+
+
+def _is_self(host: str) -> bool:
+    """True for entries that name THIS box — ssh'ing them would duplicate the
+    directly-read local row (meshanchor-server's authored list contains
+    exactly ``localhost``)."""
+    if host.lower() in ("localhost", "127.0.0.1", "::1"):
+        return True
+    try:
+        import socket
+        return host.lower() == socket.gethostname().lower()
+    except OSError:
+        return False
 
 
 def parse_claw_posture(claw: dict | None, now_ts: float,
@@ -457,6 +455,8 @@ def collect_fleet(now_ts: float | None = None,
     if local is not None:
         postures.append(local)
     for host in resolve_fleet_hosts(env):
+        if _is_self(host):
+            continue          # already read directly above — never ssh self
         postures.append(collect_remote(host, now_ts, timeout_s, stale_s, runner))
     return postures
 
@@ -596,6 +596,8 @@ def collect_fleet_deep(now_ts: float | None = None,
     if local is not None:
         results.append(local)
     for host in resolve_fleet_hosts(env):
+        if _is_self(host):
+            continue          # already read directly above — never ssh self
         results.append(collect_remote_deep(host, now_ts, timeout_s, stale_s, window_s, runner))
     return results
 
@@ -660,7 +662,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     now_ts = time.time()
     _no_data = ("No local mini state and no fleet_hosts list found "
-                "(set $MESHFORGE_FLEET_HOSTS or create ~/.config/meshforge/fleet_hosts).")
+                "(set $MESHANCHOR_FLEET_HOSTS or create ~/.config/meshanchor/fleet_hosts).")
     if args.deep:
         results = collect_fleet_deep(now_ts)
         if not results:
