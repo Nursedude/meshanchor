@@ -29,8 +29,13 @@ sys.path.insert(0, str(SCRIPTS))
 import cron_capture_wire as wire  # noqa: E402
 
 
-def _run(tmp, name, status, msg="", keep=None):
-    """Invoke cron_verdict.sh with log + capture dir confined to tmp."""
+def _run(tmp, name, status, msg="", keep=None, ts=None):
+    """Invoke cron_verdict.sh with log + capture dir confined to tmp.
+
+    ``ts`` injects CRON_VERDICT_TS: capture filenames carry 1-second
+    timestamps, so back-to-back same-second invocations collapse onto ONE
+    path and retention assertions pass vacuously (ultra review 2026-07-31).
+    Loops that assert on capture COUNTS must pass distinct timestamps."""
     env = dict(
         os.environ,
         CRON_VERDICT_LOG=str(Path(tmp) / "v.log"),
@@ -38,6 +43,8 @@ def _run(tmp, name, status, msg="", keep=None):
     )
     if keep is not None:
         env["CRON_VERDICT_KEEP_CAPTURES"] = str(keep)
+    if ts is not None:
+        env["CRON_VERDICT_TS"] = ts
     argv = ["bash", str(SCRIPT), name, status]
     if msg:
         argv.append(msg)
@@ -130,14 +137,49 @@ class TestCaptureTriState(unittest.TestCase):
 
 class TestCaptureRetention(unittest.TestCase):
     def test_prunes_to_keep_limit(self):
+        """Distinct injected timestamps make all 6 captures land as 6 files —
+        without them this test passed vacuously at len=1 and the prune loop
+        was never exercised (ultra review 2026-07-31)."""
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "cron_out"
             out.mkdir()
             for i in range(6):
                 (out / "j.out").write_text(f"failure {i}\n")
-                _run(tmp, "j", "1", keep=3)
-            kept = [p for p in out.iterdir() if p.name != "j.out"]
-            self.assertLessEqual(len(kept), 3, "older captures pruned")
+                _run(tmp, "j", "1", keep=3, ts=f"2026-07-31T00:00:0{i}Z")
+            kept = sorted(p.name for p in out.iterdir() if p.name != "j.out")
+            self.assertEqual(len(kept), 3, kept)
+            self.assertEqual(kept, [
+                "j.fail-2026-07-31T00:00:03Z.out",
+                "j.fail-2026-07-31T00:00:04Z.out",
+                "j.fail-2026-07-31T00:00:05Z.out",
+            ], "the NEWEST captures survive, the oldest are pruned")
+
+    def test_prune_cannot_reap_a_dot_suffix_neighbour(self):
+        """`sync` pruning must never delete `sync.extra`'s evidence: the glob
+        `sync.`*-*.out DOES match `sync.extra.fail-<ts>.out`, so the prune
+        pipeline filters candidates to <name>.<dot-free-slug>-<ts> (review
+        2026-07-31, finding 10 — the dot anchors underscore neighbours only)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "cron_out"
+            out.mkdir()
+            (out / "sync.extra.out").write_text("neighbour failed\n")
+            _run(tmp, "sync.extra", "1", keep=5, ts="2026-07-31T00:00:00Z")
+            neighbour = sorted(p.name for p in out.iterdir()
+                               if p.name.startswith("sync.extra.")
+                               and p.name != "sync.extra.out")
+            self.assertEqual(len(neighbour), 1)
+            # A frequently-failing `sync` churns past its keep limit; the
+            # neighbour's single preserved capture must survive the rotation.
+            for i in range(4):
+                (out / "sync.out").write_text(f"mine {i}\n")
+                _run(tmp, "sync", "1", keep=1, ts=f"2026-07-31T00:00:0{i + 1}Z")
+            still = sorted(p.name for p in out.iterdir()
+                           if p.name.startswith("sync.extra.")
+                           and p.name != "sync.extra.out")
+            self.assertEqual(still, neighbour, "dot-suffix neighbour reaped")
+            own = [p.name for p in out.iterdir()
+                   if p.name.startswith("sync.fail-")]
+            self.assertEqual(len(own), 1, "own captures still pruned to keep")
 
     def test_prune_cannot_reap_a_name_prefix_neighbour(self):
         """`brain_backup` pruning must never delete `brain_backup_extra`'s
@@ -275,6 +317,15 @@ class TestSharedConstant(unittest.TestCase):
             _, log = _run(tmp, "harness_audit", "1")
             self.assertIn("out=", log[-1])
             self.assertNotIn("uncaptured", log[-1])
+
+
+# NOTE (twin port of MF e02a227e, 2026-07-31): MF's copy carries a
+# TestConsumersParseStructurally class driving MF's harness_audit.sh
+# against a poisoned log. MeshAnchor has no harness_audit.sh, and its
+# verdict-log consumer of record (fleet_aggregator._parse_cron_verdicts)
+# is already structural + ts-validated — verified in the 2026-07-31
+# re-review. If MA ever grows a shell consumer that greps this log,
+# port that class with it.
 
 
 if __name__ == "__main__":
