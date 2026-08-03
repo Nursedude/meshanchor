@@ -709,6 +709,28 @@ class DaemonController:
             f"({len(results)} total)"
         )
 
+        # RECLAIM the signal handlers. RNS.Reticulum.__init__ installs its own
+        # SIGINT/SIGTERM handlers, and it is constructed DURING start_all()
+        # above — GatewayBridgeService.start() reaches start_gateway_headless()
+        # -> RNSMeshtasticBridge().start(). So the _setup_signals() call before
+        # the registry gets overwritten, _handle_stop never runs, and the
+        # daemon never shuts down gracefully: no service teardown, no cache
+        # flush.
+        #
+        # Root-caused in MeshForge 2026-08-03, where the identical ordering
+        # produced ZERO "Stopping bridge" lines across 24 gateway starts in a
+        # day. Registering BEFORE start is not enough — that is precisely why
+        # it hides: the registration is right there in the code.
+        #
+        # _handle_stop stays trivial (set an event); the shutdown work belongs
+        # on the main thread, not the signal path (MeshForge #61 was a SIGTERM
+        # deadlock from doing it inline).
+        self._setup_signals()
+        logger.debug(
+            "Signal handlers reclaimed after service start "
+            "(RNS installs its own during Reticulum init)"
+        )
+
         # Start watchdog
         self._watchdog = ThreadWatchdog(
             self._registry,

@@ -920,3 +920,86 @@ class TestEventBusThreadPool:
         assert bus._executor._max_workers <= 8  # Reasonable bound
 
         bus.shutdown()
+
+
+class TestSignalHandlerReclaim20260803:
+    """The daemon must own SIGTERM after its services start, not RNS.
+
+    Ported from MeshForge, where this was root-caused 2026-08-03. RNS
+    (RNS/Reticulum.py) installs its own SIGINT/SIGTERM handlers when
+    Reticulum() is constructed. The daemon calls _setup_signals() and THEN
+    _registry.start_all() — and GatewayBridgeService.start() reaches
+    start_gateway_headless() -> RNSMeshtasticBridge().start(), which builds
+    RNS. So RNS overwrites the daemon's handler and _handle_stop never runs:
+    no graceful shutdown, no service teardown.
+
+    This is the LIVE instance on meshanchor-server (its daemon journal shows
+    gateway.node_tracker discovering RNS nodes in-process). On MeshForge the
+    same defect meant ZERO "Stopping bridge" lines across 24 gateway starts.
+
+    Pins the ORDER, which is the whole property: registering before start()
+    is not enough, because start() overwrites it.
+    """
+
+    def test_daemon_reclaims_sigterm_after_services_start(self):
+        from daemon import DaemonController
+
+        calls = []
+
+        def fake_signal(sig, handler):
+            calls.append((sig, handler))
+
+        d = DaemonController.__new__(DaemonController)
+        d._stop_event = threading.Event()
+
+        registry = MagicMock()
+
+        def steal_then_start(*a, **k):
+            # Stand in for RNS.Reticulum() grabbing the handler mid-start.
+            calls.append((signal.SIGTERM, "RNS_HANDLER"))
+            return {}
+
+        registry.start_all.side_effect = steal_then_start
+
+        with patch("daemon.signal.signal", side_effect=fake_signal):
+            d._setup_signals()
+            registry.start_all()
+            # The daemon must take SIGTERM back after services are up.
+            d._setup_signals()
+
+        sigterm = [h for s, h in calls if s == signal.SIGTERM]
+        assert sigterm, "no SIGTERM handler registered at all"
+        assert sigterm[-1] != "RNS_HANDLER", (
+            "RNS's handler is the LAST SIGTERM registration — _handle_stop "
+            "never runs and the daemon never shuts down gracefully. "
+            "Registrations in order: %r" % (sigterm,)
+        )
+
+    def test_daemon_start_calls_setup_signals_after_start_all(self):
+        """The real ordering check, on the actual start() body."""
+        import inspect
+        from daemon import DaemonController
+
+        # Match STATEMENTS, not comment text. The first version of this test
+        # matched any line containing the name — including the explanatory
+        # comment added alongside the fix — so it passed with the real call
+        # deleted. A detector that reads the prose instead of the code is the
+        # same defect class this test exists to catch.
+        def _stmts(needle):
+            out = []
+            for i, ln in enumerate(src.splitlines()):
+                code = ln.split("#", 1)[0].strip()
+                if needle in code:
+                    out.append(i)
+            return out
+
+        src = inspect.getsource(DaemonController.start)
+        setup_positions = _stmts("self._setup_signals()")
+        start_all_pos = _stmts("start_all()")
+        assert setup_positions, "start() never registers signal handlers"
+        assert start_all_pos, "start() never starts the service registry"
+        assert max(setup_positions) > max(start_all_pos), (
+            "_setup_signals() runs only BEFORE start_all() — whatever RNS a "
+            "service constructs will overwrite the daemon's SIGTERM handler. "
+            "Re-register after services are up."
+        )

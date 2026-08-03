@@ -225,6 +225,18 @@ def main():
         bridge_started = True
         print("Gateway started successfully!")
 
+        # RECLAIM the signal handlers — same defect as the daemon path, latent
+        # here only because meshanchor-gateway.service is currently inactive
+        # (the daemon runs the bridge in-process instead). RNS.Reticulum
+        # installs its own SIGINT/SIGTERM handlers and is constructed inside
+        # bridge.start() above, AFTER the registration near the top of main().
+        # Its handler exits the process, so the loop below never breaks and the
+        # `finally:` that calls bridge.stop() never runs.
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        logger.debug("Signal handlers reclaimed after bridge start (RNS "
+                     "installs its own during Reticulum init)")
+
         # Auto-start metrics server for Grafana integration
         try:
             from utils.metrics_export import start_metrics_server
