@@ -12,6 +12,8 @@ import os
 import sys
 import warnings
 import weakref
+from contextlib import ExitStack
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -158,6 +160,59 @@ def _stop_leaked_bridges():
                     stop_event.set()
         except Exception as e:
             warnings.warn(f"bridge teardown failed: {e}", stacklevel=2)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_node_cache_files(tmp_path_factory):
+    """Keep the node-cache writers out of the operator's live data directory.
+
+    ``UnifiedNodeTracker._save_cache`` writes TWO files: the one
+    ``get_cache_file()`` names (``~/.config/meshanchor/node_cache.json``) and
+    an operator-owned copy at ``MeshAnchorPaths.rns_nodes_cache_path()``
+    (``~/.cache/meshanchor/rns_nodes.json``). Any test that constructs a bare
+    ``UnifiedNodeTracker()`` therefore reads and overwrites real fleet data —
+    on meshanchor-server those are 11.3 MB and 8.9 MB of live node state that
+    the map and the LXMF probes read.
+
+    Autouse and suite-wide on purpose. A per-file guard only holds until the
+    next test file constructs a tracker, so this is a gate, not a convention:
+    a test's verdict must not depend on which box ran it, and neither must its
+    side effects (feedback_tests_must_pin_ambient_state).
+
+    Tests that assert on cache CONTENT patch these to their own tmp paths;
+    an inner patch wins, so this only catches what would otherwise escape.
+
+    BOTH import aliases are patched. ``sys.path`` carries the repo root and
+    ``src/``, so ``gateway.node_tracker`` and ``src.gateway.node_tracker`` are
+    two distinct module objects holding two distinct ``UnifiedNodeTracker``
+    classes — patching one leaves the other writing to the live path, and
+    MeshAnchor's tests use both (``test_gateway_integration`` imports via
+    ``src.``). Patching only the alias in front of you is precisely the
+    half-covered guard this fixture exists to prevent.
+    """
+    root = tmp_path_factory.mktemp("node_cache_isolation")
+    targets = [
+        ('utils.paths.MeshAnchorPaths.rns_nodes_cache_path', root / "rns_nodes.json"),
+        ('src.utils.paths.MeshAnchorPaths.rns_nodes_cache_path', root / "rns_nodes.json"),
+        ('gateway.node_tracker.UnifiedNodeTracker.get_cache_file', root / "node_cache.json"),
+        ('src.gateway.node_tracker.UnifiedNodeTracker.get_cache_file', root / "node_cache.json"),
+    ]
+    with ExitStack() as stack:
+        patched = 0
+        for target, value in targets:
+            try:
+                stack.enter_context(patch(target, return_value=value))
+                patched += 1
+            except (ImportError, AttributeError, ModuleNotFoundError):
+                # An alias that is not importable in this environment cannot
+                # be the one writing to the live path either.
+                continue
+        if not patched:
+            raise RuntimeError(
+                "node cache isolation patched NOTHING — the suite would write "
+                "to the operator's live node_cache.json / rns_nodes.json"
+            )
+        yield root
 
 
 def pytest_collection_modifyitems(config, items):

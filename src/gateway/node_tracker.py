@@ -28,6 +28,10 @@ from .node_models import (
 )
 
 from utils.boundary_timing import call_boundary
+from utils.node_history import (
+    DEFAULT_DIRECTORY_RETENTION_LOCAL,
+    DEFAULT_DIRECTORY_RETENTION_EXTERNAL,
+)
 from utils.safe_import import safe_import
 
 # Import RNS service registry and topology (optional - graceful fallback)
@@ -66,8 +70,54 @@ class UnifiedNodeTracker:
     """
 
     OFFLINE_THRESHOLD = 900  # 15 minutes — consistent with map_data_collector default
-    STALE_PURGE_THRESHOLD = 86400  # 24 hours — purge nodes not seen in a day
     MAX_NODES = 10000  # Prevent unbounded memory growth
+
+    # Cache-write budget. Ported from MeshForge d101d5ff (2026-08-03), whose
+    # 18.6 h tracemalloc soak showed the gateway was never leaking — it was
+    # serializing its whole node population on every 60 s tick.
+    #
+    # Measured here the same day, on meshanchor-server: node_cache.json
+    # 11,334,223 B + rns_nodes.json 8,917,591 B = 20.2 MB per pass, one of
+    # them pretty-printed, x1440 passes/day = ~29 GB/day of fsync'd writes —
+    # for 9,051 RNS announce-space nodes serving FIVE local MeshCore radios.
+    #
+    # CLEANUP_TICK still drives timeout state at 60 s (node online/offline
+    # must stay responsive); only the WRITE moves to the longer cadence the
+    # loop's own comment had claimed since it was written.
+    CLEANUP_TICK = 60
+    # 120 s, matching MeshForge. MF chose it over 300 s after finding that its
+    # shutdown flush never actually ran (RNS had stolen SIGTERM), so the
+    # cadence IS the loss window on restart. MeshAnchor's shutdown chain is
+    # intact on paper — daemon._handle_stop -> stop_gateway_headless ->
+    # bridge.stop() -> node_tracker.stop() -> _save_cache() — and the SIGTERM
+    # reclaim landed here as b6e7d812, but a static trace is not a live
+    # observation (calibrated_claims #7). Keep the loss window short and the
+    # twins on one number until a restart is observed to flush.
+    CACHE_SAVE_INTERVAL = 120
+    # Backstop for a missed dirty marker. The dirty flag is an optimization,
+    # never a correctness dependency — if a future mutation path forgets to
+    # mark, the cache must go stale for minutes, not forever
+    # (honest_failure_modes #9: no permanent silent blindness).
+    CACHE_MAX_STALENESS = 1800
+
+    # Population retention. The node population tracks the reachable Reticulum
+    # announce space, not this box's workload: 9,051 RNS nodes resident for
+    # five local MeshCore radios, creeping toward the 10k MAX_NODES cap as RNS
+    # grows. Measured age distribution on meshanchor-server: 2.1% heard inside
+    # a day, 11.7% inside a week, 37.1% inside 30 days.
+    #
+    # The tiers are IMPORTED from the node-directory retention, never
+    # re-declared — two consumers of "how long is a node interesting" sharing
+    # one constant instead of two hardcodes that WILL drift
+    # (honest_failure_modes #5).
+    RETENTION_LOCAL = DEFAULT_DIRECTORY_RETENTION_LOCAL        # 30d — our own RF
+    RETENTION_EXTERNAL = DEFAULT_DIRECTORY_RETENTION_EXTERNAL  # 7d  — announce firehose
+
+    # Networks whose nodes are OUR OWN RF and get the longer tier. This is the
+    # MeshAnchor-specific half of the port: MeshForge's local radio is
+    # Meshtastic, MeshAnchor's is MeshCore, and copying MF's tuple verbatim
+    # would have put this box's own five radios on the 7-day firehose tier.
+    LOCAL_NETWORKS = ("meshcore", "meshtastic", "both")
 
     @classmethod
     def get_cache_file(cls) -> Path:
@@ -84,6 +134,20 @@ class UnifiedNodeTracker:
         self._rns_thread = None
         self._reticulum = None
         self._rns_connected = False
+
+        # Cache-write gating. Starts dirty: _load_cache is lossy by design
+        # (is_online is forced False, unknown fields dropped), so in-memory
+        # state never matches the file at construction. MONOTONIC only — this
+        # fleet's Pis are RTC-less and NTP steps the wall clock.
+        self._cache_dirty = True
+        self._last_cache_save = 0.0
+
+        # Retention pins — hashes that must survive any TTL sweep (the
+        # configured propagation node and default LXMF destinations). None
+        # means NOBODY HAS TOLD US YET, which keeps TTL eviction inert; see
+        # set_retention_pins.
+        self._retention_pins: Optional[set] = None
+        self._retention_unwired_warned = False
 
         # Enhanced RNS service tracking
         self._service_registry: Optional[RNSServiceRegistry] = None
@@ -351,6 +415,14 @@ class UnifiedNodeTracker:
             if self._rns_thread.is_alive():
                 logger.warning("RNS thread did not stop in time")
 
+        # Sweep before the final write. The flush below is unconditional, and
+        # this instance may never have run _cleanup_loop at all — the daemon's
+        # NodeTrackerService holds a singleton it starts threads for but never
+        # calls start() on, so its ONLY write is this one. Without the sweep it
+        # would hand the full announce-space population it loaded at startup
+        # back to disk, undoing the bridge tracker's TTL work on every clean
+        # shutdown. Inert when retention was never wired.
+        self._evict_expired_nodes()
         self._save_cache()
         logger.info("Node tracker stopped")
 
@@ -370,6 +442,7 @@ class UnifiedNodeTracker:
                 is_new = True
                 logger.debug(f"Added new node: {node.id} ({node.name})")
 
+            self._mark_cache_dirty()
             self._notify_callbacks("update", node)
 
         # Add topology edge for Meshtastic nodes (outside lock to avoid deadlock)
@@ -403,6 +476,7 @@ class UnifiedNodeTracker:
         evict_count = max(1, len(self._nodes) // 10)
         for nid, _ in offline[:evict_count]:
             del self._nodes[nid]
+            self._mark_cache_dirty()
 
         if evict_count > 0:
             logger.info(f"Evicted {evict_count} stale nodes (capacity: {self.MAX_NODES})")
@@ -412,6 +486,7 @@ class UnifiedNodeTracker:
         with self._lock:
             if node_id in self._nodes:
                 node = self._nodes.pop(node_id)
+                self._mark_cache_dirty()
                 self._notify_callbacks("remove", node)
                 logger.debug(f"Removed node: {node_id}")
 
@@ -637,36 +712,151 @@ class UnifiedNodeTracker:
         except Exception as e:
             logger.debug(f"EventBus node emit failed: {e}")
 
+    def _mark_cache_dirty(self):
+        """Record that in-memory node state has diverged from the cache file."""
+        self._cache_dirty = True
+
+    def _maybe_save_cache(self) -> bool:
+        """Write the node cache only if it is due. Returns True if written.
+
+        Two gates, in order: unchanged state is not worth a 20 MB fsync'd
+        write, and changed state is not worth writing more than once per
+        CACHE_SAVE_INTERVAL. CACHE_MAX_STALENESS is the backstop — a mutation
+        path that forgets to mark dirty costs staleness, never permanence.
+        """
+        elapsed = time.monotonic() - self._last_cache_save
+        if self._cache_dirty:
+            if elapsed < self.CACHE_SAVE_INTERVAL:
+                return False
+        elif elapsed < self.CACHE_MAX_STALENESS:
+            return False
+        self._save_cache()
+        return True
+
+    def set_retention_pins(self, hashes):
+        """Declare the RNS hashes that TTL eviction must never drop.
+
+        Call this even with an EMPTY list — that is the signal "pins have been
+        computed and there are none", and it is what arms TTL eviction. Until
+        it is called, _evict_expired_nodes is inert.
+
+        The pins exist because eviction is not a neutral act: the
+        lxmf_propagation_node_dark probe reports STALE when the configured
+        propagation node is present in the cache but quiet, and UNHEARD — read
+        as "wrong or truncated hash" — when it is absent entirely. Dropping a
+        quiet propagation node would therefore manufacture a false diagnosis
+        of a config error, the same shape as the 2026-07-21 false-UNHEARD page.
+        """
+        pins = set()
+        for h in hashes or []:
+            if isinstance(h, bytes):
+                h = h.hex()
+            h = str(h).strip().lower()
+            if h:
+                pins.add(h)
+        self._retention_pins = pins
+        logger.debug(f"Retention pins set: {len(pins)} hash(es)")
+
+    def _is_pinned(self, node) -> bool:
+        """True when a node must survive TTL eviction regardless of age."""
+        if node.is_gateway or node.is_local:
+            return True
+        pins = self._retention_pins or set()
+        h = getattr(node, "rns_hash", None)
+        if h:
+            try:
+                return (h.hex() if isinstance(h, bytes) else str(h)).lower() in pins
+            except Exception:
+                return False
+        return False
+
+    def _retention_seconds(self, node) -> int:
+        """Longer tier for our own RF, shorter for the announce firehose."""
+        if node.network in self.LOCAL_NETWORKS:
+            return self.RETENTION_LOCAL
+        return self.RETENTION_EXTERNAL
+
+    def _evict_expired_nodes(self) -> int:
+        """Drop nodes past their tier's TTL. Returns the number evicted.
+
+        INERT until set_retention_pins() has been called: an unwired deploy
+        must degrade to the old keep-everything behaviour, never to 'evict
+        with an empty pin set' (honest_failure_modes #4 — the reader and
+        writer of the pin list wire together or fail together).
+
+        A node with no last_seen is HELD, not evicted: unknown age is not
+        evidence of staleness (#2).
+
+        This replaces a STALE_PURGE_THRESHOLD branch that purged at 24 h but
+        sat under `elif node._state_machine is None` — and every node gets a
+        state machine when NODE_STATE_AVAILABLE, which is True on this fleet.
+        It had therefore never evicted anything, which is how 9,051 RNS nodes
+        accumulated under a nominal 24-hour purge. Two eviction policies, one
+        of them dead, is worse than one that runs.
+        """
+        if self._retention_pins is None:
+            if not self._retention_unwired_warned:
+                self._retention_unwired_warned = True
+                logger.warning(
+                    "Node retention is INERT — set_retention_pins() was never "
+                    "called, so the announce-space population will grow "
+                    "unbounded. Wire it from the gateway config."
+                )
+            return 0
+
+        now = datetime.now()
+        evicted = 0
+        with self._lock:
+            for nid in [
+                nid for nid, n in self._nodes.items()
+                if n.last_seen is not None
+                and not self._is_pinned(n)
+                and (now - n.last_seen).total_seconds() > self._retention_seconds(n)
+            ]:
+                del self._nodes[nid]
+                evicted += 1
+            if evicted:
+                self._mark_cache_dirty()
+
+        if evicted:
+            logger.info(
+                f"Retention sweep evicted {evicted} node(s) past TTL "
+                f"(local {self.RETENTION_LOCAL // 86400}d / "
+                f"external {self.RETENTION_EXTERNAL // 86400}d); "
+                f"{len(self._nodes)} remain"
+            )
+        return evicted
+
     def _cleanup_loop(self):
-        """Periodically check node timeouts and save cache"""
+        """Periodically check node timeouts; write the cache when it is due."""
         while self._running:
-            if self._stop_event.wait(60):
+            if self._stop_event.wait(self.CLEANUP_TICK):
                 break
 
             with self._lock:
                 now = datetime.now()
-                stale_ids = []
-                for nid, node in self._nodes.items():
+                for node in self._nodes.values():
                     # Use state machine for timeout checking if available
                     if node._state_machine is not None:
-                        node.check_timeout()
+                        if node.check_timeout():
+                            self._mark_cache_dirty()
                     elif node.last_seen:
                         # Fallback to simple threshold check
                         age = (now - node.last_seen).total_seconds()
                         if age > self.OFFLINE_THRESHOLD:
+                            if node.is_online:
+                                self._mark_cache_dirty()
                             node.is_online = False
-                        # Purge nodes not seen in 24 hours
-                        if age > self.STALE_PURGE_THRESHOLD:
-                            stale_ids.append(nid)
 
-                if stale_ids:
-                    for nid in stale_ids:
-                        del self._nodes[nid]
-                    logger.info(f"Purged {len(stale_ids)} stale node(s) "
-                                f"(not seen in {self.STALE_PURGE_THRESHOLD // 3600}h)")
+            # Same pass, so the population sweep is free: we already walked
+            # every node above.
+            self._evict_expired_nodes()
 
-            # Save cache every 5 minutes
-            self._save_cache()
+            # Timeout state is swept every tick; the cache is written at
+            # CACHE_SAVE_INTERVAL. This line used to call _save_cache()
+            # unconditionally under a comment that said "every 5 minutes" —
+            # the comment was the intent, the code was ~29 GB/day.
+            self._maybe_save_cache()
 
     def _load_cache(self):
         """Load node cache from file"""
@@ -812,6 +1002,13 @@ class UnifiedNodeTracker:
             with self._lock:
                 # Include signal history in cache for persistence
                 nodes_data = [n.to_dict(include_signal_history=True) for n in self._nodes.values()]
+                # Clear the gate against THIS snapshot, under the same lock
+                # that guards it. Clearing after the write instead would drop
+                # any mutation that raced the serialization — it would be
+                # marked dirty, then un-marked by a write that never contained
+                # it, and wait out CACHE_MAX_STALENESS. Restored below if the
+                # write fails.
+                self._cache_dirty = False
 
             cache_data = {
                 'version': 1,
@@ -820,7 +1017,18 @@ class UnifiedNodeTracker:
             }
 
             from utils.paths import atomic_write_text
-            atomic_write_text(cache_file, json.dumps(cache_data, indent=2))
+            # ONE serialization, reused for both files. The indent=2 copy cost
+            # ~2.4 MB more per write than the compact one and nothing reads an
+            # 11 MB file by eye; dumping twice also doubles the transient
+            # allocation swing on a box that swaps.
+            payload = json.dumps(cache_data)
+            atomic_write_text(cache_file, payload)
+            # The authoritative write landed. Advance the cadence clock HERE,
+            # not at the end: the operator-owned copy below is best-effort and
+            # must not make a save that already succeeded look like it didn't
+            # (a failing post-step misreporting a completed publish is the
+            # half-state bug MeshForge hit on 69ad7ee).
+            self._last_cache_save = time.monotonic()
 
             # Also save an operator-owned cache for cross-process web-API access.
             # Under ~/.cache/meshanchor (not world-writable /tmp) so another local
@@ -836,11 +1044,15 @@ class UnifiedNodeTracker:
                     # symlink-safe AND atomic — the old O_TRUNC fd-dance could
                     # expose a torn/empty JSON to the map collectors mid-write
                     # (ported from MeshForge's node_tracker fix).
-                    atomic_write_text(cache_path, json.dumps(cache_data))
+                    atomic_write_text(cache_path, payload)
             except Exception as e:
                 logger.debug(f"Could not save web API cache: {e}")
 
         except Exception as e:
+            # A save that raised did not happen: restore the gate so the next
+            # tick retries, rather than letting a cleared flag hide the loss
+            # until the staleness ceiling (honest_failure_modes #9).
+            self._cache_dirty = True
             logger.warning(f"Failed to save node cache: {e}")
 
     def to_geojson(self) -> dict:

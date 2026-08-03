@@ -376,6 +376,25 @@ class NodeTrackerService(DaemonService):
             logger.error(f"Node tracker start failed: {e}")
             return False
 
+        # Arm retention on the SINGLETON as well as on the bridge's own
+        # tracker. This daemon runs two UnifiedNodeTracker instances — the one
+        # above and RNSMeshtasticBridge's — and BOTH write the same two cache
+        # files (honest_failure_modes #8, two writers of one artifact). The
+        # bridge's writes periodically; this one writes only in stop(), and
+        # because services stop in reverse registration order it writes LAST.
+        # An un-armed singleton would therefore hand back the full
+        # announce-space population it loaded at startup, silently undoing the
+        # bridge's TTL sweep on every clean shutdown. Same pins, both objects.
+        try:
+            from gateway.config import GatewayConfig
+            self._tracker.set_retention_pins(
+                GatewayConfig.load().rns.get_retention_pins())
+        except Exception as e:
+            # Inert retention keeps the old keep-everything behaviour, which
+            # is survivable; evicting with a half-built pin set is not.
+            logger.warning(f"Node retention left inert on the singleton — "
+                           f"could not derive pins: {e}")
+
         self._stop_event.clear()
         try:
             from utils.node_history import NodeHistoryDB

@@ -1290,3 +1290,476 @@ class TestSignalQualityTrending:
 
         assert d['value'] == 10.5
         assert '2026-01-15' in d['timestamp']
+
+
+class TestCacheWriteChurn20260803:
+    """Cache-write churn — ported from MeshForge d101d5ff, re-measured here.
+
+    MeshForge's 18.6 h tracemalloc soak found its gateway was never leaking;
+    it was serializing its whole node population on every 60 s tick. The same
+    code runs here, and meshanchor-server measured the same disease on
+    2026-08-03: node_cache.json 11,334,223 B + rns_nodes.json 8,917,591 B =
+    20.2 MB per pass, one of them pretty-printed, x1440 = ~29 GB/day of
+    fsync'd writes — for 9,051 RNS announce-space nodes serving five local
+    MeshCore radios.
+
+    These pin the cure: ONE compact serialization reused for both files, a
+    cadence the write path actually honours, and a dirty gate built so it can
+    never silently freeze the cache.
+    """
+
+    @pytest.fixture
+    def tracker(self, tmp_path):
+        """A tracker whose BOTH cache files land in tmp_path.
+
+        The web-API copy is patched too, deliberately: _save_cache writes a
+        second operator-owned file via MeshAnchorPaths.rns_nodes_cache_path(),
+        and a test that leaves it unpatched overwrites the live node cache of
+        whatever box runs the suite (feedback_tests_must_pin_ambient_state).
+        """
+        cache_file = tmp_path / "node_cache.json"
+        web_cache = tmp_path / "rns_nodes.json"
+        with patch.object(UnifiedNodeTracker, 'get_cache_file', return_value=cache_file), \
+             patch.object(UnifiedNodeTracker, '_load_cache'), \
+             patch('utils.paths.MeshAnchorPaths.rns_nodes_cache_path', return_value=web_cache):
+            t = UnifiedNodeTracker()
+            t.add_node(UnifiedNode(id="n1", network="meshcore", name="One"))
+            yield t, cache_file, web_cache
+
+    # --- one compact serialization, not two (one indented) ------------------
+
+    def test_primary_cache_is_compact_not_indented(self, tracker):
+        """indent=2 cost ~2.4 MB per write and nothing reads 11 MB by eye."""
+        t, cache_file, _ = tracker
+        t._save_cache()
+        text = cache_file.read_text()
+        assert '\n  ' not in text, "cache is pretty-printed; indent=2 is pure write amplification"
+        json.loads(text)  # still valid JSON
+
+    def test_both_files_receive_identical_bytes(self, tracker):
+        """Same payload -> serialize once, write twice."""
+        t, cache_file, web_cache = tracker
+        t._save_cache()
+        assert cache_file.read_bytes() == web_cache.read_bytes()
+
+    def test_serializes_exactly_once_per_save(self, tracker):
+        """Two json.dumps of 9k nodes doubles the transient allocation peak."""
+        t, _, _ = tracker
+        import src.gateway.node_tracker as nt
+        with patch.object(nt.json, 'dumps', wraps=nt.json.dumps) as dumps:
+            t._save_cache()
+        assert dumps.call_count == 1, f"serialized {dumps.call_count}x per save"
+
+    # --- cadence: not on every 60 s tick ------------------------------------
+
+    def test_cadence_is_not_every_tick(self, tracker):
+        """Ten minutes of CLEANUP_TICK ticks must not produce ten writes.
+
+        Derived from the constants rather than hardcoding "5 minutes": a test
+        that pins a VALUE gets edited the moment the constant moves, a test
+        that pins a RELATIONSHIP gets re-derived.
+        """
+        t, _, _ = tracker
+        clock = [1000.0]
+        ticks = 10
+        expected_max = int(
+            (ticks * UnifiedNodeTracker.CLEANUP_TICK)
+            / UnifiedNodeTracker.CACHE_SAVE_INTERVAL
+        ) + 1
+        # wraps=, not a bare mock: _save_cache is what advances the cadence
+        # clock, so replacing it outright would break the very feedback loop
+        # under test and the assertion would pin nothing
+        # (feedback_verify_the_verification — the mock standing in for the
+        # layer that matters).
+        with patch.object(t, '_save_cache', wraps=t._save_cache) as save, \
+             patch('src.gateway.node_tracker.time.monotonic', side_effect=lambda: clock[0]):
+            t._last_cache_save = clock[0]
+            for _ in range(ticks):
+                clock[0] += UnifiedNodeTracker.CLEANUP_TICK
+                t._mark_cache_dirty()
+                t._maybe_save_cache()
+        assert save.call_count <= expected_max, (
+            f"{save.call_count} writes in {ticks} ticks; cadence not applied"
+        )
+        assert UnifiedNodeTracker.CACHE_SAVE_INTERVAL >= 2 * UnifiedNodeTracker.CLEANUP_TICK, (
+            "a write cadence at or below the tick rate is no cadence at all"
+        )
+
+    def test_clean_tracker_inside_window_does_not_write(self, tracker):
+        """Unchanged state is not worth 20 MB of fsync'd writes."""
+        t, _, _ = tracker
+        clock = [1000.0]
+        with patch.object(UnifiedNodeTracker, '_save_cache') as save, \
+             patch('src.gateway.node_tracker.time.monotonic', side_effect=lambda: clock[0]):
+            t._cache_dirty = False
+            t._last_cache_save = clock[0]
+            clock[0] += UnifiedNodeTracker.CACHE_SAVE_INTERVAL
+            t._maybe_save_cache()
+        assert save.call_count == 0
+
+    def test_staleness_ceiling_writes_even_when_never_marked_dirty(self, tracker):
+        """A missed dirty marker must go stale for minutes, never forever.
+
+        The dirty flag is an optimization; it must not become a correctness
+        dependency (honest_failure_modes #9 — no permanent silent blindness).
+        """
+        t, _, _ = tracker
+        clock = [1000.0]
+        with patch.object(UnifiedNodeTracker, '_save_cache') as save, \
+             patch('src.gateway.node_tracker.time.monotonic', side_effect=lambda: clock[0]):
+            t._cache_dirty = False
+            t._last_cache_save = clock[0]
+            clock[0] += UnifiedNodeTracker.CACHE_MAX_STALENESS + 1
+            t._maybe_save_cache()
+        assert save.call_count == 1, "clean cache can never be refreshed — permanently stale"
+
+    # --- the dirty markers themselves ---------------------------------------
+
+    def test_add_node_marks_dirty(self, tracker):
+        t, _, _ = tracker
+        t._cache_dirty = False
+        t.add_node(UnifiedNode(id="n2", network="rns", name="Two"))
+        assert t._cache_dirty is True
+
+    def test_merge_of_existing_node_marks_dirty(self, tracker):
+        t, _, _ = tracker
+        t._cache_dirty = False
+        t.add_node(UnifiedNode(id="n1", network="meshcore", name="One-updated"))
+        assert t._cache_dirty is True
+
+    def test_remove_node_marks_dirty(self, tracker):
+        t, _, _ = tracker
+        t._cache_dirty = False
+        t.remove_node("n1")
+        assert t._cache_dirty is True
+
+    def test_eviction_marks_dirty(self, tracker):
+        t, _, _ = tracker
+        t._cache_dirty = False
+        with t._lock:
+            t._evict_stale_nodes()
+        assert t._cache_dirty is True
+
+    def test_timeout_state_change_marks_dirty(self, tracker):
+        """The loop's own mutation is a mutation — it must mark dirty too."""
+        t, _, _ = tracker
+        node = t.get_node("n1")
+        if node._state_machine is None:
+            pytest.skip("state machine unavailable in this build")
+        # A node must be HEARD before it can time out: a fresh node sits in
+        # STALE_CACHE, which is_active() excludes, so check_timeout is a no-op
+        # until something responds. Drive the real path.
+        node.update_seen()
+        node.last_seen = datetime.now() - timedelta(hours=6)
+        t._cache_dirty = False
+        with t._lock:
+            changed = node.check_timeout()
+            if changed:
+                t._mark_cache_dirty()
+        assert changed is True and t._cache_dirty is True
+
+    # --- failure + clock honesty --------------------------------------------
+
+    def test_failed_write_keeps_dirty_for_retry(self, tracker):
+        """A save that raised did not happen — the gate must not clear."""
+        t, _, _ = tracker
+        t._mark_cache_dirty()
+        before = t._last_cache_save
+        with patch('utils.paths.atomic_write_text', side_effect=OSError("disk full")):
+            t._save_cache()   # swallowed + logged by design
+        assert t._cache_dirty is True, "failed write cleared the dirty gate"
+        assert t._last_cache_save == before, "failed write advanced the cadence clock"
+
+    def test_mutation_racing_the_write_is_not_lost(self, tracker):
+        """A node added mid-serialization must still be dirty afterwards.
+
+        The gate is cleared against the SNAPSHOT, under the lock that guards
+        it. If it were cleared after the write instead, a mutation landing
+        between snapshot and clear would be marked dirty, then un-marked by a
+        write that never contained it — invisible until CACHE_MAX_STALENESS.
+        """
+        t, _, _ = tracker
+        import src.gateway.node_tracker as nt
+        real_dumps = nt.json.dumps
+
+        def racing_dumps(obj, *a, **kw):
+            # Simulate a concurrent announce arriving while we serialize.
+            if not getattr(t, "_raced", False):
+                t._raced = True
+                t.add_node(UnifiedNode(id="racer", network="rns", name="Racer"))
+            return real_dumps(obj, *a, **kw)
+
+        with patch.object(nt.json, 'dumps', side_effect=racing_dumps):
+            t._save_cache()
+
+        assert t._cache_dirty is True, "the racing mutation was silently dropped"
+
+    def test_cadence_uses_monotonic_not_wallclock(self, tracker):
+        """RTC-less Pis + NTP steps forge wall-clock durations.
+
+        A wall clock that jumps a day backwards must not stall the cache.
+        """
+        t, _, _ = tracker
+        clock = [1000.0]
+        with patch.object(UnifiedNodeTracker, '_save_cache') as save, \
+             patch('src.gateway.node_tracker.time.monotonic', side_effect=lambda: clock[0]), \
+             patch('src.gateway.node_tracker.time.time', return_value=0.0):
+            t._mark_cache_dirty()
+            t._last_cache_save = clock[0]
+            clock[0] += UnifiedNodeTracker.CACHE_SAVE_INTERVAL + 1
+            t._maybe_save_cache()
+        assert save.call_count == 1, "cadence is driven by the forgeable wall clock"
+
+    def test_cadence_stays_inside_the_map_collector_freshness_window(self):
+        """Two consumers of one artifact must not drift (honest_failure_modes #5).
+
+        Slowing the writer is only safe while every READER still considers the
+        file fresh. The map collector rejects node_cache.json once it is older
+        than node_cache_max_age_hours. Import the real constant — a future
+        cadence bump must fail HERE, not silently blind the map in the field.
+        """
+        from src.utils.map_data_collector import MapDataCollector
+
+        worst_case = UnifiedNodeTracker.CACHE_MAX_STALENESS
+        reader_window = MapDataCollector.DEFAULT_NODE_CACHE_MAX_AGE_HOURS * 3600
+        assert UnifiedNodeTracker.CACHE_SAVE_INTERVAL <= worst_case
+        assert worst_case * 2 < reader_window, (
+            f"worst-case cache age {worst_case}s leaves under 2x margin on the "
+            f"{reader_window}s map-collector freshness window"
+        )
+
+    def test_stop_flushes_unconditionally(self, tracker):
+        """Shutdown must not lose up to CACHE_SAVE_INTERVAL of state."""
+        t, cache_file, _ = tracker
+        t._cache_dirty = False
+        t._last_cache_save = time.monotonic()
+        cache_file.unlink(missing_ok=True)
+        t.stop(timeout=0.1)
+        assert cache_file.exists(), "stop() did not flush the cache"
+
+
+class TestPopulationRetention20260803:
+    """The tracker held the whole reachable Reticulum announce space.
+
+    Measured on meshanchor-server 2026-08-03: 9,051 RNS nodes resident for
+    FIVE local MeshCore radios. The population grows with the NETWORK, not
+    with this box's workload, and every node is serialized into both cache
+    files on every save. Age distribution: 2.1% heard inside a day, 11.7%
+    inside a week, 37.1% inside 30 days.
+
+    Retention tiers are IMPORTED from the node-directory retention rather
+    than re-declared, so the two consumers of "how long is a node
+    interesting" cannot drift (honest_failure_modes #5).
+    """
+
+    @pytest.fixture
+    def tracker(self, tmp_path):
+        with patch.object(UnifiedNodeTracker, '_load_cache'):
+            yield UnifiedNodeTracker()
+
+    @staticmethod
+    def _node(nid, network="rns", age_days=0.0, rns_hash=None, **kw):
+        n = UnifiedNode(id=nid, network=network, name=nid, **kw)
+        n.last_seen = datetime.now() - timedelta(days=age_days)
+        if rns_hash:
+            n.rns_hash = bytes.fromhex(rns_hash)
+        return n
+
+    # --- the reader/writer pair must fail together (hfm #4) --------------
+
+    def test_inert_until_pins_are_wired(self, tracker):
+        """Never evict while we have not been told what is pinned.
+
+        The pin list comes from gateway.json via the bridge. If that wiring is
+        missing, the safe degradation is the OLD behaviour (keep everything) —
+        never 'evict with an empty pin set', which would silently drop the
+        configured propagation node and turn lxmf_propagation_node_dark into a
+        false UNHEARD page (the 2026-07-21 class).
+        """
+        tracker.add_node(self._node("rns_old", age_days=99))
+        assert tracker._retention_pins is None
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_old") is not None, "evicted with pins unwired"
+
+    # --- the tiers --------------------------------------------------------
+
+    def test_tiers_are_imported_not_redeclared(self):
+        from src.utils.node_history import (
+            DEFAULT_DIRECTORY_RETENTION_LOCAL,
+            DEFAULT_DIRECTORY_RETENTION_EXTERNAL,
+        )
+        assert UnifiedNodeTracker.RETENTION_LOCAL == DEFAULT_DIRECTORY_RETENTION_LOCAL
+        assert UnifiedNodeTracker.RETENTION_EXTERNAL == DEFAULT_DIRECTORY_RETENTION_EXTERNAL
+
+    def test_cold_rns_node_evicted_at_external_tier(self, tracker):
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("rns_cold", age_days=30))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_cold") is None
+
+    def test_warm_rns_node_survives(self, tracker):
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("rns_warm", age_days=2))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_warm") is not None
+
+    def test_meshcore_node_gets_the_longer_local_tier(self, tracker):
+        """THE MeshAnchor-specific half of this port.
+
+        MeshForge's local radio is Meshtastic; MeshAnchor's is MeshCore.
+        Copying MeshForge's ("meshtastic", "both") tuple verbatim would have
+        put this box's own five radios on the 7-day announce-firehose tier and
+        evicted them for going quiet over a long weekend.
+        """
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("mc_10d", network="meshcore", age_days=10))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("mc_10d") is not None, (
+            "a local MeshCore node was evicted on the external (7d) tier"
+        )
+
+    def test_meshtastic_node_also_gets_the_local_tier(self, tracker):
+        """MeshAnchor still parses Meshtastic nodes; they are local RF too."""
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("mesh_10d", network="meshtastic", age_days=10))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("mesh_10d") is not None
+
+    def test_unknown_age_is_held_not_evicted(self, tracker):
+        """last_seen=None means we cannot observe age — absence is not staleness
+        (honest_failure_modes #2)."""
+        tracker.set_retention_pins([])
+        n = self._node("rns_unknown", age_days=0)
+        n.last_seen = None
+        tracker.add_node(n)
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_unknown") is not None
+
+    # --- the pins that keep probes honest --------------------------------
+
+    def test_pinned_propagation_node_is_never_evicted(self, tracker):
+        """THE constraint. lxmf_propagation_node_dark reports STALE when the
+        configured node is in the cache and UNHEARD (= wrong/truncated hash)
+        when it is absent. Evicting a quiet propagation node would manufacture
+        a false 'wrong hash' diagnosis."""
+        h = "3968a2eeac25e2e7a7961f25842d3d85"
+        tracker.set_retention_pins([h])
+        tracker.add_node(self._node("rns_prop", age_days=99, rns_hash=h))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_prop") is not None, (
+            "configured propagation node evicted -> probe flips STALE to UNHEARD"
+        )
+
+    def test_pins_match_case_insensitively(self, tracker):
+        h = "3968A2EEAC25E2E7A7961F25842D3D85"
+        tracker.set_retention_pins([h])
+        tracker.add_node(self._node("rns_prop", age_days=99, rns_hash=h.lower()))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_prop") is not None
+
+    def test_gateway_and_local_flags_are_never_evicted(self, tracker):
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("rns_gw", age_days=99, is_gateway=True))
+        tracker.add_node(self._node("rns_local", age_days=99, is_local=True))
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_gw") is not None
+        assert tracker.get_node("rns_local") is not None
+
+    # --- integration with the write path ---------------------------------
+
+    def test_eviction_marks_cache_dirty(self, tracker):
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("rns_cold", age_days=30))
+        tracker._cache_dirty = False
+        tracker._evict_expired_nodes()
+        assert tracker._cache_dirty is True
+
+    def test_no_eviction_leaves_cache_clean(self, tracker):
+        """A no-op sweep must not force a 20 MB write every tick."""
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("rns_warm", age_days=1))
+        tracker._cache_dirty = False
+        tracker._evict_expired_nodes()
+        assert tracker._cache_dirty is False
+
+    def test_population_shrinks_to_the_warm_set(self, tracker):
+        """End to end on a meshanchor-server-shaped population."""
+        tracker.set_retention_pins([])
+        for i in range(50):
+            tracker.add_node(self._node(f"cold{i}", age_days=30))
+        for i in range(5):
+            tracker.add_node(self._node(f"warm{i}", age_days=1))
+        for i in range(5):
+            tracker.add_node(self._node(f"mc{i}", network="meshcore", age_days=10))
+        tracker._evict_expired_nodes()
+        remaining = {n.id for n in tracker.get_all_nodes()}
+        assert len(remaining) == 10, sorted(remaining)
+        assert not any(r.startswith("cold") for r in remaining)
+
+    # --- the dead purge this replaced ------------------------------------
+
+    def test_no_second_eviction_policy_survives(self, tracker):
+        """STALE_PURGE_THRESHOLD is gone, and must not come back.
+
+        It purged at 24 h but sat under `elif node._state_machine is None`,
+        and every node gets a state machine when NODE_STATE_AVAILABLE — True
+        on this fleet. It had therefore never evicted anything, which is how
+        9,051 RNS nodes accumulated under a nominal 24-hour purge. Two
+        eviction policies, one of them dead, is worse than one that runs.
+        """
+        assert not hasattr(UnifiedNodeTracker, "STALE_PURGE_THRESHOLD")
+
+    def test_eviction_reaches_nodes_that_have_a_state_machine(self, tracker):
+        """The bug in one line: the dead purge could not see these nodes.
+
+        A node with a live state machine took the `if` branch and never
+        reached the purge in the `elif`. The TTL sweep runs outside that
+        branch entirely, so it must evict a cold node that HAS one.
+        """
+        tracker.set_retention_pins([])
+        n = self._node("rns_cold_sm", age_days=30)
+        n.update_seen()                                   # materialises the state machine
+        n.last_seen = datetime.now() - timedelta(days=30)  # ...then age it back
+        tracker.add_node(n)
+        assert tracker.get_node("rns_cold_sm")._state_machine is not None, (
+            "precondition: this test is meaningless without a state machine"
+        )
+        tracker._evict_expired_nodes()
+        assert tracker.get_node("rns_cold_sm") is None
+
+    # --- the two-writer shutdown hazard ----------------------------------
+
+    def test_stop_sweeps_before_the_final_flush(self, tracker):
+        """The daemon's singleton tracker only ever writes in stop().
+
+        NodeTrackerService holds a UnifiedNodeTracker it never start()s, so
+        its cleanup loop — the only other caller of _evict_expired_nodes —
+        never runs. Because services stop in reverse registration order it
+        also writes LAST. Without a sweep here it would hand the full
+        announce-space population it loaded at startup back to disk, undoing
+        the bridge tracker's TTL work on every clean shutdown
+        (honest_failure_modes #8, two writers of one artifact).
+        """
+        tracker.set_retention_pins([])
+        tracker.add_node(self._node("rns_cold", age_days=30))
+        tracker.add_node(self._node("rns_warm", age_days=1))
+        written = {}
+
+        def capture():
+            written["ids"] = {n.id for n in tracker.get_all_nodes()}
+
+        with patch.object(tracker, '_save_cache', side_effect=capture):
+            tracker.stop(timeout=0.1)
+        assert written["ids"] == {"rns_warm"}, (
+            f"stop() flushed an unswept population: {written.get('ids')}"
+        )
+
+    def test_stop_sweep_is_inert_when_retention_unwired(self, tracker):
+        """An unwired tracker must still flush — just without evicting."""
+        tracker.add_node(self._node("rns_old", age_days=99))
+        written = {}
+        with patch.object(tracker, '_save_cache',
+                          side_effect=lambda: written.update(
+                              ids={n.id for n in tracker.get_all_nodes()})):
+            tracker.stop(timeout=0.1)
+        assert written["ids"] == {"rns_old"}

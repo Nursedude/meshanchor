@@ -1003,3 +1003,62 @@ class TestSignalHandlerReclaim20260803:
             "service constructs will overwrite the daemon's SIGTERM handler. "
             "Re-register after services are up."
         )
+
+
+class TestSingletonRetentionArmed20260803:
+    """The daemon's singleton tracker must be armed too.
+
+    This process runs TWO UnifiedNodeTracker instances — the one
+    RNSMeshtasticBridge builds and the get_node_tracker() singleton this
+    service holds — and BOTH write the same two cache files
+    (honest_failure_modes #8). The bridge's writes periodically; this one
+    writes only in stop(), and services stop in reverse registration order, so
+    it writes LAST. An un-armed singleton would hand back the full
+    announce-space population it loaded at startup, silently undoing the
+    bridge's TTL sweep on every clean shutdown.
+
+    Asserted on the object the service actually holds, not by reading
+    daemon.py — a registered call is not a running call (calibrated_claims #7).
+    """
+
+    def _start_service(self, pins):
+        from daemon import NodeTrackerService
+        from unittest.mock import MagicMock, patch
+
+        tracker = MagicMock()
+        cfg = MagicMock()
+        cfg.rns.get_retention_pins.return_value = pins
+        svc = NodeTrackerService()
+        with patch('gateway.node_tracker.get_node_tracker', return_value=tracker), \
+             patch('gateway.config.GatewayConfig.load', return_value=cfg), \
+             patch('utils.node_history.NodeHistoryDB', side_effect=RuntimeError("no db")):
+            assert svc.start() is True
+        svc.stop(timeout=0.1)
+        return tracker
+
+    def test_singleton_is_armed_with_the_configured_pins(self):
+        tracker = self._start_service(["aa" * 16])
+        assert tracker.set_retention_pins.called, (
+            "singleton retention never armed — its shutdown write restores the "
+            "full population the bridge just evicted"
+        )
+        assert list(tracker.set_retention_pins.call_args[0][0]) == ["aa" * 16]
+
+    def test_singleton_is_armed_even_with_no_pins(self):
+        tracker = self._start_service([])
+        assert tracker.set_retention_pins.called
+        assert list(tracker.set_retention_pins.call_args[0][0]) == []
+
+    def test_start_still_succeeds_when_pins_cannot_be_derived(self):
+        """A broken config leaves retention inert — it must not kill the service."""
+        from daemon import NodeTrackerService
+        from unittest.mock import MagicMock, patch
+
+        tracker = MagicMock()
+        svc = NodeTrackerService()
+        with patch('gateway.node_tracker.get_node_tracker', return_value=tracker), \
+             patch('gateway.config.GatewayConfig.load', side_effect=ValueError("bad json")), \
+             patch('utils.node_history.NodeHistoryDB', side_effect=RuntimeError("no db")):
+            assert svc.start() is True
+        svc.stop(timeout=0.1)
+        assert not tracker.set_retention_pins.called

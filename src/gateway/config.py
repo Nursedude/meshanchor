@@ -341,6 +341,25 @@ class RNSConfig:
             return [d for d in raw if isinstance(d, str) and d]
         return []
 
+    def get_retention_pins(self) -> List[str]:
+        """Hashes the node tracker must never evict on age alone.
+
+        Every identity this gateway is CONFIGURED to depend on: the
+        propagation node and the default LXMF destinations. These can
+        legitimately go quiet for longer than the announce-space TTL, and
+        dropping one turns lxmf_propagation_node_dark's STALE verdict into
+        UNHEARD — which reads as "wrong or truncated hash", a config error
+        that did not happen.
+
+        MeshForge's twin also pins peer_gateway_destinations; MeshAnchor's
+        RNSConfig has no such field, so there is nothing to pin from. Add it
+        here if that field is ever ported, rather than inventing it now.
+        """
+        pins = list(self.get_lxmf_destinations())
+        if isinstance(self.propagation_node, str) and self.propagation_node:
+            pins.append(self.propagation_node)
+        return [p.strip().lower() for p in pins if isinstance(p, str) and p.strip()]
+
 
 @dataclass
 class RNSOverMeshtasticConfig:

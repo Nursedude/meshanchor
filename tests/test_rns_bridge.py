@@ -3187,3 +3187,48 @@ class TestDeliveryCounterCallbacksIssue74:
         delivered_cb(MagicMock(name="receipt"))
         snap = _dc.get_singleton().snapshot()
         assert snap["state_totals"]["confirmed"] == 1
+
+
+class TestRetentionPinsWired20260803:
+    """The bridge must actually ARM node retention.
+
+    node_tracker keeps TTL eviction inert until set_retention_pins() is
+    called, so this wiring is what makes the population cap live. Verified on
+    the constructed object rather than by reading rns_bridge.py — a registered
+    call is not a running call (calibrated_claims #7).
+    """
+
+    def _build(self, rns_overrides):
+        from gateway.config import GatewayConfig
+        cfg = GatewayConfig()
+        for k, v in rns_overrides.items():
+            setattr(cfg.rns, k, v)
+        with patch("gateway.rns_bridge.UnifiedNodeTracker") as MockTracker, \
+             patch("gateway.rns_bridge.BridgeHealthMonitor"), \
+             patch("gateway.rns_bridge.DeliveryTracker"), \
+             patch("gateway.rns_bridge.ReconnectStrategy"):
+            from gateway.rns_bridge import RNSMeshtasticBridge
+            RNSMeshtasticBridge(config=cfg)
+            return MockTracker.return_value.set_retention_pins
+
+    def test_pins_are_armed_on_construction(self):
+        call = self._build({"propagation_node": "3968A2EEAC25E2E7A7961F25842D3D85"})
+        assert call.called, "tracker retention never armed — eviction stays inert forever"
+        pins = set(call.call_args[0][0])
+        assert "3968a2eeac25e2e7a7961f25842d3d85" in pins, pins
+
+    def test_lxmf_destinations_are_pinned(self):
+        call = self._build({
+            "propagation_node": "",
+            "default_lxmf_destination": ["bb" * 16, "cc" * 16],
+        })
+        pins = set(call.call_args[0][0])
+        assert {"bb" * 16, "cc" * 16} <= pins, pins
+
+    def test_armed_even_when_nothing_is_configured(self):
+        """An EMPTY pin list still arms eviction — 'no pins' is a result, not
+        a reason to leave the cap switched off."""
+        call = self._build({"propagation_node": "",
+                            "default_lxmf_destination": ""})
+        assert call.called
+        assert list(call.call_args[0][0]) == []
