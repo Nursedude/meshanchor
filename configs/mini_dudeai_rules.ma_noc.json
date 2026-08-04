@@ -1,5 +1,5 @@
 {
-  "_comment": "mini-dudeai MeshAnchor NOC seed — the MA twin of MeshForge's federator/gateway seeds. MeshAnchor's fleet-watchdog (monitoring/fleet_watchdog.py) records blackouts to SQLite (monitoring/fleet_history.py, table blackout_events); the meshanchor_fleet preset's BlackoutDbSource projects each ACTIVE blackout to a signal_class Condition whose extras.class is the blackout kind ∈ {no_data, http_dead, frozen, daemon_dead, role_drift}. These rules match on that class exactly as MeshForge's seeds match watchdog signal classes. Boot-health (unexpected_reboot) and source_error (health-surface blindness) are wired the same as MeshForge. Per-box file at ~/mini_dudeai_rules.json; the daemon promotes ~/mini_dudeai_rules.json.candidate over it on the next tick. Repo canonical for backup + re-deploy parity. Observation-only: mini proposes, it never ratifies.",
+  "_comment": "mini-dudeai MeshAnchor NOC seed — the MA twin of MeshForge's federator/gateway seeds. MeshAnchor's fleet-watchdog (monitoring/fleet_watchdog.py) records blackouts to SQLite (monitoring/fleet_history.py, table blackout_events); the meshanchor_fleet preset's BlackoutDbSource projects each ACTIVE blackout to a signal_class Condition whose extras.class is the blackout kind ∈ {no_data, http_dead, frozen, daemon_dead, role_drift, mini_dead, node_retention_stalled}. These rules match on that class exactly as MeshForge's seeds match watchdog signal classes. Boot-health (unexpected_reboot) and source_error (health-surface blindness) are wired the same as MeshForge. Per-box file at ~/mini_dudeai_rules.json; the daemon promotes ~/mini_dudeai_rules.json.candidate over it on the next tick. Repo canonical for backup + re-deploy parity. Observation-only: mini proposes, it never ratifies.",
   "rules": [
     {
       "id": "ma_daemon_dead_any",
@@ -93,6 +93,22 @@
       },
       "cooldown_s": 3600,
       "annotation": "fleet_watchdog role_drift — the box's live units diverge from its declared role (deployment.json / fleet_roles.yaml). Fix: provision_role.py --apply. Escalate-only (low urgency, operator-paced)."
+    },
+    {
+      "id": "ma_node_retention_stalled_any",
+      "match": {
+        "kind": "signal_class",
+        "class": "node_retention_stalled",
+        "subject_glob": "*"
+      },
+      "action": {
+        "kind": "propose_escalation",
+        "title": "MeshAnchor node retention stalled",
+        "message": "{subject}: {detail}",
+        "priority": "min"
+      },
+      "cooldown_s": 3600,
+      "annotation": "fleet_watchdog node_retention_stalled — nodes past their tier TTL (local 30d / external 7d) are still in the node cache, so the tracker's retention sweep is not running or was never armed via set_retention_pins. Defect B of the 2026-08-03 churn arc: this daemon runs TWO UnifiedNodeTracker instances writing one cache, and the get_node_tracker() singleton — never start()ed, stopped LAST — writes its unswept population back at shutdown. Left alone the population creeps toward the 10k cap and write volume with it (the origin state was 9,052 nodes / ~29 GB/day for five local radios). Escalate-only: capacity creep, not an outage. Check: count expired-unpinned entries in ~/.config/meshanchor/node_cache.json; fix by restarting meshanchor-daemon and confirming a 'Retention sweep evicted' line follows."
     },
     {
       "id": "ma_federation_peer_unhealthy_any",

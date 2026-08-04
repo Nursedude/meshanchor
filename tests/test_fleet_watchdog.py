@@ -554,3 +554,167 @@ def test_mini_dead_evaluated_on_empty_heartbeat_table(db, tmp_path):
         out = wd.detect_silence(db_path=db, now=10_530.0)     # streak → 2 ⇒ fire
     assert out[wd.KIND_MINI_DEAD] is not None
     assert out[wd.KIND_NO_DATA] == "heartbeat table is empty"   # empty-table path
+
+
+class TestNodeRetentionStalled20260804:
+    """Defect B's detector — the fix shipped with no runtime witness.
+
+    The daemon runs TWO UnifiedNodeTracker instances writing one cache; the
+    get_node_tracker() singleton is never start()ed, so its only write is the
+    unconditional flush in stop(), and it stops LAST. An un-armed singleton
+    hands the full announce-space population back to disk once per restart.
+    The cure (d36845de) logs arming only at DEBUG and sweeps only at shutdown,
+    on boxes running Storage=volatile — so success leaves no observable trace
+    (honest_failure_modes #9). This watches the DURABLE artifact instead.
+
+    Every unobservable path must ABSTAIN and HOLD the streak rather than guess
+    (#2). Those cases are the bulk of these tests on purpose: a detector that
+    fires when it cannot see is worse than no detector.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        from monitoring import fleet_watchdog as wd
+        wd._reset_node_retention_state()
+        yield
+        wd._reset_node_retention_state()
+
+    @staticmethod
+    def _cache(tmp_path, nodes, *, age_s=0.0):
+        import json, os, time
+        p = tmp_path / "node_cache.json"
+        p.write_text(json.dumps({"version": 1, "nodes": nodes}))
+        if age_s:
+            old = time.time() - age_s
+            os.utime(p, (old, old))
+        return p
+
+    @staticmethod
+    def _node(nid, *, network="rns", age_days=0.0, rns_hash="", **kw):
+        from datetime import datetime, timedelta
+        d = {"id": nid, "network": network, "rns_hash": rns_hash,
+             "last_seen": (datetime.now() - timedelta(days=age_days)).isoformat()}
+        d.update(kw)
+        return d
+
+    def _run(self, tmp_path, nodes, *, pins=None, cache_age_s=0.0,
+             cycles=1, gw_broken=False, no_cache=False):
+        """Drive the real _node_retention_reason with patched paths."""
+        import json
+        from unittest.mock import patch
+        from monitoring import fleet_watchdog as wd
+
+        cache = self._cache(tmp_path, nodes, age_s=cache_age_s)
+        if no_cache:
+            cache.unlink()
+        gw = tmp_path / "gateway.json"
+        gw.write_text("{ this is not json" if gw_broken else json.dumps(
+            {"rns": {"default_lxmf_destination": list(pins or [])}}))
+
+        # Lay the two files out exactly where the probe looks for them.
+        cfg_dir = tmp_path / ".config" / "meshanchor"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        if not no_cache:
+            (cfg_dir / "node_cache.json").write_text(cache.read_text())
+            if cache_age_s:
+                import os, time
+                old = time.time() - cache_age_s
+                os.utime(cfg_dir / "node_cache.json", (old, old))
+        (cfg_dir / "gateway.json").write_text(gw.read_text())
+
+        reason = None
+        with patch("utils.paths.get_real_user_home", return_value=tmp_path):
+            for _ in range(cycles):
+                reason = wd._node_retention_reason()
+        return reason
+
+    # ── the fault it exists to catch ──────────────────────────────────
+
+    def test_fires_when_expired_nodes_pile_up(self, tmp_path):
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"rns_{i}", age_days=30)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        reason = self._run(tmp_path, nodes,
+                           cycles=wd.NODE_RETENTION_HYSTERESIS_CYCLES)
+        assert reason is not None and "node retention stalled" in reason
+
+    def test_needs_hysteresis_one_cycle_is_silent(self, tmp_path):
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"rns_{i}", age_days=30)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        assert self._run(tmp_path, nodes, cycles=1) is None
+
+    def test_healthy_warm_population_is_silent(self, tmp_path):
+        nodes = [self._node(f"rns_{i}", age_days=1) for i in range(500)]
+        assert self._run(tmp_path, nodes, cycles=3) is None
+
+    # ── the guards that keep it honest ────────────────────────────────
+
+    def test_pinned_nodes_never_count_as_expired(self, tmp_path):
+        """Counting a configured destination would fire on a healthy box."""
+        from monitoring import fleet_watchdog as wd
+        h = "3dfbdb5d24c6de195ae4f3c0f56b5ea5"
+        nodes = [self._node(f"rns_{i}", age_days=99, rns_hash=h)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        assert self._run(tmp_path, nodes, pins=[h], cycles=3) is None
+
+    def test_local_network_uses_the_longer_tier(self, tmp_path):
+        """MeshCore radios are our own RF — 30d, not the 7d firehose tier."""
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"mc_{i}", network="meshcore", age_days=10)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        assert self._run(tmp_path, nodes, cycles=3) is None
+
+    def test_gateway_and_local_flags_are_skipped(self, tmp_path):
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"g_{i}", age_days=99, is_gateway=True)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        assert self._run(tmp_path, nodes, cycles=3) is None
+
+    def test_unknown_age_is_held_not_counted(self, tmp_path):
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"rns_{i}", age_days=99)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        for n in nodes:
+            n["last_seen"] = None
+        assert self._run(tmp_path, nodes, cycles=3) is None
+
+    # ── unobservable must ABSTAIN, never fire ─────────────────────────
+
+    def test_absent_cache_is_inert_no_gateway_organ(self, tmp_path):
+        assert self._run(tmp_path, [], no_cache=True, cycles=3) is None
+
+    def test_stale_cache_abstains(self, tmp_path):
+        """Stale bytes cannot testify about the present — the writer stopping
+        is a DIFFERENT fault with its own owners."""
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"rns_{i}", age_days=30)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        assert self._run(tmp_path, nodes, cycles=3,
+                         cache_age_s=wd.NODE_RETENTION_CACHE_STALE_S + 60) is None
+
+    def test_underivable_pins_abstain(self, tmp_path):
+        """Without pins we would count configured destinations as evictable."""
+        from monitoring import fleet_watchdog as wd
+        nodes = [self._node(f"rns_{i}", age_days=30)
+                 for i in range(wd.NODE_RETENTION_MAX_EXPIRED + 20)]
+        assert self._run(tmp_path, nodes, cycles=3, gw_broken=True) is None
+
+    # ── the closed-enum consumer (hfm #7) ─────────────────────────────
+
+    def test_kind_is_registered_and_degraded_not_wedge(self):
+        from monitoring import fleet_watchdog as wd
+        assert wd.KIND_NODE_RETENTION_STALLED in wd.ALL_KINDS
+        assert wd.KIND_NODE_RETENTION_STALLED in wd.DEGRADED_KINDS, (
+            "a capacity-creep signal must not page like a dead daemon"
+        )
+
+    def test_status_endpoint_maps_severity_from_the_shared_set(self):
+        """The old consumer said `degraded if kind == KIND_ROLE_DRIFT else
+        wedge`, so EVERY later kind silently became an outage."""
+        import inspect
+        from utils import _map_status_endpoints as ep
+        src = inspect.getsource(ep)
+        assert "DEGRADED_KINDS" in src, (
+            "status endpoint no longer derives severity from the shared set"
+        )

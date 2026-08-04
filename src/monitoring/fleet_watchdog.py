@@ -91,8 +91,39 @@ KIND_FROZEN = "frozen"
 KIND_DAEMON_DEAD = "daemon_dead"
 KIND_ROLE_DRIFT = "role_drift"
 KIND_MINI_DEAD = "mini_dead"
+KIND_NODE_RETENTION_STALLED = "node_retention_stalled"
 ALL_KINDS = (KIND_NO_DATA, KIND_HTTP_DEAD, KIND_FROZEN, KIND_DAEMON_DEAD,
-             KIND_ROLE_DRIFT, KIND_MINI_DEAD)
+             KIND_ROLE_DRIFT, KIND_MINI_DEAD, KIND_NODE_RETENTION_STALLED)
+
+#: Signal kinds that are DEGRADED rather than an outage. Everything else is a
+#: wedge. Kept here, beside ALL_KINDS, because the map's /api/status endpoint
+#: used to decide severity with ``degraded if kind == KIND_ROLE_DRIFT else
+#: "wedge"`` — so every kind added after it silently became a WEDGE, i.e. a new
+#: capacity-creep signal would have paged as an outage. Closed enums need
+#: closed consumers (honest_failure_modes #7); a shared constant is the cheapest
+#: way for the consumer to fail visibly instead of guessing.
+DEGRADED_KINDS = frozenset({KIND_ROLE_DRIFT, KIND_NODE_RETENTION_STALLED})
+
+NODE_RETENTION_MAX_EXPIRED = 50
+"""How many expired-and-unpinned nodes may sit in the cache before we call
+retention stalled.
+
+Zero is the steady state — the tracker sweeps every CLEANUP_TICK (60s), and
+the live cache measured 2026-08-04 held exactly 0 of these against 1,058
+nodes. The allowance is for the window between a node aging out and the next
+sweep, not for a backlog: the failure this watches produced THOUSANDS (9,052
+nodes for five local radios, ~29 GB/day of writes), so 50 is far below any
+real breakage and far above normal churn."""
+
+NODE_RETENTION_HYSTERESIS_CYCLES = 2
+"""Consecutive confirmed cycles before firing — same shape as
+DAEMON_HYSTERESIS_CYCLES. One cycle can land mid-sweep."""
+
+NODE_RETENTION_CACHE_STALE_S = 1800.0
+"""A cache older than this cannot testify about the present. The tracker
+writes at CACHE_SAVE_INTERVAL with CACHE_MAX_STALENESS (1800s) as its
+backstop, so anything older means the writer stopped — which is a DIFFERENT
+fault with its own owners, and must not be read as a retention verdict."""
 
 MINI_DEAD_STALE_S = 300.0
 """mini_dudeai_state.json older than this ⇒ the second brain is dead/wedged.
@@ -118,6 +149,7 @@ rationale + shape as DAEMON_HYSTERESIS_CYCLES / MeshForge's debounce_ticks)."""
 # watchdogs would corrupt the streak counter, but that's already
 # disallowed by the systemd unit (single instance).
 _daemon_state: Dict[str, int] = {"inactive_streak": 0}
+_node_retention_state: Dict[str, int] = {"over_streak": 0}
 
 # Same pattern for role_drift (independent counter).
 _role_drift_state: Dict[str, int] = {"drift_streak": 0}
@@ -129,6 +161,11 @@ _mini_dead_state: Dict[str, int] = {"stale_streak": 0}
 def _reset_daemon_state() -> None:
     """Test helper — resets the daemon_dead streak counter to 0."""
     _daemon_state["inactive_streak"] = 0
+
+
+def _reset_node_retention_state() -> None:
+    """Test helper — resets the node-retention streak counter to 0."""
+    _node_retention_state["over_streak"] = 0
 
 
 def _reset_role_drift_state() -> None:
@@ -184,6 +221,103 @@ def _daemon_dead_reason() -> Optional[str]:
                 f"{_daemon_state['inactive_streak']} consecutive checks"
             )
     # daemon_active is None → probe failed; leave streak unchanged.
+    return None
+
+
+def _node_retention_reason() -> Optional[str]:
+    """Nodes the retention sweep should have evicted are still in the cache.
+
+    WHY THIS EXISTS (2026-08-04, defect B of the node-cache churn arc). This
+    daemon runs TWO UnifiedNodeTracker instances — the bridge's and the
+    get_node_tracker() singleton — and both write the same cache files. The
+    singleton is never start()ed, so its only write is the unconditional flush
+    in stop(), and services stop in reverse registration order, so it writes
+    LAST. An un-armed singleton hands the full announce-space population back
+    to disk, silently undoing the bridge's sweep once per restart.
+
+    That fix shipped in d36845de, but it has NO RUNTIME WITNESS: arming logs
+    only at DEBUG on success, and the singleton's sweep happens at shutdown —
+    on boxes running Storage=volatile, where an absence of log lines proves
+    nothing (honest_failure_modes #9). So this watches the DURABLE ARTIFACT
+    instead: the cache itself. It catches an un-armed singleton, a broken
+    sweep, or any future regression that lets the population creep back,
+    without needing to introspect either process.
+
+    Positive evidence only. Every unobservable path abstains rather than
+    guessing, and the streak is HELD (not advanced, not reset) whenever we
+    cannot see — absence of evidence is not evidence of absence (#2).
+    """
+    import json as _json
+    import os as _os
+    import time as _time
+    from datetime import datetime as _dt
+
+    try:
+        from utils.paths import get_real_user_home
+        from gateway.node_tracker import UnifiedNodeTracker as _T
+        cache = get_real_user_home() / ".config" / "meshanchor" / "node_cache.json"
+        gw = get_real_user_home() / ".config" / "meshanchor" / "gateway.json"
+    except Exception as e:
+        logger.debug("node-retention probe: imports unavailable: %s", e)
+        return None                      # HOLD — cannot observe
+
+    if not cache.exists():
+        # No gateway organ on this box: nothing to retain, nothing to judge.
+        _node_retention_state["over_streak"] = 0
+        return None
+    try:
+        if _time.time() - _os.path.getmtime(cache) > NODE_RETENTION_CACHE_STALE_S:
+            return None                  # HOLD — stale bytes cannot testify
+        nodes = (_json.loads(cache.read_text()) or {}).get("nodes") or []
+    except Exception as e:
+        logger.debug("node-retention probe: cache unreadable: %s", e)
+        return None                      # HOLD — unreadable ≠ empty
+
+    # Pins MUST be derivable. Judging eviction without them would count the
+    # configured propagation node / LXMF destinations as evictable and fire on
+    # a healthy box — the false-UNHEARD shape, one layer up.
+    try:
+        from gateway.config import GatewayConfig
+        cfg = GatewayConfig()
+        for k, v in ((_json.loads(gw.read_text()) or {}).get("rns") or {}).items():
+            if hasattr(cfg.rns, k):
+                setattr(cfg.rns, k, v)
+        pins = set(cfg.rns.get_retention_pins())
+    except Exception as e:
+        logger.debug("node-retention probe: pins underivable: %s", e)
+        return None                      # HOLD — never judge without pins
+
+    now = _dt.now()
+    expired = 0
+    for n in nodes:
+        if not isinstance(n, dict) or n.get("is_gateway") or n.get("is_local"):
+            continue
+        if (n.get("rns_hash") or "").lower() in pins:
+            continue
+        ls = n.get("last_seen")
+        if not ls:
+            continue                     # unknown age is HELD, as the tracker does
+        try:
+            age = (now - _dt.fromisoformat(ls)).total_seconds()
+        except Exception:
+            continue                     # unparseable age is not evidence of staleness
+        ttl = (_T.RETENTION_LOCAL if n.get("network") in _T.LOCAL_NETWORKS
+               else _T.RETENTION_EXTERNAL)
+        if age > ttl:
+            expired += 1
+
+    if expired <= NODE_RETENTION_MAX_EXPIRED:
+        _node_retention_state["over_streak"] = 0
+        return None
+    _node_retention_state["over_streak"] += 1
+    if _node_retention_state["over_streak"] >= NODE_RETENTION_HYSTERESIS_CYCLES:
+        return (
+            f"node retention stalled — {expired} node(s) past their tier TTL "
+            f"(local {_T.RETENTION_LOCAL // 86400}d / external "
+            f"{_T.RETENTION_EXTERNAL // 86400}d) still in the cache of "
+            f"{len(nodes)}; the sweep is not running or was never armed "
+            f"(set_retention_pins)"
+        )
     return None
 
 
@@ -315,6 +449,7 @@ def detect_silence(
         # blackout (B-F2, honest_failure #2). role_drift is likewise independent.
         out[KIND_DAEMON_DEAD] = _daemon_dead_reason()
         out[KIND_ROLE_DRIFT] = _role_drift_reason()
+        out[KIND_NODE_RETENTION_STALLED] = _node_retention_reason()
         out[KIND_MINI_DEAD] = _mini_dead_reason(now)
         return out
 
@@ -390,6 +525,7 @@ def detect_silence(
     # Role drift: independent of heartbeat data (reads the converge SSOT's
     # dry-run plan for this box's declared role). Hysteresis inside.
     out[KIND_ROLE_DRIFT] = _role_drift_reason()
+    out[KIND_NODE_RETENTION_STALLED] = _node_retention_reason()
 
     # mini_dead: independent of heartbeat data (reads the operator's mini
     # state file). Inert on a box with no mini installed. Hysteresis inside.

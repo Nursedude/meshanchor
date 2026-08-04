@@ -163,7 +163,14 @@ def test_build_engine_ticks_clean_over_live_db(tmp_path, monkeypatch):
     # the health surface read clean — no false source_error, and self-observe
     # sees live==seed → no false drift.
     assert state.get("error_count", 0) == 0
-    assert state.get("rule_count") == 10
+    # Re-derived from the seed the engine was just handed, not hardcoded: this
+    # pins the RELATIONSHIP (every seeded rule loads) rather than a count that
+    # has to be edited by hand every time the seed grows — and a hand-edited
+    # count is a number nobody re-checks. Growing the seed now proves loading
+    # instead of failing on arithmetic.
+    with open(seed, encoding="utf-8") as f:
+        seeded = len(json.load(f)["rules"])
+    assert state.get("rule_count") == seeded
     # state + brief land in the MA namespace, NOT the MeshForge mini's ($HOME).
     assert (ma_dir / "state.json").exists()
     engine._write_brief_safe(state)

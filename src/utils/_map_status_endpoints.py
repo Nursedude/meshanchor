@@ -234,7 +234,7 @@ def watchdog_block_from_blackouts(*, now: Optional[float] = None) -> Dict[str, A
         return {"installed": True, "ok": False,
                 "reason": f"blackout store unobservable: {exc}"}
 
-    from monitoring.fleet_watchdog import ALL_KINDS, KIND_ROLE_DRIFT
+    from monitoring.fleet_watchdog import ALL_KINDS, DEGRADED_KINDS
     signals = []
     for r in active_rows:
         if not isinstance(r, dict) or not r.get("kind"):
@@ -242,7 +242,12 @@ def watchdog_block_from_blackouts(*, now: Optional[float] = None) -> Dict[str, A
         signals.append({
             "class": r["kind"],
             "subject": "fleet",
-            "severity": "degraded" if r["kind"] == KIND_ROLE_DRIFT else "wedge",
+            # Severity comes from the SHARED set, not a comparison against one
+            # kind. The old `degraded if kind == KIND_ROLE_DRIFT else "wedge"`
+            # meant every kind added later silently became an outage — a
+            # capacity-creep signal would have paged like a dead daemon
+            # (honest_failure_modes #7: a closed enum needs closed consumers).
+            "severity": "degraded" if r["kind"] in DEGRADED_KINDS else "wedge",
             "detail": r.get("reason") or "",
             "first_seen": r.get("ts_started"),
         })
