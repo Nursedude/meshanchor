@@ -279,6 +279,21 @@ def grade_compile(case: dict, backend) -> Tuple[bool, List[str], dict]:
     return not reasons, reasons, rule
 
 
+def _path_satisfies(frag: str, paths: List[str]) -> bool:
+    """Does any retrieved path NAME the file this fragment asks for?
+
+    Matched on the basename's PREFIX. The old rule — substring against every
+    path joined into one string — is satisfied by anything that merely contains
+    the fragment somewhere: a fabricated ``/tmp/decoy-<frag>-notreal.md``, or
+    the corpus DIRECTORY, which is why ``memory`` was satisfied by all 339 files
+    under the memory root. Measured 2026-08-04 by mutation-testing the eval: a
+    decoy path satisfied 29 of 29 retrieval assertions, so this axis was
+    asserting nothing at all. A checker that accepts fabricated evidence is the
+    07-25 self-confirming-detector lesson, one layer up.
+    """
+    return any(os.path.basename(p).startswith(frag) for p in paths)
+
+
 def grade_oracle(case: dict, backend) -> Tuple[bool, List[str], dict]:
     """Ask the PRODUCTION oracle path and grade retrieval + citations +
     answer content separately — a retrieval miss and a synthesis miss are
@@ -289,9 +304,9 @@ def grade_oracle(case: dict, backend) -> Tuple[bool, List[str], dict]:
                                 top_k=inp.get("top_k", 6))
     reasons: List[str] = []
     expected_tier = getattr(backend, "brain_tier", "local")
-    retrieved_paths = " ".join(r["path"] for r in result.get("retrieved") or [])
+    retrieved_paths = [r["path"] for r in result.get("retrieved") or []]
     for frag in expect.get("retrieve_must_include") or []:
-        if frag not in retrieved_paths:
+        if not _path_satisfies(frag, retrieved_paths):
             reasons.append(f"retrieval missing {frag!r}")
     if expect.get("expect_refusal"):
         # Honest-refusal case (the substitute-and-narrate-success wart, W5.1):
@@ -307,9 +322,9 @@ def grade_oracle(case: dict, backend) -> Tuple[bool, List[str], dict]:
             reasons.append(f"no grounded answer: "
                            f"{str(result.get('note', '?'))[:160]}")
         else:
-            cited_paths = " ".join(s["path"] for s in result["sources"])
+            cited_paths = [s["path"] for s in result["sources"]]
             for frag in expect.get("cite_must_include") or []:
-                if frag not in cited_paths:
+                if not _path_satisfies(frag, cited_paths):
                     reasons.append(f"citations missing {frag!r}")
             anyof = expect.get("answer_contains_any") or []
             if anyof and not any(a.lower() in result["answer"].lower()
