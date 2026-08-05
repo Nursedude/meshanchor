@@ -11,8 +11,14 @@ config files, not root's.
 
 from pathlib import Path
 from typing import Optional
+import logging
 import os
 import tempfile
+
+# Stdlib logging only — this module is deliberately dependency-light (it is
+# imported by nearly everything, including utils.logging_config itself), so
+# it must not reach for the project logger factory.
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -357,10 +363,30 @@ class ReticulumPaths:
         healthy.
 
         Every client-config writer must propagate what rnsd is actually using.
+
+        ⚠️ An UNREADABLE config also yields ``'default'``, because 9 callers
+        take a plain ``str``. That is a degraded state wearing a
+        healthy-looking value (honest_failure_modes #1) — if rnsd serves
+        some other name, every consumer then probes ``@rns/default``, finds
+        nothing, and reports "not available" as though the SERVICE were
+        down rather than the config unreadable. MeshForge hit the same class
+        from the other direction 2026-08-05 (its watchdog probed a stale
+        name for 8.8 days while both RNS probes read healthy/indeterminate);
+        MeshAnchor is NOT affected by that defect — measured, its
+        ``get_config_file()`` already prefers /etc/reticulum. So the swallow
+        keeps its return contract and gains a WITNESS instead
+        (honest_failure_modes #9): unreadable is now visible in the log,
+        never silent.
         """
         try:
             text = cls.get_config_file().read_text()
-        except (OSError, PermissionError):
+        except (OSError, PermissionError) as exc:
+            logger.warning(
+                "RNS config %s unreadable (%s) — falling back to instance_name "
+                "'default'. If rnsd serves a different name, every @rns/<name> "
+                "check will read 'not available' while rnsd is healthy.",
+                cls.get_config_file(), exc,
+            )
             return 'default'
         for raw in text.splitlines():
             line = raw.strip()

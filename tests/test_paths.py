@@ -355,3 +355,39 @@ class TestReticulumClientConfigdir:
         with open(os.path.join(d, "config"), encoding="utf-8") as fh:
             cfg = fh.read()
         assert "rpc_key" not in cfg
+
+
+class TestInstanceNameUnreadableLeavesAWitness:
+    """An unreadable RNS config still returns 'default' — 9 callers take a
+    plain str — so the degraded state wears a healthy-looking value. It must
+    at least be VISIBLE (honest_failure_modes #9: every swallow gets a
+    witness). MeshForge hit this class from the other direction 2026-08-05,
+    where a watchdog probed a stale @rns name for 8.8 days while its probes
+    read healthy/indeterminate; MeshAnchor is not affected by that defect
+    (its get_config_file() already prefers /etc/reticulum), but the silent
+    fallback is the same shape.
+    """
+
+    def test_unreadable_config_warns(self, caplog):
+        from utils.paths import ReticulumPaths
+        with patch.object(ReticulumPaths, "get_config_file",
+                          return_value=Path("/nonexistent/reticulum/config")):
+            with caplog.at_level("WARNING", logger="utils.paths"):
+                assert ReticulumPaths.get_configured_instance_name() == "default"
+        msg = " ".join(r.getMessage() for r in caplog.records)
+        assert "unreadable" in msg, (
+            "an unreadable config fell back to 'default' with NO witness — "
+            "the operator cannot tell it from a config that simply omits "
+            "the directive")
+
+    def test_omitted_directive_is_silent_and_defaults(self, tmp_path, caplog):
+        """The LEGITIMATE default: config readable, directive absent. RNS
+        itself resolves that to 'default', so it must NOT warn — or the
+        witness becomes noise on every normally-configured box."""
+        cfg = tmp_path / "config"
+        cfg.write_text("[reticulum]\n  enable_transport = True\n")
+        from utils.paths import ReticulumPaths
+        with patch.object(ReticulumPaths, "get_config_file", return_value=cfg):
+            with caplog.at_level("WARNING", logger="utils.paths"):
+                assert ReticulumPaths.get_configured_instance_name() == "default"
+        assert not [r for r in caplog.records if "unreadable" in r.getMessage()]
