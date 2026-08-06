@@ -215,6 +215,221 @@ def _isolate_node_cache_files(tmp_path_factory):
         yield root
 
 
+#: Modules that resolve an operator data store from ``get_real_user_home()``
+#: at MODULE level and WRITE it. Each is patched at its own module attribute
+#: (every import alias), which redirects only that module — patching
+#: ``utils.paths.get_real_user_home`` itself would break the tests that assert
+#: what it returns under sudo, and patching ``MeshAnchorPaths.get_config_dir``
+#: (the SSOT classmethod) would break ``test_paths.py``'s pin of it. Isolation
+#: belongs at the narrowest layer that still covers every writer.
+#: Found by full-tree directory sweep, not by memory — see
+#: ``_isolate_operator_data_stores``.
+_OPERATOR_STORE_MODULES = (
+    "commands.messaging",              # messages.db
+    "gateway.message_queue",           # message_queue.db
+    "commands.rns",                    # lxmf_storage/ (LXMF ratchets)
+    "gateway._rns_bridge_connection",  # lxmf_storage/ (LXMF ratchets)
+    "utils.map_data_collector",        # map_nodes.geojson, node_history.db
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_operator_data_stores(tmp_path_factory):
+    """Keep the suite out of the operator's message store, queue, LXMF
+    ratchets, map cache and preflight-template directory.
+
+    Sibling of ``_isolate_node_cache_files`` and
+    ``_isolate_delivery_counters_db``, found the same way. Measured on
+    VolcanoAI 2026-08-05 by sweeping the whole operator tree
+    (``~/.config/meshanchor`` + ``~/.local/share/meshanchor`` +
+    ``~/.cache/meshanchor``, 1,174 files) across one suite run, with an idle
+    CONTROL run of equal length subtracted and md5 used to separate
+    "rewritten identically" from real mutation. The control showed ZERO
+    self-change — no MeshAnchor daemon runs on that box — so attribution was
+    unusually clean. Six artifacts genuinely mutated:
+
+        lxmf_storage/lxmf/ratchets/*.ratchets   LXMF crypto ratchet state
+        messages.db                             message store
+        message_queue.db                        persistent queue
+        delivery_counters.db                    (see the sibling fixture)
+        map_nodes.geojson                       map collector cache
+        templates/exported_<ts>.json            LITTER — one NEW file per run
+
+    The ratchets are the reason this is a gate and not a note: they are
+    per-destination cryptographic state, and corrupting them fails opaquely
+    and late.
+
+    ⚠️ ``map_nodes.geojson`` is suite-caused HERE. On MeshForge the same
+    filename is written by the live map daemon and is NOT pollution — which
+    is exactly why the idle control run is part of the method. Re-run the
+    control before trusting this list on a box where MeshAnchor daemons do
+    run (meshanchor-server).
+
+    Session-scoped: redirection is idempotent and O(1). The first version of
+    the delivery-counters guard on MeshForge was function-scoped and cost
+    ~45% of suite wall-clock (6:08 -> 8:54) plus a CANCELLED CI 3.9 job on
+    its timeout — and `cancelled` is not `success`, so it read as "3 of 4
+    green". Per-test isolation between cases that assert on CONTENT stays the
+    job of those files' own fixtures, which patch inside this one and win.
+    """
+    root = tmp_path_factory.mktemp("operator_home_isolation")
+    (root / ".config" / "meshanchor").mkdir(parents=True, exist_ok=True)
+
+    from utils.paths import MeshAnchorPaths, get_real_user_home as _get_real_home
+    real_home = _get_real_home()
+
+    def _make_guarded_export(original):
+        """Redirect an export that would land in the operator's REAL home.
+
+        Deliberately NOT a blanket redirect. ``get_config_dir()`` is resolved
+        at CALL time, so a test that has monkeypatched it to its own tmp dir
+        is passed straight through and still asserts what it means to assert
+        (``test_export_default_target_uses_meshanchor_config_dir``). Only a
+        write that resolves under the real user home is diverted.
+        """
+        def guarded(live, target_dir=None):
+            if target_dir is None:
+                resolved = MeshAnchorPaths.get_config_dir() / "templates"
+                try:
+                    resolved.relative_to(real_home)
+                except ValueError:
+                    target_dir = resolved      # already isolated by the caller
+                else:
+                    target_dir = root / ".config" / "meshanchor" / "templates"
+            return original(live, target_dir=target_dir)
+        return guarded
+
+    with ExitStack() as stack:
+        patched = []
+        for mod in _OPERATOR_STORE_MODULES:
+            for alias in (mod, f"src.{mod}"):
+                try:
+                    stack.enter_context(
+                        patch(f"{alias}.get_real_user_home", return_value=root))
+                    patched.append(alias)
+                except (ImportError, AttributeError, ModuleNotFoundError):
+                    continue
+
+        # templates/exported_<ts>.json — LITTER, a NEW file every run by
+        # design ("timestamp suffix makes each export unique", so nothing
+        # ever overwrites and nothing ever cleans up). 183 had accumulated
+        # on VolcanoAI before this line existed.
+        #
+        # ⚠️ This module does NOT resolve the path through
+        # ``get_real_user_home`` the way MeshForge's twin does — it goes
+        # through ``MeshAnchorPaths.get_config_dir()`` (line ~431). The
+        # MeshForge fixture's ``_OPERATOR_STORE_MODULES`` line ported
+        # verbatim would patch a name this module never calls, cover
+        # nothing, and still report itself as applied. Verified, not
+        # inherited.
+        #
+        # Wrap the WRITER, not the path. Two earlier shapes were wrong:
+        #   - patching ``MeshAnchorPaths.get_config_dir`` globally silences
+        #     ``test_paths.py``'s pin of it (trap 4 / honest_failure_modes
+        #     #5 — isolation must not disable the SSOT a test exists to
+        #     pin);
+        #   - rebinding this module's ``MeshAnchorPaths`` to a subclass
+        #     that overrides ``get_config_dir`` broke inner-patch-wins,
+        #     because a subclass attribute SHADOWS the parent attribute a
+        #     test monkeypatches — measured: it failed
+        #     ``test_capture_reads_gateway_config``, which redirects the
+        #     config dir and writes its own gateway.json. It also
+        #     needlessly redirected the module's gateway.json READ; only
+        #     the export WRITES litter.
+        # The real litter source is ``gateway_preflight._run_export``
+        # calling ``export_current_as_template(live)`` with no target_dir
+        # — not the two export tests, which are already isolated.
+        # Reached under three aliases: sys.path carries src/ AND
+        # src/launcher_tui.
+        for alias in ("launcher_tui.handlers._gateway_preflight_template",
+                      "src.launcher_tui.handlers._gateway_preflight_template",
+                      "handlers._gateway_preflight_template"):
+            try:
+                mod = __import__(alias, fromlist=["export_current_as_template"])
+                stack.enter_context(patch(
+                    f"{alias}.export_current_as_template",
+                    _make_guarded_export(mod.export_current_as_template)))
+                patched.append(alias)
+            except (ImportError, AttributeError, ModuleNotFoundError):
+                continue
+
+        # device_config.yaml — the RADIO config. It does not exist on
+        # VolcanoAI today and the sweep never saw it, but the WRITER does
+        # (`utils/device_config_store.py`, both `save_device_setting` and
+        # `save_device_settings` funnel through `_get_config_path`), so the
+        # only thing standing between the suite and a radio-bound file is
+        # that no test has called it yet. On MeshForge this was the one file
+        # here that could do real-world harm: its header says "Re-applied
+        # automatically after meshtasticd restart", and a wrong preset
+        # written on a SHORT_TURBO gateway would take it off the air. Gate
+        # the chokepoint now rather than after the file appears.
+        for alias in ("utils.device_config_store", "src.utils.device_config_store"):
+            try:
+                stack.enter_context(patch(
+                    f"{alias}._get_config_path",
+                    return_value=root / ".config" / "meshanchor" / "device_config.yaml"))
+                patched.append(alias)
+            except (ImportError, AttributeError, ModuleNotFoundError):
+                continue
+
+        if not patched:
+            raise RuntimeError(
+                "operator data-store isolation patched NOTHING — the suite "
+                "would write the operator's messages.db / message_queue.db / "
+                "LXMF ratchets / map_nodes.geojson / template litter"
+            )
+        yield root
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_delivery_counters_db(tmp_path_factory):
+    """Keep delivery-counter writes out of the operator's live DB.
+
+    ``delivery_counters`` is SQLite-backed at
+    ``~/.local/share/meshanchor/delivery_counters.db``, and the coupling is
+    INDIRECT: a test never names it — it constructs a
+    ``PersistentMessageQueue`` or a bridge, and lifecycle events flow
+    through. That is why per-file fixtures kept missing it.
+
+    Measured on VolcanoAI 2026-08-05: **queued 46,916 / sent 4,745 /
+    confirmed 0** — a 9.9:1 queued:sent ratio with nothing ever confirmed,
+    on a box that runs no gateway. A real gateway runs queued ~= sent with
+    large confirmed counts, so that whole DB is suite exhaust. MeshForge's
+    manager box showed the same signature (9.5:1) and its garbage was
+    briefly reasoned about AS fleet evidence before the write schedule gave
+    it away.
+
+    ⚠️ MeshForge needed FOUR env seams here; MeshAnchor has exactly ONE
+    (``MESHANCHOR_DELIVERY_COUNTERS_DB``). That is a verified absence, not
+    an assumption — the other three (``_DELIVERY_SNAPSHOT_STATE``,
+    ``_CONTENT_ID_VIEW_STATE``, ``_QUEUE_STATS_STATE``) have no MeshAnchor
+    equivalent because the state files behind them do not exist here.
+    MeshForge shipped this guard MISSING its fourth seam because
+    verification watched only the two files already in mind; the check is a
+    full-tree sweep, never a hand-picked list. Re-run the sweep if the
+    gateway grows a new state file.
+
+    Suite-wide and autouse on purpose: a gate, not a convention. A file that
+    sets the env var itself still wins (both point at tmp dirs), and a test
+    that needs the real resolution deletes the var explicitly.
+    """
+    root = tmp_path_factory.mktemp("delivery_counters_isolation")
+    var = "MESHANCHOR_DELIVERY_COUNTERS_DB"
+    prior = os.environ.get(var)
+    os.environ[var] = str(root / "delivery_counters.db")
+    for alias in ("gateway.delivery_counters", "src.gateway.delivery_counters"):
+        try:
+            __import__(alias)
+            sys.modules[alias]._reset_singleton_for_tests()
+        except (ImportError, AttributeError, ModuleNotFoundError, KeyError):
+            continue
+    yield root
+    if prior is None:
+        os.environ.pop(var, None)
+    else:
+        os.environ[var] = prior
+
+
 def pytest_collection_modifyitems(config, items):
     """Auto-skip certain tests in CI environment."""
     if not (CI or MESHANCHOR_CI):
