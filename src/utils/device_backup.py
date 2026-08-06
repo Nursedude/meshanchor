@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
+from utils.backup_paths import reserve_backup_path
 from utils.paths import get_real_user_home
 from utils.cli import find_meshtastic_cli
 
@@ -99,7 +100,11 @@ class DeviceBackupManager:
             # Auto-generate filename
             node_id = config.get("node_info", {}).get("node_id", "unknown")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = self.backup_dir / f"backup_{node_id}_{timestamp}.json"
+            output_path = reserve_backup_path(
+                self.backup_dir,
+                f"backup_{node_id}_{timestamp}.json",
+                on_exists="unique",
+            )
 
         self._save_backup(config, output_path)
         config["backup_file"] = str(output_path)
