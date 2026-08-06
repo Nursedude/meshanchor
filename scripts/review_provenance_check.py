@@ -21,9 +21,23 @@ Design: `.claude/plans/upshift_witness_design.md`. Three legs:
       You may always QUEUE; you may not CLAIM the rationed frontier pass on a
       smaller model. Unknown/absent ledger model → warn, never block.
 
-  Leg 3 (advisory nudge): src lines changed since the last provenance boundary,
-      on a non-frontier session, exceeding a threshold → one advisory block.
-      Never affects the exit code.
+  Structure leg (HARD on new damage, warn on old): a table row some parser
+      would silently misread — a merged line (two rows on one line: hid a
+      whole completed pass for 12 days, found 2026-08-06) or a literal ``|``
+      in prose (truncates every later cell). New malformed rows block (the
+      reword is a one-minute fix); pre-existing ones warn.
+
+  Leg 3 (advisory nudge): src+scripts lines changed since the last CLOSING provenance
+      boundary, on a non-frontier session, exceeding a threshold → one advisory
+      block. Never affects the exit code. The boundary is the newest commit
+      whose diff ADDS a completed-table row (first cell a date) — a commit that
+      merely QUEUES a worklist row does not advance it. Found 2026-07-26 (F3,
+      `.claude/plans/audit_gap_2026_07_26.md`): keying the boundary on "last
+      commit touching the file" meant recording 12k lines of unreviewed debt
+      reset the nudge to zero — writing down that work is unreviewed persuaded
+      the guard it was reviewed. Accepted limits (advisory, both over- not
+      under-fire relative to a coverage claim): a SCOPED closing row still
+      advances the boundary, and an edit to an old completed row does too.
 
 Stdlib only. Fail-CLOSED on the two hard legs where an obligation exists (an
 absent/empty provenance file must NOT read as "no obligations" —
@@ -75,16 +89,46 @@ FRONTIER_MODEL_PREFIXES = ("claude-fable-",)
 #: witness row. Deliberately the high-signal phrasings this repo's convention
 #: uses; bare "reviewed" is excluded (too common in incidental use — a false
 #: block costs a real push, so bias to precision, honest about the limit).
+#:
+#: The numeric patterns carry a `(?<![-\d/.])` guard so an ISO DATE cannot pose
+#: as a count: in "2026-07-25 findings" the day number is preceded by a hyphen,
+#: and every shorter start position is preceded by a digit. Without it an
+#: ordinary dated summary line blocked a push (measured 3× on 2026-07-25).
+#: `\s+` is deliberately kept (it spans newlines) so a genuine claim wrapped
+#: across a line break still counts — the date, not the newline, was the bug.
 REVIEW_CLAIM_PATTERNS = (
     r"self[-\s]?review",
     r"adversarial",
     r"\bcode[-\s]?review\b",
     r"/code-review",
     r"\breview pass\b",
-    r"\b\d+\s+finding",       # "3 findings", "11 findings"
-    r"\b\d+[-\s]?finder\b",   # "6-finder", "10 finder"
-    r"\b\d+[-\s]?angle\b",    # "6-angle adversarial"
+    r"(?<![-\d/.])\b\d{1,3}\s+finding",       # "3 findings", "11 findings"
+    r"(?<![-\d/.])\b\d{1,3}[-\s]?finder\b",   # "6-finder", "10 finder"
+    r"(?<![-\d/.])\b\d{1,3}[-\s]?angle\b",    # "6-angle adversarial"
+    # A finding attributed to a review — "the Pri-1 finding from the
+    # 2026-07-23 gateway review". The numeric guard above deliberately stops
+    # reading a hyphenated LABEL ("pri-1", "thread-3") as a count, and this
+    # keeps the genuinely review-attributed ones (6afe194c) claiming without
+    # resurrecting the label-only false positives (7867f9f5, which references
+    # a scope-doc thread and no review at all). Same-clause only.
+    r"\bfinding[s]?\b[^.\n]{0,40}\breview\b",
 )
+
+#: Words that flip a claim into a DENIAL. Without these the gate had no
+#: negation awareness: "no review pass was run here" matched as strongly as an
+#: assertion, so the honest disclaimer was itself unpublishable.
+NEGATION_TERMS = (
+    r"\b(?:no|not|never|without|nor|non|neither|"
+    r"isn't|wasn't|weren't|didn't|doesn't|won't|can't|cannot)\b"
+)
+
+#: How far back to look for a negator. Short on purpose — a negator in an
+#: earlier clause must not immunise a later real claim.
+NEGATION_WINDOW_CHARS = 30
+
+#: A negator before one of these does NOT reach across it. Keeps
+#: "not a quick patch; a full code-review found bugs" a real claim.
+NEGATION_STOP_CHARS = (".", ";", ":", "\n", "—", "|")
 
 #: Phrases in a COMPLETED-row Mechanism column that ASSERT the rationed frontier
 #: pass ran. A non-frontier session may not stamp these — it queues instead.
@@ -131,12 +175,37 @@ def newest_ledger_model_id(events):
     return best_model
 
 
+def _is_negated(low, start):
+    """True if the claim beginning at ``start`` is DENIED by a nearby negator.
+
+    Looks back a short window, then discards anything at or before the last
+    clause boundary in it — so "not a quick patch; a full code-review found
+    bugs" stays a real claim while "no review pass was run here" does not.
+    """
+    window = low[max(0, start - NEGATION_WINDOW_CHARS):start]
+    for sep in NEGATION_STOP_CHARS:
+        idx = window.rfind(sep)
+        if idx != -1:
+            window = window[idx + 1:]
+    return re.search(NEGATION_TERMS, window) is not None
+
+
 def commit_claims_review(message):
-    """True if a commit message asserts a review happened."""
+    """True if a commit message ASSERTS a review happened.
+
+    A denial is not an assertion: every match is checked against a nearby
+    negator, so a message that says a pass did NOT happen does not demand a
+    provenance row (which would be a false witness). Precision matters here —
+    a false block costs a real push.
+    """
     if not message:
         return False
     low = message.lower()
-    return any(re.search(p, low) for p in REVIEW_CLAIM_PATTERNS)
+    for pat in REVIEW_CLAIM_PATTERNS:
+        for m in re.finditer(pat, low):
+            if not _is_negated(low, m.start()):
+                return True
+    return False
 
 
 def provenance_mentions_sha(prov_text, full_sha):
@@ -169,6 +238,29 @@ def parse_completed_rows(text):
             continue
         rows.append((cells[0], cells[2], s))
     return rows
+
+
+def malformed_table_rows(text):
+    """Table lines some consumer will silently misread. Added 2026-08-06 after
+    an audit found the live ledger had carried a MERGED row for 12 days (the
+    2026-07-25 Pri-2 commit overwrote the taxonomy row's leading cells — 36
+    recorded passes, 35 parseable rows) and literal ``|| true`` prose had
+    truncated the 07-29 row's fix/residual cells. Flags a DATE-first row whose
+    cell count is not exactly 5, and any other ``|`` line whose cell count is
+    neither 3 (worklist) nor 5 (completed header/row). Returns
+    ``[(line_no, cell_count, raw_line)]``."""
+    bad = []
+    for i, line in enumerate((text or "").splitlines(), 1):
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if re.match(r"\d{4}-\d{2}-\d{2}", cells[0]):
+            if len(cells) != 5:
+                bad.append((i, len(cells), s))
+        elif len(cells) not in (3, 5):
+            bad.append((i, len(cells), s))
+    return bad
 
 
 def row_claims_frontier_tier(mechanism):
@@ -288,15 +380,56 @@ def _read_provenance_at(repo, ref):
     return _git(repo, ["show", f"{ref}:{PROVENANCE_REL}"])
 
 
-def _last_provenance_commit(repo):
-    out = _git(repo, ["log", "-1", "--format=%H", "--", PROVENANCE_REL])
-    if not out:
+#: An added completed-table row in a provenance diff — the date-cell
+#: discriminator `parse_completed_rows` uses, seen through `git log -p` (the
+#: leading '+'). This is what makes a commit a CLOSING commit for leg 3.
+_CLOSING_ROW_RE = re.compile(r"^\+\s*\|\s*\d{4}-\d{2}-\d{2}\s*\|", re.M)
+
+#: How many provenance-touching commits leg 3 walks looking for a closing row.
+#: Closing rows land every few days; 60 covers months of history.
+_CLOSING_WALK_LIMIT = 60
+
+
+def closing_boundary_from_log(log_text):
+    """Newest sha in a ``git log --format=%x1e%H -p`` walk whose provenance
+    diff ADDS a completed-table row; falls back to the OLDEST walked sha when
+    none does (the advisory then over-fires rather than going quiet — the F3
+    failure was the boundary advancing on a commit that merely queued debt).
+    None when the log is empty/unreadable."""
+    if not log_text:
         return None
-    return out.strip() or None
+    oldest = None
+    for chunk in log_text.split("\x1e"):
+        chunk = chunk.strip("\n ")
+        if not chunk:
+            continue
+        sha, _, diff = chunk.partition("\n")
+        sha = sha.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            continue
+        oldest = sha
+        if _CLOSING_ROW_RE.search(diff):
+            return sha
+    return oldest
+
+
+def _last_closing_provenance_commit(repo):
+    out = _git(repo, ["log", "-n", str(_CLOSING_WALK_LIMIT),
+                      "--format=%x1e%H", "-p", "--", PROVENANCE_REL],
+               timeout=30)
+    if out is None:
+        return None
+    return closing_boundary_from_log(out)
 
 
 def _src_lines_changed(repo, since_sha):
-    out = _git(repo, ["diff", "--numstat", f"{since_sha}..HEAD", "--", "src/"])
+    """Changed lines since the boundary across the reviewable surfaces:
+    src/ plus the enforcement layer itself (scripts/, .githooks/) — the two
+    most recent Pri-1 arcs (pytest-rc trust, guard-spine) lived almost
+    entirely in scripts/ and the hooks, and a src/-only counter was blind to
+    exactly the layer whose 5.5-month inertness the 08-05 arc exposed."""
+    out = _git(repo, ["diff", "--numstat", f"{since_sha}..HEAD", "--",
+                      "src/", "scripts/", ".githooks/"])
     if out is None:
         return None
     total = 0
@@ -391,6 +524,27 @@ def _fmt_leg2_block(rows, model_id):
     return "\n".join(lines)
 
 
+def _fmt_structure_block(rows):
+    lines = [
+        "UPSHIFT-WITNESS (structure): new table row(s) in",
+        f"{PROVENANCE_REL} are malformed — a parser-invisible row is a silent",
+        "hole in review coverage (a merged line hid a whole completed pass for",
+        "12 days; a literal | in prose truncates every later cell):",
+        "",
+    ]
+    for line_no, n, raw in rows:
+        lines.append(f"  line {line_no}: {n} cells (a completed row has "
+                     "exactly 5, a worklist row 3)")
+        lines.append(f"    {raw[:90]}")
+    lines += [
+        "",
+        "One row per line; reword any literal | in prose (e.g. \"an or-true",
+        "guard\" instead of quoted shell). Then re-push.",
+        "(Override, sparingly: git push --no-verify)",
+    ]
+    return "\n".join(lines)
+
+
 def run(repo, rev_range, base_ref, ledger_path, witness_path):
     """Execute all three legs. Returns (exit_code, out_lines, warn_lines)."""
     out = []
@@ -429,22 +583,48 @@ def run(repo, rev_range, base_ref, ledger_path, witness_path):
                         "but the ledger carries no model_id — warning, not "
                         "blocking (unobservable ≠ violation)")
 
+    # --- Structure leg (hard on NEW damage, warn on pre-existing) ----------
+    # A malformed row is invisible to every parser of this file — a merged
+    # line hides a whole pass (the 2026-07-25 line-merge, found 12 days
+    # later), a stray literal | truncates every later cell. New damage
+    # blocks (the fix is a one-minute reword); damage already in the base
+    # only warns, so unrelated pushes aren't held hostage to old debt.
+    structure_new = []
+    malformed = malformed_table_rows(prov_head)
+    if malformed:
+        if base_prov is None:
+            warn.append(
+                f"structure: {len(malformed)} malformed table row(s) in "
+                f"{PROVENANCE_REL} — base unreadable, cannot tell which are "
+                "new; not blocking")
+        else:
+            base_lines = {line.strip() for line in base_prov.splitlines()}
+            structure_new = [m for m in malformed if m[2] not in base_lines]
+            preexisting = len(malformed) - len(structure_new)
+            if preexisting:
+                warn.append(
+                    f"structure: {preexisting} pre-existing malformed table "
+                    f"row(s) in {PROVENANCE_REL} — repair when convenient")
+
     # --- Leg 3 (advisory) --------------------------------------------------
     leg3_msg = None
     if session_is_frontier is False:  # only nudge a KNOWN non-frontier session
-        boundary = _last_provenance_commit(repo)
+        boundary = _last_closing_provenance_commit(repo)
         if boundary:
             changed = _src_lines_changed(repo, boundary)
             if changed is not None and changed > UNREVIEWED_SRC_LINES_NUDGE:
                 leg3_msg = (
-                    f"UPSHIFT-WITNESS (leg 3, advisory): {changed} src lines "
-                    f"changed since the last reviewed boundary ({boundary[:9]}) "
-                    f"> {UNREVIEWED_SRC_LINES_NUDGE}. Consider queueing an "
-                    "upshift row (review_provenance worklist) for the next "
-                    "frontier pass. This never blocks.")
+                    f"UPSHIFT-WITNESS (leg 3, advisory): {changed} src+scripts "
+                    f"lines changed since the last CLOSING review boundary "
+                    f"({boundary[:9]}) > {UNREVIEWED_SRC_LINES_NUDGE}. "
+                    "Consider queueing an upshift row (review_provenance "
+                    "worklist) for the next frontier pass. This never blocks.")
+        else:
+            warn.append("leg3: could not resolve the closing review boundary "
+                        "(git log unreadable/timed out) — advisory skipped")
 
     # --- Verdict + witnesses ----------------------------------------------
-    blocked = bool(leg1_violations or leg2_violations)
+    blocked = bool(leg1_violations or leg2_violations or structure_new)
     if leg1_violations:
         out.append(_fmt_leg1_block(leg1_violations))
         append_witness(
@@ -455,6 +635,11 @@ def run(repo, rev_range, base_ref, ledger_path, witness_path):
         append_witness(
             f"leg2 BLOCK: {len(leg2_violations)} frontier-claim row(s) under "
             f"model={model_id}", witness_path)
+    if structure_new:
+        out.append(_fmt_structure_block(structure_new))
+        append_witness(
+            f"structure BLOCK: {len(structure_new)} new malformed table "
+            "row(s)", witness_path)
     if leg3_msg:
         out.append(leg3_msg)
         append_witness(f"leg3 advisory under model={model_id}", witness_path)
@@ -499,6 +684,10 @@ def main(argv=None):
         code, out, warn = run(repo, rev_range, args.base_ref,
                               ledger_path, args.witness)
     except Exception as e:  # noqa: BLE001 — a gate bug must not wedge a push
+        # Pass open, but never silently: a fail-dark gate is indistinguishable
+        # from a healthy one (#9) — the witness log is what makes "did the
+        # guard even run?" answerable after the fact.
+        append_witness(f"internal error — PASSED OPEN: {e!r}", args.witness)
         print(f"review_provenance_check: WARN — internal error ({e!r}); "
               "passing open", file=sys.stderr)
         return 0

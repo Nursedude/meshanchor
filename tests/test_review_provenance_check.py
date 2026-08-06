@@ -122,6 +122,104 @@ class TestCommitClaimsReview(unittest.TestCase):
         self.assertTrue(rpc.commit_claims_review("fix: 3 findings from pass"))
 
 
+class TestClaimDetectionFalsePositives(unittest.TestCase):
+    """Three false positives measured on 2026-07-25 — each cost a real push.
+
+    The gate's own docstring says it biases to precision because a false block
+    costs a real push. These are the cases where it didn't. The gate reads
+    tokens, not meaning; these tests pin the two places that matters most.
+    """
+
+    def test_iso_date_before_the_keyword_is_not_a_count(self):
+        """"2026-07-25 findings" — the DATE's day number matched the
+        numeric-count pattern. An ordinary dated summary line tripped it."""
+        self.assertFalse(rpc.commit_claims_review(
+            "docs: MF012 demotion pass + the two 2026-07-25 findings"))
+
+    def test_iso_date_across_a_newline_is_not_a_count(self):
+        r"""\s spans newlines, so a wrapped date+keyword matched too."""
+        self.assertFalse(rpc.commit_claims_review(
+            "docs: notes\n\nthe DATE in \"2026-07-25\nfindings\" tripped it"))
+
+    def test_denying_a_review_is_not_claiming_one(self):
+        """The honest disclaimer was itself unpublishable: a sentence DENYING
+        a pass happened matched as strongly as one asserting it."""
+        self.assertFalse(rpc.commit_claims_review(
+            "docs: reworded — no review pass was run here, so a provenance "
+            "row would have been a false witness"))
+
+    def test_other_negations_are_honoured(self):
+        for msg in (
+            "docs: this was not a code-review, just a typo fix",
+            "docs: shipped without a self-review",
+            "chore: never ran an adversarial pass on this",
+        ):
+            with self.subTest(msg=msg):
+                self.assertFalse(rpc.commit_claims_review(msg))
+
+
+class TestClaimDetectionStillCatchesRealClaims(unittest.TestCase):
+    """The precision fixes must not open a hole — a real claim still blocks."""
+
+    def test_real_counts_still_claim(self):
+        for msg in ("fix: 3 findings from the pass",
+                    "fix: 11 findings, all confirmed",
+                    "fix: 6-finder sweep",
+                    "fix: 6-angle adversarial pass"):
+            with self.subTest(msg=msg):
+                self.assertTrue(rpc.commit_claims_review(msg))
+
+    def test_wrapped_real_count_still_claims(self):
+        """Precision must not cost a genuine wrapped claim — a commit body
+        wrapped at 72 chars can split the number from the keyword."""
+        self.assertTrue(rpc.commit_claims_review(
+            "fix: the arc\n\nthe pass produced 8\nfindings, all confirmed"))
+
+    def test_negation_does_not_leak_past_a_sentence_boundary(self):
+        """A negator in a PRIOR clause must not suppress a later real claim."""
+        self.assertTrue(rpc.commit_claims_review(
+            "fix: this was not a quick patch; a full code-review found bugs"))
+        self.assertTrue(rpc.commit_claims_review(
+            "fix: no shortcuts taken. self-review of the whole arc"))
+
+    def test_dated_row_with_a_real_count_still_claims(self):
+        """A date elsewhere must not immunise a genuine count."""
+        self.assertTrue(rpc.commit_claims_review(
+            "docs: 2026-07-25 audit — 8 findings, all confirmed"))
+
+
+class TestHyphenatedLabelVsAttributedFinding(unittest.TestCase):
+    """Both from REAL history — the only two commits in 800 whose verdict the
+    2026-07-25 precision fix changed. They look alike and must not be treated
+    alike, so the discriminator is pinned here.
+
+    The numeric guard stops a hyphenated LABEL ("pri-1", "thread-3") posing as
+    a count. That is right for both — but one of them attributes its finding to
+    a REVIEW and so must still demand a witness row.
+    """
+
+    def test_finding_attributed_to_a_review_still_claims(self):
+        """6afe194c — genuinely review-derived; it has a provenance row."""
+        self.assertTrue(rpc.commit_claims_review(
+            "fix: gateway_heartbeat peer-liveness on monotonic clock (Pri-1)\n\n"
+            "The Pri-1 finding from the 2026-07-23 gateway review. _check_peers "
+            "aged peer liveness on wall-clock time.time()."))
+
+    def test_label_only_finding_with_no_review_does_not_claim(self):
+        """7867f9f5 — 'Thread-3 finding' is a scope-doc thread, not a review.
+        Caught before only because '3' read as a count."""
+        self.assertFalse(rpc.commit_claims_review(
+            "docs(provisioner): config-delta assertion-upgrade DONE\n\n"
+            "Records the Thread-3 finding: the map defaults are code-baked / "
+            "deployment-specific (not operator-settable)."))
+
+    def test_attribution_does_not_reach_across_a_sentence(self):
+        """Same-clause only — an unrelated later mention must not attribute."""
+        self.assertFalse(rpc.commit_claims_review(
+            "docs: records the thread-3 finding. separately, the review "
+            "cadence doc moved"))
+
+
 class TestProvenanceMentionsSha(unittest.TestCase):
     def test_short_sha_prefix_matches_full(self):
         full = "7282dad4835d4fd09598d303492cf7c397d0561e"
@@ -351,6 +449,86 @@ class TestLeg3Integration(unittest.TestCase):
             self.assertNotIn("leg 3", "\n".join(out))
 
 
+class TestClosingBoundaryPure(unittest.TestCase):
+    """F3 (2026-07-26): the leg-3 boundary must come from a commit that ADDS a
+    completed-table row (a closing commit), never from one that merely queues
+    a worklist row — queuing debt used to silence the nudge about that debt."""
+
+    SHA_A = "a" * 40
+    SHA_B = "b" * 40
+    SHA_C = "c" * 40
+
+    @staticmethod
+    def _chunk(sha, added_lines):
+        diff = "\n".join(f"+{l}" for l in added_lines)
+        return f"\x1e{sha}\ndiff --git a/x b/x\n@@ -1 +1 @@\n{diff}\n"
+
+    def test_queuing_commit_does_not_advance_boundary(self):
+        log = (self._chunk(self.SHA_A, ["| 1 | queued scope | why |"]) +
+               self._chunk(self.SHA_B, ["| 2026-07-23 | scope | mech | fix | res |"]))
+        self.assertEqual(rpc.closing_boundary_from_log(log), self.SHA_B)
+
+    def test_closing_commit_is_the_boundary(self):
+        log = self._chunk(self.SHA_A, ["| 2026-07-26 | scope | mech | fix | res |"])
+        self.assertEqual(rpc.closing_boundary_from_log(log), self.SHA_A)
+
+    def test_no_closing_row_falls_back_to_oldest_walked(self):
+        # Direction matters: with no closing row in the window the advisory
+        # must OVER-fire (oldest boundary), never go quiet on the newest.
+        log = (self._chunk(self.SHA_A, ["| — | queued | why |"]) +
+               self._chunk(self.SHA_B, ["| Pri | Scope | Why |"]) +
+               self._chunk(self.SHA_C, ["prose only, no table row"]))
+        self.assertEqual(rpc.closing_boundary_from_log(log), self.SHA_C)
+
+    def test_removed_completed_row_is_not_a_close(self):
+        log = (f"\x1e{self.SHA_A}\ndiff --git a/x b/x\n@@ -1 +1 @@\n"
+               "-| 2026-07-23 | scope | mech | fix | res |\n" +
+               self._chunk(self.SHA_B, ["| 2026-07-20 | s | m | f | r |"]))
+        self.assertEqual(rpc.closing_boundary_from_log(log), self.SHA_B)
+
+    def test_empty_or_garbage_log(self):
+        self.assertIsNone(rpc.closing_boundary_from_log(""))
+        self.assertIsNone(rpc.closing_boundary_from_log(None))
+        self.assertIsNone(rpc.closing_boundary_from_log("\x1enot-a-sha\n+| x |"))
+
+
+class TestLeg3QueuingDoesNotSilence(unittest.TestCase):
+    """Integration form of F3 — red against the pre-fix boundary (last commit
+    touching the file), green with the closing-row boundary."""
+
+    COMPLETED_ROW = "| 2026-07-23 | full window | mech | abc1234 | none |\n"
+
+    def test_queue_commit_after_big_diff_still_nudges(self):
+        with tempfile.TemporaryDirectory() as repo:
+            _init_repo(repo)
+            _write(repo, rpc.PROVENANCE_REL,
+                   PROV_HEADER + self.COMPLETED_ROW + WORKLIST)
+            _commit(repo, "docs: review pass row (closing boundary)")
+            n = rpc.UNREVIEWED_SRC_LINES_NUDGE + 100
+            _write(repo, "src/big.py",
+                   "\n".join(f"a{i} = {i}" for i in range(n)) + "\n")
+            _commit(repo, "feat: large src change (no review claim)")
+            # The F3 shape: a later commit QUEUES a worklist row. This used to
+            # move the boundary here and zero the nudge.
+            _write(repo, rpc.PROVENANCE_REL,
+                   PROV_HEADER + self.COMPLETED_ROW + WORKLIST +
+                   "| 1 | the big unreviewed window | frontier-shaped |\n")
+            _commit(repo, "docs: queue unreviewed window for frontier")
+            ledger = os.path.join(repo, "ledger.jsonl")
+            with open(ledger, "w") as fh:
+                fh.write('{"kind":"claim","ts":100,'
+                         '"model_id":"claude-opus-4-8[1m]"}\n')
+            base = subprocess.run(
+                ["git", "rev-list", "--max-parents=0", "HEAD"], cwd=repo,
+                capture_output=True, text=True, timeout=30).stdout.strip()
+            code, out, _ = rpc.run(repo, f"{base}..HEAD", base,
+                                   ledger_path=ledger,
+                                   witness_path=os.path.join(repo, "wit.log"))
+            self.assertEqual(code, 0, "leg3 never blocks")
+            self.assertIn("leg 3", "\n".join(out),
+                          "queuing debt must not silence the nudge about it")
+
+
 class TestWitnessAndFailOpen(unittest.TestCase):
     def test_witness_written_on_block(self):
         with tempfile.TemporaryDirectory() as repo:
@@ -431,6 +609,150 @@ class TestCliSubprocess(unittest.TestCase):
             _commit(repo, "fix: correct a timeout bound")  # no review claim
             r = self._invoke(repo, base)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+class TestTableStructurePure(unittest.TestCase):
+    """malformed_table_rows — added 2026-08-06 after an audit found the live
+    ledger had carried a MERGED row for 12 days (the 2026-07-25 Pri-2 commit
+    overwrote the taxonomy row's leading cells: 36 recorded passes, 35
+    parseable rows) and literal ``|| true`` prose had truncated the 07-29
+    row's fix/residual cells. A parser-invisible row is a silent hole in
+    review coverage — exactly the absence this ledger exists to make legible."""
+
+    def test_wellformed_rows_pass(self):
+        text = (
+            "| Date | Scope | Mechanism | Fix commits | Residuals |\n"
+            "|------|-------|-----------|-------------|-----------|\n"
+            "| 2026-08-06 | scope | mech | `abc1234` | none |\n"
+            "| Pri | Scope | Why |\n"
+            "| Pri-1 | queued arc | frontier-shaped |\n"
+            "prose outside tables is ignored\n"
+        )
+        self.assertEqual(rpc.malformed_table_rows(text), [])
+
+    def test_merged_row_detected(self):
+        merged = ("| 2026-08-06 | scope | mech | fix | residual "
+                  "| second-row scope | second mech | second fix | second residual |")
+        bad = rpc.malformed_table_rows(merged)
+        self.assertEqual(len(bad), 1)
+        self.assertEqual(bad[0][1], 9)
+
+    def test_stray_pipe_in_prose_detected(self):
+        row = "| 2026-08-06 | scope | mech | fix | fell through via `|| true` guard |"
+        bad = rpc.malformed_table_rows(row)
+        self.assertEqual(len(bad), 1, "a literal | in prose truncates cells")
+
+    def test_short_date_row_detected(self):
+        bad = rpc.malformed_table_rows("| 2026-08-06 | scope | mech | fix |")
+        self.assertEqual(len(bad), 1)
+        self.assertEqual(bad[0][1], 4)
+
+    def test_queued_row_wrong_cells_detected(self):
+        bad = rpc.malformed_table_rows("| **BIG ARC — scope text** | why |")
+        self.assertEqual(len(bad), 1)
+        self.assertEqual(bad[0][1], 2)
+
+
+class TestTableStructureIntegration(unittest.TestCase):
+    MERGED = ("| 2026-08-06 | scope | mech | fix | residual "
+              "| ghost scope | ghost mech | ghost fix | ghost residual |\n")
+
+    def _ledger(self, repo):
+        path = os.path.join(repo, "ledger.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write('{"kind":"claim","ts":100,"model_id":"claude-fable-5"}\n')
+        return path
+
+    def test_new_malformed_row_blocks(self):
+        with tempfile.TemporaryDirectory() as repo:
+            _init_repo(repo)
+            _write(repo, rpc.PROVENANCE_REL, PROV_HEADER + WORKLIST)
+            base = _commit(repo, "chore: base")
+            _write(repo, rpc.PROVENANCE_REL, PROV_HEADER + self.MERGED + WORKLIST)
+            _commit(repo, "docs: record pass (merged row)")
+            code, out, _ = rpc.run(repo, f"{base}..HEAD", base,
+                                   ledger_path=self._ledger(repo),
+                                   witness_path=os.path.join(repo, "wit.log"))
+            self.assertEqual(code, 1, f"new malformed row must block; out={out}")
+            self.assertIn("structure", "\n".join(out))
+
+    def test_preexisting_malformed_row_warns_not_blocks(self):
+        with tempfile.TemporaryDirectory() as repo:
+            _init_repo(repo)
+            _write(repo, rpc.PROVENANCE_REL, PROV_HEADER + self.MERGED + WORKLIST)
+            base = _commit(repo, "chore: base already carries the damage")
+            _write(repo, "src/x.py", "x = 1\n")
+            _commit(repo, "fix: unrelated change")
+            code, out, warn = rpc.run(repo, f"{base}..HEAD", base,
+                                      ledger_path=self._ledger(repo),
+                                      witness_path=os.path.join(repo, "wit.log"))
+            self.assertEqual(code, 0, f"pre-existing damage must not block; out={out}")
+            self.assertTrue(any("structure" in w for w in warn), warn)
+
+
+class TestLiveLedgerStructure(unittest.TestCase):
+    """Pins the REAL ledger file — the repaired state, so the two damage
+    classes found 2026-08-06 (merged row, stray pipe) cannot silently recur."""
+
+    LIVE = os.path.join(os.path.dirname(__file__), "..", rpc.PROVENANCE_REL)
+
+    def _text(self):
+        with open(self.LIVE, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_no_malformed_rows(self):
+        self.assertEqual(rpc.malformed_table_rows(self._text()), [])
+
+    # (MF's twin additionally pins its 2026-08-06 un-merged taxonomy row —
+    # that row exists only in MF's ledger, so the pin is MF-only.)
+
+
+class TestLeg3CountsScripts(unittest.TestCase):
+    """The two most recent Pri-1 arcs (pytest-rc trust, guard-spine) lived in
+    scripts/ and the hooks — a src/-only debt counter was blind to exactly the
+    enforcement layer whose 5.5-month inertness the 08-05 arc exposed."""
+
+    def test_scripts_only_diff_still_nudges(self):
+        with tempfile.TemporaryDirectory() as repo:
+            _init_repo(repo)
+            _write(repo, rpc.PROVENANCE_REL, PROV_HEADER + WORKLIST)
+            _commit(repo, "chore: base + provenance boundary")
+            n = rpc.UNREVIEWED_SRC_LINES_NUDGE + 100
+            _write(repo, "scripts/big.sh",
+                   "\n".join(f"echo {i}" for i in range(n)) + "\n")
+            _commit(repo, "feat: large scripts change (no review claim)")
+            ledger = os.path.join(repo, "ledger.jsonl")
+            with open(ledger, "w") as fh:
+                fh.write('{"kind":"claim","ts":100,"model_id":"claude-opus-4-8[1m]"}\n')
+            base = subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"],
+                                  cwd=repo, capture_output=True, text=True,
+                                  timeout=30).stdout.strip()
+            code, out, _ = rpc.run(repo, f"{base}..HEAD", base, ledger_path=ledger,
+                                   witness_path=os.path.join(repo, "wit.log"))
+            self.assertEqual(code, 0, "leg3 never blocks")
+            self.assertIn("leg 3", "\n".join(out))
+
+
+class TestInternalErrorWitness(unittest.TestCase):
+    """A gate bug passes open by design (must not wedge a push) — but a silent
+    pass-open is a fail-dark (#9): it must leave a witness-log line."""
+
+    def test_pass_open_leaves_witness(self):
+        with tempfile.TemporaryDirectory() as d:
+            wit = os.path.join(d, "wit.log")
+            orig = rpc.run
+
+            def boom(*_a, **_k):
+                raise RuntimeError("drill")
+
+            rpc.run = boom
+            try:
+                code = rpc.main(["--witness", wit])
+            finally:
+                rpc.run = orig
+            self.assertEqual(code, 0, "internal error must pass open")
+            with open(wit, encoding="utf-8") as fh:
+                self.assertIn("PASSED OPEN", fh.read())
 
 
 if __name__ == "__main__":
