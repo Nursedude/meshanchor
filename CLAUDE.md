@@ -52,7 +52,7 @@ Forked from MeshForge main on 2026-04-01. Shares the same TUI framework, gateway
 
 | Branch | Version | Status |
 |--------|---------|--------|
-| `main` | `0.1.0-alpha` | MeshCore-primary NOC. Not yet field-tested. |
+| `main` | `0.2.0-beta` | MeshCore-primary NOC. Field-deployed continuously since 2026-05-02 (`meshanchor-server`). Coverage maps w/ live GPS and full 3-way concurrent traffic remain unvalidated. (Check `src/__version__.py` — this table goes stale.) |
 
 - Single branch for now. Feature branches use `claude/` prefix → PR to main.
 - **Sister project**: [MeshForge](https://github.com/Nursedude/meshforge) (Meshtastic-primary)

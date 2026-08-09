@@ -6,18 +6,40 @@ Forked from MeshForge (https://github.com/Nursedude/meshforge)
 MeshAnchor is the MeshCore-primary sister project to MeshForge.
 """
 
-__version__ = "0.1.0-alpha"
-__version_info__ = (0, 1, 0, 'alpha')
-__release_date__ = "2026-04-01"
+__version__ = "0.2.0-beta"
+__version_info__ = (0, 2, 0, 'beta')
+__release_date__ = "2026-08-09"
 __app_name__ = "MeshAnchor"
 __app_description__ = "MeshCore Network Operations Center"
 __app_tagline__ = "Anchor. Bridge. Monitor."
 __target_audience__ = "RF engineers, network operators, and amateur radio operators"
-__status__ = "alpha"  # alpha=experimental, beta=testing, stable=production
+__status__ = "beta"  # alpha=experimental, beta=testing, stable=production
 __sister_project__ = "MeshForge (https://github.com/Nursedude/meshforge)"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.2.0-beta",
+        "date": "2026-08-09",
+        "status": "beta",
+        "changes": [
+            "ALPHA -> BETA: the 0.1.0-alpha tag was set at extraction (2026-04-01) "
+            "and never revisited — 130 days and 616 commits. It described the age "
+            "of the repo, not the maturity of the software.",
+            "Evidence: 210 test files / 6,244 passing tests / 438 source modules, "
+            "and continuous field deployment on the canonical NOC since 2026-05-02. "
+            "MeshForge first called itself beta at 1 test file and 297 commits.",
+            "The tag was also working against its own goal: the README asks for "
+            "field testers, while 'alpha' conventionally reads as 'do not rely on "
+            "this'. Beta is the label that recruits testers.",
+            "STILL UNVALIDATED (unchanged by this bump): coverage maps with live "
+            "GPS position data, and full 3-way (MeshCore <-> Meshtastic <-> RNS) "
+            "concurrent traffic. Independent testing on other MeshCore hardware "
+            "remains the most valuable contribution.",
+            "0.2.0 rather than matching MeshForge's 0.6.x: the number reflects "
+            "MeshAnchor's own history since extraction, not borrowed lineage.",
+        ]
+    },
     {
         "version": "0.5.5-beta",
         "date": "2026-03-09",

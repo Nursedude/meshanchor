@@ -8,7 +8,7 @@ Working on MeshAnchor: tests, gates, and the contribution path.
 
 | Branch | Version | Focus |
 |--------|---------|-------|
-| `main` | `0.1.0-alpha` | MeshCore-primary NOC, alpha testing |
+| `main` | see `src/__version__.py` | MeshCore-primary NOC (the SSOT is the version file; a copy here is unguarded and goes stale) |
 
 **Sister project:** [MeshForge](https://github.com/Nursedude/meshforge) is the
 Meshtastic-primary NOC — extracted from the same codebase on 2026-04-01.

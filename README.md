@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.1.0--alpha-orange.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.2.0--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-passing-blue.svg" alt="Tests"></a>
@@ -39,7 +39,7 @@ sudo python3 src/launcher_tui/main.py
 **Built for:** MeshCore developers, RF engineers, network operators, amateur
 radio operators, and emergency comms planners.
 
-> **ALPHA — field-deployed and accumulating mileage. More testers wanted.**
+> **BETA — field-deployed since 2026-05-02 and accumulating mileage. More testers wanted.**
 >
 > The canonical NOC (Pi 4B + RAK Heltec V3 in Serial Companion mode) has run as
 > a continuous deployment since 2026-05-02 and is the source of truth for field
@@ -105,7 +105,7 @@ Companion mode.
 
 ---
 
-## What Works (v0.1.0-alpha)
+## What Works (v0.2.0-beta)
 
 - **MeshCore integration** — radio management, config, CLI passthrough
 - **Gateway bridge** — MeshCore ⇄ Meshtastic / RNS via `CanonicalMessage`

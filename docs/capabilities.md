@@ -2,7 +2,10 @@
 
 The full capability inventory, including what is proven in the field and what still needs independent testing.
 
-## What Works (v0.1.0-alpha)
+## What Works
+
+<!-- Version-tagged heading lives in the README, where the
+     version guard can see it; a copy here would go stale unguarded. -->
 
 ### Status Definitions
 

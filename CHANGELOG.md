@@ -16,8 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Work landed at `0.1.0-alpha` since extraction, not yet version-bumped. This is a
-**representative** list — `git log` is the authoritative record:
+## [0.2.0-beta] - 2026-08-09
+
+**alpha → beta.** The `0.1.0-alpha` tag was set at extraction (2026-04-01) and
+never revisited — 130 days and 616 commits. It described the age of the repo,
+not the maturity of the software: 210 test files, 6,244 passing tests, 438
+source modules, and continuous field deployment on the canonical NOC since
+2026-05-02. For calibration, MeshForge first called itself beta with 1 test file
+and 297 commits. The tag was also working against its own goal — the README asks
+for field testers, and "alpha" conventionally reads as "do not rely on this".
+
+**Unchanged by this bump:** coverage maps with live GPS position data, and full
+3-way (MeshCore ↔ Meshtastic ↔ RNS) concurrent traffic remain unvalidated.
+Independent testing on other MeshCore hardware is still the most valuable
+contribution.
+
+Work landed since extraction. This is a **representative** list — `git log` is
+the authoritative record:
 
 ### Added
 - Gateway: `content_id` carried through Canonical→Bridged (dedup/identity arc, MeshAnchor twin of the MeshForge work) — STEP 2a/2b-ii/3.

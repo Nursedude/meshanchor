@@ -148,7 +148,7 @@ src/
 ├── tactical/              # Tactical operations, QR transport, compliance
 ├── core/                  # RadioMode, orchestrator, plugin system
 ├── standalone.py          # Zero-dependency RF tools
-└── __version__.py         # Version: 0.1.0-alpha
+└── __version__.py         # Version SSOT + changelog
 
 scripts/
 ├── install_noc.sh         # Full NOC stack installer

@@ -10,7 +10,7 @@
 
 [project]
 name = "meshanchor"
-version = "0.1.0-alpha"
+version = "0.2.0-beta"
 description = "MeshCore Network Operations Center — sister project to MeshForge"
 readme = "README.md"
 requires-python = ">=3.10"
