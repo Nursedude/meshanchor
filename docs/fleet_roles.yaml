@@ -52,12 +52,69 @@ roles:
       meshanchor-fleet-watchdog: enabled   # silence + role-drift watchdog
       meshtasticd: disabled          # MeshCore-primary; meshtasticd egress-only/off
       meshanchor-gateway: disabled   # RF bridge deliberately off on the NOC
+    # `systemd --user` timers (see the note below the roles). DECLARE-AND-OBSERVE:
+    # role_drift reports a mismatch, `--apply` never touches a user unit.
+    # Declared from a live survey cross-checked against `systemctl --user
+    # is-enabled` (2026-08-09), not from memory.
+    user_timers:
+      meshanchor-map-poke.timer: enabled
+      meshanchor-map-restart.timer: enabled       # ⚠️ its [Install] says
+                                     # WantedBy=timers.target but the enable
+                                     # symlink lives in default.target.wants —
+                                     # enabled and firing either way. Left as
+                                     # found; re-enabling would move it.
+      meshanchor-mini-dudeai-dream.timer: enabled
+      # ── MeshForge organs co-resident on this box ──────────────────────────
+      # This host runs BOTH stacks, and MeshAnchor's fleet-watchdog is the ONLY
+      # role_drift that runs here (MeshForge's is inert — the box carries no
+      # MeshForge deployment.json, so it declares no MeshForge role). So this
+      # block covers the BOX, not just the app; without these lines nothing
+      # checks them anywhere. ⚠️ Coupling accepted deliberately: a MeshForge
+      # change to what runs here must update these two lines, and until it does
+      # role_drift will say so — which is the correct alert, not a false one.
+      meshforge-tracer.timer: enabled
+      meshforge-synth-soak.timer: absent          # 2026-08-09: this box read
+                                     # `synth_soak_degraded` for 78 DAYS over
+                                     # seven hand-fired May lab runs, blaming a
+                                     # timer it has never had. The exerciser is
+                                     # a gateway organ and belongs on the
+                                     # MeshForge gateway, not here. This line is
+                                     # what makes "someone enabled it" visible
+                                     # instead of silent.
 
 # ── MeshCore RADIO node types (documented, NOT provisioned here) ───────────
 # These are MeshCore FIRMWARE roles on the LoRa hardware (they show on the NOC
 # :5000 map), not Linux systemd boxes — the provisioner SKIPS them. Listed for a
 # complete picture of the MeshCore fleet topology, mirroring how MeshForge's
 # catalog documents external/firmware roles (e.g. `bot`).
+# user_timers — `systemd --user` timers, declared separately from `services`
+# (ported from MeshForge 2026-08-09). Same vocabulary: enabled | disabled |
+# absent. Inherited through `inherits` exactly like `services`, so an inheriting
+# role that does NOT run a parent's timer must say `absent` explicitly. Nothing
+# inherits in this catalog yet; the rule is carried in lockstep so the two
+# provisioners cannot answer it differently later.
+#
+# WHY A SEPARATE BLOCK, and why the provisioner only ever WARNS about these:
+# `services` entries are converged by `provision_role.py --apply`, which enables
+# and disables units. User units are a different scope — invisible to system
+# `systemctl`, and root cannot reach the operator's bus — and teaching `--apply`
+# to start/stop them would hand the converge sweep exactly the power behind the
+# 2026-07-24 MeshForge incident, where a restart loop started a unit that was
+# off by design. So: live enrollment is read from the enable symlink, a mismatch
+# is a required warning that role_drift counts as drift, and convergence is left
+# to a human who can decide whether the box or the declaration is wrong.
+#
+# ⚠️ Enablement is a symlink under ANY target's `*.target.wants/`, not only
+# `timers.target.wants` — see meshanchor-map-restart.timer above, which lives in
+# `default.target.wants` and is enabled and firing regardless. Reading one
+# directory reports such a timer as disabled, which for a declared-`enabled`
+# unit is FALSE drift. utils/user_units.py discovers all of them.
+#
+# WHAT THIS BUYS: before the declaration, "never enrolled here" and "enrolled,
+# then someone disabled it" were the same observation — the filesystem cannot
+# tell them apart, so a silently-retired organ looked identical to a box that
+# never ran one. The declaration is what separates them.
+
 mesh_node_types:
   usb:    "USB-attached companion radio (host-tethered client)."
   client: "Companion/client node — phone/host paired, no infrastructure role."
