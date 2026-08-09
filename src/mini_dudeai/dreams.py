@@ -181,7 +181,7 @@ def _known_fleet_subjects() -> tuple[set, bool]:
     try:
         names.append(socket.gethostname())
     except OSError:
-        pass
+        pass  # self unknown -> self stays proposable (fail open, never quiet)
     known = set()
     for n in names:
         n = (n or "").strip().lower()
@@ -205,7 +205,7 @@ def _known_fleet_subjects() -> tuple[set, bool]:
                 if any(h in known or h.split(".", 1)[0] in known for h in hostnames):
                     known.add(addr.lower())
     except OSError:
-        pass
+        pass  # no address map -> fewer names known -> MORE proposals, not fewer
     return known, readable
 
 
