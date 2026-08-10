@@ -1098,11 +1098,21 @@ def _init_rns_client():
 
     # Route through the guarded chokepoint (Issue #68 fail-open on a wedged
     # rnsd, Issue #69 fail-loud on a foreign @rns owner, idempotent singleton
-    # reuse). Returns None when RNS is degraded — callers read
-    # RNS.Transport.path_table directly, so a None here means "no peers this
-    # cycle" rather than a hang.
+    # reuse). The chokepoint returns None when the shared instance is absent
+    # or wedged — surface that as a clean CLI error rather than letting the
+    # caller read an empty path_table as "no peers this cycle": a wedged
+    # rnsd rendered as "the network is quiet" was honest_failure_modes #1
+    # verbatim (Pri-2 leg-c finding 2026-08-10; MeshForge's twin was already
+    # correct, this ports it — including require_listener=True so a pure
+    # consumer can never win the @rns host role, the 2026-05-28 class).
     from utils.rns_init import open_reticulum
-    return open_reticulum(str(client_config_dir))
+    reticulum = open_reticulum(str(client_config_dir), require_listener=True)
+    if reticulum is None:
+        raise RuntimeError(
+            "rnsd shared instance not reachable (absent or wedged). "
+            "Start it with `sudo systemctl start rnsd`, then retry."
+        )
+    return reticulum
 
 
 # ============================================================================

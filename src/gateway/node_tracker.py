@@ -255,14 +255,28 @@ class UnifiedNodeTracker:
                 except ImportError:
                     pass  # service_check not available, proceed anyway
 
-                # Connect using client-only config. Cold-start RNS attach
-                # is genuinely slow (loads identity, opens shared-instance
-                # socket, syncs initial state), so allow 10s before WARN.
-                self._reticulum = call_boundary(
-                    "rnsd.attach",
-                    RNS.Reticulum, configdir=str(client_config_dir),
-                    threshold_s=10.0,
-                )
+                # Connect using client-only config THROUGH THE CHOKEPOINT.
+                # The old code passed RNS.Reticulum as a bare callable into
+                # call_boundary — a raw attach with no #68 wedge probe, no
+                # #69 listener preflight, and no pytest attach backstop,
+                # invisible to MF019 and the chokepoint regex because the
+                # construction site had no ``Reticulum(`` (Pri-2 leg-c
+                # finding, 2026-08-10; MeshForge's twin was already
+                # correct). Cold-start RNS attach is genuinely slow, so
+                # timed_boundary still measures it at a 10s threshold.
+                from utils.boundary_timing import timed_boundary
+                from utils.rns_init import open_reticulum
+                with timed_boundary("rnsd.attach", threshold_s=10.0):
+                    self._reticulum = open_reticulum(
+                        str(client_config_dir), require_listener=True,
+                    )
+                if self._reticulum is None:
+                    logger.warning(
+                        "RNS attach degraded: shared instance absent or "
+                        "wedged (#68 fail-open) — node discovery disabled "
+                        "this run; will retry on next start.")
+                    self._rns_connected = False
+                    return
                 self._rns_connected = True
                 logger.info("Connected to existing rnsd instance")
 
