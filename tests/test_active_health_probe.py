@@ -518,6 +518,21 @@ class TestDeliveryConfirmationStallProbe:
         assert r.healthy is True
         assert "low_traffic" in r.reason
 
+    def test_ring_sized_for_min_terminal(self):
+        """Cross-constant pin (honest_failure_modes #5): the snapshot ring
+        and this check's sample floor live in different modules and drift
+        independently — ring 50 vs min_terminal 20 left MF's busiest
+        confirming gateway (~30% confirmable-terminal ring density)
+        structurally stuck in low_traffic for weeks (07-26→08-10).
+        Require ring ≥ 5× floor so a busy gateway clears it with margin."""
+        import inspect
+        from gateway.delivery_counters import SNAPSHOT_RECENT_LIMIT
+        from utils.active_health_probe import ActiveHealthProbe
+        floor = inspect.signature(
+            ActiveHealthProbe.check_delivery_confirmation_stall
+        ).parameters["min_terminal"].default
+        assert SNAPSHOT_RECENT_LIMIT >= 5 * floor
+
     def test_dedup_drops_excluded(self):
         """Benign dedup drops are not delivery failures."""
         r = self._probe().check_delivery_confirmation_stall(

@@ -967,7 +967,10 @@ class ActiveHealthProbe:
         confirming (MF Issue #74 probe port; disjoint-protocol fix 2026-06-09).
 
         Windowed rate from the ``delivery_counters.snapshot()`` recent-events
-        ring (last 50). CRUCIAL: judges ONLY protocols that actually have a
+        ring (``SNAPSHOT_RECENT_LIMIT`` events; 200 since 2026-08-10 — at 50
+        a mesh-heavy gateway's ring held fewer confirmable terminals than
+        ``min_terminal`` and this check sat permanently in ``low_traffic``).
+        CRUCIAL: judges ONLY protocols that actually have a
         confirmation mechanism (record `confirmed` events — RNS today;
         Meshtastic once ACK consumption lands), comparing that protocol's two
         REAL terminal outcomes — `confirmed` vs a failed-delivery `dropped` —
@@ -981,9 +984,9 @@ class ActiveHealthProbe:
         Self-guards healthy (silence is NOT failure here): counters
         unavailable; no confirmable protocol (nothing tracks confirmation);
         confirmable terminal events < ``min_terminal`` (one failure must not
-        tank a tiny denominator; on a mesh-heavy box the 50-event ring holds
-        few RNS events, so healthy is the honest answer over a small sample).
-        ``snap`` is a test seam.
+        tank a tiny denominator — honest over too small a sample; the ring
+        is sized so a busy gateway clears this floor, see the
+        cross-constant test). ``snap`` is a test seam.
         """
         if snap is None:
             try:

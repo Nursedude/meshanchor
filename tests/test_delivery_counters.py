@@ -430,6 +430,13 @@ class TestSnapshot:
         c.record(DeliveryState.QUEUED, "m", protocol="rns")
         assert c.snapshot(recent_limit=0)["recent"] == []
 
+    def test_snapshot_default_ring_fits_buffer_cap(self):
+        """SNAPSHOT_RECENT_LIMIT must fit inside the DB ring, or the
+        snapshot silently serves fewer events than the constant promises
+        and every consumer sized against it over-trusts its window."""
+        from gateway.delivery_counters import SNAPSHOT_RECENT_LIMIT
+        assert SNAPSHOT_RECENT_LIMIT <= RING_BUFFER_CAP
+
     def test_first_and_last_event_ts_populated(self):
         c = DeliveryCounters()
         t0 = time.time()
