@@ -460,6 +460,14 @@ class MeshCoreRadioSupervisor:
         text = args.get("text", "")
         if not text:
             raise ValueError("text required")
+        # RF egress chokepoint (2026-08-09 MF review, ported) — the
+        # supervisor drives the REAL companion radio; a refusal must reach
+        # the RPC caller loudly, so no catch here.
+        from utils.tx_guard import assert_meshcore_tx_allowed
+        assert_meshcore_tx_allowed(
+            kind="meshcore_tx",
+            detail=f"supervisor send kind={kind} target={target!r} "
+                   f"text={text[:40]!r}")
         commands = getattr(self._meshcore, "commands", None)
         if commands is None:
             raise RuntimeError("meshcore.commands not available")

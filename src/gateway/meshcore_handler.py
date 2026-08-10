@@ -62,6 +62,7 @@ from utils.meshcore_connection import (
     validate_meshcore_device,
 )
 from utils.safe_import import safe_import
+from utils.tx_guard import TransmitBlocked
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -111,68 +112,10 @@ __all__ = [
 ]
 
 
-class MeshCoreSimulator:
-    """
-    Simulates MeshCore companion radio for testing without hardware.
-
-    Generates fake events at configurable intervals so the bridge loop
-    and routing can be tested end-to-end without a physical radio.
-    """
-
-    def __init__(self):
-        self._running = False
-        self._subscribers: Dict[str, List[Callable]] = {}
-        self._contacts = self._generate_fake_contacts()
-
-    def _generate_fake_contacts(self) -> List[Dict[str, Any]]:
-        """Generate fake MeshCore contacts for simulation."""
-        return [
-            {
-                'adv_name': 'SimNode-Alpha',
-                'public_key': b'\x01\x02\x03\x04\x05\x06',
-                'last_seen': datetime.now(),
-            },
-            {
-                'adv_name': 'SimNode-Bravo',
-                'public_key': b'\x0a\x0b\x0c\x0d\x0e\x0f',
-                'last_seen': datetime.now(),
-            },
-            {
-                'adv_name': 'SimRepeater-01',
-                'public_key': b'\xaa\xbb\xcc\xdd\xee\xff',
-                'last_seen': datetime.now(),
-                'role': 'repeater',
-            },
-        ]
-
-    def subscribe(self, event_type: str, handler: Callable) -> None:
-        """Subscribe to simulated events."""
-        if event_type not in self._subscribers:
-            self._subscribers[event_type] = []
-        self._subscribers[event_type].append(handler)
-
-    async def start(self):
-        """Start generating simulated events."""
-        self._running = True
-        logger.info("MeshCore simulator started")
-
-    async def stop(self):
-        """Stop the simulator."""
-        self._running = False
-
-    async def get_contacts(self) -> List[Dict]:
-        """Return simulated contacts."""
-        return self._contacts
-
-    async def send_msg(self, contact: Any, text: str) -> bool:
-        """Simulate sending a message."""
-        logger.info(f"[SIM] MeshCore TX: {text[:50]}")
-        return True
-
-    async def send_channel_txt_msg(self, text: str) -> bool:
-        """Simulate sending a channel broadcast."""
-        logger.info(f"[SIM] MeshCore channel TX: {text[:50]}")
-        return True
+# Split to its own module 2026-08-09 (MF025 line cap); re-exported here so
+# existing `from gateway.meshcore_handler import MeshCoreSimulator` consumers
+# keep working — it stays in __all__ above.
+from gateway.meshcore_simulator import MeshCoreSimulator
 
 
 class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
@@ -484,6 +427,20 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             conn_type = getattr(meshcore_config, 'connection_type', 'serial')
             device_path = getattr(meshcore_config, 'device_path', '/dev/ttyUSB1')
             baud_rate = getattr(meshcore_config, 'baud_rate', 115200)
+
+            # RF egress attach backstop (2026-08-09 MF review, ported): the
+            # companion is a REAL LoRa radio on serial/TCP — the socket
+            # tripwire cannot see serial and the meshtastic sweeps do not
+            # cover these methods. Under pytest, refuse the live attach
+            # unless the test declared tx_guard.allow_meshcore_egress();
+            # staying disconnected is the same path a box with no companion
+            # radio takes.
+            from utils.tx_guard import (
+                meshcore_attach_allowed, note_meshcore_attach_blocked,
+            )
+            if not meshcore_attach_allowed():
+                note_meshcore_attach_blocked(f"{conn_type}:{device_path}")
+                return
 
             # All real connect paths go through the connection manager so
             # short-lived consumers (TUI probes, future CLI helpers) can see
@@ -1043,6 +1000,16 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                     self.stats.setdefault('errors', 0)
                     self.stats['errors'] += 1
 
+        except TransmitBlocked as e:
+            # Deliberate catch (see tx_guard docstring): the refusal is
+            # already recorded+logged by the guard; letting it fly would kill
+            # the outbound task mid-bookkeeping (the finding-5 class). The
+            # message is dropped, witnessed by the stat.
+            with self._stats_lock:
+                self.stats.setdefault('tx_blocked', 0)
+                self.stats['tx_blocked'] += 1
+            logger.warning(
+                f"MeshCore outbound refused by tx_guard — dropped: {e}")
         except Exception as e:
             logger.error(f"Error processing outbound MeshCore message: {e}")
 
@@ -1066,6 +1033,19 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
         """
         if not self._meshcore or not self._connected:
             return False
+
+        # RF egress chokepoint — every MeshCore send funnels through here,
+        # and the companion is a real LoRa radio (2026-08-09 MF review: this
+        # radio sat entirely outside the egress architecture — and it is
+        # MeshAnchor's PRIMARY). The in-process simulator is not egress.
+        # OUTSIDE the try, so the refusal cannot be absorbed into
+        # "send failed".
+        if not isinstance(self._meshcore, MeshCoreSimulator):
+            from utils.tx_guard import assert_meshcore_tx_allowed
+            assert_meshcore_tx_allowed(
+                kind="meshcore_tx",
+                detail=f"meshcore_handler send dest={destination!r} "
+                       f"text={text[:40]!r}")
 
         try:
             if destination:

@@ -228,13 +228,35 @@ class TestRpcDispatch:
 
     def test_send_message_channel_calls_command(self, supervisor_under_test):
         _, socket_path, mock = supervisor_under_test
+        from utils import tx_guard
         c = self._client(socket_path)
         try:
-            result = c.send_message_channel(0, "supervisor test")
+            # Declared: this drives the supervisor's REAL send path against a
+            # double (2026-08-09 egress guard). The declaration is
+            # process-global, so it covers the server thread too.
+            with tx_guard.allow_meshcore_egress():
+                result = c.send_message_channel(0, "supervisor test")
             assert result["sent"] is True
             mock.commands.send_chan_msg.assert_called()
         finally:
             c.close()
+
+    def test_undeclared_send_is_refused(self, supervisor_under_test):
+        """2026-08-09 egress guard drill: without a declaration the
+        supervisor refuses the send and the mock radio is never touched."""
+        from utils import tx_guard
+        from utils.meshcore_supervisor_client import SupervisorRemoteError
+        _, socket_path, mock = supervisor_under_test
+        tx_guard.clear_blocked_attempts()
+        c = self._client(socket_path)
+        try:
+            with pytest.raises(SupervisorRemoteError):
+                c.send_message_channel(0, "leak")
+        finally:
+            c.close()
+        mock.commands.send_chan_msg.assert_not_called()
+        recs = tx_guard.blocked_attempts()
+        assert recs and recs[-1]["kind"] == "meshcore_tx"
 
     def test_unknown_method_returns_error(self, supervisor_under_test):
         _, socket_path, _ = supervisor_under_test

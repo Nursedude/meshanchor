@@ -719,6 +719,47 @@ class TestActiveHandlerAccessor:
         assert get_active_handler() is None
 
 
+class TestSendPathEgressGuard:
+    """THE drill for the 2026-08-09 MF finding, ported: a test driving the
+    MeshCore send path without declaring egress must be refused BEFORE any
+    send method is touched — serial is invisible to the socket tripwire,
+    and this is MeshAnchor's PRIMARY radio. Deliberately OUTSIDE
+    TestSendPath, whose autouse fixture declares egress for the class."""
+
+    def test_undeclared_send_is_refused_and_sends_nothing(self, handler):
+        from utils import tx_guard
+        from utils.tx_guard import TransmitBlocked
+        fake_commands = MagicMock()
+        fake_commands.send_chan_msg = AsyncMock(return_value=None)
+        handler._connected = True
+        handler._meshcore = MagicMock(commands=fake_commands)
+
+        tx_guard.clear_blocked_attempts()
+        loop = asyncio.new_event_loop()
+        try:
+            with pytest.raises(TransmitBlocked):
+                loop.run_until_complete(
+                    handler._send_message("leak", destination=None))
+        finally:
+            loop.close()
+        fake_commands.send_chan_msg.assert_not_awaited()
+        recs = tx_guard.blocked_attempts()
+        assert recs and recs[-1]["kind"] == "meshcore_tx"
+
+    def test_simulator_send_needs_no_declaration(self, handler):
+        """The in-process simulator is not egress; a guard that fires on it
+        gets switched off (narrowness drill)."""
+        from gateway.meshcore_handler import MeshCoreSimulator
+        handler._meshcore = MeshCoreSimulator()
+        handler._connected = True
+        loop = asyncio.new_event_loop()
+        try:
+            assert loop.run_until_complete(
+                handler._send_message("sim text", destination=None)) is True
+        finally:
+            loop.close()
+
+
 class TestSendPath:
     """Regression coverage for the three send-path bugs that surfaced
     on meshanchor-server 2026-05-02 once the chat API actually drove
@@ -732,6 +773,16 @@ class TestSendPath:
        being dropped between send_text() and _process_outbound, defaulting
        every send to slot 0 (Public) regardless of TUI/API choice.
     """
+
+    @pytest.fixture(autouse=True)
+    def _declared_meshcore_egress(self):
+        """These tests deliberately exercise the send path against doubles —
+        declared once for the class (2026-08-09 egress guard: the companion
+        is a real LoRa radio and _send_message is now a guarded chokepoint).
+        """
+        from utils import tx_guard
+        with tx_guard.allow_meshcore_egress():
+            yield
 
     def test_resolve_channel_passes_int_through(self, handler):
         assert handler._resolve_channel(1, source="test") == 1

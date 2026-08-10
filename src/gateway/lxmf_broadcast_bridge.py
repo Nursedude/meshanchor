@@ -60,7 +60,7 @@ from utils.safe_import import safe_import
 
 from .canonical_message import CanonicalMessage, MessageType, Protocol
 from .config import GatewayConfig, LXMFBroadcastConfig
-from utils.tx_guard import assert_rns_tx_allowed
+from utils.tx_guard import TransmitBlocked, assert_rns_tx_allowed
 
 _RNS_mod, _HAS_RNS = safe_import("RNS")
 _LXMF_mod, _HAS_LXMF = safe_import("LXMF")
@@ -799,6 +799,14 @@ class LXMFBroadcastBridge:
                 detail="lxmf_broadcast_bridge._safe_announce")
             self._router.announce(self._destination_hash)
             logger.debug("LXMF broadcast announce sent (%s)", self._destination_hash.hex())
+        except TransmitBlocked as e:
+            # Deliberate catch (see tx_guard docstring): the refusal is
+            # already recorded+logged by the guard; letting it fly killed the
+            # LXMFBroadcast-Announce daemon thread (the MF finding-5 class,
+            # ported 2026-08-09). The announce loop retries at its interval.
+            logger.warning(
+                "LXMF broadcast announce refused by tx_guard — skipping "
+                "this cycle: %s", e)
         except Exception as e:
             logger.debug("Announce failed (will retry): %s", e)
 
