@@ -43,6 +43,7 @@ from enum import Enum
 
 from utils.event_bus import emit_service_status
 from utils.service_check import check_udp_port, check_rns_shared_instance
+from utils import tx_guard
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,8 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
     Module-level so tests can monkeypatch it and do zero real network I/O.
     """
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with tx_guard.probe_connect(), \
+                socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False

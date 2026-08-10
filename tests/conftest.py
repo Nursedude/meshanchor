@@ -382,6 +382,90 @@ def _isolate_operator_data_stores(tmp_path_factory):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _block_radio_egress():
+    """Sibling of the DB-isolation gates — and the first that fences the
+    ANTENNA rather than the disk.
+
+    Ported from MeshForge 2026-08-09, where a full suite run on a fleet radio
+    box transmitted the e2e fixture ``[RNS:abc] retry with bytes`` onto a live
+    statewide public channel. The suite reported 10,535 passed while keying
+    the air. MeshAnchor shares the bridge lineage and the same fallback chain,
+    so it had the same exposure.
+
+    Backstop layer only. The primary layer is ``utils.tx_guard``, wired into
+    each send site, which is the ONLY thing that can stop the CLI fallback
+    (``meshtastic --host X --sendtext``) because that egress happens in a
+    SUBPROCESS this patch cannot see. What this adds is coverage of sites
+    nobody guarded — including the meshtastic library's own ``TCPInterface``.
+
+    Deliberately narrow: only the meshtasticd radio ports. A blanket
+    "block non-loopback" fixture would NOT have caught the original leak,
+    because the radio is ON loopback.
+    """
+    import socket as _socket
+
+    from utils import tx_guard
+
+    radio_ports = {4403, 9443}
+    orig_connect = _socket.socket.connect
+    orig_connect_ex = _socket.socket.connect_ex
+
+    def _check(address, probe_idiom):
+        if not (isinstance(address, tuple) and len(address) >= 2):
+            return
+        host, port = address[0], address[1]
+        if port not in radio_ports:
+            return
+        # `connect_ex` returns an errno instead of raising — that IS the
+        # reachability-probe idiom, used across this tree to ask "is the radio
+        # port open?". Blocking those converts a benign probe into a failure
+        # without catching anything: meshtastic's TCPInterface reaches the
+        # radio through create_connection -> sock.connect, which stays blocked.
+        # A prober that must use plain connect declares tx_guard.probe_connect().
+        if probe_idiom or tx_guard.in_probe():
+            return
+        tx_guard.assert_tx_allowed(
+            host, port, kind="socket_tripwire",
+            detail="raw socket connect to a meshtasticd radio port",
+        )
+
+    def _connect(self, address):
+        _check(address, probe_idiom=False)
+        return orig_connect(self, address)
+
+    def _connect_ex(self, address):
+        _check(address, probe_idiom=True)
+        return orig_connect_ex(self, address)
+
+    _socket.socket.connect = _connect
+    _socket.socket.connect_ex = _connect_ex
+    try:
+        yield
+    finally:
+        _socket.socket.connect = orig_connect
+        _socket.socket.connect_ex = orig_connect_ex
+
+
+@pytest.fixture
+def allow_local_radio_tx():
+    """Allowlist the local radio for a test whose TRANSPORT IS MOCKED.
+
+    Opt-in, never autouse. Requesting this fixture is a test AUTHOR asserting
+    "my socket / subprocess / interface is a double, so permitting this target
+    cannot key anything." Do NOT use it to make a red test green: if a test
+    fails with ``TransmitBlocked`` and its transport is NOT mocked, the guard
+    just found a real leak.
+    """
+    from utils import tx_guard
+
+    # 4403/9443 = the radio; 1883 = the local broker meshtasticd relays
+    # to RF (a downlink inject keys the radio just as toradio does).
+    with tx_guard.allow_targets("127.0.0.1:4403", "127.0.0.1:9443",
+                                "127.0.0.1:1883"):
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _isolate_delivery_counters_db(tmp_path_factory):
     """Keep delivery-counter writes out of the operator's live DB.
 

@@ -463,6 +463,7 @@ class TestCallbacks:
 # send_to_meshtastic
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_local_radio_tx")
 class TestSendToMeshtastic:
     """Tests for send_to_meshtastic."""
 
@@ -473,8 +474,15 @@ class TestSendToMeshtastic:
         bridge._mesh_handler.send_text.assert_called_once_with("Hello", "!dest", 2)
 
     def test_returns_false_no_handler(self, bridge):
+        from gateway.config import MeshtasticEgressConfig
         bridge._mesh_handler = None
-        # default meshtastic_egress is disabled -> no remote fallback
+        # A REAL disabled config, not the MagicMock default. The mock answered
+        # every attribute truthily, so `eg.enabled and eg.host` passed and this
+        # test entered the remote-egress branch it claims is disabled — then
+        # returned False only because the HTTP send to a nonsense host failed.
+        # It asserted the right thing for the wrong reason; the RF egress guard
+        # surfaced it by refusing the send (2026-08-09).
+        bridge.config.meshtastic_egress = MeshtasticEgressConfig()
         assert bridge.send_to_meshtastic("Hello") is False
 
     def test_remote_egress_when_no_handler(self, bridge):

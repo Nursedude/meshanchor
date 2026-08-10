@@ -10,6 +10,9 @@ try:
 except ImportError:
     HAS_RICH = False
 from utils.cli import find_meshtastic_cli, get_meshtastic_install_instructions
+from utils.tx_guard import (
+    DEFAULT_MESH_TCP_PORT, assert_cli_args_allowed, assert_tx_allowed,
+)
 
 console = Console()
 
@@ -61,6 +64,9 @@ class MeshtasticCLI:
             console.print(f"[cyan]Install with: {get_meshtastic_install_instructions()}[/cyan]")
             return None
 
+        assert_cli_args_allowed(args, getattr(self, 'host', None),
+                                detail="cli.meshtastic_cli._run_command")
+
         full_args = [self._cli_path] + self._get_connection_args() + args
 
         console.print(f"[dim]Running: {' '.join(full_args)}[/dim]\n")
@@ -89,6 +95,9 @@ class MeshtasticCLI:
             console.print("[red]Meshtastic CLI not installed![/red]")
             console.print(f"[cyan]Install with: {get_meshtastic_install_instructions()}[/cyan]")
             return None
+
+        assert_cli_args_allowed(args, getattr(self, 'host', None),
+                                detail="cli.meshtastic_cli._run_command_interactive")
 
         full_args = [self._cli_path] + self._get_connection_args() + args
         console.print(f"[dim]Running: {' '.join(full_args)}[/dim]\n")

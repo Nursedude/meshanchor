@@ -44,6 +44,7 @@ from utils.safe_import import safe_import
 from utils.common import SettingsManager
 from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
+from utils.tx_guard import DEFAULT_MESH_TCP_PORT, assert_tx_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -655,6 +656,8 @@ class AutomationEngine:
         """Send a ping to a node via meshtastic CLI."""
         start = time.monotonic()
         try:
+            assert_tx_allowed(self._meshtastic_host, DEFAULT_MESH_TCP_PORT,
+                              kind="meshtastic_cli", detail="automation_engine ping")
             result = subprocess.run(
                 [
                     "meshtastic",
@@ -829,6 +832,8 @@ class AutomationEngine:
     ) -> TracerouteResult:
         """Traceroute via meshtastic CLI (fallback)."""
         try:
+            assert_tx_allowed(self._meshtastic_host, DEFAULT_MESH_TCP_PORT,
+                              kind="meshtastic_cli", detail="automation_engine traceroute")
             result = subprocess.run(
                 [
                     "meshtastic",
@@ -961,6 +966,8 @@ class AutomationEngine:
     def _send_welcome(self, node_id: str, message: str) -> None:
         """Send a welcome message to a new node."""
         try:
+            assert_tx_allowed(self._meshtastic_host, DEFAULT_MESH_TCP_PORT,
+                              kind="meshtastic_cli", detail="automation_engine welcome")
             result = subprocess.run(
                 [
                     "meshtastic",

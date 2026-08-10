@@ -78,6 +78,7 @@ _get_protobuf_client, _HAS_PROTOBUF_CLIENT = safe_import(
 # Sudo-safe home directory — first-party, always available (MF001)
 from utils.paths import get_real_user_home as _get_real_user_home_fn
 from utils.service_check import check_service as _check_service
+from utils.tx_guard import DEFAULT_MESH_TCP_PORT, assert_tx_allowed
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -830,6 +831,15 @@ class MQTTBridgeHandler(BaseMessageHandler):
         Spawns a transient CLI process that connects via TCP, sends, exits.
         Works but slower and uses the TCP slot briefly.
         """
+        # RF egress chokepoint — before _find_cli and outside the try. The CLI
+        # takes only --host and connects to the meshtastic TCP port, so this
+        # reaches the real radio on a loopback box no matter what port the
+        # caller's config named. An in-process socket tripwire cannot stop
+        # this hop: the send happens in a SUBPROCESS.
+        assert_tx_allowed(self.config.meshtastic.host, DEFAULT_MESH_TCP_PORT,
+                          kind="meshtastic_cli",
+                          detail=f"mqtt_bridge_handler._send_via_cli text={message[:40]!r}")
+
         cli = self._find_cli()
         if not cli:
             logger.error("meshtastic CLI not found. Install with: pip install meshtastic")
