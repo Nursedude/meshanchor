@@ -60,6 +60,7 @@ from utils.safe_import import safe_import
 
 from .canonical_message import CanonicalMessage, MessageType, Protocol
 from .config import GatewayConfig, LXMFBroadcastConfig
+from utils.tx_guard import assert_rns_tx_allowed
 
 _RNS_mod, _HAS_RNS = safe_import("RNS")
 _LXMF_mod, _HAS_LXMF = safe_import("LXMF")
@@ -793,6 +794,9 @@ class LXMFBroadcastBridge:
         if self._destination_hash is None:
             return
         try:
+            assert_rns_tx_allowed(
+                kind="rns_announce",
+                detail="lxmf_broadcast_bridge._safe_announce")
             self._router.announce(self._destination_hash)
             logger.debug("LXMF broadcast announce sent (%s)", self._destination_hash.hex())
         except Exception as e:
@@ -1096,6 +1100,9 @@ class LXMFBroadcastBridge:
                     hash_short,
                 )
 
+            assert_rns_tx_allowed(
+                kind="lxmf_outbound",
+                detail=f"broadcast fan-out -> {hash_short}")
             call_boundary("rnsd.handle_outbound",
                           self._router.handle_outbound, lxm,
                           target=hash_short)

@@ -912,6 +912,17 @@ from gateway.lxmf_broadcast_bridge import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True)
+def _allow_rns_tx_in_this_file():
+    """This whole file exercises RNS/LXMF paths against MOCKED routers, so it
+    declares RNS egress once here rather than per test. The RNS egress guard
+    (utils.tx_guard) is fail-closed and cannot tell a mocked router from a real
+    one — declaring the intent is the point."""
+    from utils import tx_guard
+    with tx_guard.allow_rns_egress():
+        yield
+
+
 def _sub(
     *, fails=0, state=STATE_HEALTHY, tier=TIER_EXTERNAL,
     last_delivery=None, last_failure_at=None, added_at=None,

@@ -888,6 +888,7 @@ class TestMeshtasticConnectionStability:
         assert bridge._running is False
 
 
+@pytest.mark.usefixtures("allow_rns_tx")
 class TestRNSConnectionStability:
     """Test RNS connection path — the historically problematic side."""
 

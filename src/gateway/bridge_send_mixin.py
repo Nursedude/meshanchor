@@ -24,6 +24,7 @@ from typing import Dict, Optional
 
 from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
+from utils.tx_guard import assert_rns_tx_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,8 @@ class BridgeSendMixin:
                 # LXMF version may not support callbacks
                 logger.debug("LXMF callbacks not available, skipping delivery tracking")
 
+            assert_rns_tx_allowed(kind="lxmf_outbound",
+                                  detail=f"bridge send -> {hash_short}")
             call_boundary("rnsd.handle_outbound",
                           self._lxmf_router.handle_outbound, lxm,
                           target=hash_short)
@@ -344,6 +347,8 @@ class BridgeSendMixin:
                     "LXMF callbacks not available, skipping delivery tracking"
                 )
 
+            assert_rns_tx_allowed(kind="lxmf_outbound",
+                                  detail=f"bridge send -> {hash_short}")
             call_boundary("rnsd.handle_outbound",
                           self._lxmf_router.handle_outbound, lxm,
                           target=hash_short)

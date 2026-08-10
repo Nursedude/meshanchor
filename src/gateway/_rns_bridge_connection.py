@@ -14,6 +14,7 @@ from utils.paths import get_real_user_home, ReticulumPaths
 from utils.rns_init import open_reticulum
 from utils.safe_import import safe_import
 from utils.service_check import check_service
+from utils.tx_guard import assert_rns_tx_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +291,8 @@ class RNSConnectionMixin:
                 logger.error("Invalid propagation_node hash '%s': %s", prop_node, e)
 
         # Announce presence
+        assert_rns_tx_allowed(kind="rns_announce",
+                              detail="gateway LXMF presence announce")
         self._lxmf_router.announce(self._lxmf_source.hash)
 
         # Register announce handler for node discovery

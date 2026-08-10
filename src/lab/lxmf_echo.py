@@ -23,6 +23,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from utils.tx_guard import assert_rns_tx_allowed
 
 # Lazy RNS / LXMF imports so unit tests can patch around them.
 
@@ -190,6 +191,7 @@ def _send_ack(state: _EchoState, dest_hash: bytes, ping):
     )
     body = make_ack_body(ping.seq, ping.sender)
     lxm = LXMF.LXMessage(destination, state.source, body, "lab echo ACK")
+    assert_rns_tx_allowed(kind="lxmf_outbound", detail="lab echo ACK")
     state.router.handle_outbound(lxm)
     state.tx_count += 1
     logger.info(
@@ -264,6 +266,7 @@ def run_daemon(loglevel: str = "INFO", announce_interval_s: int = ANNOUNCE_INTER
         state.router.register_delivery_callback(make_on_receive(state))
 
         # Initial announce + periodic re-announce.
+        assert_rns_tx_allowed(kind="rns_announce", detail="lab echo announce")
         state.router.announce(state.source.hash)
         last_announce = time.monotonic()
 
@@ -275,6 +278,7 @@ def run_daemon(loglevel: str = "INFO", announce_interval_s: int = ANNOUNCE_INTER
                 break
             if time.monotonic() - last_announce >= announce_interval_s:
                 try:
+                    assert_rns_tx_allowed(kind="rns_announce", detail="lab echo announce")
                     state.router.announce(state.source.hash)
                     last_announce = time.monotonic()
                     logger.debug("echo: re-announced")

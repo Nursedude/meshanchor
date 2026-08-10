@@ -2976,6 +2976,7 @@ class TestSeenOnRfRegistration:
 # MF Issue #74 port: circuit breaker actually wired into the send paths
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_rns_tx")
 class TestCircuitBreakerWiringIssue74:
     """The breaker was write-only (worse than MeshForge's: with no
     bounded_rpc/trip_open port, NOTHING ever touched it after
@@ -3107,6 +3108,7 @@ class TestCircuitBreakerWiringIssue74:
 # MF Issue #74 port: durable CONFIRMED/DROPPED from LXMF callbacks (both paths)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("allow_rns_tx")
 class TestDeliveryCounterCallbacksIssue74:
     """Both send paths must pin LXMF delivery callbacks to a msg_id that
     records durable CONFIRMED (proof) / DROPPED (failure) — the queue
