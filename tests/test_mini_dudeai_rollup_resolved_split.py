@@ -57,6 +57,24 @@ def test_active_and_unknown_pairs_stay_live():
     assert all(e["resolved"] is False for e in rec["escalations"])
 
 
+def test_known_pair_with_missing_active_flag_stays_live():
+    """2026-08-11 MF frontier review, ported with the byte-locked brief.py fix.
+    The conservative default only covered a missing PAIR; a pair present in
+    state whose ``currently_active`` FIELD was renamed/dropped/nulled by schema
+    drift hit ``bool(None) == False`` and flipped to resolved — the hiding
+    direction, for every matched escalation at once."""
+    history = [_hist_escalation(NOW - 10, "drifted", "ma-box", "flag missing"),
+               _hist_escalation(NOW - 11, "nulled", "ma-box", "flag null")]
+    state = {"last_tick_ts": NOW,
+             "rules": {"drifted::ma-box": {"rule_id": "drifted",
+                                           "subject": "ma-box"},
+                       "nulled::ma-box": {"rule_id": "nulled",
+                                          "subject": "ma-box",
+                                          "currently_active": None}}}
+    rec = build_box_deep("ma-box", state, history, NOW)
+    assert all(e["resolved"] is False for e in rec["escalations"])
+
+
 def test_deep_feed_moves_resolved_out_of_look_here_first():
     results = [{"host": "ma-box", "status": "fresh", "fires": [], "escalations": [
         {"ts": NOW - 5, "box": "ma-box", "stale": False, "resolved": False,
