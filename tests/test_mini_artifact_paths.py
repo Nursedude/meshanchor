@@ -86,3 +86,23 @@ def test_remote_breadth_cmd_cats_the_ma_relpath_through_a_real_shell(tmp_path):
                          capture_output=True, text=True, timeout=15)
     assert out.returncode == 0, out.stderr
     assert '"ma-box"' in out.stdout
+
+
+def test_cli_brief_default_is_the_engines_brief_path():
+    """The --brief CLI default must be engine.brief_path — the file the daemon
+    writes and warmstart reads. The old sibling-of-state default wrote an
+    orphan ``mini_dudeai_brief.md`` beside the MA state that no reader ever
+    read (found live 2026-08-11: a manual --brief on the replica created
+    exactly that orphan)."""
+    import types
+    from mini_dudeai.daemon import _brief_out_path
+    eng = types.SimpleNamespace(
+        brief_path="/h/.local/share/meshanchor/mini/brief.md",
+        state_store=types.SimpleNamespace(
+            path="/h/.local/share/meshanchor/mini/state.json"),
+    )
+    assert _brief_out_path(eng, "") == "/h/.local/share/meshanchor/mini/brief.md"
+    assert _brief_out_path(eng, "/tmp/x.md") == "/tmp/x.md"
+    eng.brief_path = None
+    assert _brief_out_path(eng, "") \
+        == "/h/.local/share/meshanchor/mini/mini_dudeai_brief.md"
