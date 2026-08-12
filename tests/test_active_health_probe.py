@@ -316,12 +316,40 @@ class TestFdExhaustionProbe:
         assert "fd_exhaustion (wedge)" in r.reason
         assert "[Errno 24]" in r.reason
 
-    def test_healthy_when_pid_unresolved(self, tmp_path):
+    def test_unobservable_systemctl_says_so(self, tmp_path):
+        """⚠️ This assertion used to read ``reason == "inactive_or_unresolved"``
+        — it planted an UNRUNNABLE systemctl and accepted a reason that says
+        the service is *inactive*. The 2026-08-12 tri-state split (MF parity)
+        separated the three no-pid cases; a systemctl we could not run is
+        unobservable, and must not claim anything about the unit's state."""
         r = self._probe().check_fd_exhaustion(
             "meshanchor-map.service", proc_root=str(tmp_path), main_pid=None,
             systemctl_path="/nonexistent/systemctl")
+        assert r.healthy is True          # deliberately NOT an alarm
+        assert r.reason.startswith("unit_state_unobservable")
+        assert "meshanchor-map.service" in r.reason
+
+    def test_absent_unit_is_named_as_absent(self, tmp_path):
+        """No such unit on this box (LoadState=not-found) — nothing to count.
+        Distinct from a unit that exists and is stopped."""
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_resolve_main_pid_status",
+                          return_value=("absent", None)):
+            r = self._probe().check_fd_exhaustion(
+                "meshanchor-map.service", proc_root=str(tmp_path))
         assert r.healthy is True
-        assert r.reason == "inactive_or_unresolved"
+        assert r.reason.startswith("absent_no_unit")
+
+    def test_installed_but_stopped_hands_off_to_systemd_check(self, tmp_path):
+        """THE DRILL, planted from the other side: a unit that EXISTS and is
+        down must NOT read as absent — check_systemd_service owns it."""
+        from utils import active_health_probe as ahp
+        with patch.object(ahp, "_resolve_main_pid_status",
+                          return_value=("down", None)):
+            r = self._probe().check_fd_exhaustion(
+                "meshanchor-map.service", proc_root=str(tmp_path))
+        assert r.healthy is True
+        assert r.reason == "inactive_check_systemd_service_owns"
 
     def test_healthy_when_proc_vanished(self, tmp_path):
         r = self._probe().check_fd_exhaustion(
@@ -683,3 +711,100 @@ class TestUserTimerUnitFailingProbe:
         with patch.object(ahp, "_unmanaged_services", return_value=set()):
             probe = ahp.create_gateway_health_probe()
         assert "user_timer_units" in set(probe._checks.keys())
+
+
+class TestResolveMainPidStatus:
+    """The tri-state MainPID resolver (MeshForge parity port, 2026-08-12).
+
+    Four states out of ONE ``systemctl show``. The discriminator was measured
+    live that day: ``systemctl show`` exits 0 for a nonexistent unit exactly as
+    it does for a running one, so the return code carries no signal —
+    ``LoadState`` does.
+    """
+
+    # systemd emits properties in its own canonical order, NOT the order they
+    # were requested (verified by passing the flags both ways round), which is
+    # why the parse is by key and not positional via ``--value``.
+    ABSENT = "MainPID=0\nLoadState=not-found\n"
+    DOWN = "MainPID=0\nLoadState=loaded\n"
+    RUNNING = "MainPID=4042974\nLoadState=loaded\n"
+
+    def _run(self, stdout="", *, returncode=0, exc=None):
+        from utils import active_health_probe_core as core
+
+        def _runner(*a, **k):
+            if exc:
+                raise exc
+
+            class _R:
+                pass
+            r = _R()
+            r.stdout, r.stderr, r.returncode = stdout, "", returncode
+            return r
+        with patch.object(core.subprocess, "run", _runner):
+            return core._resolve_main_pid_status("meshanchor-map.service")
+
+    def test_absent_unit(self):
+        assert self._run(self.ABSENT) == ("absent", None)
+
+    def test_loaded_but_down(self):
+        assert self._run(self.DOWN) == ("down", None)
+
+    def test_running(self):
+        assert self._run(self.RUNNING) == ("ok", 4042974)
+
+    def test_property_order_is_not_assumed(self):
+        assert self._run("LoadState=not-found\nMainPID=0\n") == ("absent", None)
+
+    def test_pid_one_is_not_a_main_pid(self):
+        assert self._run("MainPID=1\nLoadState=loaded\n") == ("down", None)
+
+    def test_missing_loadstate_falls_back_to_down(self):
+        """Older systemd / unexpected output keeps the pre-split meaning,
+        which is the conservative one."""
+        assert self._run("MainPID=0\n") == ("down", None)
+
+    @pytest.mark.parametrize("kw", [
+        {"stdout": "", "returncode": 1},
+        {"stdout": "MainPID=banana\nLoadState=loaded\n"},
+        {"stdout": "LoadState=loaded\n"},
+        {"stdout": "", "exc": FileNotFoundError("no systemctl")},
+        {"stdout": "", "exc": OSError("boom")},
+    ])
+    def test_unrunnable_or_unparseable_is_unknown_never_absent(self, kw):
+        """A systemctl we could not run says NOTHING about whether the unit
+        exists. Collapsing that into ``absent`` is the same defect wearing the
+        opposite costume."""
+        stdout = kw.pop("stdout")
+        assert self._run(stdout, **kw) == ("unknown", None)
+
+    def test_one_subprocess_asks_for_both_properties(self):
+        from utils import active_health_probe_core as core
+        calls = []
+
+        def _runner(argv, *a, **k):
+            calls.append(argv)
+
+            class _R:
+                pass
+            r = _R()
+            r.stdout, r.stderr, r.returncode = self.ABSENT, "", 0
+            return r
+        with patch.object(core.subprocess, "run", _runner):
+            core._resolve_main_pid_status("meshanchor-map.service")
+        assert len(calls) == 1, f"expected 1 systemctl call, made {len(calls)}"
+        assert "MainPID" in calls[0] and "LoadState" in calls[0]
+
+
+class TestFlatResolverIsGone:
+    """The flat ``_resolve_main_pid`` was DELETED, not left as a shim: it had
+    exactly one caller and that caller now takes the status form, so a shim
+    would be an unused footgun on the module surface. Pinned so nobody
+    reintroduces it by reflex when porting from MeshForge (which keeps its
+    shim only because its probe hub re-exports the name)."""
+
+    def test_no_flat_resolver_in_either_module(self):
+        from utils import active_health_probe as ahp
+        from utils import active_health_probe_core as core
+        assert not hasattr(core, "_resolve_main_pid")
+        assert not hasattr(ahp, "_resolve_main_pid")

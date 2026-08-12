@@ -38,12 +38,21 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Optional, List
+from typing import Callable, Dict, Optional, List, Tuple
 from enum import Enum
 
 from utils.event_bus import emit_service_status
 from utils.service_check import check_udp_port, check_rns_shared_instance
 from utils import tx_guard
+# systemd unit resolution + /proc fd accounting — split to their own module
+# 2026-08-12 (MF025 headroom for the tri-state MainPID port). Re-exported into
+# this namespace on purpose: the checks below reference them as module globals,
+# so `patch.object(active_health_probe, "_read_fd_usage", ...)` keeps working.
+from utils.active_health_probe_core import (  # noqa: F401
+    _LIMITS_NOFILE_RE,
+    _read_fd_usage,
+    _resolve_main_pid_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,69 +78,6 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
             return True
     except OSError:
         return False
-
-
-# Soft RLIMIT_NOFILE line in /proc/<pid>/limits, e.g.:
-#   Max open files            1024                 524288               files
-_LIMITS_NOFILE_RE = re.compile(
-    r"^Max open files\s+(\d+|unlimited)\s+(\d+|unlimited)", re.MULTILINE
-)
-
-
-def _resolve_main_pid(
-    service_name: str, *, systemctl_path: str = "systemctl",
-) -> Optional[int]:
-    """``systemctl show -p MainPID <service>`` parser. Returns None on any
-    failure (including an inactive service, which reports ``MainPID=0``)."""
-    try:
-        proc = subprocess.run(
-            [systemctl_path, "show", "-p", "MainPID", "--value", service_name],
-            capture_output=True, text=True, timeout=3,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if proc.returncode != 0:
-        return None
-    try:
-        pid = int(proc.stdout.strip())
-    except (ValueError, TypeError):
-        return None
-    return pid if pid > 1 else None
-
-
-def _read_fd_usage(pid: int, *, proc_root: str = "/proc"):
-    """Return ``(open_fd_count, soft_limit)`` for ``pid`` or None.
-
-    Counts ``/proc/<pid>/fd`` entries and parses the *soft* ``Max open
-    files`` column from ``/proc/<pid>/limits`` — the soft limit is the one a
-    process actually hits ([Errno 24]). Returns None on any read failure
-    (process vanished, permission, unlimited soft limit) so an unreadable
-    target never alarms. Module-level so tests can build a fake /proc tree.
-    """
-    import os
-    fd_dir = Path(proc_root) / str(pid) / "fd"
-    limits_path = Path(proc_root) / str(pid) / "limits"
-    try:
-        open_count = sum(1 for _ in os.scandir(fd_dir))
-    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
-        return None
-    try:
-        limits_text = limits_path.read_text()
-    except (FileNotFoundError, PermissionError, OSError):
-        return None
-    m = _LIMITS_NOFILE_RE.search(limits_text)
-    if not m:
-        return None
-    soft_raw = m.group(1)
-    if soft_raw == "unlimited":
-        return None
-    try:
-        soft = int(soft_raw)
-    except (ValueError, TypeError):
-        return None
-    if soft <= 0:
-        return None
-    return open_count, soft
 
 
 # ── user-timer failure detection (MeshForge parity port, 2026-07-19) ──
@@ -815,16 +761,33 @@ class ActiveHealthProbe:
 
         Unhealthy past ``degraded_ratio`` (default 80%); the reason flags
         ``wedge`` past ``wedge_ratio`` (default 95% — exhaustion imminent).
-        Healthy (and quiet) when the service is inactive (``MainPID``
-        unresolved — ``check_systemd_service`` owns down), /proc is
-        unreadable, the soft limit is unlimited, or usage is below the
-        degraded threshold — a healthy process must not false-alarm.
+        Healthy (and quiet) when the service is absent/inactive
+        (``check_systemd_service`` owns down), /proc is unreadable, the soft
+        limit is unlimited, or usage is below the degraded threshold — a
+        healthy process must not false-alarm.
+
+        ⚠️ The three no-pid cases carry DISTINCT reasons (2026-08-12, MF
+        parity). They used to share ``inactive_or_unresolved`` — said of a box
+        with no such unit AND of a systemctl we could not run — and
+        ``last_result.reason`` in ``daemon_status.json`` is the ONLY place an
+        operator sees this, so the collapse made real blindness unreadable.
+        All three stay ``healthy=True`` deliberately: no third state exists
+        here, and turning a transient systemctl timeout into an alarm would
+        flap the hysteresis. Legible reason, not an invented page.
         """
-        pid = main_pid if main_pid is not None else _resolve_main_pid(
-            service_name, systemctl_path=systemctl_path
-        )
+        if main_pid is not None:
+            pid_status, pid = "ok", main_pid
+        else:
+            pid_status, pid = _resolve_main_pid_status(
+                service_name, systemctl_path=systemctl_path
+            )
         if pid is None:
-            return HealthResult(healthy=True, reason="inactive_or_unresolved")
+            return HealthResult(healthy=True, reason={
+                # no unit here at all → no fd table to count (inert)
+                "absent": f"absent_no_unit ({service_name})",
+                # unit exists, stopped → check_systemd_service owns it
+                "down": "inactive_check_systemd_service_owns",
+            }.get(pid_status, f"unit_state_unobservable ({service_name})"))
 
         usage = _read_fd_usage(pid, proc_root=proc_root)
         if usage is None:
@@ -1357,9 +1320,12 @@ def create_gateway_health_probe(
     #   - meshanchor-daemon  starved SQLite opens → message_queue "unable to
     #                        open database file" (2026-05-31, same leak, 2nd
     #                        victim — surfaced after the map fix).
-    # Registered unconditionally — each check self-guards, returning healthy
-    # "inactive_or_unresolved" when its service isn't running, so boxes that
-    # don't run a given unit never false-alarm.
+    # Registered unconditionally — each check self-guards healthy when its
+    # service isn't running, so boxes that don't run a given unit never
+    # false-alarm. Since 2026-08-12 that guard names WHICH case it hit:
+    # absent_no_unit / inactive_check_systemd_service_owns /
+    # unit_state_unobservable — the last of which is a blindness, not a box
+    # that simply lacks the unit.
     probe.register_check(
         "meshanchor_map_fds",
         lambda: probe.check_fd_exhaustion("meshanchor-map.service"),
