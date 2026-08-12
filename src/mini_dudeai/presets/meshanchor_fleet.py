@@ -184,8 +184,14 @@ def ma_mini_dir(home: str) -> str:
     $HOME/mini_dudeai_* namespace so the two can coexist on a dual-stack box
     without colliding on the state lock or the rules file. monitoring.
     fleet_watchdog._mini_dead_reason MUST resolve the same location (it reads
-    ``<dir>/state.json`` + ``<dir>/clean_exit``); the agreement is test-pinned."""
-    return os.path.join(home, ".local", "share", "meshanchor", "mini")
+    ``<dir>/state.json`` + ``<dir>/clean_exit``); the agreement is test-pinned.
+
+    2026-08-11: the VALUE now lives in the _util adapter (APP_MINI_SUBDIR) so
+    the byte-locked readers (warmstart, rollup) resolve the same place as this
+    writer — before that they read $HOME/mini_dudeai_* paths this preset never
+    writes. Same location, one constant."""
+    from .._util import APP_MINI_SUBDIR
+    return os.path.join(home, APP_MINI_SUBDIR)
 
 
 def _rule_ids(path: str):
@@ -310,9 +316,16 @@ def build_engine(
     ma_dir = ma_mini_dir(home)
     os.makedirs(ma_dir, exist_ok=True)
     rules_path = rules_path or os.path.join(ma_dir, "rules.json")
-    state_path = state_path or os.path.join(ma_dir, "state.json")
-    history_path = history_path or os.path.join(ma_dir, "history.jsonl")
-    brief_path = brief_path or os.path.join(ma_dir, "brief.md")
+    # brief/state/history come from the _util adapter — the same function the
+    # byte-locked readers (warmstart, rollup) resolve, so writer and reader
+    # cannot drift apart again (2026-08-11; honest_failure_modes #4). The
+    # adapter derives them from APP_MINI_SUBDIR == ma_dir, so the watchdog's
+    # test-pinned location agreement is unchanged.
+    from .._util import app_artifact_paths
+    _default_brief, _default_state, _default_history = app_artifact_paths(home)
+    state_path = state_path or _default_state
+    history_path = history_path or _default_history
+    brief_path = brief_path or _default_brief
     annotate_path = annotate_path or os.path.join(ma_dir, "digest_annotations.md")
     ntfy_topic = ntfy_topic or os.environ.get("MINI_DUDEAI_NTFY_TOPIC")
     if not ntfy_topic:
