@@ -47,6 +47,49 @@ APP_BRIEF_RELPATH = os.path.join(APP_MINI_SUBDIR, "brief.md")
 APP_STATE_RELPATH = os.path.join(APP_MINI_SUBDIR, "state.json")
 APP_HISTORY_RELPATH = os.path.join(APP_MINI_SUBDIR, "history.jsonl")
 
+# ── peer-app conventions — the SHARED-FLEET reader's blind spot ─────────────
+# One fleet can host BOTH twins' mini daemons, each writing its OWN app's
+# convention above. A rollup driven from this repo used to `cat` only THIS
+# app's relpath and label every silent answer "no_mini" — a claim about the
+# BOX drawn from evidence that only ever covered one PATH.
+# Measured on MeshForge 2026-08-12 (ported here the same day): MF's fleet pane
+# reported this repo's replica as "runs no mini" for 19 days — since our
+# 2026-07-24 move off the home-dir convention — while the daemon ticked every
+# 30s and its own warmstart read FRESH. The mirror was LATENT here only
+# because MA's fleet_hosts lists one box; adding any MeshForge box would have
+# reproduced it exactly.
+# Entries are (app, state_relpath, history_relpath), home-relative like the
+# APP_* values, tried in order AFTER this app's own. Absent from this tuple =
+# invisible to the pane, so a twin that moves its convention must land here in
+# the SAME commit (honest_failure_modes #5: two consumers, one constant).
+PEER_APPS = (
+    ("meshforge", "mini_dudeai_state.json", "mini_dudeai_history.jsonl"),
+)
+
+
+def app_state_candidates():
+    """[(app, state_relpath, history_relpath)] — THIS app FIRST (app None =
+    native), then every known peer convention. The ONE resolution order the
+    local read, the breadth ssh leg and the deep ssh leg all share, so no
+    reader can drift into asking a different set of paths than the others."""
+    return [(None, APP_STATE_RELPATH, APP_HISTORY_RELPATH), *PEER_APPS]
+
+
+def app_state_candidate_paths():
+    """Just the state relpaths, in order — for the 'tried:' evidence line a
+    no-state verdict must carry (a verdict that doesn't say what it looked at
+    is an assertion, not an observation)."""
+    return [s for _app, s, _h in app_state_candidates()]
+
+
+def app_for_state_relpath(relpath):
+    """Which app's convention a matched state relpath belongs to. None = this
+    app's own (the unremarkable case the pane does not annotate)."""
+    for app, state_rel, _h in app_state_candidates():
+        if state_rel == relpath:
+            return app
+    return None
+
 
 def app_artifact_paths(home=None):
     """(brief, state, history) absolute paths THIS app's fleet-preset daemon
