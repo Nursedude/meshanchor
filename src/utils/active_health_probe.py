@@ -144,20 +144,29 @@ def _journal_user_unit_has_lines(
 
     The COVERAGE question for the reader above (2026-08-13, MeshForge parity).
     That reader honestly returns ``[]`` for "journalctl ran and nothing
-    matched" — but on a box with **no user journal at all** every pattern query
-    also returns ``[]``, so a caller cannot tell "the job logged no failures"
-    from "this channel is dead".
+    matched" — but ``[]`` also comes back when the unit has NO lines in the
+    window at all, so a caller cannot tell "the job ran and logged no failures"
+    from "nothing about this unit is visible here".
 
-    **This app's own box is the measured case**: meshanchor-server's user
-    journal is empty (``journalctl --user`` → *No journal files were found*),
-    and ``check_user_timer_unit_failing`` returned ``user_timers_ok_4`` about
-    four units it could not see — one of which had fired 19h earlier.
+    **Measured on meshanchor-server**: of four enrolled timers, two returned
+    empty for BOTH patterns and were folded into an affirmative
+    ``user_timers_ok_4``. One of them, ``meshanchor-map-restart.service``,
+    is a DAILY timer that had fired 19h earlier — comfortably outside the 3h
+    lookback, so "no failures" was never an observation about it (the
+    slow-cadence residual this module's header documents). The other two units
+    did have lines and were genuinely judged.
 
-    A unit that RAN must have logged something, so an unfiltered zero is the
-    discriminator. Returns True (channel works for this unit), False (nothing
-    at all — cannot judge), or **None** unobservable. Callers must treat both
-    False and None as "say nothing about this unit", never as healthy
-    (honest_failure_modes #2).
+    ⚠️ Do NOT justify this by "the user journal is dark on that box".
+    ``journalctl --user`` there reports *No journal files were found*, but that
+    is the per-user client path; the root ``USER_UNIT=`` selector this module
+    uses works fine and returns lines for the units that logged any. Two
+    different access routes — checked 2026-08-13 after an earlier read of mine
+    conflated them.
+
+    A unit that logged in the window is judgeable; one that logged nothing is
+    not. Returns True (lines present), False (none at all — cannot judge), or
+    **None** unobservable. Callers must treat both False and None as "say
+    nothing about this unit", never as healthy (honest_failure_modes #2).
 
     Asked ONLY when both pattern queries came back empty, so a busy box pays
     nothing extra.
@@ -1131,6 +1140,7 @@ class ActiveHealthProbe:
 
         failing = []
         observed_any = False
+        observed_count = 0
         for timer, service in sorted(timers.items()):
             fails = ts_fn(service, _USER_TIMER_FAIL_PATTERN)
             oks = ts_fn(service, _USER_TIMER_OK_PATTERN)
@@ -1138,17 +1148,17 @@ class ActiveHealthProbe:
                 continue                       # unobservable for THIS unit
             if not fails and not oks:
                 # AMBIGUOUS (2026-08-13, MeshForge parity): "ran and logged
-                # nothing matching" and "this box has no user journal" are the
-                # same empty result. THIS box is the measured case —
-                # meshanchor-server's user journal is empty (journalctl --user
-                # → No journal files were found), and this check reported
-                # `user_timers_ok_4` about four units it could not see, one of
-                # which had fired 19h earlier. A unit that ran logged
-                # SOMETHING, so ask the unfiltered question before reading
-                # silence as health.
+                # nothing matching" and "nothing about this unit is visible in
+                # the window" are the same empty result. Measured on
+                # meshanchor-server: 2 of 4 enrolled timers were empty for both
+                # patterns and got folded into an affirmative
+                # `user_timers_ok_4` — one being a DAILY timer that fired 19h
+                # ago, outside the 3h lookback entirely. Ask the unfiltered
+                # question before reading silence as health.
                 if coverage_fn(service) is not True:
                     continue           # dead/unreadable channel — say nothing
             observed_any = True
+            observed_count += 1
             if len(fails) < min_failures:
                 continue
             newest_fail = max(fails)
@@ -1161,9 +1171,19 @@ class ActiveHealthProbe:
         if not observed_any:
             return HealthResult(healthy=True, reason="journal_unobservable")
         if not failing:
+            # ⚠️ Say how many were actually JUDGED, not how many are enrolled
+            # (2026-08-13). A label may claim only what its evidence covers:
+            # on meshanchor-server 2 of 4 units had no journal line in the
+            # window (a daily timer that fired 19h ago is legitimately outside
+            # a 3h lookback — the KNOWN slow-cadence residual), and reporting
+            # a flat "ok_4" asserted health over two units nothing had looked
+            # at. Same defect class as the verdict that said "no mini" about a
+            # box when it had only checked one file path.
             return HealthResult(
                 healthy=True,
-                reason=f"user_timers_ok_{len(timers)}",
+                reason=(f"user_timers_ok_{observed_count}_of_{len(timers)}"
+                        if observed_count != len(timers)
+                        else f"user_timers_ok_{len(timers)}"),
             )
 
         listed = ", ".join(f"{svc} ({n}x in {lookback})" for svc, n in failing)
