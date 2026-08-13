@@ -26,6 +26,7 @@ from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,25 @@ producing a self-recursion storm. Verified 2026-05-20 on
 meshanchor-server: 7 req/s sustained + matching ``BrokenPipeError``
 rate, every external ``/fleet/slo`` request triggering a recursive
 cascade bounded only by the 0.5 s fetch timeout."""
+
+
+SELF_HTTP_PORT: Optional[int] = None
+"""The port THIS process serves on, registered by the map at bind time.
+
+Exists because "is MeshForge co-installed?" turned out not to answer the
+question the passthrough actually needs answered, which is "is the thing on
+localhost:5000 somebody ELSE?" See ``_merge_mesh_forge_blocks``.
+"""
+
+
+def set_self_http_port(port: Optional[int]) -> None:
+    """Record the port this process listens on. Single writer: the map server
+    at bind time. Idempotent; ``None`` clears it (tests)."""
+    global SELF_HTTP_PORT
+    try:
+        SELF_HTTP_PORT = int(port) if port is not None else None
+    except (TypeError, ValueError):
+        SELF_HTTP_PORT = None
 
 
 @lru_cache(maxsize=1)
@@ -286,6 +306,21 @@ into MA's self_snapshot. Additive — never overwrites a key MA
 already populated. New blocks land here when shipped by MF."""
 
 
+_self_passthrough_warned = False
+"""One-shot flag for the self-passthrough skip. The condition is a permanent
+deployment fact, so it must not log once per /fleet/slo -- that would replace a
+traceback storm with a logging storm (honest_failure_modes #9 wants a witness,
+not a flood)."""
+
+
+def _passthrough_port() -> Optional[int]:
+    """Port of ``MESHFORGE_LOCAL_SLO_URL``, or None if unparseable."""
+    try:
+        return urlparse(MESHFORGE_LOCAL_SLO_URL).port
+    except (ValueError, TypeError):
+        return None
+
+
 def _merge_mesh_forge_blocks(
     self_snapshot: Dict[str, Any],
     timeout: float = 0.5,
@@ -309,6 +344,38 @@ def _merge_mesh_forge_blocks(
     # timeout. Verified 2026-05-20 on meshanchor-server: ~7 req/s
     # sustained, 1:1 BrokenPipeError rate, 415 CPU min in 6 h 13 m wall.
     if not _meshforge_co_installed():
+        return
+    # ...and skip if the "MeshForge" map we are about to call is US.
+    #
+    # 2026-08-13: the co-install check above is a PROXY for "somebody else
+    # serves localhost:5000", and on meshanchor-server the proxy went false.
+    # /opt/meshforge has been installed there since 2026-07-14 -- it is a
+    # MeshForge FLEET MEMBER, so it carries MF's code for the watchdog and
+    # fleet_pull -- while `meshforge-map` is inactive and MeshAnchor's own map
+    # owns :5000. Existence of a directory never meant a different service was
+    # listening. The 2026-05-20 storm this guard was written for came straight
+    # back and ran for ~30 days: /fleet/slo -> slo_view -> here -> GET
+    # localhost:5000/fleet/slo -> ourselves, recursing until the 0.5s timeout
+    # cut each level, one BrokenPipeError per level. Measured before the fix:
+    # ~4.5 self-fetches/s, 13,133 handler broken pipes in ten minutes, ~20k
+    # journal lines/min -- which rotated the box's whole volatile journal every
+    # ~10 minutes and left its user timers unjudgeable.
+    #
+    # The cure is a POSITIVE identity check, the same standard
+    # fleet_config.non_self_peers already holds itself to: do not ask whether
+    # MF might be here, ask whether this URL is our own listening port.
+    if SELF_HTTP_PORT is not None and _passthrough_port() == SELF_HTTP_PORT:
+        global _self_passthrough_warned
+        if not _self_passthrough_warned:
+            _self_passthrough_warned = True
+            logger.info(
+                "MeshForge slo passthrough disabled: %s points at our own "
+                "listening port %d, so fetching it would be self-recursion. "
+                "MeshForge is installed here but is not the service on that "
+                "port. Self blocks (path_table/interfaces/cascade) will be "
+                "absent; peers are unaffected.",
+                MESHFORGE_LOCAL_SLO_URL, SELF_HTTP_PORT,
+            )
         return
     try:
         if fetch is None:

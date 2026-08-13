@@ -608,3 +608,133 @@ class TestMeshForgeBlockMergeInstallCheck:
             "every slo request and dilute the perf win of the guard."
         )
         assert info.hits == 49
+
+
+class TestMeshForgeBlockMergeSelfPortGuard:
+    """The install-check guard above was necessary but NOT sufficient.
+
+    2026-08-13, same box, same storm, ~30 days: `/opt/meshforge` was installed
+    on meshanchor-server on 2026-07-14 because it is a MeshForge FLEET MEMBER
+    (it carries MF's code for the watchdog and fleet_pull), while
+    `meshforge-map` is inactive and MeshAnchor's own map owns :5000. So
+    `_meshforge_co_installed()` answered True, the merge fetched
+    `localhost:5000/fleet/slo`, and that was ITSELF.
+
+    Measured before the fix: ~4.5 self-fetches/s, 13,133 handler
+    BrokenPipeErrors in ten minutes, ~20k journal lines/min — which rotated
+    the box's whole volatile journal every ~10 minutes and left its enrolled
+    user timers unjudgeable.
+
+    The lesson is the one this tree keeps relearning: the install check is a
+    PROXY for "somebody else serves that port", and a proxy can go false
+    without anything looking broken. The cure is a positive identity check —
+    the same standard `fleet_config.non_self_peers` already holds itself to.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_port_and_install(self, monkeypatch):
+        """SELF_HTTP_PORT is a module global; leaking it across tests would be
+        exactly the un-pinned ambient state that makes a verdict meaningless."""
+        prior = fr.SELF_HTTP_PORT
+        fr._meshforge_co_installed.cache_clear()
+        monkeypatch.setattr(fr, "_meshforge_co_installed", lambda: True)
+        monkeypatch.setattr(fr, "_self_passthrough_warned", False)
+        yield
+        fr.set_self_http_port(prior)
+
+    def _fetcher(self, calls):
+        def fake_fetch(url, timeout):
+            calls.append(url)
+            return {"path_table": {"available": True, "count": 4}}, None
+        return fake_fetch
+
+    def test_skips_when_the_passthrough_url_is_our_own_port(self):
+        """THE storm. MF 'installed', but :5000 is us."""
+        calls = []
+        fr.set_self_http_port(5000)
+        snap = {"host": "meshanchor-server"}
+        fr._merge_mesh_forge_blocks(snap, fetch=self._fetcher(calls))
+        assert calls == [], (
+            "self-recursion: the merge fetched our own listening port. "
+            f"Got: {calls!r}")
+        assert snap == {"host": "meshanchor-server"}
+
+    def test_proceeds_when_another_service_owns_that_port(self):
+        """The feature must survive the fix — on the operator's real
+        co-install, MA serves a different port and MF genuinely owns :5000."""
+        calls = []
+        fr.set_self_http_port(5001)
+        snap = {"host": "noc"}
+        fr._merge_mesh_forge_blocks(snap, fetch=self._fetcher(calls))
+        assert calls == [fr.MESHFORGE_LOCAL_SLO_URL]
+        assert snap["path_table"] == {"available": True, "count": 4}
+
+    def test_unregistered_port_keeps_the_previous_behaviour(self):
+        """Fail-OPEN by design: if the map never registered its port we must
+        not silently disable a working passthrough. Stated so the fallback is
+        a decision on the record, not an accident — the registration failure
+        path logs a warning precisely because this direction is permissive."""
+        calls = []
+        fr.set_self_http_port(None)
+        fr._merge_mesh_forge_blocks({"host": "noc"}, fetch=self._fetcher(calls))
+        assert calls == [fr.MESHFORGE_LOCAL_SLO_URL]
+
+    def test_the_skip_logs_once_not_once_per_request(self):
+        """A witness, not a flood: the condition is a permanent deployment
+        fact and /fleet/slo is polled continuously. Replacing a traceback
+        storm with a logging storm would not be a fix."""
+        fr.set_self_http_port(5000)
+        calls = []
+        with patch.object(fr.logger, "info") as info:
+            for _ in range(25):
+                fr._merge_mesh_forge_blocks({}, fetch=self._fetcher(calls))
+        assert info.call_count == 1, info.call_args_list
+
+    @pytest.mark.parametrize("bad", ["nope", object(), [5000]])
+    def test_garbage_port_registration_is_none_not_a_crash(self, bad):
+        fr.set_self_http_port(bad)
+        assert fr.SELF_HTTP_PORT is None
+
+    def test_passthrough_port_matches_the_url_constant(self):
+        """If the URL constant is ever re-pointed, the guard must follow it
+        rather than keep comparing against a stale hardcoded 5000."""
+        assert fr._passthrough_port() == 5000
+        assert ":5000/" in fr.MESHFORGE_LOCAL_SLO_URL
+
+
+class TestSelfPortRegistrationIsWired:
+    """Pin the WRITER, not just the reader (honest_failure_modes #4).
+
+    Caught live on 2026-08-13: the guard above was committed to the working
+    tree while its registration half was still missing, so `SELF_HTTP_PORT`
+    was never set and the whole branch was dead code that read as a fix. Every
+    test in the class above would still have passed — they set the global
+    themselves. A reader without its writer is a guard that cannot fire.
+    """
+
+    def test_register_helper_sets_the_rollup_global(self):
+        from utils.map_data_service import _register_self_http_port
+        prior = fr.SELF_HTTP_PORT
+        try:
+            _register_self_http_port(5055)
+            assert fr.SELF_HTTP_PORT == 5055
+        finally:
+            fr.set_self_http_port(prior)
+
+    def test_every_server_bind_registers_the_port(self):
+        """Source-level, because binding two real ports in a unit test is
+        worse. Each `ThreadingHTTPServer(...)` construction must be followed
+        closely by a registration call — a new bind site added without one
+        silently re-opens the storm on whichever box hits that path."""
+        import inspect
+        from utils import map_data_service
+        lines = inspect.getsource(map_data_service).splitlines()
+        binds = [i for i, l in enumerate(lines)
+                 if "ThreadingHTTPServer((" in l]
+        assert binds, "no bind site found — did the server construction move?"
+        for i in binds:
+            window = "\n".join(lines[i:i + 8])
+            assert "_register_self_http_port(" in window, (
+                f"bind at source line {i + 1} does not register its port "
+                f"within 8 lines; the self-recursion guard cannot arm:\n"
+                f"{window}")

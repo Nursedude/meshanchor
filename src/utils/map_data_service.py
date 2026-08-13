@@ -45,6 +45,34 @@ from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
 
+
+def _register_self_http_port(port) -> None:
+    """Tell the rollup which port is OURS, before we serve a single request.
+
+    ``fleet_rollup._merge_mesh_forge_blocks`` fetches a co-installed
+    MeshForge's ``/fleet/slo`` from ``localhost:5000``. On a box where
+    MeshAnchor's own map owns that port, that fetch is self-recursion — the
+    2026-05-20 storm, which came back for ~30 days once ``/opt/meshforge`` was
+    installed here as a fleet member. The rollup can only refuse it if it knows
+    our port, and only this module knows it.
+
+    Best-effort: a failure costs the recursion guard, not the server, so it
+    degrades to the pre-2026-08-13 behaviour rather than refusing to bind. It
+    is still a swallow, so it leaves a witness (honest_failure_modes #9) — and
+    the guard is fail-OPEN by construction, which is exactly the case that must
+    not be silent.
+    """
+    try:
+        from monitoring.fleet_rollup import set_self_http_port
+        set_self_http_port(port)
+    except Exception as e:
+        logger.warning(
+            "could not register self HTTP port %s with fleet_rollup (%s: %s) "
+            "— the MeshForge slo passthrough loses its self-recursion guard; "
+            "watch for repeated GET /fleet/slo from localhost",
+            port, type(e).__name__, e)
+
+
 # Optional dependencies for WebSocket, API proxy, and message listener
 _get_websocket_server, _is_websocket_available, _HAS_WEBSOCKET = safe_import(
     'utils.websocket_server', 'get_websocket_server', 'is_websocket_available'
@@ -379,6 +407,7 @@ class MapServer:
         # from preventing shutdown.
         self._server = ThreadingHTTPServer((self.host, self.port), MapRequestHandler)
         self._server.daemon_threads = True
+        _register_self_http_port(self.port)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
         print(f"MeshAnchor NOC Server running on port {self.port}")
         if self.host == "0.0.0.0":
@@ -417,6 +446,9 @@ class MapServer:
 
         self._server = ThreadingHTTPServer((self.host, self.port), MapRequestHandler)
         self._server.daemon_threads = True
+        # BEFORE serve_forever: the guard must be armed before the first
+        # request can reach slo_view, or the storm gets a head start.
+        _register_self_http_port(self.port)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         logger.info(f"Map server running in background on port {self.port}")
