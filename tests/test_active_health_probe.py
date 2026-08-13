@@ -808,3 +808,50 @@ class TestFlatResolverIsGone:
         from utils import active_health_probe_core as core
         assert not hasattr(core, "_resolve_main_pid")
         assert not hasattr(ahp, "_resolve_main_pid")
+
+
+class TestEnabledUserTimersUsesTheSharedHelper:
+    """2026-08-12 port from MeshForge (which landed it 2026-08-09).
+
+    ``active_health_probe`` carried its OWN ``_enabled_user_timers`` that read
+    only ``timers.target.wants``. Enablement is a symlink under **ANY**
+    ``*.target.wants``, so a timer enabled into ``default.target.wants`` was
+    invisible here and its triggered service could fail on every firing,
+    unwatched. Not hypothetical: **meshanchor-server**, the box this app
+    primarily runs on, has ``meshanchor-map-restart.timer`` in
+    ``default.target.wants``.
+
+    Neither twin had a test pinning that the CONSUMER uses the shared helper —
+    both only tested the helper itself — which is precisely how this copy
+    drifted for three days after MeshForge fixed it. These two do:
+    identity (cheap, catches a re-implementation) and behaviour (survives a
+    correct re-implementation).
+    """
+
+    def test_probe_uses_the_one_shared_definition(self):
+        """honest_failure_modes #5: two consumers, ONE definition."""
+        from utils import active_health_probe as ahp
+        from utils import user_units
+        assert ahp._enabled_user_timers is user_units.enabled_user_timers, (
+            "active_health_probe re-implemented enabled_user_timers instead of "
+            "importing it — that is how this module drifted from MeshForge and "
+            "went blind to timers outside timers.target.wants")
+
+    def test_a_timer_enabled_via_default_target_is_visible(self, tmp_path):
+        """The meshanchor-server shape, end to end through the probe's name."""
+        from utils import active_health_probe as ahp
+        root = tmp_path / ".config" / "systemd" / "user"
+        (root / "timers.target.wants").mkdir(parents=True)
+        (root / "default.target.wants").mkdir(parents=True)
+        (root / "timers.target.wants" / "in-timers.timer").write_text(
+            "[Timer]\n", encoding="utf-8")
+        (root / "default.target.wants" / "meshanchor-map-restart.timer"
+         ).write_text("[Timer]\n", encoding="utf-8")
+
+        got = ahp._enabled_user_timers(str(tmp_path))
+        assert got is not None
+        assert "meshanchor-map-restart.timer" in got, (
+            "a timer enabled into default.target.wants is enabled — a reader "
+            "that opens only timers.target.wants calls it disabled")
+        assert got["meshanchor-map-restart.timer"] == "meshanchor-map-restart.service"
+        assert "in-timers.timer" in got  # the old dir must still be read

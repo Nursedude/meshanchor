@@ -43,6 +43,7 @@ from enum import Enum
 
 from utils.event_bus import emit_service_status
 from utils.service_check import check_udp_port, check_rns_shared_instance
+from utils.user_units import enabled_user_timers
 from utils import tx_guard
 # systemd unit resolution + /proc fd accounting — split to their own module
 # 2026-08-12 (MF025 headroom for the tri-state MainPID port). Re-exported into
@@ -88,7 +89,8 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
 # silently dead and the check would alarm after every recovery.
 _USER_TIMER_FAIL_PATTERN = "Failed with result"
 _USER_TIMER_OK_PATTERN = "Finished "
-_USER_TIMER_UNIT_RE = re.compile(r"(?mi)^\s*Unit\s*=\s*(\S+)\s*$")
+# _USER_TIMER_UNIT_RE removed 2026-08-12 with the local _enabled_user_timers —
+# the Unit= parse now lives once, in utils.user_units (matches MeshForge).
 
 
 def _journal_user_unit_ts(
@@ -133,38 +135,22 @@ def _journal_user_unit_ts(
     return out
 
 
-def _enabled_user_timers(user_home: str) -> Optional[Dict[str, str]]:
-    """Map ``timer unit -> triggered service unit`` for the operator's enabled
-    user timers (``~/.config/systemd/user/timers.target.wants/``).
-
-    The service is ``Unit=`` from ``[Timer]`` when set, else systemd's default
-    of the same stem with ``.service``. ``None`` means the directory exists but
-    is unreadable — *unobservable*, which the caller must not read as "no
-    timers"; an absent directory is a real, observed empty enrollment (``{}``).
-    """
-    wants = Path(user_home) / ".config" / "systemd" / "user" / "timers.target.wants"
-    if not wants.is_dir():
-        return {}
-    try:
-        names = [p.name for p in wants.iterdir() if p.name.endswith(".timer")]
-    except OSError:
-        return None
-
-    out: Dict[str, str] = {}
-    for timer in names:
-        service = timer[: -len(".timer")] + ".service"
-        # Best-effort Unit= override; an unreadable timer file falls back to
-        # the stem default rather than dropping the timer from the map — the
-        # conservative choice is to keep WATCHING it under its likely name.
-        try:
-            body = (wants / timer).read_text(errors="replace")
-            m = _USER_TIMER_UNIT_RE.search(body)
-            if m and m.group(1).endswith(".service"):
-                service = m.group(1)
-        except OSError:
-            pass
-        out[timer] = service
-    return out
+# Ported from MeshForge 2026-08-12 (MF landed it 2026-08-09 in
+# watchdog_probes_user; this local copy was the un-ported twin).
+#
+# ⚠️ The old body here read ONLY ``timers.target.wants``. Enablement is a
+# symlink under **ANY** ``*.target.wants``, so a timer enabled into e.g.
+# ``default.target.wants`` was invisible to this probe — its triggered service
+# could have failed on every firing forever, unwatched. That is not
+# hypothetical on this app: **meshanchor-server has
+# ``meshanchor-map-restart.timer`` in ``default.target.wants``** (it declares
+# ``WantedBy=timers.target`` but is linked from the other dir), so the box this
+# app primarily runs on had a real timer outside the watch-list.
+#
+# ``utils.user_units.enabled_user_timers`` is byte-identical to MeshForge's and
+# reads every wants dir. Two consumers, ONE definition (honest_failure_modes
+# #5) — a local re-implementation is exactly how the twins drift apart.
+_enabled_user_timers = enabled_user_timers
 
 
 class HealthState(Enum):
