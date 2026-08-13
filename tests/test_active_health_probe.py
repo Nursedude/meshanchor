@@ -855,3 +855,69 @@ class TestEnabledUserTimersUsesTheSharedHelper:
             "that opens only timers.target.wants calls it disabled")
         assert got["meshanchor-map-restart.timer"] == "meshanchor-map-restart.service"
         assert "in-timers.timer" in got  # the old dir must still be read
+
+
+class TestUserTimerSilenceNeedsAWorkingJournal:
+    """2026-08-13 MeshForge parity — an empty pattern result means two things.
+
+    ``_journal_user_unit_ts`` honestly returns ``[]`` for "journalctl ran and
+    nothing matched", but on a box with no user journal every query returns
+    ``[]`` too. **This app's own box is the measured case**: meshanchor-server's
+    user journal is empty, and this check returned ``user_timers_ok_4`` about
+    four units it could not see, one of which had fired 19h earlier.
+    """
+
+    NOW = 1_000_000.0
+
+    def _check(self, tmp_path, *, fails, oks, coverage):
+        from utils.active_health_probe import ActiveHealthProbe
+        home = tmp_path / "home"
+        wants = home / ".config" / "systemd" / "user" / "timers.target.wants"
+        wants.mkdir(parents=True)
+        (wants / "t.timer").write_text("[Timer]\n", encoding="utf-8")
+        table = {"t.service": {"Failed with result": fails, "Finished ": oks}}
+        return ActiveHealthProbe().check_user_timer_unit_failing(
+            user_home=str(home), now=self.NOW,
+            ts_fn=lambda u, p: table.get(u, {}).get(p),
+            coverage_fn=lambda u: coverage)
+
+    def test_dead_journal_is_unobservable_not_ok(self, tmp_path):
+        res = self._check(tmp_path, fails=[], oks=[], coverage=False)
+        assert res.reason == "journal_unobservable", res.reason
+
+    def test_unreadable_coverage_is_also_unobservable(self, tmp_path):
+        res = self._check(tmp_path, fails=[], oks=[], coverage=None)
+        assert res.reason == "journal_unobservable", res.reason
+
+    def test_working_journal_with_no_failures_is_ok(self, tmp_path):
+        """The true-negative must survive."""
+        res = self._check(tmp_path, fails=[], oks=[], coverage=True)
+        assert res.healthy is True
+        assert res.reason.startswith("user_timers_ok"), res.reason
+
+    def test_coverage_not_consulted_when_lines_exist(self, tmp_path):
+        """Cost guard: only the ambiguous case pays the extra query."""
+        def boom(unit):
+            raise AssertionError("coverage must not be consulted here")
+        from utils.active_health_probe import ActiveHealthProbe
+        home = tmp_path / "home"
+        wants = home / ".config" / "systemd" / "user" / "timers.target.wants"
+        wants.mkdir(parents=True)
+        (wants / "t.timer").write_text("[Timer]\n", encoding="utf-8")
+        table = {"t.service": {"Failed with result": [],
+                               "Finished ": [self.NOW - 600]}}
+        res = ActiveHealthProbe().check_user_timer_unit_failing(
+            user_home=str(home), now=self.NOW,
+            ts_fn=lambda u, p: table.get(u, {}).get(p),
+            coverage_fn=boom)
+        assert res.healthy is True
+
+    def test_a_real_failure_still_fires(self, tmp_path):
+        """The alarm leg is untouched — failures are non-empty, so coverage
+        never arises."""
+        res = self._check(
+            tmp_path,
+            fails=[self.NOW - 1800, self.NOW - 1200, self.NOW - 600],
+            oks=[], coverage=False)
+        assert res.healthy is False
+        assert "t.service" in res.reason
