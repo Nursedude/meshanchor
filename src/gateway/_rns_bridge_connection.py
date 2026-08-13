@@ -316,10 +316,25 @@ class RNSConnectionMixin:
         if self._reticulum:
             try:
                 import RNS
-                # RNS.Transport.exithandler() closes all interfaces and releases ports
-                RNS.Transport.exithandler()
+                # ``exit_handler()`` — NOT ``exithandler()``. MeshForge parity
+                # port, 2026-08-12: the old spelling exists on no RNS either
+                # repo has pinned, so this raised AttributeError on EVERY
+                # gateway shutdown and the except below swallowed it at DEBUG.
+                # Found by reading a restarted gateway's journal on the MF
+                # side; this file was byte-identical, so MeshAnchor carried it
+                # too. The old comment also over-promised: exit_handler sets
+                # Transport._should_run = False and voids the queues, and
+                # persists data ONLY when this process is not a shared-instance
+                # client. It does NOT close interfaces or release ports — that
+                # is detach_interfaces(), deliberately NOT called here: this
+                # gateway is a CLIENT of the shared rnsd and does not own the
+                # interfaces (the #69/#82 @rns-ownership class).
+                RNS.Transport.exit_handler()
                 logger.debug("RNS Transport shut down")
             except Exception as e:
+                # Kept broad + swallowed (shutdown must not raise), but the
+                # spelling is now pinned by tests/test_rns_api_surface.py so a
+                # fork-merge rename fails a TEST instead of hiding here.
                 logger.debug(f"Error shutting down RNS Transport: {e}")
 
         self._lxmf_router = None
