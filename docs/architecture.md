@@ -167,7 +167,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # <!--STAT:testfiles-->215<!--/STAT--> test files, ~5,900 tests
+tests/                     # <!--STAT:testfiles-->216<!--/STAT--> test files, ~5,900 tests
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)

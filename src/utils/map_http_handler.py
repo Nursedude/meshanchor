@@ -684,7 +684,11 @@ class MapRequestHandler(
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
             self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError,
+                    ConnectionAbortedError) as e:
+                logger.debug(f"Client disconnected during static write: {e}")
         else:
             self.send_error(404, f"File not found: {path_only}")
 
@@ -744,7 +748,11 @@ class MapRequestHandler(
             self.send_header('Pragma', 'no-cache')
             self.send_header('Expires', '0')
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError,
+                    ConnectionAbortedError) as e:
+                logger.debug(f"Client disconnected during static write: {e}")
         else:
             self.send_error(404, f"Map file not found: {map_path}")
 
@@ -762,7 +770,19 @@ class MapRequestHandler(
         self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError) as e:
+            # Client abandoned the request before we finished writing — normal
+            # whenever a poller times out or a browser navigates away. This is
+            # NOT an error path: unguarded, socketserver's default handle_error
+            # prints a ~22-line traceback per hang-up. Measured on
+            # meshanchor-server 2026-08-13: 13,133 of them in TEN MINUTES from
+            # /fleet/slo alone, which burned the box's whole journal every ~10
+            # min and took every other unit's history with it. MeshForge's twin
+            # has guarded this since its own incident; this is that port.
+            logger.debug(f"Client disconnected during response write: {e}")
 
     def _serve_cached(self, cache, key, build_obj, status: int = 200):
         """Serve a JSON response through a ResponseByteCache.
@@ -801,7 +821,19 @@ class MapRequestHandler(
         self._send_cors_header()
         self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError,
+                ConnectionAbortedError) as e:
+            # Client abandoned the request before we finished writing — normal
+            # whenever a poller times out or a browser navigates away. This is
+            # NOT an error path: unguarded, socketserver's default handle_error
+            # prints a ~22-line traceback per hang-up. Measured on
+            # meshanchor-server 2026-08-13: 13,133 of them in TEN MINUTES from
+            # /fleet/slo alone, which burned the box's whole journal every ~10
+            # min and took every other unit's history with it. MeshForge's twin
+            # has guarded this since its own incident; this is that port.
+            logger.debug(f"Client disconnected during response write: {e}")
 
 
     def _serve_message_queue(self):
