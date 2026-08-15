@@ -489,6 +489,14 @@ class MeshtasticReemitConfig:
     # Defaults to the same convention as _process_mesh_to_rns so MeshCore
     # users see consistent provenance.
     output_format: str = "[Mesh:{sender}] {text}"
+    # Optional map of orig-Meshtastic-sender token → display label, applied
+    # to {sender} before output_format renders. Lets operators label
+    # well-known nodes (a bot, a beacon) so MeshCore readers see meaningful
+    # provenance instead of a node id. Keys are matched case-insensitively
+    # against the stripped sender token (e.g. "!abcd1234"); values replace
+    # it verbatim. Node ids are operator-specific, so this lives in
+    # gateway.json — never hardcode one here (MF014).
+    sender_labels: Dict[str, str] = field(default_factory=dict)
     # Content prefixes that should NEVER be re-emitted — Issue #66 synth
     # ACKs round-trip through LoRa and lose their in-process flag, so a
     # text-level guard at the bridge entry is the right layer. Checked
@@ -704,6 +712,26 @@ class GatewayConfig:
                 "(saved default predating the 9443 fix)")
         return meshtastic_data
 
+    @staticmethod
+    def _coerce_sender_labels(raw: Any) -> Dict[str, str]:
+        """Validate the reemit sender_labels mapping from gateway.json.
+
+        A mis-typed value (list, string, null) must not silently become an
+        empty mapping that LOOKS like "no labels configured" while the
+        operator believes labels are on — warn loudly and drop it
+        (honest_failure_modes #3). Keys lowercase to match the bridge's
+        case-insensitive sender comparison.
+        """
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            logger.warning(
+                "meshtastic_reemit.sender_labels must be an object of "
+                "{sender: label}; got %s — ignoring it",
+                type(raw).__name__)
+            return {}
+        return {str(k).lower(): str(v) for k, v in raw.items()}
+
     @classmethod
     def load(cls) -> 'GatewayConfig':
         """Load configuration from file"""
@@ -807,6 +835,9 @@ class GatewayConfig:
                     'drop_prefixes', default_drop_prefixes
                 )),
                 nested_drop_prefixes=nested,
+                sender_labels=cls._coerce_sender_labels(
+                    reemit_data.get('sender_labels')
+                ),
             )
 
             # Reconstruct nested dataclasses

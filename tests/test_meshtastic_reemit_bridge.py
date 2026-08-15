@@ -538,6 +538,84 @@ class TestPrefixStripAndFormat:
 
 
 # ---------------------------------------------------------------------------
+# Sender labels (operator-configured display names for known nodes)
+# ---------------------------------------------------------------------------
+
+
+class TestSenderLabels:
+    def test_label_applied_to_matching_sender(self):
+        cfg = _make_config(sender_labels={"!abcd1234": "🤖bot"})
+        handler = MagicMock()
+        bridge = _make_bridge(config=cfg, handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abcd1234] Tide Data",
+        )
+        body = handler.send_text.call_args[0][0]
+        assert body == "[Mesh:\U0001f916bot] Tide Data"
+
+    def test_wire_sender_case_insensitive(self):
+        # Loader lowercases keys; the bridge lowercases the WIRE sender,
+        # so a mixed-case sender token on the wire still matches.
+        cfg = _make_config(sender_labels={"!abcd1234": "bot"})
+        handler = MagicMock()
+        bridge = _make_bridge(config=cfg, handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!ABCD1234] hi",
+        )
+        body = handler.send_text.call_args[0][0]
+        assert body == "[Mesh:bot] hi"
+
+    def test_unlabeled_sender_unchanged(self):
+        cfg = _make_config(sender_labels={"!abcd1234": "bot"})
+        handler = MagicMock()
+        bridge = _make_bridge(config=cfg, handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!deadbeef] hi",
+        )
+        body = handler.send_text.call_args[0][0]
+        assert body == "[Mesh:!deadbeef] hi"
+
+    def test_label_survives_bad_output_format_fallback(self):
+        cfg = _make_config(
+            output_format="{bogus} {text}",
+            sender_labels={"!abcd1234": "bot"},
+        )
+        handler = MagicMock()
+        bridge = _make_bridge(config=cfg, handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abcd1234] hi",
+        )
+        body = handler.send_text.call_args[0][0]
+        assert body == "[Mesh:bot] hi"
+
+    def test_no_labels_config_is_noop(self):
+        handler = MagicMock()
+        bridge = _make_bridge(handler=handler)
+        bridge.on_lxmf_message(
+            bytes.fromhex(MOC_BROADCAST_HASH),
+            b"[meshtastic ch2:!abcd1234] hi",
+        )
+        body = handler.send_text.call_args[0][0]
+        assert body == "[Mesh:!abcd1234] hi"
+
+    def test_loader_coerces_mistyped_labels_to_empty_with_warning(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            out = GatewayConfig._coerce_sender_labels(["!abcd1234", "bot"])
+        assert out == {}
+        assert any("sender_labels" in r.message for r in caplog.records)
+
+    def test_loader_lowercases_keys_and_none_is_empty(self):
+        assert GatewayConfig._coerce_sender_labels(None) == {}
+        out = GatewayConfig._coerce_sender_labels({"!ABCD1234": "Bot"})
+        assert out == {"!abcd1234": "Bot"}
+
+
+# ---------------------------------------------------------------------------
 # Handler resolution
 # ---------------------------------------------------------------------------
 

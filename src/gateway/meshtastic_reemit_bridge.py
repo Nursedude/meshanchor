@@ -258,6 +258,15 @@ class MeshtasticReemitBridge:
                     )
                     return False
 
+            # 3c) Sender labeling: map well-known orig senders (the bot,
+            # a beacon) to an operator-configured display label so
+            # MeshCore readers see provenance, not a node id. Applied
+            # before formatting so the fallback path inherits it too.
+            label = (getattr(self._config, "sender_labels", None)
+                     or {}).get(sender.lower())
+            if label:
+                sender = label
+
             # 4) Reformat using operator's output_format. Bad templates
             # fall back to a safe default so a typo in config doesn't
             # take the bridge down.
@@ -360,6 +369,9 @@ class MeshtasticReemitBridge:
             "output_format": self._config.output_format,
             "drop_prefixes": list(self._config.drop_prefixes or ()),
             "nested_drop_prefixes": list(self._config.nested_drop_prefixes or ()),
+            "sender_labels": dict(
+                getattr(self._config, "sender_labels", None) or {}
+            ),
             "started_at_iso": (
                 self._started_at.isoformat() if self._started_at else None
             ),
