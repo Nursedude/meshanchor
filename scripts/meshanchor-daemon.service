@@ -45,6 +45,15 @@ ProtectSystem=strict
 # /root XDG subpaths kept (with `-` prefix so they're optional) for hosts
 # where SUDO_USER is unset and get_real_user_home() resolves to /root.
 ReadWritePaths=/var/log /run/meshanchor /home -/root/.config/meshanchor -/root/.local/share/meshanchor -/root/.cache/meshanchor
+# The daemon is an RNS shared-instance CLIENT, but its embedded LXMF router
+# still assembles inbound resources and manages ratchets under the SHARED
+# configdir's storage tree (/etc/reticulum/storage — host dirs are 0777 for
+# exactly this multi-process sharing). Without this entry every inbound
+# chunked LXMF (bot replies, rescanary) dies with EROFS inside the sandbox
+# and the RNS→MC bridge goes silent (2026-08-15; #60 class — MF's
+# meshforge-gateway unit has carried the same line since its own #60 fix).
+# `-` prefix: skip on hosts that run RNS from a home configdir instead.
+ReadWritePaths=-/etc/reticulum/storage
 PrivateTmp=true
 
 # Environment
