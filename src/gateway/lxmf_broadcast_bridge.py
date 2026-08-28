@@ -679,6 +679,12 @@ class LXMFBroadcastBridge:
             self._storage_path.mkdir(parents=True, exist_ok=True)
             self._identity = self._load_or_create_identity()
 
+            # Power-loss-truncated ratchets crash register_delivery_identity()
+            # AFTER Transport registration, wedging retries on 'already
+            # registered' — validate and quarantine first (2026-08-27).
+            from gateway._rns_bridge_connection import quarantine_corrupt_ratchets
+            quarantine_corrupt_ratchets(self._storage_path)
+
             # Own LXMRouter — separate from gateway's so register_delivery_identity
             # doesn't trip LXMF 0.9.4's "one identity per router" cap.
             # LXMRouter() registers signal handlers internally and fails on
