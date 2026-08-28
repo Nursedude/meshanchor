@@ -26,9 +26,13 @@ from mini_dudeai.rollup import build_box_deep, build_deep_feed  # noqa: E402
 NOW = 1_780_000_000.0
 
 
-def _hist_escalation(ts, rule, subject, detail):
+def _hist_escalation(ts, rule, subject, detail, transition="edge_up"):
+    # The engine attaches the escalation payload to BOTH transitions — the
+    # edge_up fire and the edge_down clear. Default to edge_up (a live
+    # escalation); since the byte-locked brief.py's 2026-08-28 fix, an
+    # edge_down row is itself positive resolved evidence, no state needed.
     esc = {"rule": rule, "subject": subject, "detail": detail}
-    return {"ts": ts, "iso": "2026-08-11T00:00:00", "transition": "edge_down",
+    return {"ts": ts, "iso": "2026-08-11T00:00:00", "transition": transition,
             "rule_id": rule, "subject": subject, "detail": detail,
             "outcome": {"extras": {"escalation": esc}}}
 
@@ -39,6 +43,19 @@ def test_cleared_escalation_is_marked_resolved():
              "rules": {"esc_rule::ma-box": {"rule_id": "esc_rule",
                                             "subject": "ma-box",
                                             "currently_active": False}}}
+    rec = build_box_deep("ma-box", state, history, NOW)
+    assert rec["escalations"][0]["resolved"] is True
+
+
+def test_edge_down_row_is_resolved_even_when_rule_pruned_from_state():
+    """2026-08-28 (MF moc-drain-snapshot / nomadnet, post-Lala recovery): the
+    engine replays the escalation payload on the CLEAR row, and a long-running
+    condition that resolves has usually aged out of the state's rules dict by
+    then — the currently_active lookup can't demote it. The edge_down row is
+    the engine's own observation of the clear."""
+    history = [_hist_escalation(NOW - 10, "pruned_rule", "ma-box",
+                                "failing every firing", transition="edge_down")]
+    state = {"last_tick_ts": NOW, "rules": {}}
     rec = build_box_deep("ma-box", state, history, NOW)
     assert rec["escalations"][0]["resolved"] is True
 
