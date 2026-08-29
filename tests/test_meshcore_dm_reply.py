@@ -330,3 +330,19 @@ class TestHandlerAckCorrelation:
         h._message_queue.put_nowait("occupied")
         h._emit_dm_notice("✗ test", {"contact": "c", "origin": "o"})
         assert h.stats.get('meshcore_dm_notice_dropped_full') == 1
+
+
+class TestMeshtasticNodeIdExclusion:
+    """'@!hex' is Meshtastic addressing — the DM leg must not claim it
+    (2026-08-29: every such parse was a guaranteed-✗ notice per bot ack)."""
+
+    def test_bang_prefixed_target_is_not_a_directed_reply(self):
+        assert parse_directed_reply("@!b29fa244 Testing 1,2,3") is None
+
+    def test_bang_target_after_wire_tags_is_not_claimed(self):
+        assert parse_directed_reply(
+            "[RNS:!a2e95ba4] @!b29fa244 hi there") is None
+
+    def test_plain_name_target_still_parses(self):
+        r = parse_directed_reply("@51d12a51 good day")
+        assert r is not None and r.contact_query == "51d12a51"

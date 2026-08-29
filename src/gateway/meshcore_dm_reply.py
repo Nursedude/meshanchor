@@ -74,6 +74,12 @@ def parse_directed_reply(content: str) -> Optional[DirectedReply]:
     at = _AT_RE.match(body)
     if not at:
         return None
+    if at.group(1).startswith('!'):
+        # "@!hex" is Meshtastic node-id addressing, never a MeshCore contact
+        # (no adv_name or pubkey hex starts with '!'). Claiming it produced a
+        # guaranteed-✗ notice per bot ack ('@!b29fa244 …', Borg, 2026-08-29);
+        # leave it to the channel/reemit path like any non-reply chatter.
+        return None
     return DirectedReply(
         contact_query=at.group(1),
         reply_text=at.group(2).strip(),
