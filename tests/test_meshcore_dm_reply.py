@@ -346,3 +346,30 @@ class TestMeshtasticNodeIdExclusion:
     def test_plain_name_target_still_parses(self):
         r = parse_directed_reply("@51d12a51 good day")
         assert r is not None and r.contact_query == "51d12a51"
+
+
+class TestLabWireFilter:
+    """Fleet lab plumbing (PING/ACK wire shapes) stays off MC channels —
+    the hourly gateway_rt_canary ACK was fanning onto the bridge channel
+    (2026-08-29). Regex-level pins for _LAB_WIRE_RE."""
+
+    def _re(self):
+        from gateway.meshcore_bridge_mixin import _LAB_WIRE_RE
+        return _LAB_WIRE_RE
+
+    def test_canary_ack_matches(self):
+        assert self._re().match("ACK seq=1788031382 orig=canary-mesh")
+
+    def test_tracer_ping_matches(self):
+        assert self._re().match("PING seq=42 from=lab-tracer")
+
+    def test_wire_tagged_canary_matches(self):
+        assert self._re().match("[RNS:3dfbdb5d] ACK seq=1788031382 orig=canary-mesh")
+
+    def test_human_text_mentioning_ack_does_not_match(self):
+        assert self._re().match("ack") is None
+        assert self._re().match("ACK-ACK! that was fast") is None
+        assert self._re().match("did you get my ACK seq question?") is None
+
+    def test_dm_reply_to_lab_shape_not_matched(self):
+        assert self._re().match("@51d12a51 ACK seq stuff") is None

@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 # echo-loop invariant documented in gateway/config.py.
 _MESHCORE_ORIGIN_MARKERS = ("[MC:", "[ch0:", "[ch1:", "[MeshCore]")
 
+# Fleet lab-plumbing wire shapes (MF src/lab/_lab_common.py): tracer PINGs
+# and their echo ACKs, incl. gateway_rt_canary's hourly
+# "ACK seq=<unix_ts> orig=canary-mesh". Machine traffic whose verdict lives
+# in queue rows and cron_verdict — never meant for a channel humans read.
+# Optional leading [..] wire tags are allowed before the shape.
+import re as _re
+_LAB_WIRE_RE = _re.compile(
+    r'^(?:\[[^\[\]]{1,60}\]\s+){0,4}(?:PING|ACK)\s+seq=\d+\s+(?:from|orig)=')
+
 
 def parse_meshcore_channel_header(content: str):
     """Split a MeshCore channel broadcast's baked-in header from its body.
@@ -327,6 +336,20 @@ class MeshCoreBridgeMixin:
             #   1. Per-message metadata (carries origin's channel intent)
             #   2. config.meshcore.bridge_target_channel (operator-set)
             #   3. Drop with counter — never silently broadcast on slot 0
+            # Lab plumbing stays off human channels (2026-08-29): the hourly
+            # gateway_rt_canary ACK was fanning onto the MC bridge channel
+            # ("ack bcast-17..?", operator field report). The canary's own
+            # verdict is a Meshtastic queue row + cron_verdict — dropping the
+            # MC fan-out cannot affect it. Witness stat, never silent.
+            if _LAB_WIRE_RE.match(content or ""):
+                with self._stats_lock:
+                    self.stats.setdefault('meshcore_bridge_lab_traffic_drop', 0)
+                    self.stats['meshcore_bridge_lab_traffic_drop'] += 1
+                logger.debug(
+                    "Bridge %s→MC: lab PING/ACK kept off the channel: %r",
+                    net_prefix, (content or "")[:48])
+                return
+
             target_channel = self._resolve_bridge_target_channel(msg)
             if target_channel < 0:
                 with self._stats_lock:
