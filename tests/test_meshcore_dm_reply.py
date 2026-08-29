@@ -201,6 +201,83 @@ class TestMixinDmReplyRouting:
         args, _ = h._meshcore_handler.send_text.call_args
         assert len(args[0].encode('utf-8')) <= 160
 
+    def test_reemit_owned_source_reply_still_becomes_a_dm(self):
+        """THE first-field-test miss (2026-08-28): the operator's reply came
+        from a reemit-owned gateway identity, the reemit-deferral guard ran
+        before the DM parse, and the reply broadcast on the bridge channel.
+        The DM parse now outranks the deferral."""
+        owned = "32ee84c3e0d18def4dee1ab39c02db2a"
+        h = _Host()
+        h.config.meshtastic_reemit = SimpleNamespace(
+            enabled=True, source_identities=[owned])
+        h._process_bridge_to_meshcore(_msg(
+            "[meshtastic ch2:!b29fa244] @CME1 hi",
+            source_address=owned))
+        h._meshcore_handler.send_text.assert_called_once()
+        args, kwargs = h._meshcore_handler.send_text.call_args
+        assert args[1] == "CME1"
+        assert kwargs["reply_ctx"]["origin"] == "!b29fa244"
+
+    def test_reemit_owned_non_reply_still_defers(self):
+        """The reply-doubling guard must keep working for ordinary owned-
+        source traffic — only ADDRESSED replies outrank it."""
+        owned = "32ee84c3e0d18def4dee1ab39c02db2a"
+        h = _Host()
+        h.config.meshtastic_reemit = SimpleNamespace(
+            enabled=True, source_identities=[owned])
+        h._process_bridge_to_meshcore(_msg(
+            "[meshtastic ch2:!b29fa244] plain chatter",
+            source_address=owned))
+        h._meshcore_handler.send_text.assert_not_called()
+        assert h.stats.get('meshcore_bridge_reemit_dedup_drop') == 1
+
+
+# ── the reemit bridge's matching skip ──
+
+class TestReemitDirectedReplySkip:
+    OWNED = "32ee84c3e0d18def4dee1ab39c02db2a"
+
+    def _bridge(self, handler, meshcore_config=None):
+        from gateway.config import MeshtasticReemitConfig
+        from gateway.meshtastic_reemit_bridge import MeshtasticReemitBridge
+        cfg = MeshtasticReemitConfig(
+            enabled=True, source_identities=[self.OWNED], target_channel=1)
+        b = MeshtasticReemitBridge(cfg, handler_getter=lambda: handler,
+                                   meshcore_config=meshcore_config)
+        b.start()
+        return b
+
+    def test_directed_reply_is_skipped_not_reemitted(self):
+        handler = MagicMock()
+        handler.send_text = MagicMock(return_value=True)
+        b = self._bridge(handler)
+        ok = b.on_lxmf_message(
+            self.OWNED, "[meshtastic ch2:!b29fa244] @CME1 hi")
+        assert ok is False
+        handler.send_text.assert_not_called()
+        assert b.stats["skipped_directed_reply"] == 1
+
+    def test_kill_switch_off_restores_channel_reemit(self):
+        """Disabling dm_replies must restore old behavior at BOTH legs —
+        the reemit skip honors the same flag as the DM leg."""
+        handler = MagicMock()
+        handler.send_text = MagicMock(return_value=True)
+        b = self._bridge(handler, meshcore_config=SimpleNamespace(
+            dm_replies_enabled=False))
+        ok = b.on_lxmf_message(
+            self.OWNED, "[meshtastic ch2:!b29fa244] @CME1 hi")
+        assert ok is True
+        handler.send_text.assert_called_once()
+
+    def test_non_reply_still_reemits(self):
+        handler = MagicMock()
+        handler.send_text = MagicMock(return_value=True)
+        b = self._bridge(handler)
+        ok = b.on_lxmf_message(
+            self.OWNED, "[meshtastic ch2:!b29fa244] plain chatter")
+        assert ok is True
+        handler.send_text.assert_called_once()
+
 
 # ── handler-side ack correlation (thin methods, isolated instance) ──
 

@@ -76,8 +76,14 @@ class MeshtasticReemitBridge:
         self,
         config: MeshtasticReemitConfig,
         handler_getter: Optional[Any] = None,
+        meshcore_config: Optional[Any] = None,
     ) -> None:
         self._config = config
+        # For the directed-DM reply skip (3d): the kill-switch lives on the
+        # MESHCORE config (shared with the DM leg in meshcore_bridge_mixin).
+        # Absent (None, e.g. legacy construction) reads as enabled — the two
+        # legs must agree, and the DM leg's getattr default is True too.
+        self._meshcore_config = meshcore_config
         # Allow tests to inject a fake "give me the active handler" function.
         # In production this defaults to meshcore_handler.get_active_handler,
         # but importing lazily avoids a circular import at module load.
@@ -119,10 +125,24 @@ class MeshtasticReemitBridge:
                                           # message that ORIGINATED on
                                           # MeshCore back onto MeshCore)
             "filtered_empty": 0,       # post-decode content empty
+            "skipped_directed_reply": 0,  # "@<contact> <text>" body — the
+                                          # generic bridge path delivers it
+                                          # as a MeshCore DM; re-emitting it
+                                          # here would broadcast a directed
+                                          # reply on the bridge channel
+                                          # (first field test, 2026-08-28)
             "reemitted": 0,            # send_text queued successfully
             "errors": 0,
             "handler_unavailable": 0,  # get_active_handler returned None
         }
+
+    def _dm_replies_enabled(self) -> bool:
+        """The directed-DM leg's kill-switch, read from the meshcore config.
+
+        Defaults True when unreadable — matching the DM leg's own default,
+        so the skip here and the DM there can never disagree by default.
+        """
+        return bool(getattr(self._meshcore_config, "dm_replies_enabled", True))
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -267,6 +287,27 @@ class MeshtasticReemitBridge:
             if label:
                 sender = label
 
+            # 3d) Directed-DM reply skip (2026-08-28, first field test).
+            # A stripped body shaped "@<contact> <text>" is an addressed
+            # reply: the generic bridge path (meshcore_bridge_mixin, whose
+            # DM parse now outranks its reemit-deferral guard) delivers it
+            # as a MeshCore DM with ack feedback. Re-emitting it here would
+            # broadcast the directed reply on the bridge channel — exactly
+            # what the field test observed. Honors the same kill-switch as
+            # the DM leg so disabling dm_replies restores old behavior
+            # everywhere at once.
+            if self._dm_replies_enabled():
+                from .meshcore_dm_reply import parse_directed_reply
+                if parse_directed_reply(stripped) is not None:
+                    with self._stats_lock:
+                        self.stats["skipped_directed_reply"] += 1
+                    logger.info(
+                        "meshtastic_reemit: directed reply from %s left to "
+                        "the DM leg (not re-emitted): %r",
+                        source_hex[:8], stripped[:48],
+                    )
+                    return False
+
             # 4) Reformat using operator's output_format. Bad templates
             # fall back to a safe default so a typo in config doesn't
             # take the bridge down.
@@ -389,4 +430,5 @@ def create_from_gateway_config(
     cfg = getattr(gateway_config, "meshtastic_reemit", None)
     if cfg is None or not cfg.enabled:
         return None
-    return MeshtasticReemitBridge(cfg)
+    return MeshtasticReemitBridge(
+        cfg, meshcore_config=getattr(gateway_config, "meshcore", None))

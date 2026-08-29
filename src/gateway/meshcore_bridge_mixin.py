@@ -264,6 +264,24 @@ class MeshCoreBridgeMixin:
                 )
                 return
 
+            # Directed-DM reply leg (prototype 2026-08-28; hoisted above the
+            # reemit-deferral guard 2026-08-28 after the first field test).
+            # "@<contact> <text>" is a deliberate address, not channel
+            # chatter: deliver it as a MeshCore DM (which carries a path ACK
+            # the handler feeds back as a [MC:ack] notice) instead of any
+            # channel broadcast. Must sit AFTER split-horizon (MeshCore-
+            # origin echoes never re-enter, DM or otherwise) but BEFORE the
+            # reemit deferral — the field test proved the deferral otherwise
+            # hands every reemit-owned reply to the reemit bridge, which
+            # broadcast it on the bridge channel (the exact miss this leg
+            # exists to fix). The reemit bridge carries the matching skip.
+            meshcore_cfg = getattr(self.config, 'meshcore', None)
+            if getattr(meshcore_cfg, 'dm_replies_enabled', True):
+                parsed = parse_directed_reply(content)
+                if parsed is not None:
+                    self._bridge_dm_reply(parsed, net_prefix, src_label, src_net)
+                    return
+
             # Reply-doubling guard (2026-05-26). Meshtastic-origin content
             # (carries the "[meshtastic ch..]" wire tag) whose source identity
             # is owned by the meshtastic_reemit bridge is ALREADY delivered to
@@ -292,20 +310,6 @@ class MeshCoreBridgeMixin:
                         "source (reply-doubling guard): %r",
                         net_prefix, (content or "")[:48],
                     )
-                    return
-
-            # Directed-DM reply leg (prototype 2026-08-28). "@<contact> <text>"
-            # is a deliberate address, not channel chatter: deliver it as a
-            # MeshCore DM (which carries a path ACK the handler feeds back as
-            # a [MC:ack] notice) instead of the bridge_target_channel
-            # broadcast. Sits AFTER both loop guards on purpose — MeshCore-
-            # origin echoes and reemit-owned sources must never re-enter as
-            # DMs either. A non-reply falls through unchanged.
-            meshcore_cfg = getattr(self.config, 'meshcore', None)
-            if getattr(meshcore_cfg, 'dm_replies_enabled', True):
-                parsed = parse_directed_reply(content)
-                if parsed is not None:
-                    self._bridge_dm_reply(parsed, net_prefix, src_label, src_net)
                     return
 
             prefix = f"[{net_prefix}:{src_label}] "
