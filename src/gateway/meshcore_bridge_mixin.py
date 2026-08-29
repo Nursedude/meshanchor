@@ -10,6 +10,11 @@ import logging
 from typing import Optional
 
 from .bridge_health import SubsystemState, MessageOrigin
+from .meshcore_dm_reply import (
+    DirectedReply,
+    RecentTextDedup,
+    parse_directed_reply,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +80,8 @@ class MeshCoreBridgeMixin:
             self._meshcore_handler.run_loop()
 
     def send_to_meshcore(self, message: str, destination: str = None,
-                         channel: int = -1) -> bool:
+                         channel: int = -1,
+                         reply_ctx: Optional[dict] = None) -> bool:
         """Send a message to MeshCore network.
 
         Args:
@@ -85,6 +91,9 @@ class MeshCoreBridgeMixin:
                 not specify a slot — for broadcasts this is REJECTED
                 rather than silently routed to slot 0 (Public). DMs
                 ignore the channel arg (they go to the contact).
+            reply_ctx: directed-DM reply context ({contact, origin}) — when
+                set, the handler watches the DM's expected_ack and feeds
+                the delivery outcome back as a [MC:ack] notice.
 
         Returns:
             True if queued successfully, False otherwise.
@@ -108,6 +117,11 @@ class MeshCoreBridgeMixin:
                 "Caller must pass channel= explicitly."
             )
             return False
+        if reply_ctx is not None:
+            # Kwarg passed only when set: existing call shapes (and any
+            # alternate handler implementation without the param) unchanged.
+            return self._meshcore_handler.send_text(
+                message, destination, channel, reply_ctx=reply_ctx)
         return self._meshcore_handler.send_text(message, destination, channel)
 
     def _process_meshcore_to_bridge(self, msg) -> None:
@@ -280,6 +294,20 @@ class MeshCoreBridgeMixin:
                     )
                     return
 
+            # Directed-DM reply leg (prototype 2026-08-28). "@<contact> <text>"
+            # is a deliberate address, not channel chatter: deliver it as a
+            # MeshCore DM (which carries a path ACK the handler feeds back as
+            # a [MC:ack] notice) instead of the bridge_target_channel
+            # broadcast. Sits AFTER both loop guards on purpose — MeshCore-
+            # origin echoes and reemit-owned sources must never re-enter as
+            # DMs either. A non-reply falls through unchanged.
+            meshcore_cfg = getattr(self.config, 'meshcore', None)
+            if getattr(meshcore_cfg, 'dm_replies_enabled', True):
+                parsed = parse_directed_reply(content)
+                if parsed is not None:
+                    self._bridge_dm_reply(parsed, net_prefix, src_label, src_net)
+                    return
+
             prefix = f"[{net_prefix}:{src_label}] "
             bridged_content = prefix + content
 
@@ -337,6 +365,62 @@ class MeshCoreBridgeMixin:
             logger.error(f"Error bridging →MeshCore: {e}")
             with self._stats_lock:
                 self.stats['errors'] += 1
+
+    def _bridge_dm_reply(self, parsed: DirectedReply, net_prefix: str,
+                         src_label: str, src_net: str) -> None:
+        """Deliver a parsed "@<contact> <text>" reply as a MeshCore DM.
+
+        The DM text carries the origin identity (the Meshtastic sender lifted
+        from the wire tag when present, else the bridge-level source label) so
+        the MeshCore recipient knows who is talking. reply_ctx rides to the
+        handler, which registers the send's expected_ack and feeds the path
+        ACK back as a [MC:ack] notice; a contact-not-found drop comes back
+        the same way, so an addressed reply is never a silent void.
+        """
+        # Multi-gateway dedup: every MF gateway that heard the reply on RF
+        # relays it here over RNS; only the first copy becomes a DM (a human
+        # recipient must never get the same reply twice). Lazy attr — mixins
+        # have no __init__.
+        dedup = getattr(self, '_dm_reply_dedup', None)
+        if dedup is None:
+            dedup = RecentTextDedup()
+            self._dm_reply_dedup = dedup
+        if dedup.seen(parsed.contact_query, parsed.reply_text):
+            with self._stats_lock:
+                self.stats.setdefault('meshcore_dm_reply_dedup_drop', 0)
+                self.stats['meshcore_dm_reply_dedup_drop'] += 1
+            logger.debug(
+                f"Bridge {net_prefix}→MC DM @{parsed.contact_query}: duplicate "
+                f"relay copy dropped (multi-gateway fan-in)")
+            return
+
+        origin = parsed.origin_label or src_label
+        dm_text = f"[{net_prefix}:{origin}] {parsed.reply_text}"
+        if len(dm_text.encode('utf-8')) > 160:
+            from .canonical_message import _truncate_utf8
+            dm_text = _truncate_utf8(dm_text, 160)
+        ok = self.send_to_meshcore(
+            dm_text, destination=parsed.contact_query,
+            reply_ctx={"contact": parsed.contact_query, "origin": origin})
+        if ok:
+            logger.info(
+                f"Bridge {net_prefix}→MC DM @{parsed.contact_query}: "
+                f"{dm_text[:50]}...")
+            with self._stats_lock:
+                self.stats.setdefault('meshcore_dm_reply_tx', 0)
+                self.stats['meshcore_dm_reply_tx'] += 1
+            self.health.record_message_sent(
+                "mesh_to_meshcore" if src_net == "meshtastic"
+                else "rns_to_meshcore")
+        else:
+            logger.warning(
+                f"Bridge {net_prefix}→MC DM @{parsed.contact_query} failed to queue")
+            with self._stats_lock:
+                self.stats['errors'] += 1
+            self.health.record_message_failed(
+                "mesh_to_meshcore" if src_net == "meshtastic"
+                else "rns_to_meshcore",
+                requeued=False)
 
     def _resolve_bridge_target_channel(self, msg) -> int:
         """Resolve the MeshCore slot for a cross-protocol bridge message.

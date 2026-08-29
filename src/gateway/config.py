@@ -237,6 +237,16 @@ class MeshCoreConfig:
     bridge_channels: bool = True          # Bridge channel (broadcast) messages
     bridge_dms: bool = True               # Bridge direct messages
 
+    # Directed-DM reply leg (prototype 2026-08-28). Bridged content shaped
+    # "@<contact> <text>" (from Meshtastic or RNS) is delivered as a MeshCore
+    # DM to the matching contact instead of the bridge_target_channel
+    # broadcast, and the DM's path ACK is fed back to the originating mesh
+    # as a "[MC:ack] ..." notice (syn/ack across the bridge). Lets the
+    # Meshtastic side answer MeshCore public-channel traffic deliberately
+    # without ever broadcasting onto MeshCore Public. See
+    # gateway/meshcore_dm_reply.py for the doctrine.
+    dm_replies_enabled: bool = True
+
     # Testing
     simulation_mode: bool = False         # Run without hardware (fake events)
 

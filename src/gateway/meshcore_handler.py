@@ -52,6 +52,8 @@ from .meshcore_radio_config import (
     _coerce_int,
     _empty_radio_state,
 )
+from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
+from .meshcore_dm_reply import PendingDmAcks
 from .meshcore_radio_ops_mixin import MeshCoreRadioOpsMixin
 from .reconnect import ReconnectConfig, ReconnectStrategy
 from utils.meshcore_connection import (
@@ -118,7 +120,8 @@ __all__ = [
 from gateway.meshcore_simulator import MeshCoreSimulator
 
 
-class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
+class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
+                      BaseMessageHandler):
     """
     Handles MeshCore companion radio connection and message processing.
 
@@ -232,6 +235,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
         # writes) live in MeshCoreRadioConfig. The handler only exposes
         # thin delegates so existing callers keep working.
         self._radio = MeshCoreRadioConfig(self)
+
+        # Directed-DM replies awaiting their path ACK (prototype 2026-08-28).
+        # Only touched from the handler's asyncio loop.
+        self._dm_acks = PendingDmAcks()
 
         # Register as the active handler for cross-module access (config_api).
         _set_active_handler(self)
@@ -788,6 +795,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             with self._stats_lock:
                 self.stats.setdefault('meshcore_acks', 0)
                 self.stats['meshcore_acks'] += 1
+            # Directed-DM reply correlation (MeshCoreDmAckMixin): an ACK
+            # whose code matches a watched send closes the syn/ack loop —
+            # feed it back to the originating mesh.
+            self._correlate_dm_ack(payload)
         except Exception as e:
             logger.debug(f"Error processing MeshCore ACK: {e}")
 
@@ -955,9 +966,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
 
         try:
             channel = 0
+            reply_ctx = None
             if isinstance(msg, CanonicalMessage):
                 text = msg.to_meshcore_text()
                 dest = msg.destination_address
+                reply_ctx = msg.metadata.get('dm_reply_ctx')
                 # MeshCore channel slot rides on metadata since
                 # CanonicalMessage is protocol-agnostic. send_text() stashes
                 # it; routing fallbacks default to slot 0 (Public).
@@ -968,6 +981,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             elif isinstance(msg, dict):
                 text = msg.get('message', '')
                 dest = msg.get('destination')
+                meta = msg.get('metadata')
+                if isinstance(meta, dict):
+                    reply_ctx = meta.get('dm_reply_ctx')
                 # Top-level 'channel' is the preferred carrier (set by
                 # send_text → CanonicalMessage path), but persistent
                 # queue replays from _requeue_failed_message lift channel
@@ -988,7 +1004,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                 text = str(msg)
                 dest = None
 
-            success = await self._send_message(text, dest, channel=channel)
+            success = await self._send_message(text, dest, channel=channel,
+                                               reply_ctx=reply_ctx)
 
             if success:
                 with self._stats_lock:
@@ -1018,6 +1035,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
         text: str,
         destination: Optional[str] = None,
         channel: int = 0,
+        reply_ctx: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Send a text message to the MeshCore network.
@@ -1027,6 +1045,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             destination: Destination address (None = channel broadcast)
             channel: Channel slot for broadcasts (0 = Public; 1+ = private
                 slots set up via meshcore_set_channel.py / Node-Connect).
+            reply_ctx: directed-DM reply context — when set on a DM, the
+                send result's expected_ack is registered so _on_ack can
+                feed the delivery back as a [MC:ack] notice, and a
+                contact-not-found drop emits a negative notice instead of
+                leaving the addressed reply a silent void.
 
         Returns:
             True if sent successfully.
@@ -1061,7 +1084,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                     if contact:
                         with timed_boundary("meshcore.send_msg",
                                             target=destination):
-                            await self._meshcore.commands.send_msg(contact, text)
+                            send_evt = await self._meshcore.commands.send_msg(
+                                contact, text)
+                        if reply_ctx is not None:
+                            self._register_dm_ack_watch(
+                                send_evt, destination, reply_ctx)
                         return True
                 # Contact resolution failed (advert aged out, peer never
                 # seen, etc.) — drop the DM rather than broadcasting it.
@@ -1080,6 +1107,12 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
                     f"on slot {channel}, which leaked to Public; "
                     f"see persistent_issues channel-0-leak-2026-05-19."
                 )
+                if reply_ctx is not None:
+                    # An addressed reply must not vanish silently: tell the
+                    # originating mesh the address didn't resolve.
+                    self._emit_dm_notice(
+                        f"✗ no MeshCore contact matching "
+                        f"'{destination}' — reply not delivered", reply_ctx)
                 return False
             else:
                 # Channel broadcast
@@ -1182,7 +1215,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
         return None
 
     def send_text(self, message: str, destination: str = None,
-                  channel: int = 0) -> bool:
+                  channel: int = 0,
+                  reply_ctx: Optional[Dict[str, Any]] = None) -> bool:
         """
         Send a text message to MeshCore (synchronous interface).
 
@@ -1192,6 +1226,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             message: Text content to send
             destination: Destination address (None for broadcast)
             channel: Channel index (MeshCore uses channels differently)
+            reply_ctx: directed-DM reply context ({contact, origin}) — when
+                set on a DM, the send's expected_ack is watched and the
+                delivery outcome fed back as a [MC:ack] bridge notice.
 
         Returns:
             True if queued successfully, False otherwise.
@@ -1211,6 +1248,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseMessageHandler):
             # can route to the right slot (CanonicalMessage is protocol-
             # agnostic; channel is a MeshCore-specific concept).
             msg.metadata['channel'] = int(channel)
+            if reply_ctx is not None:
+                msg.metadata['dm_reply_ctx'] = dict(reply_ctx)
             self._send_queue.put_nowait(msg)
             # Record outbound for TUI parity — operators need to see what
             # they sent alongside what came in.
