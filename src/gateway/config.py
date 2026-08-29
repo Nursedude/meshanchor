@@ -247,6 +247,15 @@ class MeshCoreConfig:
     # gateway/meshcore_dm_reply.py for the doctrine.
     dm_replies_enabled: bool = True
 
+    # Peers the DM reply leg should be able to reach (adv_names or pubkey
+    # prefixes). MeshCore public-channel senders are never stored as radio
+    # contacts automatically, and a DM needs the stored pubkey — so a listed
+    # peer's advert, when heard, is captured as a contact by the daemon
+    # (meshcore_contact_capture_mixin.py). Policy-in-config, not firmware
+    # state: the contact DB repopulates from real adverts on any rebuilt
+    # box, and grows only with declared intent (2026-08-29). Empty = inert.
+    repliable_contacts: list = field(default_factory=list)
+
     # Testing
     simulation_mode: bool = False         # Run without hardware (fake events)
 

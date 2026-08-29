@@ -52,6 +52,7 @@ from .meshcore_radio_config import (
     _coerce_int,
     _empty_radio_state,
 )
+from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
 from .meshcore_dm_reply import PendingDmAcks
 from .meshcore_radio_ops_mixin import MeshCoreRadioOpsMixin
@@ -121,7 +122,7 @@ from gateway.meshcore_simulator import MeshCoreSimulator
 
 
 class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
-                      BaseMessageHandler):
+                      MeshCoreContactCaptureMixin, BaseMessageHandler):
     """
     Handles MeshCore companion radio connection and message processing.
 
@@ -593,10 +594,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             self._subscriptions.append(sub)
 
             # Delivery confirmations
-            sub = self._meshcore.subscribe(
-                EventType.ACK, self._on_ack
-            )
+            sub = self._meshcore.subscribe(EventType.ACK, self._on_ack)
             self._subscriptions.append(sub)
+            # Allowlisted contact capture (repliable_contacts; inert if empty)
+            self._init_contact_capture(EventType)
 
             logger.debug("MeshCore event subscriptions registered")
 
