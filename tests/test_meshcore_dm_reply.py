@@ -2,7 +2,7 @@
 
 Pins the syn/ack contract: an "@<contact> <text>" reply arriving over the
 bridge becomes a MeshCore DM (never a channel broadcast), its path ACK is
-correlated back into a [MC:ack] notice, a bad address gets a negative notice
+correlated back into a [MC:reply] notice, a bad address gets a negative notice
 instead of a silent void, and both loop guards still outrank the DM parse —
 MeshCore-origin echoes must never re-enter MeshCore as DMs either.
 """
@@ -307,7 +307,7 @@ class TestHandlerAckCorrelation:
         assert h.stats.get('meshcore_dm_ack_confirmed') == 1
         notice = h._message_queue.get_nowait()
         assert "✓" in notice.content and "CME1" in notice.content
-        assert notice.source_address == "ack"       # bridges as [MC:ack] …
+        assert notice.source_address == "reply"     # bridges as [MC:reply] — never "ack": bots trigger on it (2026-08-29)
         assert notice.source_network == "meshcore"  # split-horizon safe
 
     def test_unmatched_ack_is_counted_but_emits_nothing(self):

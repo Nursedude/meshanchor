@@ -3,7 +3,7 @@
 The MeshCoreHandler half of the syn/ack loop described in
 ``meshcore_dm_reply.py``: register a sent DM's ``expected_ack`` so the ACK
 event can be correlated, and feed the outcome back to the originating mesh
-as a ``[MC:ack]`` bridge notice. Split out of ``meshcore_handler.py`` per
+as a ``[MC:reply]`` bridge notice. Split out of ``meshcore_handler.py`` per
 the 1,500-line cap (MF025) — same pattern as ``MeshCoreRadioOpsMixin``.
 
 Expects on the host class:
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class MeshCoreDmAckMixin:
-    """Ack-watch registration + [MC:ack] notice emission for directed DMs."""
+    """Ack-watch registration + [MC:reply] notice emission for directed DMs."""
 
     def _register_dm_ack_watch(self, send_evt: Any, destination: str,
                                reply_ctx: Dict[str, Any]) -> None:
@@ -84,17 +84,22 @@ class MeshCoreDmAckMixin:
     def _emit_dm_notice(self, text: str, reply_ctx: Dict[str, Any]) -> None:
         """Feed a directed-DM outcome back to the originating mesh.
 
-        Injected into the MeshCore→bridge queue with source_address 'ack',
-        so _process_meshcore_to_bridge prefixes it '[MC:ack] ' and fans it
+        Injected into the MeshCore→bridge queue with source_address 'reply',
+        so _process_meshcore_to_bridge prefixes it '[MC:reply] ' and fans it
         out to Meshtastic + RNS exactly like any MeshCore-origin traffic.
         The '[MC:' marker doubles as the split-horizon guard: the notice can
         never be re-injected onto MeshCore. A full queue leaves a stat
         witness — the notice is best-effort, the DM itself already stands.
+
+        The label must NOT contain 'ack': mesh-side auto-responders trigger
+        on it, and the notice then feeds the responder it reports on —
+        observed 2026-08-29 as a notice→bot-ack→notice bounce ('[MC:ack] ✗…'
+        answered by '@moc3 ✋Ack to you!' 5s later, producing a second ✗).
         """
         try:
             notice = CanonicalMessage(
                 content=text,
-                source_address="ack",
+                source_address="reply",
                 source_network=Protocol.MESHCORE.value,
                 is_broadcast=False,
             )

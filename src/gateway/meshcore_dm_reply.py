@@ -12,7 +12,7 @@ Meshtastic side a *deliberate, addressed* way to speak: a reply shaped
 is delivered as a MeshCore **DM** to the matching contact (name or
 pubkey-prefix, the same matching ``_find_contact`` already does) instead of a
 channel broadcast — and because MeshCore DMs carry a protocol-level path ACK,
-the ack is fed back to the originating mesh as a ``[MC:ack]`` notice, closing
+the ack is fed back to the originating mesh as a ``[MC:reply]`` notice, closing
 the syn/ack loop end to end. Public channel broadcasts have no protocol ACK
 at all, so a DM is the only shape on which "did they get it?" is answerable.
 

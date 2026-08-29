@@ -1047,7 +1047,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                 slots set up via meshcore_set_channel.py / Node-Connect).
             reply_ctx: directed-DM reply context — when set on a DM, the
                 send result's expected_ack is registered so _on_ack can
-                feed the delivery back as a [MC:ack] notice, and a
+                feed the delivery back as a [MC:reply] notice, and a
                 contact-not-found drop emits a negative notice instead of
                 leaving the addressed reply a silent void.
 
@@ -1228,7 +1228,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             channel: Channel index (MeshCore uses channels differently)
             reply_ctx: directed-DM reply context ({contact, origin}) — when
                 set on a DM, the send's expected_ack is watched and the
-                delivery outcome fed back as a [MC:ack] bridge notice.
+                delivery outcome fed back as a [MC:reply] bridge notice.
 
         Returns:
             True if queued successfully, False otherwise.

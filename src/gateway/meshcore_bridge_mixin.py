@@ -93,7 +93,7 @@ class MeshCoreBridgeMixin:
                 ignore the channel arg (they go to the contact).
             reply_ctx: directed-DM reply context ({contact, origin}) — when
                 set, the handler watches the DM's expected_ack and feeds
-                the delivery outcome back as a [MC:ack] notice.
+                the delivery outcome back as a [MC:reply] notice.
 
         Returns:
             True if queued successfully, False otherwise.
@@ -268,7 +268,7 @@ class MeshCoreBridgeMixin:
             # reemit-deferral guard 2026-08-28 after the first field test).
             # "@<contact> <text>" is a deliberate address, not channel
             # chatter: deliver it as a MeshCore DM (which carries a path ACK
-            # the handler feeds back as a [MC:ack] notice) instead of any
+            # the handler feeds back as a [MC:reply] notice) instead of any
             # channel broadcast. Must sit AFTER split-horizon (MeshCore-
             # origin echoes never re-enter, DM or otherwise) but BEFORE the
             # reemit deferral — the field test proved the deferral otherwise
@@ -378,7 +378,7 @@ class MeshCoreBridgeMixin:
         from the wire tag when present, else the bridge-level source label) so
         the MeshCore recipient knows who is talking. reply_ctx rides to the
         handler, which registers the send's expected_ack and feeds the path
-        ACK back as a [MC:ack] notice; a contact-not-found drop comes back
+        ACK back as a [MC:reply] notice; a contact-not-found drop comes back
         the same way, so an addressed reply is never a silent void.
         """
         # Multi-gateway dedup: every MF gateway that heard the reply on RF
