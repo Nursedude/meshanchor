@@ -26,7 +26,7 @@ coordinated across both projects.
 
 ### Test Coverage
 
-**~5,900 tests** across <!--STAT:testfiles-->221<!--/STAT--> test files. Top suites by depth
+**~6,500 tests** across <!--STAT:testfiles-->221<!--/STAT--> test files. Top suites by depth
 (per-file counts are a 2026-07 snapshot — run `python3 -m pytest tests/<file> --co -q` for the live number):
 
 | Test File | Tests | Covers |
@@ -58,7 +58,7 @@ python3 -m pytest tests/test_meshcore_handler.py -v  # MeshCore tests only
 
 ### Auto-Review & Lint
 
-Security linter (`scripts/lint.py`) enforces 17 rules:
+Security linter (`scripts/lint.py`) enforces 23 rules:
 
 | Rule | Description |
 |------|-------------|
@@ -79,6 +79,12 @@ Security linter (`scripts/lint.py`) enforces 17 rules:
 | MA017 | Hardened systemd units: `ReadWritePaths=` must cover the MeshAnchor write buckets |
 | MF019 | `RNS.Reticulum()` only via the `open_reticulum()` chokepoint in `utils/rns_init.py` |
 | MF020 | `apply_config_and_restart()` `(bool, msg)` result must not be discarded in TUI handlers |
+| MF023 | Map collector must not create a blocking meshtastic interface outside the bounded helper — serving never blocks on collection |
+| MF024 | Version SSOT (`src/__version__.py`) must agree with pyproject + README badge/heading |
+| MA022 | pip/apt hygiene in shell installers — route through `scripts/lib/install_common.sh` (PEP 668 + checked rc) |
+| MF025 | File-size ratchet — `src/` files over 1,500 lines; the frozen baseline may only shrink, never raise the cap |
+| MF026 | Config/state writes must be atomic — `os.O_TRUNC` banned, non-atomic `open("w")` ratcheted |
+| MF027 | Health-check fail-dark guard — a `check_*` except-handler may not return `HealthResult(healthy=True)` with no reason, or None |
 
 ```bash
 python3 scripts/lint.py --all          # Run all lint rules
