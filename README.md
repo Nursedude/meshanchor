@@ -48,8 +48,17 @@ radio operators, and emergency comms planners.
 > tier engine, the fleet observability stack, MeshCore map population, and
 > `meshcore-cli` passthrough with daemon hand-off.
 >
-> **Not yet validated:** coverage maps with live GPS position data, and full
-> 3-way (MeshCore ↔ Meshtastic ↔ RNS) concurrent traffic. If you have a MeshCore
+> Added 2026-08-29: the **directed-DM reply leg** — an `@<contact>` reply from
+> Meshtastic or RNS delivered as a MeshCore DM with a path-ACK, proven live
+> end-to-end. That is a message *round-trip* across all three networks; it is
+> **not** the same claim as sustained concurrent 3-way traffic, which remains
+> unproven.
+>
+> **Not yet validated:** coverage maps with live GPS position data; sustained
+> 3-way (MeshCore ↔ Meshtastic ↔ RNS) *concurrent* traffic (the tri-bridge
+> tests are mock-only); and the `repliable_contacts` capture path — the live
+> proof ran on a radio with firmware auto-add ON, so the capture mixin itself
+> is exercised only by tests. If you have a MeshCore
 > companion radio (RAK4631, Heltec V3, T-Deck, T-Echo), independent field
 > testing on different hardware is the single most valuable contribution right
 > now — see [Contributing](docs/development.md).
@@ -68,6 +77,7 @@ yours.
 | **MeshCore radio** | Companion-radio management via meshcore_py, pre-flight device validation, persistent udev naming, in-TUI LoRa/channel/TX-power config with region-aware validation | MeshCore radio |
 | **MeshCore CLI passthrough** | Drops you into [meshcore-cli](https://github.com/meshcore-dev/meshcore-cli) — DMs, channels, remote-admin `cmd`, REPL — handing off radio ownership cleanly so the bridge resumes on exit | MeshCore radio |
 | **Gateway bridge** | Bidirectional MeshCore ⇄ Meshtastic / RNS routing via `CanonicalMessage` | Target network |
+| **Directed DM replies** | `@<contact> text` from Meshtastic or RNS lands as a MeshCore **DM**, not a channel broadcast — addressed by exact adv_name or pubkey prefix, with `[MC:reply]` notices and a `dm_replies_enabled` kill switch | MeshCore radio + a bridged network |
 | **Reticulum (RNS)** | Encrypted transport, LXMF messaging, propagation, reliability tiers | Network or radio |
 | **Live NOC maps** | Leaflet browser view, WebSocket updates, MeshCore map population + operator pins | Position data |
 | **meshforge-maps** | Discovery, browser launch, bidirectional data fusion on `:8808` | [MeshForge Maps](https://github.com/Nursedude/meshforge-maps) |
@@ -109,13 +119,14 @@ Companion mode.
 
 - **MeshCore integration** — radio management, config, CLI passthrough
 - **Gateway bridge** — MeshCore ⇄ Meshtastic / RNS via `CanonicalMessage`
+- **Directed DM replies** — `@<contact>` from Meshtastic/RNS → MeshCore DM, live-proven 2026-08-29
 - **LXMF reliability tiers** — subscriber engine with Prometheus metrics
 - **Fleet observability** — collector + watchdog, 24h clean-soak passed
 - **Maps** — MeshCore map population, operator pins, meshforge-maps fusion
 - **RF engineering** — link budget, Fresnel, FSPL, space weather
 - **AI diagnostics** — offline knowledge base, optional Claude tier
 
-~5,900 tests across <!--STAT:testfiles-->221<!--/STAT--> test files (run
+~6,500 tests across <!--STAT:testfiles-->221<!--/STAT--> test files (run
 `python3 -m pytest tests/ --co -q` for the live count).
 
 **Full inventory, with proven vs. unvalidated called out:

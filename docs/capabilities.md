@@ -23,7 +23,9 @@ The full capability inventory, including what is proven in the field and what st
 | Pre-flight device validation | -- | Serial probe before connection, permission + existence checks |
 | meshcore_py connection | 58 | Async event loop, reconnect, message handling. **Field-validated** with RAK Heltec V3 in Serial Companion mode (2026-05-02). |
 | CanonicalMessage bridging | 46 | Protocol-agnostic message format, N-protocol routing |
-| 3-way routing classifier | 32 | MeshCore + Meshtastic + RNS tri-bridge tests (mock-only) |
+| 3-way routing classifier | 32 | MeshCore + Meshtastic + RNS tri-bridge tests (mock-only). A live `@<contact>` **round-trip** across all three was proven 2026-08-29 — see Directed DM replies; sustained *concurrent* 3-way traffic is still unproven. |
+| Directed DM replies | 44 | `@<contact> text` from Meshtastic/RNS delivered as a MeshCore **DM** instead of a channel broadcast. Address = exact `adv_name` or pubkey prefix, **at the start of the message**; `@!hex` is Meshtastic addressing and deliberately falls through to the channel path. `[MC:reply]` notices (label chosen so it does not trigger mesh `ack` bots); `dm_replies_enabled` kill switch; directed replies outrank the reemit path on both legs. **Live-proven 2026-08-29.** |
+| `repliable_contacts` capture | 12 | MeshCore public-channel senders are never stored as radio contacts, and a DM needs the stored pubkey. An allowlist of adv_names/pubkey-prefixes stores a listed peer on `NEW_CONTACT`, plus a connect-time sweep of the pending backlog. Empty list = inert. ⚠️ **Tests only** — the live proof ran on a radio with firmware auto-add ON, so this path is coverage for manual-add radios and is not itself field-exercised. |
 | MeshCore TUI menu | -- | Status, detect, config, nodes, stats, chat, daemon control |
 | Chat HTTP API (`/chat/*` on :8081) | 19 | Daemon-side ring buffer + send/receive endpoints. Bidirectional Public + private-channel messaging field-validated 2026-05-02. |
 | Daemon control in TUI | 5 | start / stop / restart / journal / live tail through `service_check` SSOT |
@@ -128,7 +130,10 @@ be considered reliable.
 
 **What has not yet been tested with real hardware in MeshAnchor:**
 - Coverage maps with real GPS position data
-- 3-way routing (MeshCore ↔ Meshtastic ↔ RNS) with concurrent traffic on a single host
+- 3-way routing (MeshCore ↔ Meshtastic ↔ RNS) with **concurrent** traffic on a single
+  host. ⚠️ Not the same as the directed-DM **round-trip**, which WAS proven live
+  2026-08-29 — one message across all three networks is not sustained concurrency.
+- The `repliable_contacts` capture path on a radio without firmware auto-add
 - Independent confirmation on hardware other than `meshanchor-server` (this is the gap
   external testers can close — see [Contributing](development.md#contributing))
 
