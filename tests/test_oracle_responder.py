@@ -329,3 +329,34 @@ def test_from_env_anchors_cooldown_on_time_monotonic():
         snapshot_fn=_snap, send_fn=lambda t, d, c: True, log_fn=None,
         env={"MESHANCHOR_ORACLE_ENABLED": "1", "MESHANCHOR_ORACLE_ALLOWLIST": "*"})
     assert r is not None and r._mono is _time.monotonic
+
+
+def test_last_answer_map_is_bounded():
+    # 2026-09-01 port of MeshForge's spoofable-key RAM guard: distinct
+    # spoofed ids past the cap are pruned once older than the cooldown.
+    from oracle import responder as rmod
+    mono = _Clock()
+    r = MeshOracleResponder(
+        snapshot_fn=_snap, send_fn=lambda t, d, c: True,
+        now_fn=_Clock(), monotonic_fn=mono, answer_all=True, cooldown_s=30.0)
+    for i in range(rmod._LAST_ANSWER_CAP + 200):
+        r.handle(f"!{i:08x}", "status")
+        mono.t += 0.001
+    mono.t += 100.0                                    # age them past cooldown
+    r.handle("!ffffffff", "status")                    # triggers a prune
+    assert len(r._last_answer) <= rmod._LAST_ANSWER_CAP + 1
+
+
+def test_prune_keeps_entries_still_inside_the_cooldown():
+    # a prune must never free a sender the cooldown still gates
+    from oracle import responder as rmod
+    mono = _Clock()
+    r = MeshOracleResponder(
+        snapshot_fn=_snap, send_fn=lambda t, d, c: True,
+        now_fn=_Clock(), monotonic_fn=mono, answer_all=True, cooldown_s=30.0)
+    for i in range(rmod._LAST_ANSWER_CAP + 5):
+        r.handle(f"!{i:08x}", "status")
+    mono.t += 1.0                                      # everyone still cooling
+    r.handle("!recent", "status")                      # cap exceeded -> prune runs
+    assert "!00000000" in r._last_answer               # kept: inside the cooldown
+    assert r.handle("!00000000", "status") is None     # and still gated

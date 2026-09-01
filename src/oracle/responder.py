@@ -34,6 +34,13 @@ _DEFAULT_COOLDOWN_S = 30.0
 # sibling gateway relaying its whole mesh as ONE LXMF identity is never an
 # oracle principal (see tests/test_regression_guards.py).
 ORACLE_DECLINE_REASONS = ("cooldown", "not_allowlisted", "peer_gateway_relay")
+# Cap on the per-sender cooldown map (ported from MeshForge): the key is the
+# unauthenticated, spoofable mesh `from` id, so an attacker (or a buggy node)
+# rotating it would otherwise grow this dict without bound (a witness-less
+# RAM leak on 1-2GB Pis, the #73 class in memory). Once past the cap we prune
+# entries already older than the cooldown — they can no longer gate any
+# decision.
+_LAST_ANSWER_CAP = 4096
 
 
 def _norm(node_id: str) -> str:
@@ -144,6 +151,7 @@ class MeshOracleResponder:
         reply = answer(text, snap)
         # Rate-limit on ATTEMPT (airtime is spent whether or not it lands).
         self._last_answer[node] = mono
+        self._prune_cooldowns(mono)
         try:
             delivered = bool(self._send_fn(reply, from_id, channel))
         except Exception as exc:  # a send must never raise into the bridge
@@ -155,6 +163,16 @@ class MeshOracleResponder:
                      delivered=delivered, facts_stale=_facts_stale(snap),
                      channel=channel)
         return reply
+
+    def _prune_cooldowns(self, mono: float) -> None:
+        """Bound the cooldown map (spoofable-key RAM-leak guard). Only runs
+        past the cap; drops entries already older than the cooldown, which
+        can no longer gate any decision."""
+        if len(self._last_answer) <= _LAST_ANSWER_CAP:
+            return
+        cutoff = mono - self._cooldown_s
+        self._last_answer = {k: v for k, v in self._last_answer.items()
+                             if v > cutoff}
 
     def decline(self, from_id: str, text: str, *, reason: str,
                 channel: Optional[int] = None) -> bool:
