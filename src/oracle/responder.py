@@ -17,11 +17,14 @@ services, mutates config, or shells out. Default OFF — opt-in via
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Callable, Dict, Optional, Set
 
 from .intents import answer, is_query
+
+logger = logging.getLogger(__name__)
 
 _TRUE = {"1", "true", "yes", "on"}
 _DEFAULT_COOLDOWN_S = 30.0
@@ -164,6 +167,16 @@ class MeshOracleResponder:
                      channel=channel)
         return reply
 
+    def describe(self) -> str:
+        """One line of the access posture this responder was BUILT with, for
+        the leg's startup INFO log. 2026-09-01: a restart's journal could not
+        say whether the oracle came up or with what allowlist — 'did the
+        responder build' was a guess; this makes it a grep."""
+        chans = ",".join(str(c) for c in sorted(self._allowed_channels, key=str)) or "-"
+        return (f"answer_all={self._answer_all} allowlist={len(self._allowlist)} "
+                f"channels={chans} cooldown={self._cooldown_s:g}s "
+                f"consume={self.consume}")
+
     def _prune_cooldowns(self, mono: float) -> None:
         """Bound the cooldown map (spoofable-key RAM-leak guard). Only runs
         past the cap; drops entries already older than the cooldown, which
@@ -238,6 +251,7 @@ class MeshOracleResponder:
         transport: str = "meshtastic",
         allowlist_env: str = "MESHANCHOR_ORACLE_ALLOWLIST",
         allowed_channels: Optional[Set[int]] = None,
+        leg: str = "",
     ) -> Optional["MeshOracleResponder"]:
         """Build from ``MESHANCHOR_ORACLE_*`` env, or ``None`` if disabled (default).
 
@@ -274,7 +288,7 @@ class MeshOracleResponder:
             cooldown = float(env.get("MESHANCHOR_ORACLE_COOLDOWN_S", "") or _DEFAULT_COOLDOWN_S)
         except (TypeError, ValueError):
             cooldown = _DEFAULT_COOLDOWN_S
-        return cls(
+        inst = cls(
             snapshot_fn=snapshot_fn,
             send_fn=send_fn,
             log_fn=log_fn,
@@ -286,3 +300,9 @@ class MeshOracleResponder:
             transport=transport,
             consume=consume,
         )
+        # 2026-09-01: a restart's journal could not say whether an oracle leg
+        # came up or with what allowlist — 'did the responder build' was a
+        # guess. One INFO line per built leg makes it a grep.
+        logger.info(f"mesh oracle ({leg or transport}) responder built: "
+                    f"{inst.describe()}")
+        return inst

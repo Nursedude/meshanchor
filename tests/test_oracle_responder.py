@@ -360,3 +360,22 @@ def test_prune_keeps_entries_still_inside_the_cooldown():
     r.handle("!recent", "status")                      # cap exceeded -> prune runs
     assert "!00000000" in r._last_answer               # kept: inside the cooldown
     assert r.handle("!00000000", "status") is None     # and still gated
+
+
+def test_describe_states_the_built_access_posture():
+    r, _, _ = _make(allowlist={"p3"}, allowed_channels={"meshanchor"}, cooldown_s=10.0)
+    d = r.describe()
+    assert "answer_all=False" in d and "allowlist=1" in d
+    assert "channels=meshanchor" in d and "cooldown=10s" in d and "consume=True" in d
+
+
+def test_from_env_logs_one_built_line_per_leg(caplog):
+    import logging
+    with caplog.at_level(logging.INFO, logger="oracle.responder"):
+        r = MeshOracleResponder.from_env(
+            snapshot_fn=_snap, send_fn=lambda t, d, c: True, log_fn=None,
+            env={"MESHANCHOR_ORACLE_ENABLED": "1", "MESHANCHOR_ORACLE_ALLOWLIST": "*"},
+            transport="meshcore")
+    assert r is not None
+    lines = [m for m in caplog.messages if "responder built" in m]
+    assert len(lines) == 1 and "(meshcore)" in lines[0] and "answer_all=True" in lines[0]
