@@ -25,6 +25,15 @@ from .intents import answer, is_query
 
 _TRUE = {"1", "true", "yes", "on"}
 _DEFAULT_COOLDOWN_S = 30.0
+# The closed vocabulary of POLICY declines this responder can record — a
+# query the oracle correctly chose not to answer. Any consumer that buckets
+# audit records (MeshForge's oracle-delivery probe; none in MeshAnchor yet)
+# must learn every entry, or a decline is silently counted as a benign
+# non-delivery (honest_failure_modes #5/#7 — shape-parity with MeshForge
+# `a3ce083a`). `peer_gateway_relay` is reserved for an RNS oracle leg: a
+# sibling gateway relaying its whole mesh as ONE LXMF identity is never an
+# oracle principal (see tests/test_regression_guards.py).
+ORACLE_DECLINE_REASONS = ("cooldown", "not_allowlisted", "peer_gateway_relay")
 
 
 def _norm(node_id: str) -> str:
@@ -110,13 +119,14 @@ class MeshOracleResponder:
         node = _norm(from_id)
         if not self._allowed(node, channel):
             self._record(from_id, text, intent=None, reply=None,
-                         delivered=False, reason="not_allowlisted")
+                         delivered=False, reason="not_allowlisted",
+                         channel=channel)
             return None
         now = self._now()
         last = self._last_answer.get(node)
         if last is not None and (now - last) < self._cooldown_s:
             self._record(from_id, text, intent=None, reply=None,
-                         delivered=False, reason="cooldown")
+                         delivered=False, reason="cooldown", channel=channel)
             return None
 
         snap = self._snapshot_fn()
@@ -128,14 +138,39 @@ class MeshOracleResponder:
         except Exception as exc:  # a send must never raise into the bridge
             self._record(from_id, text, intent=_intent_of(text), reply=reply,
                          delivered=False, reason=f"send_error: {exc}",
-                         facts_stale=_facts_stale(snap))
+                         facts_stale=_facts_stale(snap), channel=channel)
             return reply
         self._record(from_id, text, intent=_intent_of(text), reply=reply,
-                     delivered=delivered, facts_stale=_facts_stale(snap))
+                     delivered=delivered, facts_stale=_facts_stale(snap),
+                     channel=channel)
         return reply
 
+    def decline(self, from_id: str, text: str, *, reason: str,
+                channel: Optional[int] = None) -> bool:
+        """Refuse a query BEFORE the allow logic runs, leaving the audit witness.
+
+        For principal classes a LEG must exclude regardless of allowlist or
+        wildcard. Ported from MeshForge `a3ce083a` (2026-09-01 frontier pass):
+        on the RNS leg a sibling gateway forwards its whole RF segment as ONE
+        LXMF identity, so answering it under ``*`` composes with the bridge
+        into cross-mesh answering that bypasses the sibling's own allowlist
+        and cooldown. MeshAnchor has no RNS oracle leg today; the guard test
+        in tests/test_regression_guards.py requires any future one to call
+        this with ``reason="peer_gateway_relay"``. The responder stays
+        gateway-ignorant; the leg decides, this method records.
+
+        Returns True when ``text`` was a query and a decline record was
+        written (the caller lets the text bridge on as ordinary chat); False
+        when it was not a query (nothing recorded).
+        """
+        if not is_query(text):
+            return False
+        self._record(from_id, text, intent=None, reply=None,
+                     delivered=False, reason=reason, channel=channel)
+        return True
+
     def _record(self, from_id, text, *, intent, reply, delivered,
-                reason=None, facts_stale=None) -> None:
+                reason=None, facts_stale=None, channel=None) -> None:
         """Append one audit record (best-effort; never breaks answering)."""
         if self._log_fn is None:
             return
@@ -150,6 +185,12 @@ class MeshOracleResponder:
         }
         if reason is not None:
             rec["reason"] = reason
+        # The inbound channel token (leg-native: MeshCore channel NAME on the
+        # channel hook, None on the DM hook). Without it the log cannot say
+        # WHICH leg of the additive allow (allowlist vs channel gate)
+        # authorized an answer.
+        if channel is not None:
+            rec["channel"] = channel
         if facts_stale is not None:
             rec["facts_stale"] = facts_stale
         try:

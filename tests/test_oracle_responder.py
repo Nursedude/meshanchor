@@ -239,3 +239,45 @@ def test_from_env_rns_leg_uses_separate_allowlist_and_transport():
     assert r.handle("deadbeefcafe", "status")
     assert r.handle("!meshnode", "status") is None
     assert logs[-1]["transport"] == "rns"
+
+
+# --------------------------------------------------------------------------- #
+# 2026-09-01 port of MeshForge a3ce083a: decline() for leg-excluded principals
+# + channel witness in the audit record
+# --------------------------------------------------------------------------- #
+def test_decline_records_a_query_without_consulting_the_allow_logic():
+    r, sent, logs = _make(answer_all=True)      # answer_all would have answered
+    assert r.decline("aa" * 16, "status", reason="peer_gateway_relay") is True
+    assert sent == []
+    assert logs[-1]["delivered"] is False
+    assert logs[-1]["reason"] == "peer_gateway_relay"
+    assert logs[-1]["from"] == "aa" * 16 and logs[-1]["intent"] is None
+
+
+def test_decline_ignores_non_queries_and_writes_nothing():
+    r, sent, logs = _make(answer_all=True)
+    assert r.decline("aa" * 16, "hello fleet", reason="peer_gateway_relay") is False
+    assert logs == [] and sent == []
+
+
+def test_decline_does_not_touch_the_cooldown_map():
+    r, sent, logs = _make(answer_all=True, cooldown_s=30.0)
+    r.decline("!abc", "status", reason="peer_gateway_relay")
+    assert r.handle("!abc", "status")            # answered, not cooldown-declined
+    assert logs[-1]["delivered"] is True
+
+
+def test_audit_record_carries_the_inbound_channel_token():
+    # MeshCore channel hook passes the channel NAME; the DM hook passes None
+    r, _, logs = _make(allowed_channels={"meshanchor"})
+    assert r.handle("p3", "status", channel="meshanchor")
+    assert logs[-1]["channel"] == "meshanchor"
+    r2, _, logs2 = _make(allowlist={"!a"})
+    r2.handle("!zz", "status", channel=None)
+    assert logs2[-1]["reason"] == "not_allowlisted" and "channel" not in logs2[-1]
+
+
+def test_decline_reasons_vocabulary_is_closed_and_named():
+    from oracle.responder import ORACLE_DECLINE_REASONS
+    assert set(ORACLE_DECLINE_REASONS) == {"cooldown", "not_allowlisted",
+                                           "peer_gateway_relay"}

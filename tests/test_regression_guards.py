@@ -1232,3 +1232,29 @@ class TestGuardsAreNotInert:
         finally:
             if os.path.exists(drill):
                 os.remove(drill)
+
+
+class TestOraclePeerGatewayGuard:
+    """2026-09-01 (MeshForge frontier pass, ported): a PEER GATEWAY is never an
+    oracle principal. On an RNS oracle leg a sibling gateway relays its whole
+    mesh as ONE LXMF identity with raw text, so ``RNS_ALLOWLIST=*`` composes
+    with the bridge into cross-mesh answering (moc3 answered moc's gateway
+    hash 74/118 times). MeshAnchor has NO RNS oracle leg today — this guard
+    pins the FUTURE: the moment a source file wires the RNS allowlist env into
+    a responder, that file must also call ``decline(... peer_gateway_relay)``
+    before ``handle``. Two-sided on purpose: it asserts the premise (no leg)
+    OR the guard (leg + decline), never a vacuous pass about a leg that does
+    not exist."""
+
+    def test_any_rns_oracle_leg_declines_peer_gateways(self):
+        legs = _scan_python_files(
+            r'ORACLE_RNS_ALLOWLIST',
+            exclude_files=['responder.py'])   # the responder documents the env; it is not a leg
+        for filepath, lineno, line in legs:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                body = f.read()
+            assert 'peer_gateway_relay' in body and '.decline(' in body, (
+                f"{os.path.relpath(filepath, SRC_DIR)}:{lineno} wires an RNS oracle "
+                f"leg ({line.strip()}) without the peer-gateway decline guard — "
+                f"a relaying sibling gateway must be refused BEFORE the allow "
+                f"logic (MeshForge a3ce083a, bridge_rns_events_mixin.py)")
