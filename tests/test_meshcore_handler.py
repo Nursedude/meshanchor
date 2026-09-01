@@ -1079,7 +1079,7 @@ class TestMeshOracleMeshcoreWiring:
 
     def test_dm_query_routed_directed_and_consumed(self, handler):
         handler._oracle = MagicMock()
-        handler._oracle.handle.return_value = "dude-AI@x: fleet:?"
+        handler._oracle.handle.return_value = "dude-AI@x: nodes:?"
         event = SimpleNamespace(type='CONTACT_MSG_RECV', payload={
             'text': 'status', 'sender': 'abc123', 'destination': 'gw',
             'is_channel': False, 'channel': 0})
@@ -1096,7 +1096,7 @@ class TestMeshOracleMeshcoreWiring:
         # Real MeshCore channel text: "<channel> <sender>: <text>" with an empty
         # source_address. The hook parses the channel NAME + sender + query.
         handler._oracle = MagicMock()
-        handler._oracle.handle.return_value = "dude-AI@x: fleet:?"
+        handler._oracle.handle.return_value = "dude-AI@x: nodes:?"
         event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
             'text': 'meshanchor p3: status', 'destination': None,
             'is_channel': True, 'channel': 0})
@@ -1116,7 +1116,7 @@ class TestMeshOracleMeshcoreWiring:
         try:
             loop.run_until_complete(handler._connect())
             handler._oracle = MagicMock()
-            handler._oracle.handle.return_value = "dude-AI@x: fleet:?"
+            handler._oracle.handle.return_value = "dude-AI@x: nodes:?"
             handler._oracle.consume = False
             event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
                 'text': 'meshanchor p3: status', 'sender': 'p3',
