@@ -281,3 +281,51 @@ def test_decline_reasons_vocabulary_is_closed_and_named():
     from oracle.responder import ORACLE_DECLINE_REASONS
     assert set(ORACLE_DECLINE_REASONS) == {"cooldown", "not_allowlisted",
                                            "peer_gateway_relay"}
+
+
+# --------------------------------------------------------------------------- #
+# 2026-09-01 port of two MeshForge responder fixes: wildcard-anywhere and the
+# monotonic cooldown clock
+# --------------------------------------------------------------------------- #
+def test_wildcard_anywhere_in_the_list_means_answer_all():
+    # '*,!abc' used to parse as the dead literal node key '!*' — no wildcard,
+    # no warning. Now '*' anywhere wins and the allowlist is dropped.
+    r = MeshOracleResponder.from_env(
+        snapshot_fn=_snap, send_fn=lambda t, d, c: True, log_fn=None,
+        env={"MESHANCHOR_ORACLE_ENABLED": "1",
+             "MESHANCHOR_ORACLE_ALLOWLIST": "*,!abc"})
+    assert r is not None and r._answer_all is True and r._allowlist == set()
+    assert r.handle("!nobody", "status")           # answered under the wildcard
+
+
+def test_cooldown_uses_the_monotonic_clock_not_wall_clock():
+    wall, mono = _Clock(1000.0), _Clock(50.0)
+    sent, logs = [], []
+    r = MeshOracleResponder(
+        snapshot_fn=_snap, send_fn=lambda t, d, c: sent.append(d) or True,
+        log_fn=logs.append, now_fn=wall, monotonic_fn=mono,
+        allowlist={"!n"}, cooldown_s=30.0)
+    assert r.handle("!n", "status")
+    wall.t = 5000.0                                # wall-clock leapt an hour
+    assert r.handle("!n", "status") is None        # mono did not move: cooldown
+    assert logs[-1]["reason"] == "cooldown"
+    mono.t = 90.0                                  # 40 s of monotonic time
+    assert r.handle("!n", "status")                # expired on the clock that counts
+    assert logs[-1]["ts"] == 5000.0                # records still wear wall-clock
+
+
+def test_backward_clock_step_does_not_strand_the_sender():
+    clk = _Clock(1000.0)
+    r, sent, logs = _make(allowlist={"!n"}, cooldown_s=30.0, clock=clk)
+    assert r.handle("!n", "status")
+    clk.t = 400.0                                  # stepped BACK 10 minutes
+    assert r.handle("!n", "status")                # negative delta = expired, not suppressed
+    assert logs[-1]["delivered"] is True
+
+
+def test_from_env_anchors_cooldown_on_time_monotonic():
+    import time as _time
+    r = MeshOracleResponder.from_env(
+        snapshot_fn=_snap, send_fn=lambda t, d, c: True, log_fn=None,
+        env={"MESHANCHOR_ORACLE_ENABLED": "1", "MESHANCHOR_ORACLE_ALLOWLIST": "*"})
+    assert r is not None and r._mono is _time.monotonic
