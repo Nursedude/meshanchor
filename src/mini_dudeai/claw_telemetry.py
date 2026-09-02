@@ -79,6 +79,34 @@ def _str(rx: re.Pattern, s: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def _rssi_field(rx: re.Pattern, s: str) -> "tuple[Optional[int], bool]":
+    """``(rssi_dbm, rssi_absent)`` — 0 and -0 are sentinels, never measurements.
+
+    Ported from MeshForge 2026-09-01. dudeclaw ``.19`` emits ``rssi=-0`` for an
+    RSSI it does not have (observed live on dudeclaw-02; fixed in firmware
+    ``.20``), and ``int(float("-0"))`` is ``0`` — a plausible integer, and the
+    STRONGEST possible LoRa RSSI. So the one mark separating "no reading" from
+    "a reading" was erased right here. 0 dBm is 1 mW at the receiver; no LoRa
+    link produces it, so both 0 and -0 are refused (honest_failure_modes #1 —
+    the degraded value must not overlap the healthy domain, least of all at its
+    best end).
+
+    MeshAnchor's copy of this module is DIVERGED from MeshForge's (it never
+    grew the per-id watch/direct parsers), so only this scalar site exists
+    here. An absent field stays ``(None, False)`` — unknown, not sentinel.
+    """
+    m = rx.search(s)
+    if not m:
+        return None, False
+    try:
+        value = int(float(m.group(1)))
+    except (TypeError, ValueError):
+        return None, False
+    if value == 0:
+        return None, True
+    return value, False
+
+
 # battery_read: "Battery: 4.06 V (adc 829 mV)". The FIRST voltage is the pack
 # reading; the parenthesised adc millivolts is a raw sample, never the answer.
 _RE_BATTERY_V = re.compile(r"([\d.]+)\s*V\b", re.IGNORECASE)
@@ -130,13 +158,18 @@ def parse_lora_stats(result: Any) -> Optional[Dict[str, Any]]:
     if age is None:
         return None
     snr_m = _RE_LORA_SNR.search(result)
+    last_rssi, last_rssi_absent = _rssi_field(_RE_LORA_RSSI, result)
     return {
         "heard_age_s": age,
         "heard_pkts": _int(_RE_LORA_HEARD, result),
         "crc_err": _int(_RE_LORA_CRC, result),
         "runts": _int(_RE_LORA_RUNTS, result),
         "last_from": _str(_RE_LORA_FROM, result),
-        "last_rssi_dbm": _int(_RE_LORA_RSSI, result),
+        "last_rssi_dbm": last_rssi,
+        # True when the firmware reported the -0 sentinel rather than a
+        # reading, so "no RSSI" stays distinguishable downstream
+        # (honest_failure_modes #9 — the swallow leaves a witness).
+        "last_rssi_absent": last_rssi_absent,
         "last_snr": float(snr_m.group(1)) if snr_m else None,
     }
 
