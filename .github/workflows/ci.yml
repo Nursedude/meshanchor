@@ -98,12 +98,46 @@ jobs:
 
       - name: Run tests
         id: pytest
+        shell: bash
         run: |
           set -o pipefail
-          python -m pytest tests/ -v --tb=short --timeout=30 --timeout-method=thread --ignore=tests/test_bridge_integration.py 2>&1 | tee /tmp/pytest.log | head -500
+          # The step log used to be piped through `head -500`, which cut the
+          # run off at roughly 7% and dropped the "short test summary info"
+          # block entirely -- so a red main showed a PASSED line followed by
+          # "Process completed with exit code 1" and nothing else. On
+          # 2026-09-04 main sat red for ~23h over ONE assertion that was never
+          # visible from the web log; the evidence was in the uploaded artifact
+          # the whole time, but nobody reads an artifact when the log looks
+          # like it should already have the answer. A truncation that HIDES the
+          # failure summary is worse than no log at all. Stream everything;
+          # tee keeps the artifact copy.
+          python -m pytest tests/ -v --tb=short --timeout=30 --timeout-method=thread \
+            --ignore=tests/test_bridge_integration.py \
+            2>&1 | tee /tmp/pytest.log
         env:
           CI: true
           MESHANCHOR_CI: true
+          PYTHONUNBUFFERED: "1"
+
+      # Ported from MeshForge 2026-09-04. GitHub's lazy-loaded log viewer can
+      # still hide raw output on a long run, so extract the failing lines and
+      # the summary into an explicit marker section the reader cannot miss.
+      - name: Dump failure summary
+        if: failure() && steps.pytest.outcome == 'failure'
+        shell: bash
+        run: |
+          {
+            echo "--- FAILED lines ---"
+            grep -aE "^FAILED|^ERROR|^tests/.*FAIL|assert|Error:|^E +" /tmp/pytest.log | head -50 || true
+            echo
+            echo "--- short test summary info ---"
+            awk '/short test summary info/{flag=1} flag' /tmp/pytest.log | head -50 || true
+          } > /tmp/failure_summary.txt
+          echo "============================================"
+          echo "==  PYTEST FAILURE SUMMARY (CI-EXTRACTED) =="
+          echo "============================================"
+          cat /tmp/failure_summary.txt
+          echo "============================================"
 
       - name: Upload pytest log
         if: always()

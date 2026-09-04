@@ -260,8 +260,35 @@ class TestFullRegistryIntegration:
                 f"Section {section!r} has no menu items"
             )
 
-    def test_all_tags_dispatch(self, registry):
-        """Every registered tag should dispatch successfully."""
+    def test_all_tags_dispatch(self, registry, no_network):
+        """Every registered tag should dispatch successfully.
+
+        ``no_network`` makes this hermetic. Dispatch actually RUNS each
+        handler's ``execute()`` (wrapped in ``safe_call``), and some of those
+        paths open sockets — this suite has been observed reaching
+        ``127.0.0.1:4403`` (a meshtasticd radio port) from inside this very
+        test, where only ``tx_guard`` stood between the harness and a real
+        radio. A blocked connect normally fails fast, but a reachable-but-slow
+        peer lets ``socket.connect`` hang past pytest-timeout, and the thread
+        timeout method then kills the whole session — which surfaces as a bare
+        "exit code 1" with no test summary at all.
+
+        Blocking ``socket.socket`` turns any such attempt into an instant
+        OSError that ``safe_call`` catches, so dispatch still returns True: the
+        routing assertion this test exists for is unchanged, just no longer at
+        the mercy of the network.
+
+        Ported from MeshForge 2026-09-04, which added this guard on 2026-06-16
+        after the same flake reddened its suite. MeshAnchor defined the
+        ``no_network`` fixture (conftest.py) and then used it NOWHERE — a
+        fixture with no consumer, which is why the guard never applied here.
+
+        NOT covered by this fixture: handlers that shell out to a CHILD
+        process (``DiagnosticsHandler`` runs ``src/cli/diagnose.py`` via
+        ``subprocess.run``). Patching ``socket.socket`` cannot reach another
+        interpreter, so that path can still block on a slow box. Left as a
+        separate finding rather than papered over here.
+        """
         for section in registry.section_names:
             for tag, _ in registry.get_menu_items(section):
                 result = registry.dispatch(section, tag)
