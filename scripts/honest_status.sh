@@ -86,7 +86,17 @@ PY="python3"
 # NOT-GREEN from the gate whose whole job is to not lie about green. Ported
 # from MF 1c6fd0bf, which observed exactly that 2026-07-28.
 HS_TMP="$(mktemp -d -t honest_status_ma.XXXXXX)"
-trap 'rm -rf "$HS_TMP"' EXIT INT TERM
+# EXIT cleans up. INT/TERM clean up AND EXIT — never resume.
+#
+# A handler that only cleans lets bash RESUME with the scratch dir already
+# deleted, so every later leg reads its log as missing and reports FAIL.
+# Measured on the MF twin 2026-09-07: an interrupted run printed "lint FAIL
+# exit 1" while a direct lint was exit 0, and closed "proven not-green" on a
+# green tree. That is the SECOND route into the false-NOT-GREEN above —
+# 07-28 came through fixed tmp NAMES, this one through the interrupt handler.
+# An interrupted check knows nothing; UNKNOWN (2) is the only honest answer.
+trap 'rm -rf "$HS_TMP"' EXIT
+trap 'rm -rf "$HS_TMP"; printf "\nUNKNOWN: interrupted — scratch state removed, refusing to classify\n" >&2; exit 2' INT TERM
 
 pass=0; fail=0; unknown=0; warns=0
 ok()    { printf '  %-22s \033[32mPASS\033[0m    %s\n' "$1" "$2"; pass=$((pass+1)); }
