@@ -158,7 +158,7 @@ class TestEvaluate:
             "All done — all tests pass, all green.", self.HEAD, None, 1000.0)
         assert block is True
         assert "calibrated_claims" in reason
-        assert "pytest" in reason  # surfaces MA's check of record
+        assert self.HEAD[:7] in reason  # surfaces the current HEAD (evaluate is byte-shared with MeshForge since 2026-09-07)
 
     def test_calibrated_overclaim_passes(self):
         block, reason = claim_gate.evaluate(
@@ -249,3 +249,51 @@ class TestMainWrapper:
             {"transcript_path": str(tmp_path / "does_not_exist.jsonl"),
              "stop_hook_active": False})
         assert rc == 0 and out.strip() == ""
+
+
+# ── ported from MeshForge 2026-09-07 (§3 harness drill + review) ─────────
+
+class TestEveryStrongClaimFires:
+    """'fully verified' and 'verified green' contain the marker 'verified' and
+    never blocked. Every strong claim, alone and unbacked, must block."""
+
+    @pytest.mark.parametrize("claim", claim_gate.STRONG_CLAIMS)
+    def test_each_strong_claim_alone_blocks(self, claim):
+        block, _ = claim_gate.evaluate(f"Done. {claim}.", "c" * 40, None, 1000.0)
+        assert block, f"STRONG_CLAIM {claim!r} cannot fire"
+
+
+class TestHedgePolarityAroundClaims:
+    @pytest.mark.parametrize("text", [
+        "This is not fully verified yet.",
+        "unverified green on the peer — treat as UNKNOWN",
+        "I have not verified green status.",
+        "haven't fully verified the fleet leg",
+    ])
+    def test_negated_or_embedded_claim_is_not_a_claim(self, text):
+        assert not claim_gate.has_strong_claim(text), text
+        block, _ = claim_gate.evaluate(text, "c" * 40, None, 1000.0)
+        assert not block, text
+
+    @pytest.mark.parametrize("text", ["Fully verified.", "verified green", "all tests passed"])
+    def test_bare_or_suffixed_claim_still_blocks(self, text):
+        block, _ = claim_gate.evaluate(text, "c" * 40, None, 1000.0)
+        assert block, text
+
+
+class TestMarkerScopeAndTree:
+    HEAD = "a" * 40
+
+    def _fresh(self, **over):
+        m = {"head_full": self.HEAD, "exit_code": 0, "ran_full_suite": True, "ts": 1000.0}
+        m.update(over)
+        return m
+
+    def test_narrowed_scope_rejected(self):
+        assert not claim_gate.marker_satisfies(self._fresh(scope_narrowed=True), self.HEAD, 1000.0)
+
+    def test_dirty_tree_rejected(self):
+        assert not claim_gate.marker_satisfies(self._fresh(dirty_tree=True), self.HEAD, 1000.0)
+
+    def test_legacy_marker_without_fields_honored(self):
+        assert claim_gate.marker_satisfies(self._fresh(), self.HEAD, 1000.0)

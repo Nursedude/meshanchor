@@ -120,17 +120,43 @@ def extract_last_assistant_text(transcript_lines) -> str:
     return last_text
 
 
+# A strong claim is a claim only when it is not negated and not the tail of a
+# longer word: "not fully verified yet", "haven't fully verified", "unverified
+# green" are hedges, not overclaims. Leading word boundary + negation
+# look-behinds; no trailing boundary, so "all tests passed" still counts.
+# (Ported from MeshForge 2026-09-07 — the §3 harness drill + its review.)
+_CLAIM_NEG = r"(?<!\bnot )(?<!\bnever )(?<!n't )(?<!\bno )(?<!\bnothing )(?<![\w])"
+_CLAIM_RES = tuple(re.compile(_CLAIM_NEG + re.escape(c)) for c in STRONG_CLAIMS)
+
+
+def _claim_spans(low: str):
+    return [m.span() for rx in _CLAIM_RES for m in rx.finditer(low)]
+
+
 def has_strong_claim(text: str) -> bool:
-    low = text.lower()
-    return any(claim in low for claim in STRONG_CLAIMS)
+    return bool(_claim_spans(text.lower()))
 
 
 def is_calibrated(text: str) -> bool:
     """True if the message already shows evidence or honest hedging — the
-    autonomy-preserving exempt path."""
+    autonomy-preserving exempt path.
+
+    A marker that lies INSIDE a strong claim does not count: two
+    STRONG_CLAIMS ("fully verified", "verified green") contain the marker
+    "verified", so the phrase that should trip the gate exempted itself for
+    the gate's whole life (MeshForge §3 drill 2026-09-07). Spans, not strips:
+    a marker anywhere outside a claim span still calibrates, including the
+    hedges that overlap a claim ("not fully verified yet")."""
     low = text.lower()
-    if any(m in low for m in CALIBRATION_MARKERS):
-        return True
+    spans = _claim_spans(low)
+
+    def _inside(s, e):
+        return any(a <= s and e <= b for a, b in spans)
+
+    for mk in CALIBRATION_MARKERS:
+        for m in re.finditer(re.escape(mk), low):
+            if not _inside(*m.span()):
+                return True
     return any(re.search(p, text, re.IGNORECASE) for p in EVIDENCE_PATTERNS)
 
 
@@ -144,6 +170,13 @@ def marker_satisfies(marker, head_full, now_ts, max_age_s=MARKER_MAX_AGE_S) -> b
     if marker.get("exit_code") != 0:
         return False
     if not marker.get("ran_full_suite"):
+        return False
+    # A run whose box list was narrowed (HONEST_BOXES override / no fleet
+    # SSOT) or whose tree carried uncommitted edits cannot back a
+    # fleet-strength claim about HEAD (MeshForge §3 drill 2026-09-07).
+    # honest_status writes both fields; a marker without them (older writer,
+    # test fixture) is judged on the fields it has.
+    if marker.get("scope_narrowed") or marker.get("dirty_tree"):
         return False
     ts = marker.get("ts")
     if not isinstance(ts, (int, float)):
@@ -165,23 +198,25 @@ def evaluate(text, head_full, marker, now_ts):
     if marker_satisfies(marker, head_full, now_ts):
         return False, None
 
+    head_disp = (head_full[:7] if head_full else "unknown")
     if isinstance(marker, dict) and marker.get("summary"):
-        marker_line = (f"Latest verification verdict: {marker.get('summary')} "
+        marker_line = (f"Latest honest_status verdict: "
+                       f"{marker.get('summary')} "
                        f"(HEAD {str(marker.get('head_full',''))[:7]}, "
                        f"exit {marker.get('exit_code')}).")
     else:
-        marker_line = "No verification verdict on record this turn."
+        marker_line = "No honest_status verdict on record for any HEAD."
 
     reason = (
         "CALIBRATED-CLAIMS CHECK (.claude/rules/calibrated_claims.md): your "
         "closing message makes an unqualified completion claim, but this turn "
-        "ran no external check you quoted.\n"
+        "ran no external check you quoted, and no fresh full honest_status "
+        f"verdict covers the current HEAD ({head_disp}).\n"
         f"{marker_line}\n\n"
         "This is one reflective beat, not a cage — reconcile your wording with "
         "the evidence, then your judgment stands:\n"
-        "  • If it IS verified: run `python3 -m pytest tests/ -q` + `python3 "
-        "scripts/lint.py --all`, quote the real captured exit code, and tag the "
-        "claim VERIFIED.\n"
+        "  • If it IS verified: run `bash scripts/honest_status.sh` (exit 0 = "
+        "green) or quote the real captured exit code, and tag the claim VERIFIED.\n"
         "  • If it is NOT yet verified: say so — tag it BELIEVED (written, not "
         "run) or UNKNOWN (couldn't check), and name the check that would confirm "
         "it. Unobservable is never 'healthy'; 'worked once' is not 'reliable'.\n"

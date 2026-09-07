@@ -348,8 +348,16 @@ echo "--> $verdict_msg"
 # witness (honest_failure_modes #9). A missing/old marker reads as "this HEAD is
 # unverified" downstream — the safe direction.
 VERDICT_PATH="${HONEST_VERDICT_PATH:-${HOME:-/tmp}/.cache/meshanchor/honest_verdict.json}"
+# Scope + tree fingerprint (ported from MeshForge 2026-09-07): a run narrowed
+# by HONEST_BOXES wrote a marker indistinguishable from a fleet run, and no
+# marker could tell a clean tree from one with uncommitted edits. claim_gate
+# refuses a marker carrying either flag. A git failure is NOT a clean tree.
+HV_NARROW=0; [ -n "${HONEST_BOXES:-}" ] && HV_NARROW=1
+HV_DIRTY=1
+if _hv_st="$(git -C "$REPO" status --porcelain 2>/dev/null)" && [ -z "$_hv_st" ]; then HV_DIRTY=0; fi
 if ! HV_RC="$verdict_rc" HV_MSG="$verdict_msg" HV_HEAD="$HEADFULL" \
      HV_FULL="$RUN_TESTS" HV_STRICT="$STRICT" HV_PATH="$VERDICT_PATH" \
+     HV_NARROW="$HV_NARROW" HV_DIRTY="$HV_DIRTY" HV_BOXES="${BOXES:-}" \
      python3 - <<'PY' 2>/dev/null
 import json, os, tempfile, time
 p = os.environ["HV_PATH"]
@@ -366,6 +374,9 @@ payload = json.dumps({
     "instrument": "honest_status",
     "ran_full_suite": os.environ.get("HV_FULL") == "1",
     "strict": os.environ.get("HV_STRICT") == "1",
+    "scope_narrowed": os.environ.get("HV_NARROW") == "1",
+    "dirty_tree": os.environ.get("HV_DIRTY") == "1",
+    "boxes": os.environ.get("HV_BOXES", ""),
 }, indent=2)
 fd, tmp = tempfile.mkstemp(dir=d, prefix=os.path.basename(p) + ".", suffix=".tmp")
 try:
