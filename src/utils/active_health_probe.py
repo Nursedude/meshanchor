@@ -53,7 +53,17 @@ from utils.active_health_probe_core import (  # noqa: F401
     _LIMITS_NOFILE_RE,
     _read_fd_usage,
     _resolve_main_pid_status,
+    # rnstatus-timeout confirmation (2026-09-08). Lives in _core so this
+    # file stays under the MF025 cap; re-exported here because
+    # check_rns_rpc_responsive and its tests are the only consumers.
+    _DEFAULT_RPC_CONFIRM_TICKS,
+    _RPC_CONFIRM_TICKS_ENV,
+    _cpu_pressure_context,
+    _rpc_confirm_ticks,
+    judge_rns_rpc_timeout,
+    reset_rns_rpc_timeout_streak,
 )
+import utils.active_health_probe_core as _ahp_core
 
 logger = logging.getLogger(__name__)
 
@@ -699,24 +709,22 @@ class ActiveHealthProbe:
         A genuinely down rnsd fails FAST (binary missing / no shared
         instance / refused) — that leaves ``RNSStatus.timed_out`` False and
         we report healthy here (``check_rns_port`` / ``check_systemd_service``
-        own rnsd-down). Only a subprocess TIMEOUT (``timed_out=True``) is
-        reported unhealthy, so RNS-less boxes never false-alarm.
+        own rnsd-down). Only a subprocess TIMEOUT (``timed_out=True``) is a
+        candidate, so RNS-less boxes never false-alarm.
+
+        A busy box is not a wedge (2026-09-08): ``rnstatus`` wall time also
+        measures CPU/IO headroom, so we require ``_rpc_confirm_ticks()``
+        CONSECUTIVE timeouts before reporting unhealthy; short of that the
+        result is healthy with an explicitly UNCONFIRMED reason. Measured
+        incident + rationale: ``active_health_probe_core``.
         """
         try:
             from utils.rns_status_parser import run_rnstatus
             status = run_rnstatus(timeout_s=timeout_s)
         except Exception as e:  # pragma: no cover - defensive
             return HealthResult(healthy=False, reason=f"rpc_check_error: {e}"[:120])
-        if status.timed_out:
-            return HealthResult(
-                healthy=False,
-                reason=(
-                    "rns_rpc_unresponsive: rnstatus timed out — rnsd accepts "
-                    "shared-instance connects but the RPC round-trip is wedged. "
-                    "Recovery: restart rnsd.service then RNS-using services."
-                ),
-            )
-        return HealthResult(healthy=True, reason="rpc_responsive")
+        healthy, reason = _ahp_core.judge_rns_rpc_timeout(status.timed_out)
+        return HealthResult(healthy=healthy, reason=reason)
 
     def check_rns_interface_down_peer_reachable(
         self,

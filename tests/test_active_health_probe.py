@@ -128,20 +128,98 @@ class TestRNSWedgeProbes:
       check_rns_interface_down_peer_reachable:  2026-05-30 stuck-uplink islanding
     """
 
+    @pytest.fixture(autouse=True)
+    def _clean_streak(self):
+        """The consecutive-timeout streak is module state; a test that
+        leaves it dirty would arm or disarm the next one."""
+        from utils.active_health_probe import reset_rns_rpc_timeout_streak
+        reset_rns_rpc_timeout_streak()
+        yield
+        reset_rns_rpc_timeout_streak()
+
     def _probe(self):
         from utils.active_health_probe import ActiveHealthProbe
         return ActiveHealthProbe()
 
+    @staticmethod
+    def _needed():
+        from utils.active_health_probe import _rpc_confirm_ticks
+        return _rpc_confirm_ticks()
+
     # --- check_rns_rpc_responsive ---
 
-    def test_rpc_timeout_is_unhealthy(self):
+    def test_rpc_timeout_is_unhealthy_once_confirmed(self):
+        """A wedge holds until rnsd restarts, so it survives confirmation."""
         from utils import rns_status_parser as rsp
         from utils.rns_status_parser import RNSStatus
-        with patch.object(rsp, "run_rnstatus",
-                          return_value=RNSStatus(parse_error="timed out", timed_out=True)):
+        timed = RNSStatus(parse_error="timed out", timed_out=True)
+        with patch.object(rsp, "run_rnstatus", return_value=timed):
+            for _ in range(self._needed() - 1):
+                assert self._probe().check_rns_rpc_responsive().healthy is True
             r = self._probe().check_rns_rpc_responsive()
-            assert r.healthy is False
-            assert "rns_rpc_unresponsive" in r.reason
+        assert r.healthy is False
+        assert "rns_rpc_unresponsive" in r.reason
+        assert "CONFIRM first" in r.reason
+
+    def test_single_rpc_timeout_does_not_alarm(self):
+        """THE 2026-09-08 false alarm, pinned (ported from MeshForge).
+        apt-daily-upgrade starved the rnstatus subprocess for one tick
+        while rnsd's own RPC logged `ok 0.000s` throughout. One timeout
+        must never become a wedge claim whose stated cure is restarting a
+        healthy rnsd — the #69 @rns race trigger."""
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        timed = RNSStatus(parse_error="timed out", timed_out=True)
+        with patch.object(rsp, "run_rnstatus", return_value=timed):
+            r = self._probe().check_rns_rpc_responsive()
+        assert r.healthy is True
+        # ...but NOT laundered into a clean "rpc_responsive".
+        assert "unconfirmed" in r.reason
+        assert r.reason != "rpc_responsive"
+
+    def test_rpc_streak_resets_when_rnstatus_recovers(self):
+        """Two isolated timeouts an hour apart are not a wedge — only a
+        CONSECUTIVE run counts, so a healthy sample rearms the guard."""
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        timed = RNSStatus(parse_error="timed out", timed_out=True)
+        with patch.object(rsp, "run_rnstatus", return_value=timed):
+            for _ in range(self._needed() - 1):
+                self._probe().check_rns_rpc_responsive()
+        with patch.object(rsp, "run_rnstatus", return_value=RNSStatus()):
+            assert self._probe().check_rns_rpc_responsive().healthy is True
+        with patch.object(rsp, "run_rnstatus", return_value=timed):
+            for _ in range(self._needed() - 1):
+                assert self._probe().check_rns_rpc_responsive().healthy is True
+
+    def test_rpc_confirm_ticks_env_override(self, monkeypatch):
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "1")
+        timed = RNSStatus(parse_error="timed out", timed_out=True)
+        with patch.object(rsp, "run_rnstatus", return_value=timed):
+            assert self._probe().check_rns_rpc_responsive().healthy is False
+
+    def test_rpc_confirm_ticks_env_garbage_falls_back(self, monkeypatch):
+        from utils.active_health_probe import (
+            _rpc_confirm_ticks, _DEFAULT_RPC_CONFIRM_TICKS,
+        )
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "nope")
+        assert _rpc_confirm_ticks() == _DEFAULT_RPC_CONFIRM_TICKS
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "0")
+        assert _rpc_confirm_ticks() == _DEFAULT_RPC_CONFIRM_TICKS
+
+    def test_wedge_reason_carries_load_evidence(self):
+        """The alert must let the operator tell `rnsd is wedged` from
+        `this Pi was buried` without reconstructing it from journals."""
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        timed = RNSStatus(parse_error="timed out", timed_out=True)
+        with patch.object(rsp, "run_rnstatus", return_value=timed):
+            for _ in range(self._needed() - 1):
+                self._probe().check_rns_rpc_responsive()
+            r = self._probe().check_rns_rpc_responsive()
+        assert "loadavg" in r.reason
 
     def test_rpc_healthy_when_not_timed_out(self):
         from utils import rns_status_parser as rsp

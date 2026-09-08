@@ -122,3 +122,122 @@ def _read_fd_usage(pid: int, *, proc_root: str = "/proc"):
     if soft <= 0:
         return None
     return open_count, soft
+
+
+# ── rnstatus-timeout confirmation (2026-09-08, ported from MeshForge) ──
+#
+# A single `rnstatus` run exceeding its bound is NOT evidence that rnsd's
+# RPC is wedged. `rnstatus` is a fresh interpreter that imports RNS
+# before it speaks one byte of RPC, so its WALL TIME measures the box's
+# CPU/IO headroom at least as much as rnsd's health. Measured on the
+# MeshForge fleet, 2026-09-08:
+#
+#   06:36:34  apt-daily-upgrade starts (61s CPU, 273 MB, 35 MB swap)
+#   06:37:41  rnstatus timed out  ->  "RPC round-trip is wedged"
+#   06:37:49  ...while the gateway logged rpc[rnsd.path_table_read] ok
+#             0.000s every 10s, straight THROUGH the declared "wedge"
+#   06:37:53  apt-daily-upgrade finishes
+#   06:38:26  cleared — nothing done, nothing wrong
+#
+# rnsd's RPC was sub-millisecond at the exact second we called it wedged:
+# a correctly-derived claim about the wrong quantity.
+#
+# ⚠️ Dangerous rather than merely noisy: the reason tells the operator to
+# restart rnsd, and rapid rnsd restart cycling is what opens the `@rns`
+# ownership race (#69).
+#
+# Discriminator: PERSISTENCE. A real #68/#72 wedge holds until rnsd is
+# restarted; contention passes within a tick. Require N consecutive
+# timed-out observations before reporting unhealthy; short of that the
+# check reports healthy=True with an explicitly UNCONFIRMED reason, so
+# the moment is never silently laundered into a clean "rpc_responsive".
+#
+# Module-level (not instance) state on purpose: it must survive a prober
+# that is re-instantiated per tick, and it must NOT live on disk — an
+# unwritable state dir would freeze the streak below its threshold and
+# the check could never fire at all (the 2026-09-02 debounce-saver trap).
+_RPC_CONFIRM_TICKS_ENV = "MESHANCHOR_RNS_RPC_CONFIRM_TICKS"
+_DEFAULT_RPC_CONFIRM_TICKS = 3
+
+_rpc_timeout_streak = 0
+
+
+def _rpc_confirm_ticks() -> int:
+    """Consecutive timed-out checks required before claiming a wedge."""
+    raw = os.environ.get(_RPC_CONFIRM_TICKS_ENV)
+    if raw is None:
+        return _DEFAULT_RPC_CONFIRM_TICKS
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_RPC_CONFIRM_TICKS
+    return value if value >= 1 else _DEFAULT_RPC_CONFIRM_TICKS
+
+
+def reset_rns_rpc_timeout_streak() -> None:
+    """Clear the consecutive-timeout streak. For tests and cold start."""
+    global _rpc_timeout_streak
+    _rpc_timeout_streak = 0
+
+
+def _cpu_pressure_context() -> str:
+    """Best-effort load/PSI string carried WITH the wedge claim, so the
+    operator can tell "rnsd is wedged" from "this Pi was buried" on the
+    alert itself rather than from journals afterwards."""
+    parts = []
+    try:
+        with open("/proc/loadavg", "r") as fh:
+            parts.append("loadavg " + " ".join(fh.read().split()[:3]))
+    except OSError:
+        parts.append("loadavg unknown")
+    try:
+        with open("/proc/pressure/cpu", "r") as fh:
+            for line in fh:
+                if line.startswith("some"):
+                    for tok in line.split():
+                        if tok.startswith("avg10="):
+                            parts.append("cpu-psi-some10 " + tok[6:])
+                    break
+    except OSError:
+        pass
+    return "; ".join(parts)
+
+
+def bump_rns_rpc_timeout_streak() -> int:
+    """Record one more consecutive timed-out check; return the new streak."""
+    global _rpc_timeout_streak
+    _rpc_timeout_streak += 1
+    return _rpc_timeout_streak
+
+
+def judge_rns_rpc_timeout(timed_out: bool) -> Tuple[bool, str]:
+    """Turn one `rnstatus` outcome into a (healthy, reason) verdict.
+
+    Owns the consecutive-timeout streak, so the decision and the state it
+    depends on cannot drift apart. See the block comment above for why a
+    single timeout is not a wedge.
+    """
+    global _rpc_timeout_streak
+    if not timed_out:
+        _rpc_timeout_streak = 0
+        return True, "rpc_responsive"
+
+    _rpc_timeout_streak += 1
+    needed = _rpc_confirm_ticks()
+    pressure = _cpu_pressure_context()
+
+    if _rpc_timeout_streak < needed:
+        # Not yet decidable. Healthy so we do not page, but the reason says
+        # UNCONFIRMED — never the bare "rpc_responsive" that would launder a
+        # genuinely blind moment into health.
+        return True, (
+            f"rpc_timeout_unconfirmed {_rpc_timeout_streak}/{needed}"
+            f" ({pressure})"
+        )[:120]
+
+    return False, (
+        f"rns_rpc_unresponsive: rnstatus timed out on {_rpc_timeout_streak} "
+        f"consecutive checks — RPC round-trip wedged ({pressure}). "
+        "CONFIRM first: timeout 8 rnstatus; then restart rnsd.service + "
+        "RNS-using services."
+    )[:240]
