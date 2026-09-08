@@ -61,6 +61,7 @@ from utils.active_health_probe_core import (  # noqa: F401
     _cpu_pressure_context,
     _rpc_confirm_ticks,
     judge_rns_rpc_timeout,
+    reset_rnstatus_baseline,
     reset_rns_rpc_timeout_streak,
 )
 import utils.active_health_probe_core as _ahp_core
@@ -723,7 +724,8 @@ class ActiveHealthProbe:
             status = run_rnstatus(timeout_s=timeout_s)
         except Exception as e:  # pragma: no cover - defensive
             return HealthResult(healthy=False, reason=f"rpc_check_error: {e}"[:120])
-        healthy, reason = _ahp_core.judge_rns_rpc_timeout(status.timed_out)
+        healthy, reason = _ahp_core.judge_rns_rpc_timeout(
+            status.timed_out, status.duration_s)
         return HealthResult(healthy=healthy, reason=reason)
 
     def check_rns_interface_down_peer_reachable(

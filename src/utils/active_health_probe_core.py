@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections import deque
+from statistics import median
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -156,8 +158,23 @@ def _read_fd_usage(pid: int, *, proc_root: str = "/proc"):
 # that is re-instantiated per tick, and it must NOT live on disk — an
 # unwritable state dir would freeze the streak below its threshold and
 # the check could never fire at all (the 2026-09-02 debounce-saver trap).
+# Default 1 here, 3 in MeshForge — DELIBERATE, and the difference is the
+# consumer, not the defect (calibrated_claims #7: verify the
+# consumer-of-record, not the wiring). MeshForge's watchdog converts one
+# probe return straight into a paging signal, so the confirmation must
+# live in the probe. MeshAnchor's ActiveHealthProbe ALREADY debounces:
+# `fails=3` means three consecutive failing checks before UNHEALTHY.
+# Measured 2026-09-08: meshanchor-server logged only `rnsd_rpc is now
+# HEALTHY` transitions over 7 days and never once went UNHEALTHY, i.e.
+# the framework absorbed the same single-tick timeouts that paged on the
+# MeshForge side. Stacking a second debounce would have made a REAL wedge
+# take fails x ticks = 9 ticks (~4.5 min) to surface — trading true-
+# positive latency away to fix a false positive this repo was not having.
+# One debounce layer per pipeline, placed where the pipeline has none.
+# Raise this via the env var only for a deployment that constructs
+# ActiveHealthProbe with fails=1.
 _RPC_CONFIRM_TICKS_ENV = "MESHANCHOR_RNS_RPC_CONFIRM_TICKS"
-_DEFAULT_RPC_CONFIRM_TICKS = 3
+_DEFAULT_RPC_CONFIRM_TICKS = 1
 
 _rpc_timeout_streak = 0
 
@@ -210,7 +227,115 @@ def bump_rns_rpc_timeout_streak() -> int:
     return _rpc_timeout_streak
 
 
-def judge_rns_rpc_timeout(timed_out: bool) -> Tuple[bool, str]:
+# ── per-box rnstatus latency baseline (2026-09-08, MF parity port) ────
+#
+# The confirmation above fixed WHAT we measure and WHETHER it persists; it
+# did not fix what we measure AGAINST. The wedge arm fires on a fixed 8s
+# subprocess timeout, and the fleet is heterogeneous. Measured: a healthy
+# rnstatus is ~1.2s on a Pi 5 gateway, so a box degrading 1.2s -> 6s never
+# trips 8s at all. An absolute threshold on a heterogeneous fleet does not
+# merely misfire — it FALLS SILENT on exactly the box that has drifted.
+#
+# So judge each box against ITSELF: a rolling median of healthy rnstatus
+# durations, and a sustained multiple of that median is the same condition
+# the wedge arm catches, seen earlier and on boxes whose normal is slow.
+#
+# ⚠️ The trap in every adaptive baseline is that it LEARNS THE ILLNESS: a
+# slow drift raises the median, the median raises the threshold, and the
+# detector silently re-normalises around a sick box. Guards: (1) samples
+# judged slow are NOT admitted, so the median stays at pre-degradation
+# values while the condition holds; (2) the baseline may only TIGHTEN the
+# hard timeout, never loosen it. A warming baseline says so in its reason
+# rather than reading as a bare healthy.
+#
+# In-memory for the same reason as the streak: on disk it would inherit
+# the 2026-09-02 debounce-saver trap.
+_RNSTATUS_BASELINE_MAXLEN = 60        # ~30 min of checks at the 30s cadence
+_RNSTATUS_BASELINE_MIN_SAMPLES = 12   # don't judge a box before we know it
+_RNSTATUS_SLOW_FACTOR_ENV = "MESHANCHOR_RNS_RPC_SLOW_FACTOR"
+# 3.0, not 5.0: the arm only earns its keep in the band BELOW the hard
+# timeout. On a 1.2s median, 5x puts the threshold at 6.0s and leaves a
+# 6.0-8.0s window to catch anything in — nearly nothing. 3x gives 3.6-8.0s.
+_DEFAULT_RNSTATUS_SLOW_FACTOR = 3.0
+_RNSTATUS_SLOW_FLOOR_S = 2.0          # never alarm on a sub-2s absolute run
+
+_rnstatus_durations: "deque" = deque(maxlen=_RNSTATUS_BASELINE_MAXLEN)
+_rpc_slow_streak = 0
+
+
+def _rnstatus_slow_factor() -> float:
+    """Multiple of this box's own median that counts as degraded."""
+    raw = os.environ.get(_RNSTATUS_SLOW_FACTOR_ENV)
+    if raw is None:
+        return _DEFAULT_RNSTATUS_SLOW_FACTOR
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_RNSTATUS_SLOW_FACTOR
+    return value if value > 1.0 else _DEFAULT_RNSTATUS_SLOW_FACTOR
+
+
+def reset_rnstatus_baseline() -> None:
+    """Clear the latency baseline and slow streak. For tests and cold start."""
+    global _rpc_slow_streak
+    _rnstatus_durations.clear()
+    _rpc_slow_streak = 0
+
+
+def _rnstatus_median() -> Optional[float]:
+    """Median of the healthy-sample window, or None while warming."""
+    if len(_rnstatus_durations) < _RNSTATUS_BASELINE_MIN_SAMPLES:
+        return None
+    return median(_rnstatus_durations)
+
+
+def _judge_rnstatus_latency(duration_s: Optional[float]) -> Tuple[bool, str]:
+    """Second arm: is rnstatus slow FOR THIS BOX? Healthy rnstatus only."""
+    global _rpc_slow_streak
+
+    if duration_s is None:
+        return True, "rpc_responsive (no duration observed)"
+
+    baseline = _rnstatus_median()
+    if baseline is None:
+        _rnstatus_durations.append(duration_s)
+        _rpc_slow_streak = 0
+        return True, (
+            f"rpc_responsive {duration_s:.2f}s; latency baseline warming "
+            f"{len(_rnstatus_durations)}/{_RNSTATUS_BASELINE_MIN_SAMPLES}"
+        )[:120]
+
+    factor = _rnstatus_slow_factor()
+    threshold = max(_RNSTATUS_SLOW_FLOOR_S, baseline * factor)
+
+    if duration_s <= threshold:
+        _rnstatus_durations.append(duration_s)
+        _rpc_slow_streak = 0
+        return True, (
+            f"rpc_responsive {duration_s:.2f}s vs median {baseline:.2f}s"
+        )[:120]
+
+    # Slow: do NOT admit the sample, or the baseline learns the illness.
+    _rpc_slow_streak += 1
+    needed = _rpc_confirm_ticks()
+    if _rpc_slow_streak < needed:
+        return True, (
+            f"rpc_slow_unconfirmed {_rpc_slow_streak}/{needed} "
+            f"{duration_s:.2f}s vs median {baseline:.2f}s"
+        )[:120]
+
+    return False, (
+        f"rns_rpc_degraded: rnstatus {duration_s:.2f}s against this box's "
+        f"own median {baseline:.2f}s (>{factor:.1f}x) on {_rpc_slow_streak} "
+        f"consecutive checks — RPC degrading but BELOW the hard timeout, so "
+        f"the wedge arm is still silent ({_cpu_pressure_context()}). Check "
+        "whether the box is merely busy before touching rnsd."
+    )[:240]
+
+
+def judge_rns_rpc_timeout(
+    timed_out: bool, duration_s: Optional[float] = None,
+) -> Tuple[bool, str]:
     """Turn one `rnstatus` outcome into a (healthy, reason) verdict.
 
     Owns the consecutive-timeout streak, so the decision and the state it
@@ -220,7 +345,7 @@ def judge_rns_rpc_timeout(timed_out: bool) -> Tuple[bool, str]:
     global _rpc_timeout_streak
     if not timed_out:
         _rpc_timeout_streak = 0
-        return True, "rpc_responsive"
+        return _judge_rnstatus_latency(duration_s)
 
     _rpc_timeout_streak += 1
     needed = _rpc_confirm_ticks()

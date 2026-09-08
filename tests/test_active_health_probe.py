@@ -132,10 +132,14 @@ class TestRNSWedgeProbes:
     def _clean_streak(self):
         """The consecutive-timeout streak is module state; a test that
         leaves it dirty would arm or disarm the next one."""
-        from utils.active_health_probe import reset_rns_rpc_timeout_streak
+        from utils.active_health_probe_core import (
+            reset_rns_rpc_timeout_streak, reset_rnstatus_baseline,
+        )
         reset_rns_rpc_timeout_streak()
+        reset_rnstatus_baseline()
         yield
         reset_rns_rpc_timeout_streak()
+        reset_rnstatus_baseline()
 
     def _probe(self):
         from utils.active_health_probe import ActiveHealthProbe
@@ -161,21 +165,94 @@ class TestRNSWedgeProbes:
         assert "rns_rpc_unresponsive" in r.reason
         assert "CONFIRM first" in r.reason
 
-    def test_single_rpc_timeout_does_not_alarm(self):
-        """THE 2026-09-08 false alarm, pinned (ported from MeshForge).
-        apt-daily-upgrade starved the rnstatus subprocess for one tick
-        while rnsd's own RPC logged `ok 0.000s` throughout. One timeout
-        must never become a wedge claim whose stated cure is restarting a
-        healthy rnsd — the #69 @rns race trigger."""
+    def test_single_rpc_timeout_does_not_reach_UNHEALTHY(self):
+        """THE 2026-09-08 false alarm, pinned at the PIPELINE — which is
+        where this repo actually debounces it.
+
+        MeshForge's watchdog turns one probe return straight into a paging
+        signal, so its confirmation lives in the probe. Here the framework
+        already debounces (`fails=3`), and measurement says it worked:
+        meshanchor-server logged only `rnsd_rpc is now HEALTHY` over 7 days
+        and never went UNHEALTHY through the same single-tick timeouts that
+        paged on the MeshForge side. So the invariant to pin is the one an
+        operator experiences — the service must not be declared UNHEALTHY
+        on one starved rnstatus — NOT the internal return value of a
+        function whose debounce belongs to its consumer
+        (calibrated_claims #7: verify the consumer-of-record).
+        """
         from utils import rns_status_parser as rsp
         from utils.rns_status_parser import RNSStatus
+        from utils.active_health_probe import (
+            ActiveHealthProbe, HealthState,
+        )
         timed = RNSStatus(parse_error="timed out", timed_out=True)
+        probe = ActiveHealthProbe(interval=30, fails=3, passes=2)
         with patch.object(rsp, "run_rnstatus", return_value=timed):
-            r = self._probe().check_rns_rpc_responsive()
-        assert r.healthy is True
-        # ...but NOT laundered into a clean "rpc_responsive".
-        assert "unconfirmed" in r.reason
-        assert r.reason != "rpc_responsive"
+            probe.register_check("rnsd_rpc",
+                                 lambda: probe.check_rns_rpc_responsive())
+            probe._run_check("rnsd_rpc")
+            assert probe._states["rnsd_rpc"].state is not HealthState.UNHEALTHY
+            probe._run_check("rnsd_rpc")
+            assert probe._states["rnsd_rpc"].state is not HealthState.UNHEALTHY
+            # ...and a SUSTAINED wedge must still surface, not be absorbed.
+            probe._run_check("rnsd_rpc")
+            assert probe._states["rnsd_rpc"].state is HealthState.UNHEALTHY
+
+    def test_stacked_debounce_would_delay_a_real_wedge(self):
+        """Guard against re-introducing the second debounce layer. With
+        the framework at fails=3, a probe-side confirm of N makes a REAL
+        wedge take N*3 checks to surface — trading true-positive latency
+        away to fix a false positive this repo was not having."""
+        from utils.active_health_probe import _rpc_confirm_ticks
+        assert _rpc_confirm_ticks() == 1, (
+            "MeshAnchor's debounce belongs to ActiveHealthProbe(fails=); "
+            "a probe-side confirm >1 stacks with it"
+        )
+
+    def test_latency_arm_catches_the_silent_degradation(self):
+        """The case an absolute 8s timeout is structurally blind to: box
+        median ~1.2s degrading to 6.0s never trips the timeout, so without
+        this arm the detector falls silent on the box that has drifted."""
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        from utils.active_health_probe_core import (
+            reset_rnstatus_baseline, _RNSTATUS_BASELINE_MIN_SAMPLES,
+        )
+        reset_rnstatus_baseline()
+        pr = self._probe()
+        with patch.object(rsp, "run_rnstatus",
+                          return_value=RNSStatus(duration_s=1.2)):
+            for _ in range(_RNSTATUS_BASELINE_MIN_SAMPLES):
+                assert pr.check_rns_rpc_responsive().healthy is True
+        slow = RNSStatus(duration_s=6.0)
+        assert slow.timed_out is False          # wedge arm cannot fire
+        with patch.object(rsp, "run_rnstatus", return_value=slow):
+            r = pr.check_rns_rpc_responsive()
+        assert r.healthy is False
+        assert "rns_rpc_degraded" in r.reason
+        reset_rnstatus_baseline()
+
+    def test_latency_baseline_does_NOT_learn_its_own_illness(self):
+        """A rolling baseline that admits slow samples re-normalises around
+        a sick box and goes quiet. Slow samples must never be admitted."""
+        from utils import rns_status_parser as rsp
+        from utils.rns_status_parser import RNSStatus
+        from utils.active_health_probe_core import (
+            reset_rnstatus_baseline, _RNSTATUS_BASELINE_MIN_SAMPLES,
+            _RNSTATUS_BASELINE_MAXLEN,
+        )
+        reset_rnstatus_baseline()
+        pr = self._probe()
+        with patch.object(rsp, "run_rnstatus",
+                          return_value=RNSStatus(duration_s=1.2)):
+            for _ in range(_RNSTATUS_BASELINE_MIN_SAMPLES):
+                pr.check_rns_rpc_responsive()
+        with patch.object(rsp, "run_rnstatus",
+                          return_value=RNSStatus(duration_s=6.0)):
+            for _ in range(_RNSTATUS_BASELINE_MAXLEN * 2):
+                assert pr.check_rns_rpc_responsive().healthy is False, (
+                    "detector adapted away from a sick box")
+        reset_rnstatus_baseline()
 
     def test_rpc_streak_resets_when_rnstatus_recovers(self):
         """Two isolated timeouts an hour apart are not a wedge — only a
