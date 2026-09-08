@@ -1,16 +1,16 @@
 # MeshAnchor Core Dependencies (required for all profiles)
 
 # Terminal formatting (TUI)
-rich>=13.0.0
+rich>=15.0.0
 
 # Configuration and utilities
-pyyaml>=6.0
-requests>=2.31.0
-distro>=1.8.0
+pyyaml>=6.0.3
+requests>=2.34.2
+distro>=1.9.0
 
 # Meshtastic protobuf definitions (used by gateway protobuf client).
 # Floor mirrors the FLEET baseline pinned in MeshForge's requirements/core.txt
 # (MF's probe_dep_version_drift reads that copy; MA's
 # active_health_probe.check_dep_version_floor reads THIS line via
 # utils.requirements_floor). Keep the two floors in lockstep on a reviewed roll.
-meshtastic>=2.7.9
+meshtastic>=2.7.11
