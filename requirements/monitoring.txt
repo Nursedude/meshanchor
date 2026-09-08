@@ -1,13 +1,13 @@
 # MeshAnchor Monitoring Dependencies (optional, enhances all profiles)
 
 # System monitoring
-psutil>=5.9.0
+psutil>=7.2.2
 
 # WebSocket support (real-time message broadcast)
-websockets>=12.0
+websockets>=17.1
 
 # Prometheus client — feeds the HTTP-side /metrics histogram + counters.
 # Optional; map_metrics.py no-ops if missing, /metrics still serves the
 # hand-rolled prometheus_exporter exposition. Reverse port from MeshForge
 # (2026-05-09) — Phase E observability.
-prometheus_client>=0.17.0
+prometheus_client>=0.26.0
