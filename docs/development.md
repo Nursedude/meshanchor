@@ -26,7 +26,7 @@ coordinated across both projects.
 
 ### Test Coverage
 
-**~6,500 tests** across <!--STAT:testfiles-->222<!--/STAT--> test files. Top suites by depth
+**~6,500 tests** across <!--STAT:testfiles-->223<!--/STAT--> test files. Top suites by depth
 (per-file counts are a 2026-07 snapshot — run `python3 -m pytest tests/<file> --co -q` for the live number):
 
 | Test File | Tests | Covers |

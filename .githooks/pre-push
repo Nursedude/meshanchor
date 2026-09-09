@@ -67,4 +67,65 @@ if [ -f "$REPO_ROOT/scripts/review_provenance_check.py" ]; then
         exit 1
     fi
 fi
+
+# Doc stat sentinels — 67ms (2026-09-09). On that day a single new test file in
+# THIS repo (the test_mini_warmstart.py byte-lock port) bumped a
+# filesystem-derived count and reddened CI, while the checker sat unwired here
+# exactly as it did in MeshForge. Note --check: the bare invocation exits 2
+# whether clean or drifted, so its raw exit code is NOT a gate signal.
+SENTINELS_RAN=no
+if [ -f "$REPO_ROOT/scripts/readme_stats.py" ]; then
+    echo "Pre-push: doc stat sentinels..."
+    if ! python3 "$REPO_ROOT/scripts/readme_stats.py" --check; then
+        echo ""
+        echo "Doc stat sentinel(s) drifted from the tree. Fix with:"
+        echo "  python3 scripts/readme_stats.py --update   # then commit the docs change"
+        echo "Override (sparingly): git push --no-verify"
+        exit 1
+    fi
+    SENTINELS_RAN=yes
+fi
+
+# Byte-lock parity — THE ASYMMETRY THIS CLOSES (2026-09-09). parity_check.py
+# lives only in MeshForge, the lead repo, so an edit made HERE to a byte-locked
+# file could drift and this repo's own hook could not see it — it would surface
+# only when MeshForge's suite next ran. Borrow the lead repo's checker when it is
+# on this box. Tri-state: 1 = real drift and BLOCKS, anything else = parity is
+# UNOBSERVABLE from here and must read as neither (honest_failure_modes #2).
+PARITY_STATE="UNOBSERVABLE (MeshForge repo not on this box)"
+MF_REPO="${MESHFORGE_REPO:-/opt/meshforge}"
+if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
+    echo "Pre-push: byte-lock parity (via the lead repo's checker)..."
+    python3 "$MF_REPO/scripts/parity_check.py" --meshanchor "$REPO_ROOT" \
+        >/tmp/.ma_prepush_parity.out 2>&1
+    prc=$?
+    if [ "$prc" -eq 1 ]; then
+        cat /tmp/.ma_prepush_parity.out
+        echo ""
+        echo "Byte-locked file(s) DRIFTED. MeshForge is the LEAD repo: land the"
+        echo "change there first, then port here — not the other way round."
+        rm -f /tmp/.ma_prepush_parity.out
+        exit 1
+    elif [ "$prc" -eq 0 ]; then
+        PARITY_STATE="checked"
+    else
+        PARITY_STATE="UNOBSERVABLE (checker exit $prc)"
+        echo "  WARN: parity unobservable — not a pass, not a failure."
+    fi
+    rm -f /tmp/.ma_prepush_parity.out
+fi
+
+# THE SCOPE STATEMENT. This hook used to end with a bare `exit 0` — silent,
+# which a reader fills in as "fine". MeshForge's said "Pre-push checks passed."
+# and that one line let four red-CI pushes through on 2026-09-09: the hook
+# measured a SUBSET honestly and the pass was read as clearance. Both now state
+# what they did NOT check, the same way fleet_truth's services cell now names
+# its quantity instead of returning a bare HEALTHY.
+if [ "$SENTINELS_RAN" = yes ]; then s_state="checked"; else s_state="skipped"; fi
+echo ""
+echo "Pre-push checks passed."
+echo "  SCOPE: lint, regression guards, upshift-witness,"
+echo "         doc sentinels ($s_state), byte-lock parity ($PARITY_STATE)."
+echo "  NOT RUN: the full test suite, and CI."
+echo "           This is a SUBSET. It does not license 'safe to push'."
 exit 0
