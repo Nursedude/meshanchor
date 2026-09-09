@@ -115,6 +115,42 @@ if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
     rm -f /tmp/.ma_prepush_parity.out
 fi
 
+# TWIN-FLEET DRIFT — an OBSERVATION, not a reminder (2026-09-09). This repo is
+# pushed from the dev box and PULLED on its own fleet box; fleet_pull.sh
+# already supports it (`fleet_pull.sh /opt/meshanchor`, per-repo host list
+# fleet_hosts.meshanchor, both present since 2026-07-16). Nothing was missing
+# but the CALL: four pushes landed that day with the deploy never run, and the
+# check of record could not see it because honest_status's fleet-SHA leg is
+# scoped to the MeshForge repo.
+#
+# ⚠️ This is a NUDGE and cannot be the fix. git has no post-push hook, so at
+# this moment the push has not happened yet — the honest thing it can report is
+# whether the box is ALREADY behind, which is a real finding on its own. It
+# never blocks: being behind is a deploy state, not a bad commit. The actual
+# gate for this class belongs in honest_status, AFTER the push.
+#
+# And note WHY prose was never going to work: this exact instruction was already
+# written down in the operator's memory ("MA: push from VolcanoAI, PULL on
+# meshanchor-server") and read at session start. It was still missed four times.
+if [ -x "$MF_REPO/scripts/fleet_pull.sh" ]; then
+    ma_target=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "")
+    ma_list="$HOME/.config/meshforge/fleet_hosts.meshanchor"
+    if [ -n "$ma_target" ] && [ -r "$ma_list" ]; then
+        while read -r ma_box; do
+            case "$ma_box" in ""|\#*) continue ;; esac
+            ma_sha=$(timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=8 "$ma_box" \
+                     "git -C $REPO_ROOT rev-parse HEAD 2>/dev/null" 2>/dev/null || echo "")
+            if [ -z "$ma_sha" ]; then
+                echo "  NOTE: twin fleet box '$ma_box' UNREACHABLE — deploy state unknown."
+            elif [ "$ma_sha" != "$ma_target" ]; then
+                echo "  NOTE: twin fleet box '$ma_box' is BEHIND (${ma_sha:0:8} vs local ${ma_target:0:8})."
+                echo "        It will be one further behind after this push. Deploy with:"
+                echo "          bash $MF_REPO/scripts/fleet_pull.sh $REPO_ROOT"
+            fi
+        done < "$ma_list"
+    fi
+fi
+
 # THE SCOPE STATEMENT. This hook used to end with a bare `exit 0` — silent,
 # which a reader fills in as "fine". MeshForge's said "Pre-push checks passed."
 # and that one line let four red-CI pushes through on 2026-09-09: the hook
