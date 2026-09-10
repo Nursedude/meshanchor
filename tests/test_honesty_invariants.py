@@ -151,3 +151,51 @@ class TestDeployRestartHook:
         """A restart verb inside a comment must NOT count as wiring."""
         commented = "# TODO: try-restart meshanchor-echo.service someday\n"
         assert "meshanchor-echo" not in deploy_restarted_units(commented)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Operator login must not be resolved from advisory env alone
+# ═════════════════════════════════════════════════════════════════════
+
+def test_no_script_resolves_the_operator_from_advisory_env_alone():
+    """Ported from MeshForge 2026-09-10 (lead repo for this class).
+
+    `REAL_USER="${SUDO_USER:-$USER}"` looks total and is not: a root cron or a
+    systemd unit sets NEITHER var, so it yields "" and `eval echo "~"` then
+    expands to the INVOKING user's home. The user units get written there, the
+    chown runs as ":", every error is swallowed by `2>/dev/null || true`, and
+    the script prints "✓ User service templates deployed" — a false success
+    claim built on a degraded value that looked valid (honest_failure_modes #1).
+
+    MeshForge found this when its 04:45 calibration_reverify cron — an env with
+    no $USER — marked a verified head "broke". MeshAnchor has no dry-run test
+    harness to surface it the same way, which is exactly why the guard is
+    ported rather than waiting for the symptom to show up here.
+
+    The bare two-level form is the defect signature; longer chains ending in a
+    real resolution (`$(id -un)`, `$(whoami)`) are the fix, so this greps for
+    the bare form rather than for the variable names.
+    """
+    import re
+    offenders = []
+    for path in sorted((REPO / "scripts").glob("*.sh")):
+        for n, ln in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\$\{SUDO_USER:-\$USER\}", ln):
+                offenders.append(f"{path.name}:{n}: {ln.strip()}")
+    assert not offenders, (
+        "operator login resolved from advisory env alone — $USER and $SUDO_USER "
+        "are both unset under cron and systemd. End the chain in the real uid "
+        "(${SUDO_USER:-${USER:-$(id -un)}}) and handle the no-operator case "
+        "explicitly:\n  " + "\n  ".join(offenders))
+
+
+def test_red_bare_advisory_form_is_detected():
+    """RED proof — the guard's pattern must actually fire on the pre-fix text.
+    Without this, a grep that silently matches nothing reads identical to a
+    clean tree (a guard that has never failed is not evidence)."""
+    import re
+    pre_fix = 'REAL_USER="${SUDO_USER:-$USER}"'
+    post_fix = 'REAL_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || true)}}"'
+    pat = re.compile(r"\$\{SUDO_USER:-\$USER\}")
+    assert pat.search(pre_fix), "the pattern must match the defect it exists for"
+    assert not pat.search(post_fix), "the fixed form must not be flagged"

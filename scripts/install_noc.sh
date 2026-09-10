@@ -1427,10 +1427,21 @@ WantedBy=multi-user.target
 RNSD_SERVICE
 
     # Also deploy user-level service template for non-root setups
-    REAL_USER="${SUDO_USER:-$USER}"
+    #
+    # Ported from MeshForge 2026-09-10 (lead repo, 7916d12d). $SUDO_USER and
+    # $USER are ADVISORY — a root cron or systemd unit sets NEITHER, and
+    # `eval echo "~"` then expands to the invoking user's home, so the units
+    # land under the wrong account while this still prints "✓ deployed".
+    # Fall back to the real uid; when that yields no operator (root with no
+    # sudo context) SKIP the block loudly rather than deploy somewhere.
+    REAL_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || true)}}"
+    if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
+        echo -e "  ${YELLOW}⚠ No operator login resolved (SUDO_USER='$SUDO_USER' USER='$USER') — skipping user-service deployment${NC}"
+        REAL_USER=""
+    fi
     REAL_HOME=$(eval echo "~${REAL_USER}")
     USER_SYSTEMD_DIR="${REAL_HOME}/.config/systemd/user"
-    if [[ -d "$INSTALL_DIR/templates/systemd" ]]; then
+    if [[ -n "$REAL_USER" && -d "$INSTALL_DIR/templates/systemd" ]]; then
         mkdir -p "$USER_SYSTEMD_DIR"
         cp "$INSTALL_DIR/templates/systemd/rnsd-user.service" "$USER_SYSTEMD_DIR/rnsd.service" 2>/dev/null || true
         if [[ -f "$INSTALL_DIR/templates/systemd/nomadnet-user.service" ]]; then
