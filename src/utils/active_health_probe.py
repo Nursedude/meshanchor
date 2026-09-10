@@ -1019,16 +1019,20 @@ class ActiveHealthProbe:
         if not confirmable:
             return HealthResult(healthy=True, reason="no_confirmable_protocol")
 
-        recent = snap.get("recent")
+        # Prefer the terminal-only ring: a general FIFO lets unconfirmable
+        # traffic evict the terminals this check needs, so it reads
+        # `low_traffic` while a TOTAL collapse reads the same. Ring size does
+        # not fix that; density does. See TestConfirmationRingStarvation.
+        recent = snap.get("recent_terminal")
+        ring_source = "recent_terminal" if isinstance(recent, list) else "recent"
+        if not isinstance(recent, list):
+            recent = snap.get("recent")
         if not isinstance(recent, list):
             return HealthResult(healthy=True, reason="no_recent_ring")
 
-        # Drop reasons meaning ATTEMPTED-and-FAILED (the denominator-mates of
-        # `confirmed`); benign dedup/capacity drops are NOT delivery failures.
-        failure_reasons = {
-            "rns_delivery_failed", "retries_exhausted", "destination_unreachable",
-            "delivery_timeout", "non_retriable_error", "circuit_open", "wedged",
-        }
+        # Vocabulary owned by delivery_counters — imported, never re-listed
+        # (honest_failure_modes #5: two independent hardcodes WILL drift).
+        from gateway.delivery_counters import DELIVERY_FAILURE_REASONS
         ring_conf = 0
         ring_failed = 0
         for e in recent:
@@ -1037,14 +1041,18 @@ class ActiveHealthProbe:
             st = e.get("state")
             if st == "confirmed":
                 ring_conf += 1
-            elif st == "dropped" and e.get("drop_reason") in failure_reasons:
+            elif st == "dropped" and e.get("drop_reason") in DELIVERY_FAILURE_REASONS:
                 ring_failed += 1
 
         terminal = ring_conf + ring_failed
         if terminal < min_terminal:
+            # ⚠️ healthy=True here means "cannot judge", NOT "confirmations
+            # are fine" — HealthResult is binary. Read the reason, not the bool.
+            stale = "" if ring_source == "recent_terminal" else " (legacy `recent` ring)"
             return HealthResult(
                 healthy=True,
-                reason=f"low_traffic terminal={terminal}<{min_terminal}",
+                reason=(f"low_traffic terminal={terminal}<{min_terminal} "
+                        f"in {len(recent)} `{ring_source}` events{stale}"),
             )
 
         rate = ring_conf / terminal

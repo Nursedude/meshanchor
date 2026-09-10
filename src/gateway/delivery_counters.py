@@ -244,6 +244,21 @@ def compute_confirmation_view(
     }
 
 
+#: Drop reasons meaning ATTEMPTED-and-FAILED — the denominator-mates of
+#: ``CONFIRMED`` when judging a confirmation rate. Benign dedup/capacity drops
+#: are NOT delivery failures. Lives here because this module owns the
+#: ``DropReason`` vocabulary; consumers import it rather than re-listing it
+#: (honest_failure_modes #5 — two independent hardcodes WILL drift).
+DELIVERY_FAILURE_REASONS = frozenset({
+    DropReason.RNS_DELIVERY_FAILED.value,
+    DropReason.RETRIES_EXHAUSTED.value,
+    DropReason.DESTINATION_UNREACHABLE.value,
+    DropReason.DELIVERY_TIMEOUT.value,
+    DropReason.NON_RETRIABLE_ERROR.value,
+    DropReason.CIRCUIT_OPEN.value,
+    DropReason.WEDGED.value,
+})
+
 RING_BUFFER_CAP = 500
 """Maximum rows retained in the events table. Sized for ~1 hour of
 healthy gateway traffic on a 5-box fleet (a few dozen msgs/min peak);
@@ -688,6 +703,23 @@ class DeliveryCounters:
                     "LIMIT ?",
                     (max(0, recent_limit),),
                 ).fetchall()
+                # 2026-09-10 (ported from MeshForge 7e26f2fa): TERMINAL events
+                # across the WHOLE ring, not just the newest `recent_limit`
+                # slots. `recent` is a general-purpose FIFO, so on a gateway
+                # whose traffic is mostly a protocol that can never confirm,
+                # the confirmable events a judgement needs get evicted by ones
+                # it must ignore. Measured on a MeshForge gateway: 200 slots
+                # spanning 17.7 h held 196 unconfirmable events beside 4
+                # confirmable, against a check needing 20 — so the check could
+                # not judge, and a TOTAL confirmation collapse read the same.
+                # The same ring held 49 confirmable terminals over 25.9 h.
+                terminal_rows = conn.execute(
+                    "SELECT ts, id, state, protocol, drop_reason "
+                    "FROM events WHERE state IN (?, ?) "
+                    "ORDER BY rowid DESC LIMIT ?",
+                    (DeliveryState.CONFIRMED.value, DeliveryState.DROPPED.value,
+                     max(0, recent_limit)),
+                ).fetchall()
                 ring_capacity = self._ring_cap
         except sqlite3.Error as e:
             logger.warning(
@@ -696,6 +728,7 @@ class DeliveryCounters:
             )
             rows = []
             events_rows = []
+            terminal_rows = []
             ring_capacity = self._ring_cap
 
         state_totals: Dict[str, int] = {s.value: 0 for s in DeliveryState}
@@ -756,6 +789,15 @@ class DeliveryCounters:
                 d["note"] = note
             recent.append(d)
 
+        # Newest-LAST, same contract as `recent`. Compact by design: a consumer
+        # judging confirmation rates needs state/protocol/drop_reason only.
+        recent_terminal: List[Dict[str, Any]] = [
+            {"ts": ts, "id": msg_id, "state": state,
+             "protocol": protocol, "drop_reason": drop_reason}
+            for (ts, msg_id, state, protocol, drop_reason)
+            in reversed(terminal_rows)
+        ]
+
         # Health block (Issue #63 / reliability backlog #2; #74
         # cross-process write-error truth). The cross-process truth is
         # what's persisted in the DB (`db_preflight_*` and
@@ -805,6 +847,7 @@ class DeliveryCounters:
             "state_by_protocol": state_by_protocol,
             **confirmation,
             "recent": recent,
+            "recent_terminal": recent_terminal,
             "first_event_ts": first_event_ts,
             "last_event_ts": last_event_ts,
             "ring_capacity": ring_capacity,

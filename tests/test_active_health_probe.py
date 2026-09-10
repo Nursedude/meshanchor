@@ -707,7 +707,13 @@ class TestDeliveryConfirmationStallProbe:
         independently — ring 50 vs min_terminal 20 left MF's busiest
         confirming gateway (~30% confirmable-terminal ring density)
         structurally stuck in low_traffic for weeks (07-26→08-10).
-        Require ring ≥ 5× floor so a busy gateway clears it with margin."""
+        Require ring ≥ 5× floor so a busy gateway clears it with margin.
+
+        ⚠️ 2026-09-10: ring SIZE is not the guarantee this docstring implies —
+        DENSITY is. A gateway whose traffic is mostly unconfirmable re-starves
+        any fixed general-purpose ring however large (measured: 4 confirmable
+        terminals in 200 slots). The actual cure is `recent_terminal`, pinned
+        by TestConfirmationRingStarvation below; this stays as a floor."""
         import inspect
         from gateway.delivery_counters import SNAPSHOT_RECENT_LIMIT
         from utils.active_health_probe import ActiveHealthProbe
@@ -715,6 +721,46 @@ class TestDeliveryConfirmationStallProbe:
             ActiveHealthProbe.check_delivery_confirmation_stall
         ).parameters["min_terminal"].default
         assert SNAPSHOT_RECENT_LIMIT >= 5 * floor
+
+    def test_starved_ring_is_judged_from_recent_terminal(self):
+        """Ported from MeshForge 7e26f2fa. 4 confirmable terminals in a
+        200-slot ring flooded by unconfirmable traffic — beside 49 in the
+        terminal-only ring. Before the port this sat in `low_traffic`."""
+        snap = self._snap(confirmed=4, mesh_sent=196)
+        snap["recent_terminal"] = [
+            {"state": "confirmed", "protocol": "rns", "id": f"tc{i}"}
+            for i in range(49)
+        ]
+        r = self._probe().check_delivery_confirmation_stall(snap=snap)
+        assert r.healthy is True
+        assert "low_traffic" not in r.reason, r.reason
+        assert "confirm_ok 49/49" in r.reason
+
+    def test_collapse_hidden_by_that_flood_is_caught(self):
+        """THE consequence: with only 4 usable events a TOTAL confirmation
+        collapse read exactly like a quiet leg — healthy=True, `low_traffic`.
+        On a binary HealthResult that is the honest_failure_modes #2 shape:
+        unobservable rendered healthy."""
+        snap = self._snap(confirmed=0, mesh_sent=196)
+        snap["recent_terminal"] = (
+            [{"state": "confirmed", "protocol": "rns", "id": "tc0"}]
+            + [{"state": "dropped", "protocol": "rns",
+                "drop_reason": "rns_delivery_failed", "id": f"tf{i}"}
+               for i in range(48)]
+        )
+        r = self._probe().check_delivery_confirmation_stall(snap=snap)
+        assert r.healthy is False, "a 2% confirmation rate still read healthy"
+        assert "delivery_confirmation_stall (wedge)" in r.reason
+
+    def test_older_gateway_falls_back_and_names_the_legacy_ring(self):
+        """A gateway that has not rolled the producer must keep working, and
+        its shortfall must be legible as 'not rolled yet', never 'quiet leg'.
+        The bool cannot say it — the reason must."""
+        r = self._probe().check_delivery_confirmation_stall(
+            snap=self._snap(confirmed=4, mesh_sent=196))
+        assert r.healthy is True
+        assert "low_traffic terminal=4<20" in r.reason
+        assert "legacy `recent` ring" in r.reason, r.reason
 
     def test_dedup_drops_excluded(self):
         """Benign dedup drops are not delivery failures."""
