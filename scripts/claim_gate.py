@@ -24,15 +24,16 @@ FAIL-OPEN, ALWAYS. A bug in this gate must never wedge a session: every
 unexpected error is swallowed into a silent pass (exit 0) with a stderr witness.
 A gate that wedges sessions gets ripped out and protects nothing.
 
-MeshAnchor has no honest_status.sh verdict marker (a MeshForge-side artifact), so
-the marker leg here is inert by default and the gate runs on the text-calibration
-path — the marker code is kept (env-overridable) so it future-proofs if MA grows
-its own verifier. Stdlib only. Pure core (`evaluate`) is unit-tested (RED + GREEN).
+MeshAnchor's own `scripts/honest_status.sh` writes the verdict marker this gate
+reads. What stays MeshForge-only is the AUTOMATIC ledger FEED (the Stop hook
+recording a marker-backed claim via `record_claim`) — MA logs no claims. The
+ledger MODULE is present here as a byte-locked twin and supplies the shared
+marker SSOT below. Stdlib only. Pure core (`evaluate`) is unit-tested
+(RED + GREEN).
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import time
@@ -40,6 +41,26 @@ from pathlib import Path
 
 # Repo root (this file lives in <repo>/scripts/).
 REPO = Path(__file__).resolve().parent.parent
+
+# The marker-acceptance predicate, the marker path and the HEAD resolver are
+# the ledger module's (MeshForge finding 18, 2026-09-09): this file carried its
+# own copies — a HEAD resolver WITHOUT the `-c safe.directory` guard warmstart
+# has (so under dubious ownership the gate blocked every strong claim beside a
+# fresh green marker), a third hand-typed marker path with a different HOME
+# fallback from honest_status's, and a verbatim copy of the refusal rule.
+# Import failure is NOT fatal (fail-open contract): `_cl` stays None, no marker
+# is honored (the refusing direction — the gate then only ever blocks MORE,
+# never less), and the one stderr line says so.
+_SRC = str(REPO / "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+try:
+    from mini_dudeai import calibration_ledger as _cl
+except Exception as _cl_err:  # noqa: BLE001 — fail-open, with a witness
+    _cl = None
+    print(f"claim_gate: WARN — mini_dudeai.calibration_ledger unavailable "
+          f"({_cl_err!r}); no verdict marker will be honored",
+          file=sys.stderr)
 
 # A verified marker (if MA ever grows a verifier that writes one) is honored only
 # when fresh AND covering the current HEAD AND a full run. Same HEAD = same
@@ -122,15 +143,40 @@ def extract_last_assistant_text(transcript_lines) -> str:
 
 # A strong claim is a claim only when it is not negated and not the tail of a
 # longer word: "not fully verified yet", "haven't fully verified", "unverified
-# green" are hedges, not overclaims. Leading word boundary + negation
-# look-behinds; no trailing boundary, so "all tests passed" still counts.
+# green" are hedges, not overclaims. Leading word boundary; no trailing
+# boundary, so "all tests passed" still counts.
 # (Ported from MeshForge 2026-09-07 — the §3 harness drill + its review.)
-_CLAIM_NEG = r"(?<!\bnot )(?<!\bnever )(?<!n't )(?<!\bno )(?<!\bnothing )(?<![\w])"
-_CLAIM_RES = tuple(re.compile(_CLAIM_NEG + re.escape(c)) for c in STRONG_CLAIMS)
+#
+# NEGATION IS A WINDOW, NOT AN ADJACENCY (MeshForge finding 10, 2026-09-09).
+# The first cut used look-behinds, which can only see the ONE token before the
+# phrase — so "I have not yet fully verified this." and "hasn't been fully
+# tested yet" BLOCKED (the honest hedge read as an overclaim) while "not fully
+# verified yet" passed. A negation word within the preceding NEG_WINDOW tokens
+# of the SAME sentence negates the phrase. The window is deliberately small:
+# "did not run lint but all tests pass" keeps its claim (the `not` is four
+# tokens back, across a `but`), because the gate biases to precision — a false
+# fire costs one reflective beat; a false pass costs the operator hours.
+NEG_WINDOW = 3
+_NEG_WORDS = frozenset({"not", "never", "no", "nothing", "cannot"})
+_CLAIM_RES = tuple(re.compile(r"(?<![\w])" + re.escape(c)) for c in STRONG_CLAIMS)
+_SENTENCE_END = re.compile(r"[.!?;:\n]")
+_TOKEN = re.compile(r"[a-z']+")
+
+
+def _negated_before(low: str, start: int) -> bool:
+    """Is there a negation word within NEG_WINDOW tokens before ``start``,
+    without crossing a sentence boundary?"""
+    before = low[:start]
+    cut = [m.end() for m in _SENTENCE_END.finditer(before)]
+    if cut:
+        before = before[cut[-1]:]
+    toks = _TOKEN.findall(before)[-NEG_WINDOW:]
+    return any(t in _NEG_WORDS or t.endswith("n't") for t in toks)
 
 
 def _claim_spans(low: str):
-    return [m.span() for rx in _CLAIM_RES for m in rx.finditer(low)]
+    return [m.span() for rx in _CLAIM_RES for m in rx.finditer(low)
+            if not _negated_before(low, m.start())]
 
 
 def has_strong_claim(text: str) -> bool:
@@ -160,29 +206,44 @@ def is_calibrated(text: str) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in EVIDENCE_PATTERNS)
 
 
-def marker_satisfies(marker, head_full, now_ts, max_age_s=MARKER_MAX_AGE_S) -> bool:
-    """A fresh, full, green verdict marker covering the current HEAD backs a
-    completion claim. Inert on MeshAnchor until/unless a verifier writes one."""
-    if not isinstance(marker, dict) or not head_full:
-        return False
+def marker_refusal_reason(marker, head_full, now_ts,
+                          max_age_s=MARKER_MAX_AGE_S) -> str | None:
+    """Why the marker does NOT back a claim about ``head_full`` — or None when
+    it does. The scope/tree/quick rules come from the ledger's ONE predicate
+    (``calibration_ledger.marker_refusal``); this adds the gate's own head,
+    exit and freshness rules. Every refusal NAMES its cause (MeshForge finding
+    15): the gate used to print "no fresh full honest_status verdict covers
+    HEAD" beside "Latest verdict: N/N PASS (HEAD <same>, exit 0)" — a self-
+    contradiction whose advice was to re-run the script just run."""
+    if not isinstance(marker, dict):
+        return "no marker"
+    if not head_full:
+        return "current HEAD unknown"
+    if _cl is None:
+        return "marker predicate unavailable (mini_dudeai import failed)"
     if marker.get("head_full") != head_full:
-        return False
+        return (f"the latest verdict is for HEAD "
+                f"{str(marker.get('head_full', ''))[:7] or '?'}, not this one")
     if marker.get("exit_code") != 0:
-        return False
-    if not marker.get("ran_full_suite"):
-        return False
-    # A run whose box list was narrowed (HONEST_BOXES override / no fleet
-    # SSOT) or whose tree carried uncommitted edits cannot back a
-    # fleet-strength claim about HEAD (MeshForge §3 drill 2026-09-07).
-    # honest_status writes both fields; a marker without them (older writer,
-    # test fixture) is judged on the fields it has.
-    if marker.get("scope_narrowed") or marker.get("dirty_tree"):
-        return False
+        return f"the latest verdict on this HEAD was exit {marker.get('exit_code')}"
+    why = _cl.marker_refusal(marker)
+    if why is not None:
+        return why
     ts = marker.get("ts")
-    if not isinstance(ts, (int, float)):
-        return False
+    if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+        return "the marker carries no usable timestamp"
     age = now_ts - ts
-    return 0 <= age <= max_age_s
+    if age < 0:
+        return "the marker is stamped in the future — a clock stepped"
+    if age > max_age_s:
+        return f"the marker is {int(age // 60)} min old (cap {max_age_s // 60} min)"
+    return None
+
+
+def marker_satisfies(marker, head_full, now_ts, max_age_s=MARKER_MAX_AGE_S) -> bool:
+    """A fresh, full, green honest_status verdict covering the current HEAD
+    backs a completion claim. Anything less does not (the safe direction)."""
+    return marker_refusal_reason(marker, head_full, now_ts, max_age_s) is None
 
 
 def evaluate(text, head_full, marker, now_ts):
@@ -195,7 +256,8 @@ def evaluate(text, head_full, marker, now_ts):
         return False, None
     if is_calibrated(text):
         return False, None
-    if marker_satisfies(marker, head_full, now_ts):
+    why = marker_refusal_reason(marker, head_full, now_ts)
+    if why is None:
         return False, None
 
     head_disp = (head_full[:7] if head_full else "unknown")
@@ -203,9 +265,9 @@ def evaluate(text, head_full, marker, now_ts):
         marker_line = (f"Latest honest_status verdict: "
                        f"{marker.get('summary')} "
                        f"(HEAD {str(marker.get('head_full',''))[:7]}, "
-                       f"exit {marker.get('exit_code')}).")
+                       f"exit {marker.get('exit_code')}) — NOT honored: {why}.")
     else:
-        marker_line = "No honest_status verdict on record for any HEAD."
+        marker_line = f"No honest_status verdict on record for any HEAD ({why})."
 
     reason = (
         "CALIBRATED-CLAIMS CHECK (.claude/rules/calibrated_claims.md): your "
@@ -231,31 +293,28 @@ def evaluate(text, head_full, marker, now_ts):
 
 
 def _current_head():
-    import subprocess
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(REPO), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
+    """HEAD of the repo this gate lives in, via the ledger's ONE resolver
+    (safe.directory-guarded). None when unresolvable — the gate then treats
+    every marker as not covering HEAD, the refusing direction."""
+    if _cl is None:
         return None
-    if out.returncode != 0:
-        return None
-    h = out.stdout.strip()
-    return h or None
+    return _cl.repo_head(str(REPO))
 
 
 def _marker_path():
-    env = os.environ.get("HONEST_VERDICT_PATH")
-    if env:
-        return env
-    home = os.environ.get("HOME") or os.path.expanduser("~")
-    return os.path.join(home, ".cache", "meshanchor", "honest_verdict.json")
+    """The ONE marker path contract (writer honest_status.sh, readers this
+    gate + warmstart). None when the SSOT is unavailable → no marker read."""
+    if _cl is None:
+        return None
+    return _cl.verdict_marker_path()
 
 
 def _read_marker():
+    p = _marker_path()
+    if not p:
+        return None
     try:
-        with open(_marker_path(), encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
@@ -282,8 +341,11 @@ def main(argv=None) -> int:
     try:
         with open(transcript_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-    except OSError as e:
-        print(f"claim_gate: WARN — transcript unreadable ({e}); passing open",
+    except (OSError, MemoryError) as e:
+        # MemoryError is in the tuple on purpose (MeshForge finding 17): the
+        # transcript grows all session and this hook slurps it whole; a Pi that
+        # cannot hold it must pass open with a witness, not traceback.
+        print(f"claim_gate: WARN — transcript unreadable ({e!r}); passing open",
               file=sys.stderr)
         return 0
 
