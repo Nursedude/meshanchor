@@ -50,6 +50,9 @@ from utils import tx_guard
 # this namespace on purpose: the checks below reference them as module globals,
 # so `patch.object(active_health_probe, "_read_fd_usage", ...)` keeps working.
 from utils.active_health_probe_core import (  # noqa: F401
+    HealthState,
+    HealthResult,
+    ServiceHealthState,
     _LIMITS_NOFILE_RE,
     _read_fd_usage,
     _resolve_main_pid_status,
@@ -65,6 +68,8 @@ from utils.active_health_probe_core import (  # noqa: F401
     reset_rns_rpc_timeout_streak,
 )
 import utils.active_health_probe_core as _ahp_core
+import utils.active_health_checks_delivery as _checks_delivery
+import utils.active_health_checks_host as _checks_host
 
 logger = logging.getLogger(__name__)
 
@@ -92,110 +97,12 @@ def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
-# ── user-timer failure detection (MeshForge parity port, 2026-07-19) ──
-# systemd's user manager logs both of these about a unit under the
-# ``USER_UNIT=`` journal field, which root can select WITHOUT sudo or the
-# user bus. Verified empirically on the fleet before this was trusted: had
-# the success line lacked that field, success-detection would have been
-# silently dead and the check would alarm after every recovery.
-_USER_TIMER_FAIL_PATTERN = "Failed with result"
-_USER_TIMER_OK_PATTERN = "Finished "
 # _USER_TIMER_UNIT_RE removed 2026-08-12 with the local _enabled_user_timers —
 # the Unit= parse now lives once, in utils.user_units (matches MeshForge).
 
 
-def _journal_user_unit_ts(
-    user_unit: str,
-    pattern: str,
-    lookback: str,
-    journalctl_path: str = "journalctl",
-) -> Optional[List[float]]:
-    """Epoch timestamps of ``USER_UNIT=<user_unit>`` journal lines matching
-    ``pattern`` within ``lookback``.
-
-    ``-u <unit>`` selects the SYSTEM journal namespace and is structurally
-    blind to user units (rc 0 but EMPTY from a root context) — the
-    ``USER_UNIT=`` field selector is the read that actually works.
-
-    Returns the parsed list (``[]`` = genuinely no matching lines) or
-    **None** on journalctl unavailable / timeout / rc∉(0,1) — the honest
-    *unobservable* answer, which a caller must never collapse into ``[]``.
-    """
-    try:
-        proc = subprocess.run(
-            [
-                journalctl_path, "-q", f"USER_UNIT={user_unit}",
-                "--since", f"-{lookback}", "-g", pattern,
-                "-o", "short-unix", "--no-pager",
-            ],
-            capture_output=True, text=True, timeout=15,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if proc.returncode not in (0, 1):
-        return None
-    out: List[float] = []
-    for ln in proc.stdout.splitlines():
-        if not ln:
-            continue
-        head = ln.split(None, 1)[0]
-        try:
-            out.append(float(head))
-        except ValueError:
-            continue
-    return out
 
 
-def _journal_user_unit_has_lines(
-    user_unit: str,
-    lookback: str,
-    journalctl_path: str = "journalctl",
-) -> Optional[bool]:
-    """Does ``USER_UNIT=<user_unit>`` have ANY journal line in ``lookback``?
-
-    The COVERAGE question for the reader above (2026-08-13, MeshForge parity).
-    That reader honestly returns ``[]`` for "journalctl ran and nothing
-    matched" — but ``[]`` also comes back when the unit has NO lines in the
-    window at all, so a caller cannot tell "the job ran and logged no failures"
-    from "nothing about this unit is visible here".
-
-    **Measured on meshanchor-server**: of four enrolled timers, two returned
-    empty for BOTH patterns and were folded into an affirmative
-    ``user_timers_ok_4``. One of them, ``meshanchor-map-restart.service``,
-    is a DAILY timer that had fired 19h earlier — comfortably outside the 3h
-    lookback, so "no failures" was never an observation about it (the
-    slow-cadence residual this module's header documents). The other two units
-    did have lines and were genuinely judged.
-
-    ⚠️ Do NOT justify this by "the user journal is dark on that box".
-    ``journalctl --user`` there reports *No journal files were found*, but that
-    is the per-user client path; the root ``USER_UNIT=`` selector this module
-    uses works fine and returns lines for the units that logged any. Two
-    different access routes — checked 2026-08-13 after an earlier read of mine
-    conflated them.
-
-    A unit that logged in the window is judgeable; one that logged nothing is
-    not. Returns True (lines present), False (none at all — cannot judge), or
-    **None** unobservable. Callers must treat both False and None as "say
-    nothing about this unit", never as healthy (honest_failure_modes #2).
-
-    Asked ONLY when both pattern queries came back empty, so a busy box pays
-    nothing extra.
-    """
-    try:
-        proc = subprocess.run(
-            [
-                journalctl_path, "-q", f"USER_UNIT={user_unit}",
-                "--since", f"-{lookback}", "-n", "1", "-o", "cat",
-                "--no-pager",
-            ],
-            capture_output=True, text=True, timeout=15,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        return None
-    if proc.returncode not in (0, 1):
-        return None
-    return bool(proc.stdout.strip())
 
 
 # Ported from MeshForge 2026-08-12 (MF landed it 2026-08-09 in
@@ -214,47 +121,6 @@ def _journal_user_unit_has_lines(
 # reads every wants dir. Two consumers, ONE definition (honest_failure_modes
 # #5) — a local re-implementation is exactly how the twins drift apart.
 _enabled_user_timers = enabled_user_timers
-
-
-class HealthState(Enum):
-    """Health state for a monitored service."""
-    UNKNOWN = "unknown"    # Not yet checked
-    HEALTHY = "healthy"    # Passing checks
-    UNHEALTHY = "unhealthy"  # Failing checks
-    RECOVERING = "recovering"  # Transitioning from unhealthy to healthy
-
-
-@dataclass
-class HealthResult:
-    """Result of a single health check."""
-    healthy: bool
-    reason: str = ""
-    latency_ms: float = 0.0
-    timestamp: float = field(default_factory=time.time)
-
-    def __bool__(self) -> bool:
-        return self.healthy
-
-
-@dataclass
-class ServiceHealthState:
-    """Tracks health state for a single service with hysteresis."""
-    name: str
-    state: HealthState = HealthState.UNKNOWN
-    consecutive_passes: int = 0
-    consecutive_fails: int = 0
-    last_check: Optional[float] = None
-    last_result: Optional[HealthResult] = None
-    total_checks: int = 0
-    total_passes: int = 0
-    total_fails: int = 0
-
-    @property
-    def uptime_percent(self) -> float:
-        """Calculate uptime percentage based on total checks."""
-        if self.total_checks == 0:
-            return 0.0
-        return (self.total_passes / self.total_checks) * 100
 
 
 class ActiveHealthProbe:
@@ -609,75 +475,30 @@ class ActiveHealthProbe:
     # box no MeshForge probe watches).
     DEP_FLOOR_WATCHED = ("meshtastic",)
 
-    def check_dep_version_floor(
-        self,
-        *,
-        requirements_path=None,
-        installed: Optional[Dict[str, str]] = None,
-    ) -> HealthResult:
-        """A critical pip dependency importable by THIS process sits BELOW the
-        requirements/core.txt floor — the box missed or failed an update
-        (MeshForge ``probe_dep_version_drift`` parity, 2026-07-03).
+    # ── Checks, split out 2026-09-10 (MF025) ─────────────────────────────
+    # The bodies live in utils/active_health_checks_{delivery,host}.py; 9 of
+    # 11 checks never touched `self`, so they are free functions there and are
+    # re-exposed here. staticmethod keeps `probe.check_x(...)`, every
+    # register_check lambda, and inspect.signature() behaving exactly as
+    # before the move — this split changes no behaviour.
+    check_delivery_confirmation_stall = staticmethod(
+        _checks_delivery.check_delivery_confirmation_stall)
+    check_fd_exhaustion = staticmethod(_checks_host.check_fd_exhaustion)
+    check_user_timer_unit_failing = staticmethod(
+        _checks_host.check_user_timer_unit_failing)
 
-        Consumer-of-record simplification vs MeshForge: MF's watchdog runs in
-        a DIFFERENT process/user than the services, so it must enumerate
-        venv/user-site/system-dist installs. This check runs INSIDE the
-        MeshAnchor daemon — the very interpreter that imports meshtastic — so
-        ``importlib.metadata`` on our own env IS the consumer-of-record. The
-        read hits on-disk dist-info each tick, so a pip upgrade clears the
-        alarm as soon as it lands (before the restart that loads it).
+    # The two that legitimately need the instance: they supply state the free
+    # function judges, rather than reaching for it themselves.
+    def check_queue_backlog(self, *args, **kwargs) -> HealthResult:
+        """Owns the depth-sample window; the judging lives in the module."""
+        return _checks_delivery.check_queue_backlog(
+            self._dl_samples, *args, **kwargs)
 
-        Self-guards healthy-with-reason (this codebase's idiom for
-        not-applicable, cf. check_fd_exhaustion): no parseable floor
-        (unreadable SSOT must not read as compliant OR as drift — it is
-        indeterminate), or no watched package importable here (a venv
-        elsewhere may be the consumer — don't guess). Fires unhealthy only on
-        a concrete below-floor fact.
-        """
-        from utils.requirements_floor import (
-            default_core_requirements,
-            read_requirement_floors,
-            version_below,
-        )
+    def check_dep_version_floor(self, *args, **kwargs) -> HealthResult:
+        """Supplies the class-level watch list to the module function."""
+        return _checks_host.check_dep_version_floor(
+            self.DEP_FLOOR_WATCHED, *args, **kwargs)
 
-        req = (Path(requirements_path) if requirements_path
-               else default_core_requirements())
-        floors = read_requirement_floors(self.DEP_FLOOR_WATCHED, req)
-        if not floors:
-            return HealthResult(
-                healthy=True, reason="dep_floor_indeterminate_no_floor")
-
-        if installed is None:
-            import importlib.metadata as _md
-            installed = {}
-            for pkg in floors:
-                try:
-                    installed[pkg] = _md.version(pkg)
-                except _md.PackageNotFoundError:
-                    continue  # not visible in this env — don't guess
-                except Exception:
-                    continue
-        if not installed:
-            return HealthResult(
-                healthy=True, reason="dep_floor_indeterminate_not_importable")
-
-        stale = [
-            f"{pkg} installed={installed[pkg]} floor>={floor}"
-            for pkg, floor in floors.items()
-            if pkg in installed and version_below(installed[pkg], floor)
-        ]
-        if stale:
-            return HealthResult(
-                healthy=False,
-                reason=(
-                    f"below_requirements_floor: {'; '.join(stale)} — this box "
-                    f"missed or failed an update; fix: sudo pip3 install "
-                    f"--break-system-packages '<pkg>==<floor>' then restart "
-                    f"meshanchor (see feedback_version_env_rigor)"
-                ),
-            )
-        ok = ", ".join(f"{p}={v}" for p, v in sorted(installed.items()))
-        return HealthResult(healthy=True, reason=f"dep_floor_ok {ok}")
 
     def check_rns_port(self, port: int = 37428, host: str = "127.0.0.1") -> HealthResult:
         """
@@ -787,437 +608,9 @@ class ActiveHealthProbe:
                 )
         return HealthResult(healthy=True, reason="no_stuck_interface")
 
-    def check_fd_exhaustion(
-        self,
-        service_name: str,
-        *,
-        proc_root: str = "/proc",
-        systemctl_path: str = "systemctl",
-        degraded_ratio: float = 0.80,
-        wedge_ratio: float = 0.95,
-        main_pid: Optional[int] = None,
-    ) -> HealthResult:
-        """Warn when a service's open fds approach its soft RLIMIT_NOFILE.
 
-        Proactive companion to the HTTP/port wedge checks (which only fail
-        once the port has already gone dark). MeshForge Issue #73
-        (2026-05-31): meshanchor-map leaked one paho MQTT client socket per
-        reconnect until it hit the 1024 soft fd cap; new ``accept()`` then
-        failed with ``[Errno 24]`` and ``:5000`` wedged — unservable for ~1h
-        before any wedge check fired. Counting fds vs the soft limit surfaces
-        the climb BEFORE the wedge, and names the fd-leak cause.
 
-        Unhealthy past ``degraded_ratio`` (default 80%); the reason flags
-        ``wedge`` past ``wedge_ratio`` (default 95% — exhaustion imminent).
-        Healthy (and quiet) when the service is absent/inactive
-        (``check_systemd_service`` owns down), /proc is unreadable, the soft
-        limit is unlimited, or usage is below the degraded threshold — a
-        healthy process must not false-alarm.
 
-        ⚠️ The three no-pid cases carry DISTINCT reasons (2026-08-12, MF
-        parity). They used to share ``inactive_or_unresolved`` — said of a box
-        with no such unit AND of a systemctl we could not run — and
-        ``last_result.reason`` in ``daemon_status.json`` is the ONLY place an
-        operator sees this, so the collapse made real blindness unreadable.
-        All three stay ``healthy=True`` deliberately: no third state exists
-        here, and turning a transient systemctl timeout into an alarm would
-        flap the hysteresis. Legible reason, not an invented page.
-        """
-        if main_pid is not None:
-            pid_status, pid = "ok", main_pid
-        else:
-            pid_status, pid = _resolve_main_pid_status(
-                service_name, systemctl_path=systemctl_path
-            )
-        if pid is None:
-            return HealthResult(healthy=True, reason={
-                # no unit here at all → no fd table to count (inert)
-                "absent": f"absent_no_unit ({service_name})",
-                # unit exists, stopped → check_systemd_service owns it
-                "down": "inactive_check_systemd_service_owns",
-            }.get(pid_status, f"unit_state_unobservable ({service_name})"))
-
-        usage = _read_fd_usage(pid, proc_root=proc_root)
-        if usage is None:
-            return HealthResult(healthy=True, reason="fd_usage_unreadable")
-        open_count, soft = usage
-
-        ratio = open_count / soft
-        if ratio < degraded_ratio:
-            return HealthResult(
-                healthy=True,
-                reason=f"fd_ok_{open_count}/{soft}",
-            )
-
-        level = "wedge" if ratio >= wedge_ratio else "degraded"
-        return HealthResult(
-            healthy=False,
-            reason=(
-                f"fd_exhaustion ({level}): {service_name} (pid {pid}) holds "
-                f"{open_count}/{soft} open fds ({ratio * 100:.0f}% of soft "
-                f"RLIMIT_NOFILE). Approaching [Errno 24] — new sockets/files "
-                f"will fail and the HTTP server will stop accepting (#73 "
-                f"fd-leak class). Inspect: sudo ls /proc/{pid}/fd | wc -l ; "
-                f"sudo ss -tanp | grep pid={pid}"
-            ),
-        )
-
-    def check_queue_backlog(
-        self,
-        *,
-        depth_degraded: float = 0.80,
-        depth_wedge: float = 0.95,
-        dl_growth_degraded: int = 10,
-        dl_growth_wedge: int = 50,
-        growth_window_s: float = 300.0,
-        now: Optional[float] = None,
-        stats: Optional[dict] = None,
-    ) -> HealthResult:
-        """Persistent-queue backpressure (MF Issue #74 probe port).
-
-        A deep backlog masks delivery failures: messages sit 'pending'
-        while the operator reads the gateway as healthy, and at the
-        shed threshold ``_shed_overflow`` silently drops LOW/NORMAL
-        priority. Two legs:
-
-        - depth: queue_depth / max_queue_size ≥ 95% flags ``wedge``
-          (shed imminent/active), ≥ 80% ``degraded``. Skipped when
-          max_queue_size ≤ 0 (unlimited — no ceiling to judge, mirrors
-          the fd check's "unlimited" guard).
-        - dead-letter GROWTH over a trailing ``growth_window_s`` deque
-          (instance state — the MA-native replacement for MF's
-          persisted-baseline file): a one-tick spike stays ≥ threshold
-          vs the oldest in-window sample for the full window (~10
-          ticks at 30s), latching past the fails=3 hysteresis, then
-          self-heals as the elevated count becomes the new baseline.
-          A static historical pile never fires.
-
-        Reads ``PersistentMessageQueue().get_stats()`` IN-PROCESS — the
-        probe runs as the operator inside the daemon/agent (unlike
-        MF's sandboxed root watchdog, which must go over localhost
-        HTTP). Healthy (quiet) when stats are unavailable — a box with
-        no gateway/queue must not false-alarm.
-
-        ``now``/``stats`` are test seams (fd check's injection style).
-        """
-        if stats is None:
-            try:
-                from gateway.message_queue import PersistentMessageQueue
-                stats = PersistentMessageQueue().get_stats()
-            except Exception:
-                return HealthResult(healthy=True, reason="queue_stats_unavailable")
-        try:
-            max_q = int(stats.get("max_queue_size") or 0)
-            depth = int(stats.get("queue_depth") or 0)
-            dead = int(stats.get("dead_letter") or 0)
-        except (TypeError, ValueError):
-            return HealthResult(healthy=True, reason="queue_stats_malformed")
-
-        ts_now = now if now is not None else time.time()
-        findings = []  # (level, fragment)
-
-        if max_q > 0:
-            usage = depth / max_q
-            if usage >= depth_wedge:
-                findings.append((
-                    "wedge",
-                    f"queue at {usage:.0%} of max ({depth}/{max_q}) — "
-                    f"shed threshold; LOW/NORMAL priority messages are "
-                    f"being dropped",
-                ))
-            elif usage >= depth_degraded:
-                findings.append((
-                    "degraded",
-                    f"queue backlog building: {usage:.0%} of max "
-                    f"({depth}/{max_q})",
-                ))
-
-        self._dl_samples.append((ts_now, dead))
-        while self._dl_samples and ts_now - self._dl_samples[0][0] > growth_window_s:
-            self._dl_samples.popleft()
-        baseline = self._dl_samples[0][1]
-        growth = dead - baseline
-        if growth >= dl_growth_wedge:
-            findings.append((
-                "wedge",
-                f"dead-letter +{growth} in {growth_window_s / 60:.0f}m "
-                f"(now {dead}) — retries exhausting en masse",
-            ))
-        elif growth >= dl_growth_degraded:
-            findings.append((
-                "degraded",
-                f"dead-letter +{growth} in window (now {dead})",
-            ))
-
-        if not findings:
-            return HealthResult(
-                healthy=True,
-                reason=f"queue_ok depth={depth}/{max_q} dl={dead}",
-            )
-
-        level = "wedge" if any(lv == "wedge" for lv, _ in findings) else "degraded"
-        return HealthResult(
-            healthy=False,
-            reason=(
-                f"queue_backlog ({level}): "
-                + "; ".join(f for _, f in findings)
-                + ". Check /api/gateway/queue and the gateway journal "
-                "for the failing destination."
-            ),
-        )
-
-    def check_delivery_confirmation_stall(
-        self,
-        *,
-        min_terminal: int = 20,
-        rate_degraded: float = 0.50,
-        rate_wedge: float = 0.10,
-        snap: Optional[dict] = None,
-    ) -> HealthResult:
-        """A confirmable protocol's deliveries are failing instead of
-        confirming (MF Issue #74 probe port; disjoint-protocol fix 2026-06-09).
-
-        Windowed rate from the ``delivery_counters.snapshot()`` recent-events
-        ring (``SNAPSHOT_RECENT_LIMIT`` events; 200 since 2026-08-10 — at 50
-        a mesh-heavy gateway's ring held fewer confirmable terminals than
-        ``min_terminal`` and this check sat permanently in ``low_traffic``).
-        CRUCIAL: judges ONLY protocols that actually have a
-        confirmation mechanism (record `confirmed` events — RNS today;
-        Meshtastic once ACK consumption lands), comparing that protocol's two
-        REAL terminal outcomes — `confirmed` vs a failed-delivery `dropped` —
-        NOT the meaningless cross-population `confirmed/sent` ratio. The
-        counters use disjoint lifecycle states per protocol (RNS:
-        queued→confirmed, never `sent`; Meshtastic: queued→sent, never
-        `confirmed`), so `confirmed/sent` was (RNS-confirmed ÷ mesh-sent) —
-        two different populations that never measured a coherent rate and
-        false-alarmed ~50% on every mesh-heavy gateway.
-
-        Self-guards healthy (silence is NOT failure here): counters
-        unavailable; no confirmable protocol (nothing tracks confirmation);
-        confirmable terminal events < ``min_terminal`` (one failure must not
-        tank a tiny denominator — honest over too small a sample; the ring
-        is sized so a busy gateway clears this floor, see the
-        cross-constant test). ``snap`` is a test seam.
-        """
-        if snap is None:
-            try:
-                from gateway.delivery_counters import snapshot as _snapshot
-                snap = _snapshot()
-            except Exception:
-                return HealthResult(
-                    healthy=True, reason="delivery_counters_unavailable",
-                )
-        if not isinstance(snap, dict):
-            return HealthResult(healthy=True, reason="no_traffic")
-
-        # Confirmable = protocols that have ever recorded a `confirmed` event.
-        confirmed_by_proto = (snap.get("state_by_protocol") or {}).get("confirmed") or {}
-        confirmable = {
-            p for p, c in confirmed_by_proto.items()
-            if isinstance(c, (int, float)) and not isinstance(c, bool) and c > 0
-        }
-        if not confirmable:
-            return HealthResult(healthy=True, reason="no_confirmable_protocol")
-
-        # Prefer the terminal-only ring: a general FIFO lets unconfirmable
-        # traffic evict the terminals this check needs, so it reads
-        # `low_traffic` while a TOTAL collapse reads the same. Ring size does
-        # not fix that; density does. See TestConfirmationRingStarvation.
-        recent = snap.get("recent_terminal")
-        ring_source = "recent_terminal" if isinstance(recent, list) else "recent"
-        if not isinstance(recent, list):
-            recent = snap.get("recent")
-        if not isinstance(recent, list):
-            return HealthResult(healthy=True, reason="no_recent_ring")
-
-        # Vocabulary owned by delivery_counters — imported, never re-listed
-        # (honest_failure_modes #5: two independent hardcodes WILL drift).
-        from gateway.delivery_counters import DELIVERY_FAILURE_REASONS
-        ring_conf = 0
-        ring_failed = 0
-        for e in recent:
-            if not isinstance(e, dict) or e.get("protocol") not in confirmable:
-                continue
-            st = e.get("state")
-            if st == "confirmed":
-                ring_conf += 1
-            elif st == "dropped" and e.get("drop_reason") in DELIVERY_FAILURE_REASONS:
-                ring_failed += 1
-
-        terminal = ring_conf + ring_failed
-        if terminal < min_terminal:
-            # ⚠️ healthy=True here means "cannot judge", NOT "confirmations
-            # are fine" — HealthResult is binary. Read the reason, not the bool.
-            stale = "" if ring_source == "recent_terminal" else " (legacy `recent` ring)"
-            return HealthResult(
-                healthy=True,
-                reason=(f"low_traffic terminal={terminal}<{min_terminal} "
-                        f"in {len(recent)} `{ring_source}` events{stale}"),
-            )
-
-        rate = ring_conf / terminal
-        if rate > rate_degraded:
-            return HealthResult(
-                healthy=True,
-                reason=f"confirm_ok {ring_conf}/{terminal} ({rate:.0%})",
-            )
-
-        level = "wedge" if rate <= rate_wedge else "degraded"
-        protos = ", ".join(sorted(confirmable))
-        return HealthResult(
-            healthy=False,
-            reason=(
-                f"delivery_confirmation_stall ({level}): {ring_conf}/{terminal} "
-                f"{protos} messages confirmed in the recent window ({rate:.0%}); "
-                f"the rest failed delivery. Check RNS paths to the fan-out peers "
-                f"and /api/gateway/delivery drop_reasons."
-            ),
-        )
-
-    def check_user_timer_unit_failing(
-        self,
-        *,
-        user_home: Optional[str] = None,
-        lookback: str = "3h",
-        min_failures: int = 2,
-        recency_s: float = 3600.0,
-        journalctl_path: str = "journalctl",
-        ts_fn=None,
-        coverage_fn=None,
-        now: Optional[float] = None,
-    ) -> HealthResult:
-        """Unhealthy when an enabled USER *timer's* job fails on every firing.
-
-        MeshForge ``probe_user_timer_unit_failing`` parity port (2026-07-19).
-        Origin incident is MF-side but the blind spot is identical on both
-        NOCs: a timer-triggered oneshot is **inactive between firings by
-        design**, so nothing that judges "is it running" can judge it, and it
-        never crashloops, so restart-counter detectors miss it too. On
-        MeshForge, kiai's ``meshforge-tracer.timer`` fired every 10 minutes
-        for a week while its job exited 2 every time, and no probe on either
-        repo could have seen it.
-
-        Outcome-based rather than an error count: a timer's service is judged
-        failing only when it has ``min_failures`` ``Failed with result``
-        events inside ``lookback``, the newest fresher than ``recency_s``,
-        **and no successful run since that newest failure**. Fails-then-
-        succeeds is a blip and stays quiet; a remediated job stops alarming
-        immediately instead of ringing off its own history.
-
-        Reads are bus-free and root-readable: enrollment from
-        ``~/.config/systemd/user/timers.target.wants/`` symlinks, outcomes
-        from the ``USER_UNIT=`` journal field (no sudo, no user bus).
-
-        Self-guards healthy-with-reason, following the fd-exhaustion
-        precedent, so boxes with no user timers never false-alarm: no
-        resolvable operator, no timers enrolled, wants dir unreadable, or the
-        journal unobservable for every enrolled timer.
-
-        NOTE (calibrated — the MF twin is stricter): MeshForge's version is
-        tri-state and HOLDS its debounce streak across an unobservable tick,
-        so a journalctl wedge cannot clear an in-flight outage. ``HealthResult``
-        is binary, so here an unobservable journal necessarily reads healthy
-        (``journal_unobservable``) and the probe's own ``fails`` hysteresis is
-        what rides out a single bad tick. The reason string is deliberately
-        greppable so an operator can tell "observed clean" from "could not
-        look".
-        """
-        now = time.time() if now is None else now
-
-        if user_home is None:
-            operator = None
-            try:
-                from utils.fleet_test_runner import _find_operator_user
-                operator = _find_operator_user()
-            except Exception:
-                operator = None
-            if operator is None:
-                return HealthResult(healthy=True, reason="no_operator_user")
-            uid, name = operator
-            try:
-                import pwd as _pwd
-                user_home = _pwd.getpwuid(uid).pw_dir
-            except (ImportError, KeyError):
-                user_home = f"/home/{name}"
-
-        timers = _enabled_user_timers(user_home)
-        if timers is None:
-            return HealthResult(healthy=True, reason="user_timers_unreadable")
-        if not timers:
-            return HealthResult(healthy=True, reason="no_user_timers_enrolled")
-
-        if ts_fn is None:
-            def ts_fn(unit, pattern):
-                return _journal_user_unit_ts(
-                    unit, pattern, lookback, journalctl_path=journalctl_path)
-
-        if coverage_fn is None:
-            def coverage_fn(unit):
-                return _journal_user_unit_has_lines(
-                    unit, lookback, journalctl_path=journalctl_path)
-
-        failing = []
-        observed_any = False
-        observed_count = 0
-        for timer, service in sorted(timers.items()):
-            fails = ts_fn(service, _USER_TIMER_FAIL_PATTERN)
-            oks = ts_fn(service, _USER_TIMER_OK_PATTERN)
-            if fails is None or oks is None:
-                continue                       # unobservable for THIS unit
-            if not fails and not oks:
-                # AMBIGUOUS (2026-08-13, MeshForge parity): "ran and logged
-                # nothing matching" and "nothing about this unit is visible in
-                # the window" are the same empty result. Measured on
-                # meshanchor-server: 2 of 4 enrolled timers were empty for both
-                # patterns and got folded into an affirmative
-                # `user_timers_ok_4` — one being a DAILY timer that fired 19h
-                # ago, outside the 3h lookback entirely. Ask the unfiltered
-                # question before reading silence as health.
-                if coverage_fn(service) is not True:
-                    continue           # dead/unreadable channel — say nothing
-            observed_any = True
-            observed_count += 1
-            if len(fails) < min_failures:
-                continue
-            newest_fail = max(fails)
-            if (now - newest_fail) > recency_s:
-                continue                       # already remediated
-            if oks and max(oks) > newest_fail:
-                continue                       # recovered after the failures
-            failing.append((service, len(fails)))
-
-        if not observed_any:
-            return HealthResult(healthy=True, reason="journal_unobservable")
-        if not failing:
-            # ⚠️ Say how many were actually JUDGED, not how many are enrolled
-            # (2026-08-13). A label may claim only what its evidence covers:
-            # on meshanchor-server 2 of 4 units had no journal line in the
-            # window (a daily timer that fired 19h ago is legitimately outside
-            # a 3h lookback — the KNOWN slow-cadence residual), and reporting
-            # a flat "ok_4" asserted health over two units nothing had looked
-            # at. Same defect class as the verdict that said "no mini" about a
-            # box when it had only checked one file path.
-            return HealthResult(
-                healthy=True,
-                reason=(f"user_timers_ok_{observed_count}_of_{len(timers)}"
-                        if observed_count != len(timers)
-                        else f"user_timers_ok_{len(timers)}"),
-            )
-
-        listed = ", ".join(f"{svc} ({n}x in {lookback})" for svc, n in failing)
-        return HealthResult(
-            healthy=False,
-            reason=(
-                f"user_timer_unit_failing: timer-triggered user job(s) "
-                f"failing every firing: {listed}. No successful run since the "
-                f"newest failure. These are invisible to every 'is it running' "
-                f"check — a oneshot is inactive between firings by design and "
-                f"never crashloops. Inspect: systemctl --user status <unit> ; "
-                f"journalctl --user -u <unit> -n 50. Usual cause is a missing "
-                f"input (config/peers file), which fails every cadence forever "
-                f"without alerting anyone."
-            ),
-        )
 
     def check_systemd_service(self, service_name: str) -> HealthResult:
         """

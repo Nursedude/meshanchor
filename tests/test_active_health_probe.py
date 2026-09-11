@@ -487,7 +487,13 @@ class TestFdExhaustionProbe:
     def test_absent_unit_is_named_as_absent(self, tmp_path):
         """No such unit on this box (LoadState=not-found) — nothing to count.
         Distinct from a unit that exists and is stopped."""
-        from utils import active_health_probe as ahp
+        # Patch where the name is LOOKED UP: check_fd_exhaustion moved to
+        # active_health_checks_host (2026-09-10 MF025 split) and resolves this
+        # from core into its OWN namespace. Patching it on active_health_probe
+        # silently stopped taking effect — test_absent_unit_is_named_as_absent
+        # then passed vacuously, because the real resolver also says "absent"
+        # for a unit that does not exist.
+        from utils import active_health_checks_host as ahp
         with patch.object(ahp, "_resolve_main_pid_status",
                           return_value=("absent", None)):
             r = self._probe().check_fd_exhaustion(
@@ -498,7 +504,13 @@ class TestFdExhaustionProbe:
     def test_installed_but_stopped_hands_off_to_systemd_check(self, tmp_path):
         """THE DRILL, planted from the other side: a unit that EXISTS and is
         down must NOT read as absent — check_systemd_service owns it."""
-        from utils import active_health_probe as ahp
+        # Patch where the name is LOOKED UP: check_fd_exhaustion moved to
+        # active_health_checks_host (2026-09-10 MF025 split) and resolves this
+        # from core into its OWN namespace. Patching it on active_health_probe
+        # silently stopped taking effect — test_absent_unit_is_named_as_absent
+        # then passed vacuously, because the real resolver also says "absent"
+        # for a unit that does not exist.
+        from utils import active_health_checks_host as ahp
         with patch.object(ahp, "_resolve_main_pid_status",
                           return_value=("down", None)):
             r = self._probe().check_fd_exhaustion(

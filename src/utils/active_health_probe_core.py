@@ -14,6 +14,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
+from dataclasses import dataclass, field
+from enum import Enum
 from collections import deque
 from statistics import median
 from pathlib import Path
@@ -366,3 +369,50 @@ def judge_rns_rpc_timeout(
         "CONFIRM first: timeout 8 rnstatus; then restart rnsd.service + "
         "RNS-using services."
     )[:240]
+
+
+# ── Result contract ──────────────────────────────────────────────────
+# Moved here 2026-09-10 when the check methods were split out of
+# active_health_probe into per-domain modules: those modules and the
+# engine both need these, and core is the one place neither imports
+# through the other. Re-exported by active_health_probe, so every
+# existing `from utils.active_health_probe import HealthResult` stands.
+class HealthState(Enum):
+    """Health state for a monitored service."""
+    UNKNOWN = "unknown"    # Not yet checked
+    HEALTHY = "healthy"    # Passing checks
+    UNHEALTHY = "unhealthy"  # Failing checks
+    RECOVERING = "recovering"  # Transitioning from unhealthy to healthy
+
+
+@dataclass
+class HealthResult:
+    """Result of a single health check."""
+    healthy: bool
+    reason: str = ""
+    latency_ms: float = 0.0
+    timestamp: float = field(default_factory=time.time)
+
+    def __bool__(self) -> bool:
+        return self.healthy
+
+
+@dataclass
+class ServiceHealthState:
+    """Tracks health state for a single service with hysteresis."""
+    name: str
+    state: HealthState = HealthState.UNKNOWN
+    consecutive_passes: int = 0
+    consecutive_fails: int = 0
+    last_check: Optional[float] = None
+    last_result: Optional[HealthResult] = None
+    total_checks: int = 0
+    total_passes: int = 0
+    total_fails: int = 0
+
+    @property
+    def uptime_percent(self) -> float:
+        """Calculate uptime percentage based on total checks."""
+        if self.total_checks == 0:
+            return 0.0
+        return (self.total_passes / self.total_checks) * 100
