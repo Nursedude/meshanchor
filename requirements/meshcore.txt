@@ -10,4 +10,4 @@
 # and reachable directly on the shell once installed. The CLI lands in
 # the active venv's bin (or ~/.local/bin under some site-packages
 # layouts); find_meshcore_cli() in utils/cli.py searches both.
-meshcore-cli>=1.5.0
+meshcore-cli>=1.6.3
