@@ -138,6 +138,23 @@ def get_lan_ip() -> str:
     return ips[0] if ips else "127.0.0.1"
 
 
+def _operator_position():
+    """``(lat, lon)`` from operator_position.json, or None.
+
+    Indirection so the warm-path ranking has ONE patch point in both twins:
+    MeshForge reads it through ``utils.geo_filter``; a tree without that
+    module simply has no operator position to lead with.
+    """
+    try:
+        from utils.geo_filter import _load_operator_position
+    except Exception:
+        return None
+    try:
+        return _load_operator_position()
+    except Exception:
+        return None
+
+
 class MapServer:
     """MeshAnchor HTTP server for network monitoring and radio control.
 
@@ -229,6 +246,7 @@ class MapServer:
 
         self.collector = MapDataCollector(meshtastic_enabled=meshtastic_enabled)
         self._server: Optional[ThreadingHTTPServer] = None
+        self._terrain_warm_started = False
         self._thread: Optional[threading.Thread] = None
         self._message_listener_started = False
         self._websocket_started = False
@@ -424,6 +442,7 @@ class MapServer:
             print(f"  NOC Map:     http://{self.host}:{self.port}/")
             print(f"  Mesh Client: https://{self.host}:{self.meshtasticd_port}/ (native)")
         print("  Press Ctrl+C to stop")
+        self._start_terrain_warm()
 
         try:
             self._server.serve_forever()
@@ -431,6 +450,116 @@ class MapServer:
             print("\nShutting down map server...")
             self._stop_all_services()
             self._server.shutdown()
+
+    # Class-level so a server built without __init__ (tests) still has it.
+    _terrain_warm_lock = threading.Lock()
+
+    _WARM_EXCLUDED_ORIGINS = frozenset({
+        "meshcore_public", "aredn_worldmap", "public_fallback",
+        "mqtt_global", "federation",
+    })
+
+    def _terrain_warm_points(self):
+        """(lat, lon) pairs worth warming tiles for: this box's OWN nodes.
+
+        Local-origin features only (never the public bulk feeds), (0, 0)
+        dropped (a null-island position from any source wants nine tiles
+        of ocean), ranked so the DENSEST tiles come first — the budget
+        goes to where this box's nodes actually are. When an
+        operator_position.json exists, that position leads the list.
+        """
+        geojson = getattr(self.collector, "_cached_geojson", None) or {}
+        points = []
+        for feat in geojson.get("features") or []:
+            if not isinstance(feat, dict):
+                continue
+            props = feat.get("properties") or {}
+            origin = props.get("source_origin") or ""
+            if origin in self._WARM_EXCLUDED_ORIGINS and not props.get("is_local"):
+                continue
+            geom = feat.get("geometry") if isinstance(feat.get("geometry"), dict) else None
+            coords = geom.get("coordinates") if geom else None
+            if not (isinstance(coords, (list, tuple)) and len(coords) >= 2):
+                continue
+            try:
+                lat, lon = float(coords[1]), float(coords[0])
+            except (TypeError, ValueError):
+                continue
+            if not (lat == lat and lon == lon) or (abs(lat) < 1e-6 and abs(lon) < 1e-6):
+                continue
+            points.append((lat, lon))
+        # Rank by how many nodes share each 1-degree tile, densest first,
+        # keeping one representative point per tile.
+        by_tile = {}
+        for lat, lon in points:
+            key = (int(lat // 1), int(lon // 1))
+            by_tile.setdefault(key, []).append((lat, lon))
+        ranked = [pts[0] for _, pts in sorted(by_tile.items(),
+                                              key=lambda kv: -len(kv[1]))]
+        op = _operator_position()
+        if op:
+            ranked.insert(0, (float(op[0]), float(op[1])))
+        return ranked, len(points)
+
+    def _warm_terrain_tiles(self):
+        """Fetch the SRTM tiles around this box's OWN nodes, once, off the request thread.
+
+        Companion to the 2026-09-14 security pass: the HTTP request path no
+        longer downloads (an unauthenticated client must not pick what this
+        box fetches), so the tiles a box actually needs — the ones under and
+        around its known local node positions — arrive here instead. Bounded
+        by ``MESHFORGE_SRTM_WARM_MAX`` tiles per start (default 9; 0
+        disables) and a 2 GiB free-disk floor inside ``warm_tiles``. Runs
+        ONCE per process (guarded), never fatal. The operator's lever for
+        more is ``scripts/srtm_warm.py``.
+        """
+        with self._terrain_warm_lock:
+            if getattr(self, "_terrain_warm_started", False):
+                return
+            self._terrain_warm_started = True
+        try:
+            max_tiles = int(os.environ.get("MESHFORGE_SRTM_WARM_MAX", "9"))
+        except ValueError:
+            max_tiles = 9
+        if max_tiles <= 0:
+            logger.info("SRTM warm: disabled (MESHFORGE_SRTM_WARM_MAX=%s)", max_tiles)
+            return
+        try:
+            from utils._map_node_endpoints import _HAS_TERRAIN, _terrain_provider
+            if not _HAS_TERRAIN:
+                return
+            ranked, n_local = self._terrain_warm_points()
+            if not ranked:
+                logger.info("SRTM warm: no positioned LOCAL nodes yet; nothing to warm")
+                return
+            summary = _terrain_provider().warm_tiles(ranked, max_tiles=max_tiles)
+            logger.info(
+                "SRTM warm: %d local node(s) in %d tile(s) -> %d wanted; cached %d, "
+                "downloaded %d, failed %d, over-budget %d, disk-floor %d",
+                n_local, len(ranked), len(summary["wanted"]), len(summary["cached"]),
+                len(summary["downloaded"]), len(summary["failed"]),
+                len(summary["skipped_budget"]), len(summary["skipped_disk"]),
+            )
+        except Exception as e:
+            logger.warning("SRTM warm failed (non-fatal): %s", e)
+
+    def _start_terrain_warm(self):
+        """Warm SRTM tiles once the first collect has populated node positions.
+
+        MeshAnchor's server has no warm-up thread to ride (MeshForge kicks
+        this from its warmup-cache-watcher), so a one-shot daemon thread
+        waits for ``collector._cached_geojson`` — bounded at 20 minutes —
+        then calls the same bounded ``_warm_terrain_tiles``.
+        """
+        def _wait_then_warm():
+            gate = threading.Event()
+            for _ in range(240):  # 240 x 5 s = 20 min
+                if getattr(self.collector, "_cached_geojson", None) is not None:
+                    break
+                gate.wait(5)
+            self._warm_terrain_tiles()
+
+        threading.Thread(target=_wait_then_warm, daemon=True, name="srtm-warm").start()
 
     def start_background(self):
         """Start server in background thread."""
@@ -464,6 +593,7 @@ class MapServer:
             logger.warning(
                 "Periodic refresh start failed (non-fatal): %s", e,
             )
+        self._start_terrain_warm()
 
     def stop(self):
         """Stop the server."""
