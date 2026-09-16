@@ -83,6 +83,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshCoreHandler._meshcore_menu")
 
     def _meshcore_status_line(self) -> str:
         """Build status line for MeshCore menu subtitle."""
@@ -543,6 +545,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshCoreHandler._meshcore_radio_menu")
 
     def _meshcore_radio_status(self):
         """Read-only display of MeshCore LoRa radio config.
@@ -1276,6 +1280,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, BaseHandler):
             fn = dispatch.get(choice)
             if fn:
                 fn()
+            else:
+                self.ctx.notify_unwired(choice, "MeshCoreHandler._meshcore_daemon_control")
 
     def _daemon_status_summary(self) -> str:
         """One-line status for the menu subtitle. is-active is fast and

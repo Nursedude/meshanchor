@@ -99,6 +99,8 @@ class MeshCorePositionsHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshCorePositionsHandler._main_menu")
 
     # ---- Pin self -------------------------------------------------
 

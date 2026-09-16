@@ -140,6 +140,38 @@ class TUIContext:
             )
         return bool(ok)
 
+    def notify_unwired(self, tag: Any, where: str = "") -> None:
+        """Honest feedback for a menu tag that no dispatch entry owns.
+
+        The handler idiom is ``entry = dispatch.get(choice)`` followed by
+        ``if entry:``. ``dict.get`` returns ``None`` both for "the operator
+        chose a tag nobody implements" and for the ordinary no-op, so the
+        bare ``if`` maps a wiring bug onto the healthy path and the menu
+        simply re-renders. The operator presses a row, nothing happens,
+        forever, and no log line or dialog anywhere records it —
+        honest_failure_modes #1 (a degraded value overlapping the healthy
+        domain) and #9 (every swallow gets a witness).
+
+        Ported from MeshForge (F9, 2026-09-16), where 77 such sites were
+        measured across 62 modules. MeshAnchor carried the same idiom at
+        the same scale AND, unlike MeshForge, had no tripwire on its
+        top-level section menus either. It should never fire — menu rows
+        and dispatch keys are written side by side — which is exactly why
+        a silent version hid the class instead of surfacing it.
+
+        Args:
+            tag: The unowned menu tag the operator selected.
+            where: Optional screen name, so the report says which menu.
+        """
+        scope = f" in {where}" if where else ""
+        logger.error("Menu tag %r reached dispatch with no owner%s", tag, scope)
+        self.dialog.msgbox(
+            "Not wired",
+            f"No handler owns the action '{tag}'{scope}.\n\n"
+            "This is a MeshAnchor wiring bug — please report it\n"
+            "(About > Version has the issue link).",
+        )
+
     def safe_call(self, name: str, method, *args, **kwargs):
         """Safely call a handler method with exception handling.
 

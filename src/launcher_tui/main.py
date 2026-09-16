@@ -143,6 +143,16 @@ class MeshAnchorLauncher:
         ) or "Default"
         self.dialog.msgbox(title, f"Active profile: {profile_name}\n\n{body}")
 
+    def _notify_unwired(self, choice) -> None:
+        """Honest feedback for a menu tag no handler owns.
+
+        Delegates to ``TUIContext.notify_unwired`` rather than carrying a
+        second copy of the dialog — one contract, one implementation
+        (honest_failure_modes #5). MeshForge grew a launcher-side copy
+        historically; there is no reason to repeat that here.
+        """
+        self._tui_context.notify_unwired(choice)
+
     def _build_section_menu(self, section, legacy_items, ordering=None):
         """Build menu choices by merging registry + legacy items.
 
@@ -668,6 +678,8 @@ class MeshAnchorLauncher:
         if entry:
             name, method = entry
             self._safe_call(name, method)
+        else:
+            self._notify_unwired(choice)
 
     # --- Submenu: Dashboard (1) ---
 
@@ -701,6 +713,8 @@ class MeshAnchorLauncher:
             # Cross-section dispatch (network handler is in "system" section)
             if choice == "network":
                 self._registry.dispatch("system", "network")
+                continue
+            self._notify_unwired(choice)
 
     # --- Submenu: MeshCore (2) — primary radio ---
 
@@ -759,6 +773,7 @@ class MeshAnchorLauncher:
             # MeshCore handler items dispatched via registry
             if self._registry.dispatch("meshcore", choice):
                 continue
+            self._notify_unwired(choice)
 
     # --- Sub-Submenu: Optional Gateways (under MeshCore) ---
 
@@ -821,6 +836,7 @@ class MeshAnchorLauncher:
 
             if self._registry.dispatch("mesh_networks", choice):
                 continue
+            self._notify_unwired(choice)
 
     # --- NEW Submenu: RF & SDR (3) ---
 
@@ -846,6 +862,7 @@ class MeshAnchorLauncher:
             # Try registry-based dispatch first (converted handlers)
             if self._registry.dispatch("rf_sdr", choice):
                 continue
+            self._notify_unwired(choice)
 
             # RF & SDR section fully converted — no legacy dispatch remaining
 
@@ -874,6 +891,7 @@ class MeshAnchorLauncher:
             # Try registry-based dispatch first (converted handlers)
             if self._registry.dispatch("maps_viz", choice):
                 continue
+            self._notify_unwired(choice)
 
             # All maps_viz items handled by registry
 
@@ -913,6 +931,8 @@ class MeshAnchorLauncher:
             # Cross-section dispatch: RNS config is in the "rns" section
             if choice == "rns-config":
                 self._registry.dispatch("rns", "edit")
+                continue
+            self._notify_unwired(choice)
 
     # --- NEW Submenu: System (6) ---
 
@@ -942,8 +962,11 @@ class MeshAnchorLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Registry-based dispatch (all system items converted)
-            self._registry.dispatch("system", choice)
+            # Registry-based dispatch (all system items converted).
+            # The return value used to be discarded, so an unowned tag was
+            # indistinguishable from a handled one.
+            if not self._registry.dispatch("system", choice):
+                self._notify_unwired(choice)
 
     # --- Submenu: About (a) ---
 
@@ -969,8 +992,10 @@ class MeshAnchorLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Registry-based dispatch (all about items converted)
-            self._registry.dispatch("about", choice)
+            # Registry-based dispatch (all about items converted).
+            # The return value used to be discarded (see _system_menu).
+            if not self._registry.dispatch("about", choice):
+                self._notify_unwired(choice)
 
 def main():
     """Main entry point."""

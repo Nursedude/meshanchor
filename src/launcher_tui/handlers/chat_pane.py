@@ -101,6 +101,8 @@ class ChatPaneHandler(ChatPaneServiceOpsMixin, BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "ChatPaneHandler._chat_pane_menu")
 
     # ------------------------------------------------------------------
     # Status
@@ -234,6 +236,8 @@ class ChatPaneHandler(ChatPaneServiceOpsMixin, BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "ChatPaneHandler._service_control_menu")
 
     def _do_install(self) -> None:
         if not shutil.which("tmux"):

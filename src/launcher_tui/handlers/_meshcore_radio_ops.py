@@ -257,6 +257,8 @@ class MeshCoreRadioOpsMixin:
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshCoreRadioOpsMixin._meshcore_identity_menu")
 
     def _meshcore_set_name(self):
         """PUT /radio/name — change the advertised long name."""

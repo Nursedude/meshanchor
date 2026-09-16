@@ -544,8 +544,13 @@ def build_rollup(postures: list[dict], now_ts: float) -> str:
         if counts.get(s)
     ) or "no boxes"
 
+    # "watchers", never "posture". MeshAnchor has no utils/fleet_posture
+    # module, so the word collides with nothing INSIDE this tree — but
+    # MeshForge's fleet_posture.py declare governs meshanchor-server too,
+    # and the operator reads both repos' panes for ONE fleet. Renamed for
+    # that shared vocabulary (MeshForge 6ea6135c), not for a local clash.
     lines = [
-        f"# mini-dudeai fleet posture — {len(postures)} boxes",
+        f"# mini-dudeai fleet watchers — {len(postures)} boxes",
         f"_rolled up {stamp} · per-box freshness re-derived now · {summary}_",
         "",
     ]
@@ -865,7 +870,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     postures = collect_fleet(now_ts)
     if not postures:
-        print(f"# mini-dudeai fleet posture\n\n{_no_data}")
+        print(f"# mini-dudeai fleet watchers\n\n{_no_data}")
         return 0
     sys.stdout.write(build_rollup(postures, now_ts))
     return 0

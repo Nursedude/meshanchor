@@ -86,6 +86,8 @@ class MeshforgeMapsHandler(BaseHandler):
         entry = dispatch.get(action)
         if entry:
             self.ctx.safe_call(*entry)
+        else:
+            self.ctx.notify_unwired(action, "MeshforgeMapsHandler.execute")
 
     def _client(self) -> MeshforgeMapsClient:
         """Build a probe client from the persisted endpoint config.

@@ -513,6 +513,8 @@ class NomadNetTmuxServiceOpsMixin:
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "NomadNetTmuxServiceOpsMixin._nomadnet_tmux_service_menu")
 
     def _do_nomadnet_install(self) -> None:
         if not shutil.which("tmux"):

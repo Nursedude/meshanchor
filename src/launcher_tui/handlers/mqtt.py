@@ -294,6 +294,8 @@ class MQTTHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MQTTHandler._mqtt_menu")
 
     def _dispatch_broker(self):
         """Dispatch to BrokerHandler's broker menu."""
@@ -1146,6 +1148,8 @@ class MQTTHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MQTTHandler._request_telemetry_menu")
 
     def _request_single_telemetry(self):
         """Request telemetry from a single node by ID."""

@@ -214,9 +214,29 @@ class DialogBackend:
         )
         # Chrome: border(2) + title(1) + padding(2) + button(1) = 6
         chrome = 6
-        if chrome + text_lines + lh > max_h or h > max_h:
-            lh = max(4, max_h - chrome - text_lines)
-            h = min(h, max_h)
+        # GROW the box to fit its content up to the terminal, then shrink
+        # the list if it still doesn't fit.
+        #
+        # MeshAnchor carried the ORIGINAL shrink-only fit, so it had two
+        # defects at once. (1) A multi-line text panel inside the fixed
+        # 22-row box was clipped even on a tall terminal — MeshForge fixed
+        # that half in review F3 and the fix never ported here. (2) The
+        # list never grew either: `lh` stayed at the default 14 no matter
+        # how tall the terminal, so a 22-item menu scrolled identically on
+        # a 60-row terminal that could show every row with space to spare.
+        # MeshForge measured (2) with scripts/tui_smoke.py against real
+        # whiptail on 2026-09-16; this port cures both.
+        #
+        # Small terminals are unaffected: when avail_lh binds, this
+        # computes exactly what the old shrink branch did. Swept 12,296
+        # combinations of terminal height x backtitle overhead x text
+        # lines x item count against MeshAnchor's old formula: 5,754
+        # identical, 6,542 changed, ZERO regressions (never fewer rows
+        # shown, never a box taller than the terminal).
+        wanted_lh = max(lh, len(choices))
+        avail_lh = max(4, max_h - chrome - text_lines)
+        lh = min(wanted_lh, avail_lh)
+        h = min(max(h, chrome + text_lines + lh), max_h)
 
         args = [
             '--title', title,

@@ -90,6 +90,8 @@ class SystemToolsHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "SystemToolsHandler._system_tools_menu")
 
     # =========================================================================
     # Interactive Monitoring (top, htop, btop)

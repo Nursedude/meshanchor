@@ -116,6 +116,8 @@ class ServiceMenuHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "ServiceMenuHandler._run_bridge")
 
     def _is_bridge_running(self) -> bool:
         """Check if the gateway bridge process is running."""
@@ -463,6 +465,8 @@ class ServiceMenuHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "ServiceMenuHandler._service_menu")
 
     def _show_all_service_status(self):
         """Show status of all mesh services."""
@@ -1076,6 +1080,8 @@ WantedBy=multi-user.target
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "ServiceMenuHandler._manage_openhamclock_docker")
 
     def _configure_openhamclock_via_settings(self):
         """Delegate OpenHamClock configuration to SettingsHandler."""

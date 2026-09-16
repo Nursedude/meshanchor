@@ -114,6 +114,8 @@ class MeshCoreCLIHandler(BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshCoreCLIHandler._cli_menu")
 
     def _build_subtitle(self) -> str:
         cli_path = self._cli_path()

@@ -454,6 +454,8 @@ class NomadNetHandler(
                 self.ctx.safe_call(*entry)
                 if choice in terminal_actions:
                     break
+            else:
+                self.ctx.notify_unwired(choice, "NomadNetHandler._nomadnet_menu")
 
     # ------------------------------------------------------------------
     # Status

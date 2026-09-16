@@ -97,6 +97,8 @@ class MeshChatXHandler(MeshChatXServiceOpsMixin, BaseHandler):
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshChatXHandler._meshchatx_menu")
 
     # ------------------------------------------------------------------
     # Actions

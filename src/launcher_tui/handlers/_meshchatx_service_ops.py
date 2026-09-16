@@ -344,6 +344,8 @@ class MeshChatXServiceOpsMixin:
             entry = dispatch.get(choice)
             if entry:
                 self.ctx.safe_call(*entry)
+            else:
+                self.ctx.notify_unwired(choice, "MeshChatXServiceOpsMixin._service_control_menu")
 
     def _run_systemctl_and_report(self, verb: str) -> None:
         ok, out = self._systemctl_user(verb)
