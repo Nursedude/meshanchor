@@ -44,6 +44,9 @@ def get_all_handlers() -> List[Type]:
     from handlers.link_quality import LinkQualityHandler
     from handlers.webhooks import WebhooksHandler
     from handlers.network_tools import NetworkToolsHandler
+    # NanoVNA antenna analyzer — ported from MeshForge 2026-09-15. Its
+    # driver sat unreachable in the unloaded plugins/ tree here too.
+    from handlers.nanovna import NanoVNAHandler
     handlers.extend([
         NodeHealthHandler,
         MetricsHandler,
@@ -53,6 +56,7 @@ def get_all_handlers() -> List[Type]:
         LinkQualityHandler,
         WebhooksHandler,
         NetworkToolsHandler,
+        NanoVNAHandler,
     ])
 
     # Batch 2 handlers

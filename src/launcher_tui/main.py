@@ -826,7 +826,9 @@ class MeshAnchorLauncher:
 
     def _rf_sdr_menu(self):
         """RF & SDR - Calculators, SDR monitoring."""
-        _ORDERING = ["link", "site", "freq", "antenna", "weather", "sdr"]
+        # "vna" beside "antenna": one MEASURES the antenna in front of you,
+        # the other COMPARES antenna types from a table.
+        _ORDERING = ["link", "site", "freq", "antenna", "vna", "weather", "sdr"]
         while True:
             # All RF & SDR tags handled by registry — empty legacy list
             legacy = []
