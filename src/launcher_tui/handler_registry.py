@@ -38,6 +38,10 @@ class HandlerRegistry:
         self._sections: Dict[str, List[CommandHandler]] = defaultdict(list)
         # Tag-to-handler index for O(1) dispatch
         self._tag_index: Dict[str, Dict[str, CommandHandler]] = defaultdict(dict)
+        # Cross-section rows: (section, tag) -> (owner_section, owner_tag).
+        # See ``alias()`` — the ONE declaration of a row shown on a screen
+        # other than its handler's own.
+        self._aliases: Dict[str, Dict[str, Tuple[str, str]]] = defaultdict(dict)
 
     def register(self, handler: CommandHandler) -> None:
         """Register a handler, injecting the shared context.
@@ -93,6 +97,40 @@ class HandlerRegistry:
     #: on the 24x80 terminal where it matters most.
     OFF_MARK = "[off] "
 
+    def alias(self, section: str, tag: str,
+              owner_section: str, owner_tag: str) -> None:
+        """Declare a CROSS-SECTION row: ``tag`` on ``section``'s screen IS
+        the action ``owner_section``/``owner_tag``, shown one menu away.
+
+        ONE declaration per row, and nothing else about it is stated
+        anywhere: its label, its ``[off]`` mark and the title of its
+        refusal all derive from the owner through ``owner_row``, so the
+        same action cannot read differently on two screens. Until
+        2026-09-17 each menu loop carried a hand-copied 2-tuple label with
+        NO mark and a hand-written dispatch fallback — so on the MeshCore
+        box, under the ``meshcore`` profile, the primary menu listed
+        NomadNet / Channels as available and the keypress answered
+        "not in this profile" (MeshForge review 2026-09-16 R1/R4/F4,
+        ported).
+
+        Fails loud at declaration: an alias to an owner nobody registered,
+        or to a tag the section's own handlers already own, is a wiring
+        bug the operator must never meet as a blank or duplicate row.
+        """
+        if owner_tag not in self._tag_index.get(owner_section, {}):
+            raise ValueError(
+                f"alias {section}/{tag}: no handler owns "
+                f"{owner_section}/{owner_tag}")
+        if tag in self._tag_index.get(section, {}):
+            raise ValueError(
+                f"alias {section}/{tag}: a handler in {section!r} already "
+                f"owns that tag — the alias is dead, delete it")
+        self._aliases[section][tag] = (owner_section, owner_tag)
+
+    def aliases(self, section: str) -> Dict[str, Tuple[str, str]]:
+        """The cross-section rows declared on a section's screen."""
+        return dict(self._aliases.get(section, {}))
+
     def get_menu_items(self, section: str) -> List[Tuple[str, str]]:
         """Every menu row for a section — gated ones MARKED, never removed.
 
@@ -109,6 +147,9 @@ class HandlerRegistry:
         Marking teaches them what the tool does AND why this box does not
         do it, which is the whole job of a deployment profile.
 
+        Cross-section rows (``alias``) come last, rendered from their
+        owner's label and flag, so the menus that carry one keep no copy.
+
         Returns:
             List of (tag, description). A row whose flag is off keeps its
             own label, prefixed with ``OFF_MARK`` so the reader still sees
@@ -118,21 +159,32 @@ class HandlerRegistry:
         for handler in self._sections.get(section, []):
             for tag, desc, flag in handler.menu_items():
                 items.append((tag, self.mark_label(desc, flag)))
+        for tag, (osec, otag) in self._aliases.get(section, {}).items():
+            row = self.owner_row(osec, otag)
+            if row is None:
+                # Validated at declaration, so the owner LOST the row
+                # since. owner_row logged which half drifted; render the
+                # tag rather than let the row vanish.
+                items.append((tag, tag))
+                continue
+            items.append((tag, self.mark_label(row[0], row[1])))
         return items
 
     def mark_label(self, desc: str, flag: Optional[str]) -> str:
         """The label a row shows under the active profile.
 
-        One implementation, because the launcher renders cross-section and
-        legacy rows itself — they must all mark identically or the same
-        action reads differently depending on which screen you found it on.
+        One implementation, because the launcher renders legacy rows
+        itself — they must all mark identically or the same action reads
+        differently depending on which screen you found it on.
         """
         if flag is None or self._ctx.feature_enabled(flag):
             return desc
         return self.OFF_MARK + desc
 
     def get_gated_items(self, section: str) -> List[Tuple[str, str, str]]:
-        """The rows the active profile marks off, and the flag that did it.
+        """The ROWS the active profile marks off on this screen, and the
+        flag that did it — including a cross-section row whose owner is
+        off, so the count agrees with the marks the operator can see.
 
         Not "hidden" — nothing is hidden any more. Used for honest counts.
 
@@ -144,24 +196,51 @@ class HandlerRegistry:
             for tag, desc, flag in handler.menu_items():
                 if flag is not None and not self._ctx.feature_enabled(flag):
                     gated.append((tag, desc, flag))
+        for tag, (osec, otag) in self._aliases.get(section, {}).items():
+            row = self.owner_row(osec, otag)
+            if row is None or row[1] is None:
+                continue
+            if not self._ctx.feature_enabled(row[1]):
+                gated.append((tag, row[0], row[1]))
         return gated
 
-    def owner_flag(self, section: str, tag: str) -> Optional[str]:
-        """The feature flag a tag carries in the section that OWNS it.
+    def owner_row(self, section: str,
+                  tag: str) -> Optional[Tuple[str, Optional[str]]]:
+        """The (description, flag) of the handler that OWNS section/tag,
+        following a cross-section alias to its owner first.
 
-        Lets a cross-section row inherit its owner's flag instead of a
-        second hardcoded copy of the flag name.
+        ONE lookup for every reader — ``get_menu_items``,
+        ``get_gated_items``, ``dispatch`` and ``explain_gated`` — where
+        each used to walk the section on its own. It can fail two ways
+        and logs them as two different sentences because they are two
+        different defects: no handler registered for the tag is a wiring
+        gap; a registered handler whose LIVE ``menu_items()`` no longer
+        lists the tag is a handler that drifted from its own registration.
         """
-        for handler in self._sections.get(section, []):
-            for t, _desc, flag in handler.menu_items():
-                if t == tag:
-                    return flag
+        section, tag = self._aliases.get(section, {}).get(tag, (section, tag))
+        handler = self._tag_index.get(section, {}).get(tag)
+        if handler is None:
+            logger.warning(
+                "owner_row(%r, %r): no handler in that section owns the tag",
+                section, tag)
+            return None
+        for t, desc, flag in handler.menu_items():
+            if t == tag:
+                return desc, flag
         logger.warning(
-            "owner_flag(%r, %r): no handler in that section owns the tag "
-            "— the cross-section row will not be marked", section, tag)
+            "owner_row(%r, %r): %s is registered for the tag but its live "
+            "menu_items() no longer lists it — the handler drifted from "
+            "its registration",
+            section, tag, getattr(handler, "handler_id", "?"))
         return None
 
-    def explain_gated(self, section: str, tag: str, flag: str) -> None:
+    def owner_flag(self, section: str, tag: str) -> Optional[str]:
+        """The feature flag a tag carries in the section that OWNS it."""
+        row = self.owner_row(section, tag)
+        return None if row is None else row[1]
+
+    def explain_gated(self, section: str, tag: str, flag: str,
+                      label: Optional[str] = None) -> None:
         """Say why this row is off, and how to change it WITHOUT leaving.
 
         Derived from the flag and the profile rather than read out of a
@@ -171,14 +250,22 @@ class HandlerRegistry:
         this replaced had three entries for a tree with more flags than
         that, and every one of its bodies told the operator to quit the
         TUI and run a CLI command — the thing MF018 exists to forbid.
+
+        The dialog goes through ``safe_call`` like every other thing the
+        registry shows, so a refusal that fails to render leaves a LOG
+        witness (``log_error`` runs before any second dialog). What that
+        does NOT buy is exception-freedom: ``safe_call``'s own error
+        dialog uses the same backend, so if the dialog itself is what is
+        broken the exception still propagates — as it does from every
+        ``safe_call`` in the TUI.
         """
         profile = self._ctx.profile_label() or "?"
-        label = tag
-        for handler in self._sections.get(section, []):
-            for t, desc, _f in handler.menu_items():
-                if t == tag:
-                    label = desc.strip().split("  ")[0] or tag
-        self._ctx.dialog.msgbox(
+        if label is None:
+            row = self.owner_row(section, tag)
+            label = row[0] if row is not None else tag
+        label = label.strip().split("  ")[0] or tag
+        self._ctx.safe_call(
+            f"explain gated {section}/{tag}", self._ctx.dialog.msgbox,
             f"{label} — not in this profile",
             f"This box is set to the '{profile}' deployment profile, which "
             f"does not include '{flag}'.\n\n"
@@ -193,6 +280,11 @@ class HandlerRegistry:
     def dispatch(self, section: str, tag: str) -> bool:
         """Find and execute the handler for a given section + tag.
 
+        A cross-section alias delegates to its owner, so the menu loops
+        need no per-tag fallback of their own — and the refusal a gated
+        owner shows is titled with the label this screen rendered,
+        because both come from the same ``owner_row``.
+
         Wraps the handler's ``execute()`` in ``safe_call()`` for
         consistent error handling.
 
@@ -201,8 +293,14 @@ class HandlerRegistry:
             tag: The action tag selected by the user.
 
         Returns:
-            True if a handler was found and invoked, False otherwise.
+            True if a handler was found — invoked, or refused with an
+            explanation because the active profile does not include it.
+            False only when no handler owns the tag.
         """
+        target = self._aliases.get(section, {}).get(tag)
+        if target is not None:
+            return self.dispatch(*target)
+
         handler = self._tag_index.get(section, {}).get(tag)
         if handler is None:
             return False
@@ -213,12 +311,15 @@ class HandlerRegistry:
         # which is how this repo ended up running two designs at once.
         # Returns True because the tag IS owned; falling through would
         # reach the "not wired" path and report a wiring bug that does
-        # not exist.
-        flag = self.owner_flag(section, tag)
+        # not exist. owner_row logs the witness when the handler's live
+        # rows no longer carry the tag — the action still runs, unflagged,
+        # and the log says why.
+        row = self.owner_row(section, tag)
+        flag = row[1] if row is not None else None
         if flag is not None and not self._ctx.feature_enabled(flag):
             logger.info("Refused %s/%s: '%s' is not in profile %r",
                         section, tag, flag, self._ctx.profile_label())
-            self.explain_gated(section, tag, flag)
+            self.explain_gated(section, tag, flag, label=row[0])
             return True
 
         self._ctx.safe_call(handler.handler_id, handler.execute, tag)
@@ -255,8 +356,12 @@ class HandlerRegistry:
 
     @property
     def section_names(self) -> List[str]:
-        """List of sections that have at least one handler."""
-        return list(self._sections.keys())
+        """List of sections that have at least one handler or alias."""
+        names = list(self._sections.keys())
+        for sec in self._aliases:
+            if sec not in names:
+                names.append(sec)
+        return names
 
     def __repr__(self) -> str:
         return (

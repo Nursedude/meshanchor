@@ -100,6 +100,9 @@ def collect_screens(profile=None):
     ctx.registry = registry
     for cls in get_all_handlers():
         registry.register(cls())
+    # The cross-section rows, exactly as the launcher declares them —
+    # before 2026-09-17 this driver rendered none of them.
+    tui_main.MeshAnchorLauncher._declare_cross_section_rows(registry)
 
     screens = []
 

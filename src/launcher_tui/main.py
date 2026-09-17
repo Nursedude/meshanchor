@@ -94,8 +94,35 @@ class MeshAnchorLauncher:
         self._tui_context.registry = self._registry
         for handler_cls in get_all_handlers():
             self._registry.register(handler_cls())
+        self._declare_cross_section_rows(self._registry)
         if profile is None:
             self._load_deployment_profile()
+
+    #: Cross-section rows — the ONE declaration. A row on one screen whose
+    #: handler lives in another section: (screen, tag, owner_section,
+    #: owner_tag), and nothing else. Label, [off] mark and the refusal's
+    #: title all derive from the owner through the registry, so the same
+    #: action cannot read differently on two screens. Until 2026-09-17
+    #: each of these was a hand-copied 2-tuple (never marked) plus a
+    #: hand-written dispatch fallback — on the MeshCore box under the
+    #: meshcore profile the primary menu showed NomadNet / Channels as
+    #: available and the keypress refused. Nothing here is a label: a
+    #: label in this table would be the second copy it exists to remove.
+    CROSS_SECTION_ROWS = (
+        ("dashboard",     "network",    "system",        "network"),
+        ("meshcore",      "nomadnet",   "mesh_networks", "nomadnet"),
+        ("meshcore",      "meshchatx",  "rns",           "meshchatx"),
+        ("meshcore",      "channels",   "configuration", "channels"),
+        ("configuration", "rns-config", "rns",           "edit"),
+    )
+
+    @classmethod
+    def _declare_cross_section_rows(cls, registry) -> None:
+        """Apply CROSS_SECTION_ROWS to a registry (the launcher's, a test's,
+        the smoke driver's) — one path, so every renderer of the TUI shows
+        the same rows."""
+        for section, tag, owner_section, owner_tag in cls.CROSS_SECTION_ROWS:
+            registry.alias(section, tag, owner_section, owner_tag)
 
     def _load_deployment_profile(self) -> None:
         """Load the SAVED deployment profile and arm menu marking.
@@ -693,9 +720,11 @@ class MeshAnchorLauncher:
                       "datapath", "stack_health", "metrics", "analytics", "latency",
                       "reports", "alerts"]
         while True:
-            # Legacy items — most now handled by DashboardHandler (Batch 4)
+            # Legacy items — most now handled by DashboardHandler (Batch 4).
+            # 'network' is a cross-section row (system/network): declared
+            # once in CROSS_SECTION_ROWS, rendered and dispatched by the
+            # registry, so it is no longer copied here.
             legacy = [
-                ("network", "Network Status      Ports, interfaces, conflicts"),
                 ("health", "Node Health         Battery, signal, latency"),
                 ("metrics", "Historical Trends   Metrics over time"),
             ]
@@ -710,13 +739,9 @@ class MeshAnchorLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Try registry-based dispatch first (converted handlers)
+            # The registry owns every row here, the cross-section one
+            # through its alias.
             if self._registry.dispatch("dashboard", choice):
-                continue
-
-            # Cross-section dispatch (network handler is in "system" section)
-            if choice == "network":
-                self._registry.dispatch("system", "network")
                 continue
             self._notify_unwired(choice)
 
@@ -738,13 +763,12 @@ class MeshAnchorLauncher:
             "optional_gateways",
         ]
         while True:
+            # nomadnet / meshchatx / channels are cross-section rows —
+            # declared once in CROSS_SECTION_ROWS, rendered from their
+            # owner (label AND [off] mark) and dispatched by the registry.
+            # optional_gateways opens a sub-menu below; it is the one row
+            # this loop still owns.
             legacy = [
-                ("nomadnet",
-                 "NomadNet            RNS messaging client"),
-                ("meshchatx",
-                 "MeshChatX           LXMF web UI on :8000"),
-                ("channels",
-                 "Channel Config      Meshtastic channels"),
                 ("optional_gateways",
                  "Optional Gateways → Meshtastic, RNS, MQTT, NomadNet, AREDN"),
             ]
@@ -763,18 +787,8 @@ class MeshAnchorLauncher:
                 self._optional_gateways_menu()
                 continue
 
-            # Cross-section shortcuts: dispatch to handlers' canonical sections.
-            if choice == "nomadnet":
-                self._registry.dispatch("mesh_networks", "nomadnet")
-                continue
-            if choice == "meshchatx":
-                self._registry.dispatch("rns", "meshchatx")
-                continue
-            if choice == "channels":
-                self._registry.dispatch("configuration", "channels")
-                continue
-
-            # MeshCore handler items dispatched via registry
+            # MeshCore handler items AND the cross-section aliases dispatch
+            # via the registry.
             if self._registry.dispatch("meshcore", choice):
                 continue
             self._notify_unwired(choice)
@@ -888,7 +902,8 @@ class MeshAnchorLauncher:
             legacy = [
                 ("meshtasticd", "meshtasticd          Radio, service, config"),
                 ("channels", "Channel Config      Meshtastic channels"),
-                ("rns-config", "RNS Config          Reticulum settings"),
+                # rns-config is a cross-section row (rns/edit) — declared
+                # once in CROSS_SECTION_ROWS, no copy here.
                 ("backup", "Device Backup       Backup/restore configs"),
                 ("updates", "Software Updates    One-click updates"),
                 ("webhooks", "Webhooks            External notifications"),
@@ -906,13 +921,7 @@ class MeshAnchorLauncher:
             if choice is None or choice == "back":
                 break
 
-            # Registry-based dispatch (all configuration items converted)
             if self._registry.dispatch("configuration", choice):
-                continue
-
-            # Cross-section dispatch: RNS config is in the "rns" section
-            if choice == "rns-config":
-                self._registry.dispatch("rns", "edit")
                 continue
             self._notify_unwired(choice)
 
