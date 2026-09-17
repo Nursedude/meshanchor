@@ -65,8 +65,13 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[=>]")
 
 # --------------------------------------------------------------- screens
 
-def collect_screens():
+def collect_screens(profile=None):
     """Every (name, title, subtitle, choices) the TUI renders.
+
+    ``profile`` is a ProfileDefinition whose feature_flags gate the menu.
+    A gated row is MARKED ``[off]``, never removed, so the screen list is
+    the same length on every profile — that invariant is what this driver
+    can actually see, and it is checked in main().
 
     Built from the same code the TUI uses — ``_build_section_menu``
     merging the live registry with SECTION_ORDERINGS, and the main
@@ -86,7 +91,11 @@ def collect_screens():
     from handler_registry import HandlerRegistry
     from handlers import get_all_handlers
 
-    ctx = TUIContext(dialog=SimpleNamespace())
+    ctx = TUIContext(
+        dialog=SimpleNamespace(),
+        feature_flags=dict(getattr(profile, "feature_flags", {}) or {}),
+        profile=profile,
+    )
     registry = HandlerRegistry(ctx)
     ctx.registry = registry
     for cls in get_all_handlers():
@@ -98,7 +107,10 @@ def collect_screens():
     captured = []
     fake = SimpleNamespace(
         _get_menu_status_hint=lambda: "MeshAnchor smoke",
-        _feature_enabled=lambda f: True,
+        # The REAL registry, not a lambda: the launcher marks top-level
+        # rows through it, so a stub here would render an ungated menu
+        # while claiming to have rendered a gated one.
+        _registry=registry,
         _MAX_DIALOG_RETRIES=3,
         _handle_main_choice=lambda c: None,
         dialog=SimpleNamespace(
@@ -233,18 +245,39 @@ def render_in_pty(title, subtitle, choices, rows, cols, timeout=25.0):
     # A label counts as PAINTED only if its visible text is on the
     # screen. First word, because whiptail truncates to the box width
     # and the labels carry column-alignment padding.
+    #
+    # ⚠️ The OFF_MARK prefix is stripped FIRST, and that is not cosmetic.
+    # A gated row reads "[off] Meshtastic ...", whose first word is
+    # "[off]" — shared by every marked row on the screen. Matching on it
+    # meant one painted marker counted ALL of them, so a profile with six
+    # flags off scored HIGHER than the ungated run (114/115 vs 112/115,
+    # measured 2026-09-16). The metric was corroborating itself. Match on
+    # the capability's own name, which is the thing a reader is looking
+    # for; whether the marker painted is asserted separately below.
     seen = 0
+    marked = 0
     for _tag, label in choices:
-        word = label.strip().split()[0] if label.strip() else ""
+        text = label.strip()
+        if text.startswith("[off] "):
+            marked += 1
+            text = text[len("[off] "):].strip()
+        word = text.split()[0] if text else ""
         if word and word in screen:
             seen += 1
+    # If the screen HAS marked rows, the marker itself must be visible —
+    # otherwise the row reads as available and the profile is invisible.
+    mark_missing = marked > 0 and "[off]" not in screen
 
     first_tag = choices[0][0] if choices else None
     ok = (payload.get("error") is None
           and payload.get("selected") == first_tag
           and payload.get("rows") == rows
           and payload.get("cols") == cols
+          and not mark_missing
           and not note)
+    if mark_missing:
+        note = (f"{marked} row(s) are marked [off] but no marker painted — "
+                f"the profile is invisible to the reader")
     if payload.get("error"):
         note = payload["error"]
     elif not note and payload.get("selected") != first_tag:
@@ -265,6 +298,9 @@ def main(argv=None):
                    help="comma list like 24x80,40x120")
     p.add_argument("--json", dest="json_out", default=None)
     p.add_argument("--only", default=None, help="one screen name")
+    p.add_argument("--profile", default=None,
+                   help="deployment profile name to gate the menu with "
+                        "(e.g. meshcore, gateway, full); default ungated")
     args = p.parse_args(argv)
 
     if not shutil.which("whiptail") and not shutil.which("dialog"):
@@ -278,7 +314,21 @@ def main(argv=None):
         sizes = tuple(tuple(int(v) for v in s.lower().split("x"))
                       for s in args.sizes.split(","))
 
-    screens = collect_screens()
+    profile = None
+    if args.profile:
+        sys.path.insert(0, str(SRC))
+        from utils.deployment_profiles import get_profile_by_name
+        profile = get_profile_by_name(args.profile)
+        if profile is None:
+            print(f"UNKNOWN: no such profile {args.profile!r} — nothing "
+                  f"rendered. An unknown profile is not an ungated one.",
+                  file=sys.stderr)
+            return 2
+        print(f"  profile: {profile.display_name} "
+              f"({sum(1 for v in profile.feature_flags.values() if not v)} "
+              f"flag(s) off)\n")
+
+    screens = collect_screens(profile)
     if args.only:
         screens = [s for s in screens if s[0] == args.only]
     if not screens:
