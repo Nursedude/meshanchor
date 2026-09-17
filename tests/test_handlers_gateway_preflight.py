@@ -336,7 +336,7 @@ class TestGatewayPreflightRegistry:
         assert "preflight" in tags
         assert "export" in tags
 
-    def test_hidden_when_gateway_flag_off(self):
+    def test_marked_off_when_gateway_flag_off(self):
         from handler_protocol import TUIContext
         from handler_registry import HandlerRegistry
         from handlers import get_all_handlers
@@ -345,6 +345,7 @@ class TestGatewayPreflightRegistry:
         reg = HandlerRegistry(ctx)
         for cls in get_all_handlers():
             reg.register(cls())
-        tags = [tag for tag, _desc in reg.get_menu_items("mesh_networks")]
-        assert "preflight" not in tags
-        assert "export" not in tags
+        items = dict(reg.get_menu_items("mesh_networks"))
+        for tag in ("preflight", "export"):
+            assert tag in items, f"{tag} was REMOVED; it must be marked"
+            assert items[tag].startswith("[off] ")

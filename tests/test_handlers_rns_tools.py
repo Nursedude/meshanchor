@@ -309,7 +309,7 @@ class TestRNSToolsRegistry:
         tags = [tag for tag, _desc in reg.get_menu_items("rns")]
         assert "tools" in tags
 
-    def test_handler_hidden_when_rns_flag_off(self):
+    def test_handler_marked_off_when_rns_flag_off(self):
         from handler_protocol import TUIContext
         from handler_registry import HandlerRegistry
         from handlers import get_all_handlers
@@ -318,5 +318,6 @@ class TestRNSToolsRegistry:
         reg = HandlerRegistry(ctx)
         for cls in get_all_handlers():
             reg.register(cls())
-        tags = [tag for tag, _desc in reg.get_menu_items("rns")]
-        assert "tools" not in tags
+        items = dict(reg.get_menu_items("rns"))
+        assert "tools" in items, "gated row was REMOVED; it must be marked"
+        assert items["tools"].startswith("[off] ")

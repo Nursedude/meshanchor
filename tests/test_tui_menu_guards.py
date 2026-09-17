@@ -196,7 +196,10 @@ class TestMainMenuPin:
 
         fake = SimpleNamespace(
             _get_menu_status_hint=lambda: "",
-            _feature_enabled=lambda f: True,
+            # The launcher marks top-level rows through the registry's one
+            # implementation, so the stub needs it. It used to carry a
+            # _feature_enabled lambda instead; that wrapper is gone.
+            _registry=SimpleNamespace(mark_label=lambda desc, flag: desc),
             _MAX_DIALOG_RETRIES=3,
             _handle_main_choice=lambda c: None,
             dialog=SimpleNamespace(menu=fake_menu, yesno=lambda *a: True),

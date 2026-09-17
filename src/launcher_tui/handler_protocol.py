@@ -67,6 +67,17 @@ class TUIContext:
             return True
         return self.feature_flags.get(feature, True)
 
+    def profile_label(self) -> str:
+        """Short name of the active profile, or '' when none is gating.
+
+        Named in the dialog a row marked ``[off]`` raises, so the reason a
+        tool is unavailable is always on screen beside the tool itself.
+        """
+        if not self.feature_flags:
+            return ""
+        name = getattr(self.profile, "name", None)
+        return getattr(name, "value", None) or str(name or "")
+
     @staticmethod
     def wait_for_enter(msg: str = "\nPress Enter to continue...") -> None:
         """Wait for user to press Enter, handling Ctrl+C gracefully."""

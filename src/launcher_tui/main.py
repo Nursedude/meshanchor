@@ -94,54 +94,54 @@ class MeshAnchorLauncher:
         self._tui_context.registry = self._registry
         for handler_cls in get_all_handlers():
             self._registry.register(handler_cls())
+        if profile is None:
+            self._load_deployment_profile()
 
-    def _feature_enabled(self, feature: str) -> bool:
-        """Check if a feature is enabled in the current deployment profile.
+    def _load_deployment_profile(self) -> None:
+        """Load the SAVED deployment profile and arm menu marking.
 
-        When no profile is set, all features are enabled (backward compatible).
+        Both construction sites — ``main()`` here and the package-level
+        ``launcher_tui.main()`` — build this class with no argument, and
+        the CLI's ``--profile`` lands in a different process entirely when
+        the TUI is launched as a subprocess. So gating that depends on
+        being HANDED a profile never executes, which is exactly what had
+        happened: every flag on every handler was inert.
+
+        Deliberately ``load_profile()``, never ``load_or_detect_profile()``.
+        Auto-detection reads which services are RUNNING, so gating on it
+        would mark the RNS menu off on a box whose rnsd is merely down —
+        editorialising about a fault at the moment the tool is needed. A
+        saved profile is a human declaration; a detection is a guess.
+
+        On a box with no saved profile this is a no-op and every action
+        renders unmarked, exactly as before.
         """
-        if not self._feature_flags:
-            return True
-        return self._feature_flags.get(feature, True)
-
-    # Phase 8 visibility fix: feature entries always render in submenus.
-    # When a flag is off, the row is dimmed-prefixed and selecting it shows
-    # the hint below instead of dispatching to the handler. Replaces the
-    # prior "vanish on disable" behavior that hid Meshtastic/RNS/Gateway
-    # entries from operators on minimal profiles.
-    _FEATURE_HINTS = {
-        "meshtastic": (
-            "Meshtastic Gateway",
-            "Meshtastic is disabled in the current deployment profile.\n\n"
-            "To enable, switch to the GATEWAY or FULL profile:\n"
-            "  python3 src/launcher.py --profile gateway\n\n"
-            "Profile is saved to ~/.config/meshanchor/deployment.json",
-        ),
-        "rns": (
-            "RNS / Reticulum",
-            "RNS is disabled in the current deployment profile.\n\n"
-            "To enable, switch to the GATEWAY or FULL profile:\n"
-            "  python3 src/launcher.py --profile gateway",
-        ),
-        "gateway": (
-            "Gateway Bridge",
-            "Gateway bridge is disabled in the current deployment profile.\n\n"
-            "Bridges MeshCore <-> Meshtastic <-> RNS.\n"
-            "To enable, switch to the GATEWAY or FULL profile:\n"
-            "  python3 src/launcher.py --profile gateway",
-        ),
-    }
-
-    def _show_disabled_feature_hint(self, feature: str) -> None:
-        """Show enable hint for a feature disabled by the current profile."""
-        title, body = self._FEATURE_HINTS.get(
-            feature,
-            (feature.title(), f"{feature} is disabled in the current profile."),
-        )
-        profile_name = (
-            getattr(self._profile, "display_name", None) if self._profile else None
-        ) or "Default"
-        self.dialog.msgbox(title, f"Active profile: {profile_name}\n\n{body}")
+        try:
+            from utils.deployment_profiles import load_profile
+            profile = load_profile()
+        except Exception as e:
+            # Never let profile plumbing keep the NOC off the screen.
+            logger.warning(
+                "Deployment profile not loaded, no menu marking: %s", e)
+            return
+        if profile is None:
+            logger.debug("No saved deployment profile — menu marking inactive")
+            return
+        flags = dict(getattr(profile, "feature_flags", {}) or {})
+        if not flags:
+            logger.warning(
+                "Saved profile %r declares no feature_flags — menu marking "
+                "inactive", getattr(profile, "display_name", profile))
+            return
+        self._profile = profile
+        self._feature_flags = flags
+        self._tui_context.profile = profile
+        self._tui_context.feature_flags = flags
+        gated = sum(len(self._registry.get_gated_items(sec))
+                    for sec in self._registry.section_names)
+        logger.info("Deployment profile %r active: %d menu action(s) marked "
+                    "[off] (shown, not run)",
+                    getattr(profile, "display_name", "?"), gated)
 
     def _notify_unwired(self, choice) -> None:
         """Honest feedback for a menu tag no handler owns.
@@ -590,13 +590,17 @@ class MeshAnchorLauncher:
                 ("2", "MeshCore            Primary radio + Optional Gateways"),
                 ("3", "RF & SDR            Calculators, SDR monitoring"),
             ]
-            if self._feature_enabled("maps"):
-                choices.append(("4", "Maps & Viz          Coverage maps, topology"))
+            # A profile MARKS these rows, it never removes them — the menu
+            # is the same length on every profile. Marked here with the
+            # registry's one implementation so a top-level row reads the
+            # same as the same capability seen from a submenu.
+            choices.append(("4", self._registry.mark_label(
+                "Maps & Viz          Coverage maps, topology", "maps")))
             choices.append(("5", "Configuration       Radio, services, settings"))
             choices.append(("6", "System              Hardware, logs, Linux tools"))
             # Quick Access
-            if self._feature_enabled("tactical"):
-                choices.append(("t", "Tactical Ops        SITREP, zones, QR, ATAK"))
+            choices.append(("t", self._registry.mark_label(
+                "Tactical Ops        SITREP, zones, QR, ATAK", "tactical")))
             choices.extend([
                 ("q", "Quick Actions       Common shortcuts"),
                 ("e", "Emergency Mode      Field operations"),
@@ -789,24 +793,14 @@ class MeshAnchorLauncher:
                       "aredn",
                       "messaging", "traffic", "mqtt", "favorites", "ham", "services",
                       "nomadnet"]
-        # Visibility fix: render Meshtastic/RNS/Gateway rows regardless of
-        # feature flag. When a flag is off, row is prefixed [off] and
-        # selection routes to _show_disabled_feature_hint instead of
-        # dispatching the handler.
+        # meshtastic / rns / gateway are REGISTRY-owned (radio_menu.py,
+        # rns_menu.py, gateway.py), each declaring its own flag. They used
+        # to be repeated here with hand-built "[off]" labels, which only
+        # ever rendered because the registry DROPPED a disabled row and let
+        # the legacy copy through — two designs propping each other up.
+        # The registry marks them now, so the copies are gone.
         while True:
-            mt_on = self._feature_enabled("meshtastic")
-            rns_on = self._feature_enabled("rns")
-            gw_on = self._feature_enabled("gateway")
             legacy = [
-                ("meshtastic",
-                 "Meshtastic          Radio, channels, CLI" if mt_on
-                 else "Meshtastic   [off] Disabled in current profile"),
-                ("rns",
-                 "RNS / Reticulum     Status, gateway, messaging" if rns_on
-                 else "RNS          [off] Disabled in current profile"),
-                ("gateway",
-                 "Gateway Bridge      RNS-Meshtastic-MeshCore" if gw_on
-                 else "Gateway      [off] Disabled in current profile"),
                 ("aredn", "AREDN Mesh          AREDN integration"),
                 ("messaging", "Messaging           Send/receive messages"),
                 ("favorites", "Favorites           Manage favorite nodes"),
@@ -821,18 +815,6 @@ class MeshAnchorLauncher:
 
             if choice is None or choice == "back":
                 break
-
-            # Disabled-feature short-circuit — preserve discoverability
-            # without dispatching handlers that would error on missing deps.
-            if choice == "meshtastic" and not mt_on:
-                self._show_disabled_feature_hint("meshtastic")
-                continue
-            if choice == "rns" and not rns_on:
-                self._show_disabled_feature_hint("rns")
-                continue
-            if choice == "gateway" and not gw_on:
-                self._show_disabled_feature_hint("gateway")
-                continue
 
             if self._registry.dispatch("mesh_networks", choice):
                 continue

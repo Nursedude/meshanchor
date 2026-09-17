@@ -345,7 +345,14 @@ class TestRegistryMenuItems:
         assert "alpha" in tags
         assert "beta" in tags
 
-    def test_get_menu_items_feature_gated_hidden(self):
+    def test_get_menu_items_feature_gated_is_marked_not_hidden(self):
+        """A profile changes what a row SAYS, never whether it is there.
+
+        This test pinned the opposite until 2026-09-16 — it asserted the
+        gated row was absent. Hiding is wrong for someone new to the
+        domain, who cannot go looking for a capability they have never
+        been shown.
+        """
         ctx = _make_context(feature_flags={"beta_feature": False})
         registry = HandlerRegistry(ctx)
         registry.register(SampleHandler())
@@ -353,7 +360,17 @@ class TestRegistryMenuItems:
         items = registry.get_menu_items("test_section")
         tags = [tag for tag, _desc in items]
         assert "alpha" in tags
-        assert "beta" not in tags
+        assert "beta" in tags, "gated row was REMOVED; it must be marked"
+        assert dict(items)["beta"].startswith(HandlerRegistry.OFF_MARK)
+        assert not dict(items)["alpha"].startswith(HandlerRegistry.OFF_MARK)
+
+    def test_get_gated_items_reports_what_the_profile_marked(self):
+        ctx = _make_context(feature_flags={"beta_feature": False})
+        registry = HandlerRegistry(ctx)
+        registry.register(SampleHandler())
+
+        gated = registry.get_gated_items("test_section")
+        assert [(t, f) for t, _d, f in gated] == [("beta", "beta_feature")]
 
     def test_get_menu_items_multiple_handlers(self):
         ctx = _make_context()

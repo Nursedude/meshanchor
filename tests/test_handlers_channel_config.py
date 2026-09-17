@@ -383,7 +383,7 @@ class TestRegistry:
         tags = [tag for tag, _ in reg.get_menu_items("configuration")]
         assert "channels" in tags
 
-    def test_hidden_when_meshtastic_flag_off(self):
+    def test_marked_off_when_meshtastic_flag_off(self):
         from handler_protocol import TUIContext
         from handler_registry import HandlerRegistry
         from handlers import get_all_handlers
@@ -391,5 +391,8 @@ class TestRegistry:
         reg = HandlerRegistry(ctx)
         for cls in get_all_handlers():
             reg.register(cls())
-        tags = [tag for tag, _ in reg.get_menu_items("configuration")]
-        assert "channels" not in tags
+        items = dict(reg.get_menu_items("configuration"))
+        # A profile MARKS a row, it never removes one (2026-09-16). This
+        # test asserted absence until then.
+        assert "channels" in items, "gated row was REMOVED; it must be marked"
+        assert items["channels"].startswith("[off] ")

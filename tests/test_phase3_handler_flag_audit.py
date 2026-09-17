@@ -163,20 +163,28 @@ def test_always_visible_tag_remains_unflagged(tag):
 # Profile-level integration: registry-side filtering
 # ---------------------------------------------------------------------------
 
-def test_meshcore_profile_hides_all_gateway_rows():
-    """Under MESHCORE feature flags, none of the gated rows surface in
-    the mesh_networks or rns sections."""
+def test_meshcore_profile_marks_all_gateway_rows_off():
+    """Under MESHCORE flags every gated row is still SHOWN, marked [off].
+
+    Asserted the opposite until 2026-09-16 — that the rows vanished. They
+    are shown and marked now: someone new to the domain cannot go looking
+    for a capability they have never been shown.
+    """
     reg = _build_registry(MESHCORE_FLAGS)
 
-    visible_in_mesh = {tag for tag, _ in reg.get_menu_items("mesh_networks")}
-    visible_in_rns = {tag for tag, _ in reg.get_menu_items("rns")}
+    rows = dict(reg.get_menu_items("mesh_networks"))
+    rows.update(dict(reg.get_menu_items("rns")))
 
-    # Every gated tag must be absent
     gated_tags = {tag for tag, flag in EXPECTED_FLAGS
                   if not MESHCORE_FLAGS.get(flag, True)}
-    leaked = (visible_in_mesh | visible_in_rns) & gated_tags
-    assert not leaked, (
-        f"MESHCORE profile leaked gated tags: {sorted(leaked)}"
+    missing = gated_tags - set(rows)
+    assert not missing, (
+        f"MESHCORE profile REMOVED gated tags instead of marking them: "
+        f"{sorted(missing)}"
+    )
+    unmarked = [t for t in gated_tags if not rows[t].startswith("[off] ")]
+    assert not unmarked, (
+        f"gated rows rendered with no [off] mark: {sorted(unmarked)}"
     )
 
 
@@ -191,14 +199,19 @@ def test_meshcore_profile_keeps_cross_radio_rows():
     )
 
 
-def test_meshcore_profile_rns_section_collapses():
-    """Every row in the rns section is now flagged 'rns', so the section
-    must be empty under MESHCORE."""
+def test_meshcore_profile_rns_section_is_fully_marked_not_empty():
+    """Every row in the rns section is flagged 'rns', so under MESHCORE
+    every one of them is marked [off] — and the section is NOT empty.
+
+    A section that collapses to nothing tells the operator the tool does
+    not exist. A section where every row reads [off] tells them what the
+    box could do and why this one does not.
+    """
     reg = _build_registry(MESHCORE_FLAGS)
     items = reg.get_menu_items("rns")
-    assert items == [], (
-        f"rns section should be empty under MESHCORE, got: {items}"
-    )
+    assert items, "rns section collapsed to empty; rows must be marked"
+    unmarked = [t for t, d in items if not d.startswith("[off] ")]
+    assert not unmarked, f"rns rows not marked under MESHCORE: {unmarked}"
 
 
 def test_full_profile_shows_everything():

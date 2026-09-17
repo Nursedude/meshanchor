@@ -338,7 +338,7 @@ class TestRegistry:
         tags = [tag for tag, _ in reg.get_menu_items("mesh_networks")]
         assert "test_gateway_rx" in tags
 
-    def test_hidden_when_gateway_flag_off(self):
+    def test_marked_off_when_gateway_flag_off(self):
         from handler_protocol import TUIContext
         from handler_registry import HandlerRegistry
         from handlers import get_all_handlers
@@ -346,5 +346,6 @@ class TestRegistry:
         reg = HandlerRegistry(ctx)
         for cls in get_all_handlers():
             reg.register(cls())
-        tags = [tag for tag, _ in reg.get_menu_items("mesh_networks")]
-        assert "test_gateway_rx" not in tags
+        items = dict(reg.get_menu_items("mesh_networks"))
+        assert "test_gateway_rx" in items, "gated row was REMOVED"
+        assert items["test_gateway_rx"].startswith("[off] ")
