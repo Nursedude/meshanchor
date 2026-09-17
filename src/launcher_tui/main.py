@@ -114,6 +114,12 @@ class MeshAnchorLauncher:
         ("meshcore",      "meshchatx",  "rns",           "meshchatx"),
         ("meshcore",      "channels",   "configuration", "channels"),
         ("configuration", "rns-config", "rns",           "edit"),
+        # The RNS sub-menu (rns_menu.py) carried a SEVENTH copy of the
+        # nomadnet row — its own label AND its own fallback — that the
+        # first port missed because its guards scanned only this file
+        # (review 2026-09-17 #1). The handler merges get_menu_items("rns"),
+        # so the alias renders and dispatches there for free.
+        ("rns",           "nomadnet",   "mesh_networks", "nomadnet"),
     )
 
     @classmethod
@@ -166,7 +172,7 @@ class MeshAnchorLauncher:
         self._tui_context.feature_flags = flags
         gated = sum(len(self._registry.get_gated_items(sec))
                     for sec in self._registry.section_names)
-        logger.info("Deployment profile %r active: %d menu action(s) marked "
+        logger.info("Deployment profile %r active: %d menu row(s) marked "
                     "[off] (shown, not run)",
                     getattr(profile, "display_name", "?"), gated)
 

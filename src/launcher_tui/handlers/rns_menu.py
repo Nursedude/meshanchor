@@ -67,13 +67,12 @@ class RNSMenuHandler(BaseHandler):
                 for tag, desc in self.ctx.registry.get_menu_items("rns"):
                     registry_items[tag] = desc
 
-            # Own items (not from sub-handlers).
-            # The "nomadnet" entry launches the NomadNet handler via
-            # cross-section dispatch — its handler lives under
-            # mesh_networks but the user-facing "Launch RNS Client"
-            # affordance belongs in the RNS submenu next to MeshChatX.
+            # Own items (not from sub-handlers). The NomadNet row is a
+            # CROSS-SECTION alias (MeshAnchorLauncher.CROSS_SECTION_ROWS:
+            # rns/nomadnet -> mesh_networks/nomadnet) and arrives through
+            # get_menu_items("rns") above — label, [off] mark and dispatch
+            # all from its owner, never a copy here.
             own_items = {
-                "nomadnet": "Launch NomadNet         LXMF TUI client",
                 "status": "RNS Status (rnstatus)",
                 "paths": "RNS Path Table (rnpath)",
                 "probe": "Probe Destination (rnprobe)",
@@ -110,14 +109,10 @@ class RNSMenuHandler(BaseHandler):
             if choice is None or choice == "back":
                 break
 
-            # Try sub-handler dispatch first (rns section)
+            # Sub-handler dispatch first (rns section) — the nomadnet
+            # alias delegates to its mesh_networks owner inside dispatch().
             if self.ctx.registry and self.ctx.registry.dispatch("rns", choice):
                 continue
-
-            # Cross-section: NomadNet handler lives under mesh_networks.
-            if choice == "nomadnet" and self.ctx.registry:
-                if self.ctx.registry.dispatch("mesh_networks", "nomadnet"):
-                    continue
 
             # Own inline dispatches
             own_dispatch = {

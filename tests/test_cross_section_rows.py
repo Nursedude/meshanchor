@@ -116,10 +116,46 @@ class TestTheDeclaration:
         with pytest.raises(ValueError):
             registry.alias("dashboard", owned, "system", "network")
 
+    def test_a_second_declaration_of_the_same_row_is_refused(self):
+        """Last-one-wins would accept a contradiction in the SSOT table
+        silently (review 2026-09-17 #3)."""
+        _ctx, registry, _h = _make()
+        with pytest.raises(ValueError):
+            registry.alias("dashboard", "network", "system", "network")
+
+
+HANDLER_SOURCES = sorted((LAUNCHER_TUI / "handlers").glob("*.py"))
+
 
 class TestTheLauncherKeepsNoCopy:
-    """The three copies are gone from main.py: no legacy label for an
-    aliased tag, and no hand-written dispatch fallback to its owner."""
+    """The three copies are gone: no legacy label for an aliased tag, and
+    no hand-written dispatch fallback to its owner — in main.py AND in
+    every handler-built sub-menu. The first port scanned only main.py and
+    missed rns_menu.py's own copy of the nomadnet row (review 2026-09-17
+    #1)."""
+
+    def test_no_handler_dispatches_an_owner_by_hand(self):
+        for _s, _t, osec, otag in ROWS:
+            pat = re.compile(
+                r'dispatch\(\s*["\']' + re.escape(osec) + r'["\']\s*,\s*["\']'
+                + re.escape(otag) + r'["\']\s*\)')
+            for f in [LAUNCHER_TUI / "main.py"] + HANDLER_SOURCES:
+                assert not pat.search(f.read_text()), (f.name, osec, otag)
+
+    def test_no_handler_carries_a_label_for_an_aliased_tag(self):
+        """A handler-built sub-menu's own row table must not name an
+        aliased tag — the alias arrives through get_menu_items()."""
+        aliased_by_screen = {}
+        for s, t, _os, _ot in ROWS:
+            aliased_by_screen.setdefault(s, set()).add(t)
+        for f in HANDLER_SOURCES:
+            src = f.read_text()
+            for screen, tags in aliased_by_screen.items():
+                if f'get_menu_items("{screen}")' not in src:
+                    continue          # this handler does not build that screen
+                for tag in tags:
+                    assert not re.search(r'["\']' + re.escape(tag) + r'["\']\s*:\s*["\']', src), (
+                        f.name, screen, tag, "own_items still carries the aliased row")
 
     def test_no_legacy_block_lists_an_aliased_tag_on_its_screen(self):
         """Per SCREEN: a legacy block is tied to the section its loop
@@ -137,10 +173,6 @@ class TestTheLauncherKeepsNoCopy:
                 found.add((sec.group(1), tag))
         assert not (found & aliased), sorted(found & aliased)
 
-    def test_no_per_loop_dispatch_fallback_to_an_owner(self):
-        src = (LAUNCHER_TUI / "main.py").read_text()
-        for _s, _t, osec, otag in ROWS:
-            assert f'dispatch("{osec}", "{otag}")' not in src, (osec, otag)
 
 
 class TestRenderedFromTheOwner:
@@ -231,3 +263,70 @@ class TestTheRealPrimaryLoopRendersTheMark:
         assert rows["nomadnet"].startswith(OFF), rows["nomadnet"]
         assert rows["channels"].startswith(OFF), rows["channels"]
         assert "optional_gateways" in rows, "the sub-menu opener must survive"
+
+
+class TestUnreadableFlagFailsClosed:
+    """Review 2026-09-17 #2: when the owner is registered but its LIVE
+    menu_items() no longer lists the tag, the flag is unreadable. Under a
+    profile that must read as REFUSED on the screen, in the count and at
+    the keypress — never as "unflagged, run it" (honest-failure-modes #1:
+    the degraded value must not wear a healthy one)."""
+
+    @staticmethod
+    def _drop_owner_row(registry, osec, otag):
+        from unittest.mock import patch as _patch
+        owner = registry._tag_index[osec][otag]
+        orig = type(owner).menu_items
+        return _patch.object(type(owner), "menu_items",
+                             lambda self: [r for r in orig(self) if r[0] != otag])
+
+    def test_rendered_marked_counted_and_refused_under_a_profile(self):
+        ctx, registry, holder = _make(MESHCORE)
+        owner = registry._tag_index["system"]["network"]
+        reached = []
+        owner.execute = lambda *a, **k: reached.append(a)
+        with self._drop_owner_row(registry, "system", "network"):
+            rows = dict(_rows(holder, "dashboard"))
+            assert rows["network"].startswith(OFF), rows["network"]
+            assert "network" in [t for t, _d, _f in registry.get_gated_items("dashboard")]
+            assert registry.dispatch("dashboard", "network") is True
+        assert not reached, "an unreadable flag ran the action under a profile"
+        title, body = ctx.dialog.msgboxes[-1]
+        assert "cannot verify profile" in title, title
+        assert "About > Version" in body
+
+    def test_without_a_profile_it_still_runs(self):
+        """No profile = nothing gates; the drift is logged, the action runs."""
+        _ctx, registry, holder = _make()
+        owner = registry._tag_index["system"]["network"]
+        reached = []
+        owner.execute = lambda *a, **k: reached.append(a)
+        with self._drop_owner_row(registry, "system", "network"):
+            rows = dict(_rows(holder, "dashboard"))
+            assert rows["network"] == "network"
+            assert registry.dispatch("dashboard", "network") is True
+        assert reached
+
+
+class TestTheRnsSubMenuRendersTheAlias:
+    """The seventh copy (review 2026-09-17 #1): drive the REAL
+    RNSMenuHandler._rns_submenu under meshcore and read the row."""
+
+    def test_rns_submenu_shows_nomadnet_marked_from_its_owner(self):
+        ctx, registry, _h = _make(MESHCORE)
+        seen = []
+
+        def fake_menu(title, subtitle, choices):
+            seen.append(list(choices))
+            return "back"
+
+        ctx.dialog.menu = fake_menu
+        handler = next(h for h in registry._handlers.values()
+                       if type(h).__name__ == "RNSMenuHandler")
+        handler._rns_submenu()
+        assert seen, "the RNS sub-menu rendered nothing"
+        rows = dict(seen[0])
+        owner = dict(registry.get_menu_items("mesh_networks"))["nomadnet"]
+        assert rows["nomadnet"] == owner, (rows["nomadnet"], owner)
+        assert rows["nomadnet"].startswith(OFF)
+        assert list(rows)[0] == "nomadnet", "ordering kept nomadnet first"

@@ -241,8 +241,13 @@ class TestFullRegistryIntegration:
     def registry(self):
         ctx = _make_context()
         reg = HandlerRegistry(ctx)
+        # The cross-section aliases ride along so every alias tag is
+        # dispatch-exercised here too (review 2026-09-17 #6).
+        import main as _tui_main
+        _declare = _tui_main.MeshAnchorLauncher._declare_cross_section_rows
         for cls in _get_handler_classes():
             reg.register(cls())
+        _declare(reg)
         return reg
 
     def test_all_handlers_registered(self, registry):

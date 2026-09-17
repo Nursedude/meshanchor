@@ -125,7 +125,16 @@ class HandlerRegistry:
             raise ValueError(
                 f"alias {section}/{tag}: a handler in {section!r} already "
                 f"owns that tag — the alias is dead, delete it")
+        if tag in self._aliases.get(section, {}):
+            raise ValueError(
+                f"alias {section}/{tag}: already declared as "
+                f"{self._aliases[section][tag]} — a second declaration is a "
+                f"contradiction in the SSOT table, not an update")
         self._aliases[section][tag] = (owner_section, owner_tag)
+
+    def _profile_active(self) -> bool:
+        """True when a saved profile is gating the menu at all."""
+        return bool(getattr(self._ctx, "feature_flags", None))
 
     def aliases(self, section: str) -> Dict[str, Tuple[str, str]]:
         """The cross-section rows declared on a section's screen."""
@@ -164,8 +173,12 @@ class HandlerRegistry:
             if row is None:
                 # Validated at declaration, so the owner LOST the row
                 # since. owner_row logged which half drifted; render the
-                # tag rather than let the row vanish.
-                items.append((tag, tag))
+                # tag rather than let the row vanish — and under a profile
+                # render it MARKED, because dispatch() will refuse it: a
+                # flag that cannot be read is not "no flag" (review
+                # 2026-09-17 #2, honest-failure-modes #1).
+                items.append((tag, self.OFF_MARK + tag
+                              if self._profile_active() else tag))
                 continue
             items.append((tag, self.mark_label(row[0], row[1])))
         return items
@@ -198,7 +211,11 @@ class HandlerRegistry:
                     gated.append((tag, desc, flag))
         for tag, (osec, otag) in self._aliases.get(section, {}).items():
             row = self.owner_row(osec, otag)
-            if row is None or row[1] is None:
+            if row is None:
+                if self._profile_active():
+                    gated.append((tag, tag, "?"))   # unreadable = refused
+                continue
+            if row[1] is None:
                 continue
             if not self._ctx.feature_enabled(row[1]):
                 gated.append((tag, row[0], row[1]))
@@ -315,6 +332,20 @@ class HandlerRegistry:
         # rows no longer carry the tag — the action still runs, unflagged,
         # and the log says why.
         row = self.owner_row(section, tag)
+        if row is None and self._profile_active():
+            # The flag cannot be read (owner_row logged why). Under a
+            # profile that is a REFUSAL, not a pass: None must not wear
+            # the "unflagged, run it" value (review 2026-09-17 #2).
+            profile = self._ctx.profile_label() or "?"
+            self._ctx.safe_call(
+                f"refuse unreadable {section}/{tag}", self._ctx.dialog.msgbox,
+                f"{tag} — cannot verify profile",
+                f"MeshAnchor cannot tell whether the '{profile}' profile "
+                f"includes '{tag}': its handler no longer lists this row, "
+                f"so the row's feature flag is unreadable.\n\n"
+                f"Not run. This is a MeshAnchor wiring drift — please "
+                f"report it (About > Version has the issue link).")
+            return True
         flag = row[1] if row is not None else None
         if flag is not None and not self._ctx.feature_enabled(flag):
             logger.info("Refused %s/%s: '%s' is not in profile %r",

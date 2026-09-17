@@ -336,12 +336,19 @@ def test_rns_menu_orders_clients_first():
 
 
 def test_rns_menu_offers_nomadnet_launch():
-    """The own_items dict in _rns_submenu includes a NomadNet launcher."""
+    """The RNS sub-menu offers NomadNet — as a CROSS-SECTION ALIAS declared
+    once in MeshAnchorLauncher.CROSS_SECTION_ROWS, never as its own row
+    table entry plus a hand-written dispatch (2026-09-17: that copy was
+    the seventh cross-section copy in the tree, and the one the first
+    port missed). The rendered row is driven live in
+    tests/test_cross_section_rows.py."""
+    sys.path.insert(0, str(LAUNCHER_TUI))
+    import main as tui_main
+    assert ("rns", "nomadnet", "mesh_networks", "nomadnet") in \
+        tui_main.MeshAnchorLauncher.CROSS_SECTION_ROWS
     src = (LAUNCHER_TUI / "handlers" / "rns_menu.py").read_text()
-    # Walk the function body to find the own_items dict.
-    assert '"nomadnet": "Launch NomadNet' in src
-    # Cross-section dispatch wiring
-    assert 'self.ctx.registry.dispatch("mesh_networks", "nomadnet")' in src
+    assert '"nomadnet": "Launch NomadNet' not in src, "the copy returned"
+    assert 'dispatch("mesh_networks", "nomadnet")' not in src, "the fallback returned"
 
 
 # ---------------------------------------------------------------------------
