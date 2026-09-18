@@ -250,15 +250,30 @@ class DialogBackend:
         code, output = self._run(args)
         if code == 0:
             return output
+        if code in (1, 255):
+            # User pressed Cancel (1) or Escape (255) — an ANSWER, not a
+            # failure. Never retry it: the blanket retry below made every
+            # Cancel and every Escape need TWO presses, because the first
+            # one was spent re-rendering the same menu. Ported from
+            # MeshForge review F4.
+            #
+            # Safe to stop retrying these because the stale-terminal-input
+            # problem the blanket retry was papering over is fixed at the
+            # source: _run() calls termios.tcflush() before every dialog.
+            return None
 
-        # Retry once on failure — the main menu already has retry logic for
-        # transient dialog failures, but submenus silently return None.
-        # A single retry with a fresh input flush (in _run) catches cases
-        # where stale terminal input caused whiptail to exit immediately.
+        # Retry once on a GENUINE dialog failure (subprocess death, timeout,
+        # exotic exit code) — the case the original retry was added for.
         logger.debug("Menu '%s' failed (code=%d), retrying once", title, code)
         code, output = self._run(args)
         if code == 0:
             return output
+        # NOTE: MeshForge raises DialogError here, so a dead dialog cannot
+        # impersonate a user cancel (review F7). MeshAnchor has no
+        # DialogError type and no caller that catches one, so returning
+        # None keeps the existing contract; the main menu's consecutive-
+        # failure counter remains the backstop. Closing that gap needs the
+        # exception type threaded through main.py — queued, not done here.
         return None
 
     def inputbox(self, title: str, text: str, init: str = "",
