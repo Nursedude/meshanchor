@@ -462,6 +462,26 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 )
                 logger.info("Registered 'mqtt' sender for persistent queue")
 
+        elif self._persistent_queue and self._meshtastic_egress_configured():
+            # Radio-less gateway (no local meshtasticd) with a remote egress:
+            # register an egress-backed sender so a queued Meshtastic message
+            # is RETRIED rather than rejected at enqueue. Without this the
+            # queue has no 'meshtastic' consumer, enqueue() short-circuits
+            # (Issue #67) and the message is discarded — silently, at INFO.
+            # Same pacing: the egress ends at the same firmware rate limiter
+            # as a local toradio burst, so the 2026-06-04 find applies.
+            self._persistent_queue.register_sender(
+                "meshtastic", self._queue_send_meshtastic_egress,
+                min_spacing_s=MESHTASTIC_TX_MIN_SPACING_S,
+            )
+            logger.info(
+                "Registered remote-egress 'meshtastic' sender for persistent "
+                "queue (no local radio; egress → %s:%s ch%s)",
+                self.config.meshtastic_egress.host,
+                self.config.meshtastic_egress.port,
+                self.config.meshtastic_egress.channel_index,
+            )
+
         # Initialize MeshCore handler if configured and available
         meshcore_config = getattr(self.config, 'meshcore', None)
         if HAS_MESHCORE and meshcore_config and meshcore_config.enabled:
@@ -847,8 +867,13 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 # Process RNS → Meshtastic queue
                 try:
                     msg = self._rns_to_mesh_queue.get(timeout=0.1)
-                    mesh_state = self.health.get_subsystem_state("meshtastic")
-                    if mesh_state in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+                    # ONE predicate for every Meshtastic gate. This used to
+                    # read the subsystem state directly, which is DISABLED by
+                    # design on a radio-less gateway — so this branch ran on
+                    # EVERY message and _process_rns_to_mesh (the only path to
+                    # the egress) never executed. See
+                    # BridgeSendMixin.meshtastic_path_available.
+                    if not self.meshtastic_path_available():
                         # Meshtastic is down — queue for later delivery
                         requeued = self._requeue_failed_message(msg, "meshtastic")
                         if requeued:

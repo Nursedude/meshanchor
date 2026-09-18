@@ -175,10 +175,10 @@ class MeshCoreBridgeMixin:
             # but a radio-less gateway can still egress to a peer meshtasticd
             # when meshtastic_egress is configured (send_to_meshtastic handles
             # the remote send_text_direct fallback).
-            mesh_state = self.health.get_subsystem_state("meshtastic")
-            egress = getattr(self.config, "meshtastic_egress", None)
-            egress_on = bool(egress and getattr(egress, "enabled", False) and egress.host)
-            if egress_on or mesh_state not in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+            # This test used to be spelled out here AND (differently, and
+            # wrongly) in rns_bridge's RNS→Mesh worker. Both now derive it
+            # from one predicate so a third consumer cannot drift a third way.
+            if self.meshtastic_path_available():
                 if self.send_to_meshtastic(bridged_content,
                                            channel=self.config.meshtastic.channel):
                     logger.info(f"Bridge MC→Mesh: {bridged_content[:50]}...")

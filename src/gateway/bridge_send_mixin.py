@@ -11,6 +11,7 @@ Host class must provide:
 - self._lxmf_source / self._lxmf_router (RNSConnectionMixin)
 - self._mesh_handler / self._meshcore_handler (or None)
 - self._persistent_queue (PersistentMessageQueue or None)
+- self.health (BridgeHealthMonitor) — meshtastic_path_available()
 - self.delivery_tracker (DeliveryTracker)
 - self.can_send_to / record_send_success / record_send_failure
   (BridgeHealthMixin)
@@ -25,6 +26,9 @@ from typing import Dict, Optional
 from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
 from utils.tx_guard import assert_rns_tx_allowed
+
+from .base_handler import chunk_for_mesh
+from .bridge_health import SubsystemState
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,86 @@ def _coerce_metadata_for_json(obj):
 
 class BridgeSendMixin:
     """Mixin: direct sends, queue dispatch, and requeue-on-failure."""
+
+    def _meshtastic_egress_configured(self) -> bool:
+        """Whether a remote Meshtastic egress is configured AND usable.
+
+        Single reading of the three fields that make ``send_to_meshtastic``'s
+        radio-less branch live. Kept private and derived so no caller
+        re-spells the test (honest_failure_modes #5: two consumers of one
+        concept, independently coded, WILL drift — which is exactly how the
+        RNS→Mesh leg went dead, see below).
+        """
+        eg = getattr(self.config, 'meshtastic_egress', None)
+        return bool(eg and getattr(eg, 'enabled', False)
+                    and getattr(eg, 'host', ''))
+
+    def meshtastic_path_available(self) -> bool:
+        """Whether ``send_to_meshtastic`` has ANY route to the Meshtastic net.
+
+        THE predicate every Meshtastic gate must ask. It exists because two
+        gates asked it independently and disagreed for five days (2026-09-17):
+        ``meshcore_bridge_mixin`` tested ``egress_on or state not in (...)``
+        and kept working, while the RNS→Mesh worker in ``rns_bridge`` tested
+        only the subsystem state. On a radio-less gateway that state is
+        ``DISABLED`` **by design** — it is the very condition
+        ``meshtastic_egress`` exists to cover — so the RNS worker took its
+        degraded branch on every message and ``_process_rns_to_mesh``, the
+        only path that reaches the egress, never executed at all. Every
+        RNS→Meshtastic message was silently discarded.
+
+        Answer the question here, once, or the third consumer drifts too.
+        """
+        if self._meshtastic_egress_configured():
+            return True
+        state = self.health.get_subsystem_state("meshtastic")
+        return state not in (SubsystemState.DISCONNECTED,
+                             SubsystemState.DISABLED)
+
+    def _queue_send_meshtastic_egress(self, payload: Dict) -> bool:
+        """Persistent-queue sender for a radio-less gateway's remote egress.
+
+        Registered under ``"meshtastic"`` when there is no local
+        ``_mesh_handler`` but an egress is configured. Without it, a queued
+        Meshtastic message is REJECTED at enqueue (Issue #67's no-sender
+        drop) and discarded rather than retried — the second half of the
+        2026-09-17 defect above.
+
+        Channel: deliberately NOT forwarded. ``send_to_meshtastic``'s egress
+        branch uses ``meshtastic_egress.channel_index`` (the PEER gateway's
+        slot) and ignores the local-radio channel arg, so a replay lands on
+        the same channel the original direct send would have used. Passing
+        ``payload['channel']`` here would put a retry on a different channel
+        than the message it retries — and that replay path is where Issue
+        #37's privacy class lived.
+
+        ``destination`` is forwarded for symmetry with the local-handler
+        sender, but note the egress branch cannot honour it: ``send_text_direct``
+        takes no destination, so an egressed DM goes out as a channel
+        broadcast. That is pre-existing behaviour of the direct path, not
+        something the queue introduces — the queue matching it is the point.
+        """
+        message = payload.get('message') or payload.get('content') or ''
+        if not message:
+            return False
+        destination = payload.get('destination')
+
+        # Chunk rather than truncate. The local-handler sender path runs
+        # _truncate_if_needed; an un-chunked requeue (_requeue_failed_message
+        # persists the whole original) would therefore lose every line past
+        # the cap. chunk_for_mesh is the same helper the direct RNS→Mesh path
+        # uses, so a retried message keeps the content the first attempt had.
+        chunks = chunk_for_mesh(message)
+        if not chunks:
+            return False
+        # Send EVERY chunk, then judge — deliberately not a short-circuiting
+        # all(), which would abandon chunks 2..n after one transient failure.
+        # Mirrors the direct RNS→Mesh path in rns_bridge, which builds its
+        # failed_chunks list the same way. All-or-nothing on the return so a
+        # partial send is never recorded as a delivery.
+        results = [self.send_to_meshtastic(chunk, destination)
+                   for chunk in chunks]
+        return all(results)
 
     def send_to_meshtastic(self, message: str, destination: str = None, channel: int = 0) -> bool:
         """Send a message to Meshtastic network.
