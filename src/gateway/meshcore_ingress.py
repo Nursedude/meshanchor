@@ -52,6 +52,30 @@ def parse_meshcore_channel_text(content: Optional[str]) -> Tuple[Optional[str], 
     return (name_prefix.lower() or None), label, body.strip()
 
 
+def reach_of(payload: Any) -> str:
+    """``hops=<n|direct|?> snr=<dB|?>`` from the wire's own fields.
+
+    Wired 2026-09-18 for the Public-bot question ("how effective for users
+    out of LOS?"): meshcore_py delivers ``path_len`` (repeater hops; 0 or the
+    255 marker = heard direct) and ``SNR`` (dB) on every CHANNEL_MSG_RECV, and
+    nothing read them — a free reach census of every sender, including the
+    Public traffic the policy refuses. '?' = the field was absent (older
+    frame without the logged-packet lookup), never a guess.
+    """
+    if not isinstance(payload, dict):
+        return "hops=? snr=?"
+    pl = payload.get('path_len')
+    if pl is None:
+        hops = "?"
+    elif pl == 255 or pl == 0:
+        hops = "direct"
+    else:
+        hops = str(pl)
+    snr = payload.get('SNR')
+    snr_s = "?" if snr is None else f"{snr:g}"
+    return f"hops={hops} snr={snr_s}"
+
+
 def disclose_channel_ingress(handler: Any, event: Any, msg: Any) -> None:
     """Log the slot index the wire delivered (and, at first, the payload keys).
 
@@ -65,15 +89,16 @@ def disclose_channel_ingress(handler: Any, event: Any, msg: Any) -> None:
         idx = (msg.metadata or {}).get('channel')
         name = channel_name_for(handler, idx) or '?'
         text = msg.content or ''
+        reach = reach_of(payload)
         n = getattr(handler, '_ingress_keys_logged', 0)
         if n < 3:
             handler._ingress_keys_logged = n + 1
             keys = (sorted(payload.keys()) if isinstance(payload, dict)
                     else type(payload).__name__)
             logger.info(
-                f"MeshCore channel rx idx={idx} name={name} keys={keys} text={text[:40]!r}")
+                f"MeshCore channel rx idx={idx} name={name} {reach} keys={keys} text={text[:40]!r}")
         else:
-            logger.info(f"MeshCore channel rx idx={idx} name={name} text={text[:40]!r}")
+            logger.info(f"MeshCore channel rx idx={idx} name={name} {reach} text={text[:40]!r}")
     except Exception as e:
         logger.debug(f"channel ingress disclosure failed: {e}")
 

@@ -214,6 +214,22 @@ class TestLegibility:
             _run(h, _wire_event(1))
         assert "MeshCore channel rx idx=1 name=meshanchor" in caplog.text
 
+    def test_ingress_line_carries_reach_hops_and_snr_from_the_wire(self, caplog):
+        """path_len + SNR ride on every CHANNEL_MSG_RECV and were read by
+        nothing. 3 repeater hops at -7.25 dB must render as such; a direct
+        packet (path_len 0 or the 255 marker) as 'direct'; absent as '?'."""
+        from gateway.meshcore_ingress import reach_of
+        assert reach_of({'path_len': 3, 'SNR': -7.25}) == "hops=3 snr=-7.25"
+        assert reach_of({'path_len': 0, 'SNR': 9.5}) == "hops=direct snr=9.5"
+        assert reach_of({'path_len': 255}) == "hops=direct snr=?"
+        assert reach_of({'text': 'x'}) == "hops=? snr=?"
+        assert reach_of(None) == "hops=? snr=?"
+        h, _ = _handler()
+        ev = _wire_event(1); ev.payload['SNR'] = -7.25; ev.payload['path_len'] = 3
+        with caplog.at_level(logging.INFO):
+            _run(h, ev)
+        assert "channel rx idx=1 name=meshanchor hops=3 snr=-7.25" in caplog.text, caplog.text
+
     def test_metrics_line_carries_the_suppression_count_and_posture(self, caplog):
         h, _ = _handler()
         _run(h, _wire_event(0))
