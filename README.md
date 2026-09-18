@@ -126,7 +126,7 @@ Companion mode.
 - **RF engineering** — link budget, Fresnel, FSPL, space weather
 - **AI diagnostics** — offline knowledge base, optional Claude tier
 
-~6,500 tests across <!--STAT:testfiles-->236<!--/STAT--> test files (run
+~6,500 tests across <!--STAT:testfiles-->237<!--/STAT--> test files (run
 `python3 -m pytest tests/ --co -q` for the live count).
 
 **Full inventory, with proven vs. unvalidated called out:

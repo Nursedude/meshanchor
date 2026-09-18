@@ -164,6 +164,51 @@ def dual_path_dedup_window_s(config: Any) -> float:
         return 60.0
 
 
+def is_rns_to_mesh_echo(text) -> bool:
+    """True if ``text`` has ALREADY been on the Meshtastic side.
+
+    Putting such content back on the radio is a duplicate transmission on a
+    shared channel, not a delivery — real airtime spent re-saying what every
+    listener already heard.
+
+    ⚠️ Live-caught 2026-09-18, about an hour after the radio-less RNS→Mesh
+    leg was repaired on meshanchor-server: 11 of that leg's first 20 bridges
+    were real ch2 user traffic returning to ch2. The cycle is
+
+        ch2 RX -> moc MeshtasticBroadcastBridge (stamps "[meshtastic ch2:…]")
+               -> LXMF fan-out -> subscriber's _process_rns_to_mesh
+               -> meshtastic_egress -> moc ch2
+
+    and it needs a box that BOTH subscribes to another box's Meshtastic
+    fan-out AND can transmit on that same channel. Only a radio-less gateway
+    using ``meshtastic_egress`` does both, which is why MeshForge never saw
+    it (moc: 0 of 300 RNS→Mesh bridges carried the tag over 7 days) and why
+    the guard was never written on this leg.
+
+    ``meshtastic_reemit_bridge`` has carried the SYMMETRIC guard since
+    2026-05-18 and its own comment names "a peer gateway's
+    ``_process_rns_to_mesh`` re-broadcast" as the loop it closes. The
+    knowledge was in the tree; the guard existed on one leg and not its twin
+    (honest_failure_modes #5) — the same shape as the egress gate fixed
+    earlier the same night.
+
+    Vocabulary is DERIVED from ``ECHO_LOOP_INVARIANT_PREFIXES`` plus the
+    Meshtastic wire tag, never re-spelled, so the legs cannot drift apart.
+
+    ⚠️ Dropping ``"[MC:"`` here does NOT break MeshCore->Meshtastic: that
+    path runs ``meshcore_bridge_mixin`` -> ``send_to_meshtastic`` directly
+    and never reaches ``_process_rns_to_mesh``. A ``"[MC:"``-tagged body
+    arriving over LXMF is a second copy of something already bridged.
+
+    Untagged content — a bot reply, a NomadNet message, operator text — has
+    no bridge prefix and is unaffected.
+    """
+    from .config import RNS_TO_MESH_ECHO_PREFIXES
+    if not isinstance(text, str):
+        return False
+    return text.lstrip().startswith(RNS_TO_MESH_ECHO_PREFIXES)
+
+
 def chunk_for_mesh(message: str,
                    max_bytes: int = MAX_MESHTASTIC_MSG_LENGTH,
                    prefix: str = "") -> List[str]:

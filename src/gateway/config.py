@@ -38,6 +38,42 @@ ECHO_LOOP_INVARIANT_PREFIXES = [
     "[MeshCore]", "[MC:", "[RNS:", "[ch0:", "[ch1:", "[Mesh:",
 ]
 
+# The wire tag MeshtasticBroadcastBridge stamps onto Meshtastic RX before
+# fanning it out over LXMF ("[meshtastic ch{channel}:{sender}] {text}",
+# MeshtasticReemitConfig.strip_pattern). It is NOT in the invariant list
+# above because that list is the "already bridged, never re-bridge"
+# vocabulary shared with mesh_bridge and the re-emit leg, and the re-emit
+# leg STRIPS this tag rather than dropping on it.
+MESH_WIRE_TAG_PREFIX = "[meshtastic ch"
+
+# Prefixes that mean "this content has ALREADY been on the Meshtastic side",
+# checked on the RNS→Mesh leg so a message is never put back on the radio it
+# came from.
+#
+# ⚠️ Live-caught 2026-09-18, ~1h after the radio-less RNS→Mesh leg was
+# repaired on meshanchor-server: 11 of its first 20 bridges were real ch2
+# user traffic coming straight back out onto ch2. The cycle is
+#   ch2 RX -> moc MeshtasticBroadcastBridge -> LXMF fan-out ->
+#   subscriber's _process_rns_to_mesh -> egress -> moc ch2
+# and it needs a box that BOTH subscribes to another box's Meshtastic
+# fan-out AND can transmit on that same channel. Only a radio-less gateway
+# with meshtastic_egress does both, which is why MeshForge never saw it
+# (moc: 0 of 300 RNS→Mesh bridges carried the tag over 7 days).
+#
+# DERIVED from ECHO_LOOP_INVARIANT_PREFIXES, never re-spelled: the shared
+# tags must not drift between the legs that check them (honest_failure_modes
+# #5 — and a guard written on one leg and not its symmetric twin is exactly
+# how this leg went unguarded while meshtastic_reemit_bridge's 3b comment
+# already described the loop it would form).
+#
+# ⚠️ Dropping "[MC:" here does NOT break MeshCore->Meshtastic. That path
+# runs meshcore_bridge_mixin -> send_to_meshtastic DIRECTLY and never
+# reaches _process_rns_to_mesh; a "[MC:"-tagged body arriving over LXMF is a
+# second copy of something already bridged.
+RNS_TO_MESH_ECHO_PREFIXES = tuple(ECHO_LOOP_INVARIANT_PREFIXES) + (
+    MESH_WIRE_TAG_PREFIX,
+)
+
 
 # =============================================================================
 # CONFIGURATION VALIDATION — moved to gateway/config_validators.py

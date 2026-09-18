@@ -16,7 +16,8 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
-from .base_handler import chunk_for_mesh, get_rf_tx_registry
+from .base_handler import (chunk_for_mesh, get_rf_tx_registry,
+                           is_rns_to_mesh_echo)
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode
 from .reconnect import ReconnectStrategy
@@ -1270,6 +1271,19 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
         chunk == content, so the common path is unchanged.
         """
         try:
+            # Echo guard — is_rns_to_mesh_echo() carries the why. Witness,
+            # never a silent drop (honest_failure_modes #9).
+            if is_rns_to_mesh_echo(msg.content):
+                with self._stats_lock:
+                    self.stats['rns_to_mesh_echo_suppressed'] = (
+                        self.stats.get('rns_to_mesh_echo_suppressed', 0) + 1)
+                logger.info(
+                    "RNS→Mesh echo suppressed — already bridge-tagged "
+                    "(from %s): %r",
+                    msg.source_id[:8] if msg.source_id else "?",
+                    str(msg.content)[:48])
+                return
+
             prefix = f"[RNS:{msg.source_id[:4]}] "
             content = prefix + msg.content
 
