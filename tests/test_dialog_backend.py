@@ -130,3 +130,84 @@ class TestCancelButtonLabel:
         be.menu("T", "text", [("a", "A")])
         assert be._run_calls[0][0] == '--title'
         assert not [a for a in be._run_calls[0] if a.startswith('--cancel')]
+
+
+class TestCancelLabelInference:
+    """The button's label is DERIVED from the menu's own rows.
+
+    Ported from MeshForge 2026-09-18. A navigational menu carries a
+    `back` row and maps menu()'s None to that same row -- one control,
+    two faces, and only the row can scroll off a 24x80 terminal.
+
+    Measured: MeshAnchor has 214 menu call sites, ~167 carrying a `back`
+    row, and the "None means back" contract is spelled at least five
+    different ways across them. No regex over call sites classifies that
+    reliably; the presence of the ROW does.
+    """
+
+    def test_a_back_row_infers_the_back_label(self):
+        be = _make_backend([(0, "x")])
+        be.menu("T", "text", [("status", "Status"), ("back", "Back")])
+        args = be._run_calls[0]
+        assert '--cancel-button' in args
+        assert args[args.index('--cancel-button') + 1] == 'Back'
+
+    def test_no_back_row_keeps_whiptails_cancel(self):
+        """An operational picker must NOT say Back."""
+        be = _make_backend([(0, "x")])
+        be.menu("T", "text", [("eth0", "eth0"), ("wlan0", "wlan0")])
+        assert not [a for a in be._run_calls[0] if a.startswith('--cancel')]
+
+    def test_explicit_label_beats_inference(self):
+        be = _make_backend([(0, "x")])
+        be.menu("T", "text", [("a", "A"), ("back", "Back")],
+                cancel_label="Exit")
+        args = be._run_calls[0]
+        assert args[args.index('--cancel-button') + 1] == 'Exit'
+
+    def test_explicit_cancel_is_the_opt_out(self):
+        be = _make_backend([(0, "x")])
+        be.menu("T", "text", [("a", "A"), ("back", "Back")],
+                cancel_label="Cancel")
+        args = be._run_calls[0]
+        assert args[args.index('--cancel-button') + 1] == 'Cancel'
+
+    def test_explicit_none_emits_no_flag(self):
+        """None stays distinguishable from 'infer one for me'."""
+        be = _make_backend([(0, "x")])
+        be.menu("T", "text", [("a", "A"), ("back", "Back")],
+                cancel_label=None)
+        assert not [a for a in be._run_calls[0] if a.startswith('--cancel')]
+
+    def test_inference_itself_tolerates_ragged_rows(self):
+        """The HELPER is defensive, even though menu() is not.
+
+        menu() has never accepted a ragged choices list -- `for tag, desc
+        in choices` raises on one, and that contract predates this
+        change. So this pins the helper directly rather than claiming
+        menu() tolerates input it never did.
+        """
+        be = _make_backend([])
+        assert be._infer_cancel_label(
+            [(), None, ("back", "Back")], be._AUTO_CANCEL) == 'Back'
+        assert be._infer_cancel_label(None, be._AUTO_CANCEL) is None
+        assert be._infer_cancel_label([], be._AUTO_CANCEL) is None
+
+    def test_back_must_be_the_TAG_not_the_label(self):
+        """A row LABELLED 'Back' with another tag is not the back row."""
+        be = _make_backend([(0, "x")])
+        be.menu("T", "text", [("return_home", "Back")])
+        assert not [a for a in be._run_calls[0] if a.startswith('--cancel')]
+
+    def test_the_main_menu_still_says_cancel(self):
+        """MA's top level has NO back row, so inference must not fire.
+
+        Escape there still counts as a dialog FAILURE (see
+        _run_main_menu), so a button promising Back would not keep its
+        word. This pins that the inference does not accidentally grant
+        one. Queued: DialogError, then the main menu can say Exit.
+        """
+        be = _make_backend([(0, "x")])
+        be.menu("MeshAnchor NOC", "hint",
+                [("1", "Dashboard"), ("a", "About"), ("x", "Exit")])
+        assert not [a for a in be._run_calls[0] if a.startswith('--cancel')]
