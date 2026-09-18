@@ -868,6 +868,54 @@ MF025_LINE_LIMIT = 1_500
 # baseline is now EMPTY: every src/ python file must be <= 1,500 lines.
 MF025_BASELINE = {}
 
+# ─────────────────────────────────────────────────────────────────────────
+# MF025 split hints — per-file guidance delivered AT THE MOMENT OF THE
+# DECISION, because that is the only moment anyone is listening.
+#
+# ⚠️ Why this exists (2026-09-18, and the evidence is a diff, not a theory):
+# a session added a ~25-line comment to rns_bridge.py explaining a live RF
+# echo loop, tripped this rule at 1,515 lines, and did NOT split the file.
+# It moved the rationale into base_handler.py, then — still 3 over — reworded
+# a log string and joined a paren to land on exactly 1,500. Pure line-golf.
+# That session had read CLAUDE.md's "ALWAYS split files exceeding 1,500
+# lines" an hour earlier.
+#
+# The lesson generalises: splitting is expensive, trimming is free, and the
+# cheapest lines to cut are always the ones carrying no executable weight —
+# the comments and docstrings, i.e. the WHY. On a codebase whose whole
+# discipline is "record why so the next reader does not re-pay", the cheapest
+# path to satisfying this cap erodes precisely what the project values most.
+# A bare "split the file" also invites INVENTING a seam, which scatters one
+# concept across files — the "guard on one leg and not its twin" defect class
+# that cost three separate bugs in that same session.
+#
+# So: when a file has a KNOWN answer, say the answer here. A file at exactly
+# the cap cannot document its own situation in its own docstring (any added
+# line fails), so this dict is the only place the note can live.
+#
+# Keys are repo-relative paths; every key must name a real file
+# (TestSplitHintsAreNotStale) so a hint can never outlive its subject.
+# ─────────────────────────────────────────────────────────────────────────
+MF025_SPLIT_HINTS = {
+    'src/gateway/rns_bridge.py': (
+        "⚠️ Do NOT invent a seam, and do NOT trim comments to fit. MeshForge "
+        "ALREADY split this file and runs the result on 9 boxes: port "
+        "`_rns_bridge_xform.py` (MessageTransformMixin — _process_mesh_to_rns, "
+        "_process_rns_to_mesh, _requeue_failed_message and the dedup/identity/"
+        "session predicates; MF rns_bridge.py sits at ~1,400 after it). This is "
+        "a PARITY PORT, not a design decision. See the 2026-09-18 parity row in "
+        ".claude/audits/review_provenance.md."
+    ),
+    'src/gateway/meshcore_handler.py': (
+        "⚠️ Do NOT trim comments to fit. Unlike rns_bridge.py there is NO "
+        "upstream seam to port — MeshAnchor is the LEAD for MeshCore (9 "
+        "meshcore_* modules here vs 2 in MeshForge), so MF's smaller handler is "
+        "a thinner implementation, not a proven split. A split here is a real "
+        "design decision: find a seam with meaning, or say plainly that the "
+        "file earns its size."
+    ),
+}
+
 
 def check_file_size_ratchet(files: List[str], repo_root: Optional[str] = None) -> List[LintIssue]:
     """MF025: fail when a src/ python file exceeds 1,500 lines (or, for a
@@ -900,7 +948,9 @@ def check_file_size_ratchet(files: List[str], repo_root: Optional[str] = None) -
                 f"{lines:,} lines exceeds the "
                 f"{'frozen baseline of ' + format(limit, ',') if frozen else '1,500-line cap'}"
                 f" — split the file (CLAUDE.md size rule). The baseline only "
-                f"shrinks; do not add or raise entries to grant headroom.",
+                f"shrinks; do not add or raise entries to grant headroom."
+                + (f" {MF025_SPLIT_HINTS[rel]}" if rel in MF025_SPLIT_HINTS
+                   else ""),
             ))
     return issues
 
