@@ -117,7 +117,10 @@ def collect_screens(profile=None):
         _MAX_DIALOG_RETRIES=3,
         _handle_main_choice=lambda c: None,
         dialog=SimpleNamespace(
-            menu=lambda t, s, c: (captured.append(list(c)), "x")[1],
+            # **kw: the real menu() takes cancel_label=; a fixed-arity
+            # double makes a new keyword a TypeError about the
+            # stand-in, not a finding about the screen.
+            menu=lambda t, s, c, **kw: (captured.append(list(c)), "x")[1],
             yesno=lambda *a: True),
     )
     tui_main.MeshAnchorLauncher._run_main_menu(fake)

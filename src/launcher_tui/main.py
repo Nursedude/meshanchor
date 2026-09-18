@@ -61,6 +61,15 @@ from handler_registry import HandlerRegistry
 from handlers import get_all_handlers
 
 
+# The label on BOTH escape hatches out of a section, and they must agree.
+# A section menu treats Cancel/Escape (menu() -> None) as identical to the
+# "back" row, so the row and the button are one control with two faces.
+# The row is a LIST row and scrolls off a 24x80 terminal (the
+# mesh_networks section paints 17 of 20); the button is chrome and never
+# can. Shared constant because two consumers of one artifact drift when
+# they are hardcoded apart (honest_failure_modes #5).
+BACK_LABEL = "Back"
+
 class MeshAnchorLauncher:
     """MeshAnchor launcher with raspi-config style interface."""
 
@@ -219,7 +228,7 @@ class MeshAnchorLauncher:
         else:
             result = list(registry_items) + filtered_legacy
 
-        result.append(("back", "Back"))
+        result.append(("back", BACK_LABEL))
         return result
 
     @staticmethod
@@ -642,6 +651,13 @@ class MeshAnchorLauncher:
                 ("x", "Exit"),
             ])
 
+            # DELIBERATELY UNLABELLED — the top level is not a "back".
+            # MeshForge labels its main-menu Cancel "Exit" because there
+            # Escape offers an exit; here Escape still counts as a dialog
+            # FAILURE (see the consecutive_failures branch below), so a
+            # button promising "Exit" or "Back" would not keep its word.
+            # Fixing that honestly needs DialogError threaded through this
+            # loop — queued in .claude/audits/review_provenance.md.
             choice = self.dialog.menu(
                 f"MeshAnchor NOC v{__version__}",
                 status_hint,
@@ -739,7 +755,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "Dashboard",
                 "System status and monitoring:",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -784,6 +801,7 @@ class MeshAnchorLauncher:
                 "MeshCore (primary radio)",
                 "MeshCore companion radio tools. Optional gateways nested below:",
                 choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -830,7 +848,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "Optional Gateways",
                 "Optional bridges to other mesh stacks (Meshtastic, RNS, AREDN):",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -855,7 +874,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "RF & SDR Tools",
                 "Radio frequency tools and monitoring:",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -884,7 +904,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "Maps & Visualization",
                 "Network visualization tools:",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -921,7 +942,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "Configuration",
                 "System and service configuration:",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -953,7 +975,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "System Tools",
                 "System administration:",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":
@@ -983,7 +1006,8 @@ class MeshAnchorLauncher:
             choice = self.dialog.menu(
                 "About MeshAnchor",
                 "Information, help, and diagnostics:",
-                choices
+                choices,
+                cancel_label=BACK_LABEL,
             )
 
             if choice is None or choice == "back":

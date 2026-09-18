@@ -190,7 +190,10 @@ class TestMainMenuPin:
         import main as tui_main
         seen = []
 
-        def fake_menu(title, subtitle, choices):
+        # **kwargs: the real menu() takes cancel_label=; a double with a
+        # fixed arity turns a NEW keyword into a TypeError about the
+        # stand-in rather than a finding about the code under test.
+        def fake_menu(title, subtitle, choices, **kwargs):
             seen.append(list(choices))
             return "x"
 
@@ -242,3 +245,92 @@ class TestMainMenuPin:
             f"registry 'main' owns {sorted(registry_tags)}, the "
             f"_handle_main_choice dict owns {sorted(dict_tags)}.")
 
+
+
+# ------------------------------------------ the escape hatch is CHROME, not a row
+
+class TestSectionMenusLabelTheirCancelButton:
+    """A SECTION menu must label its Cancel button; the MAIN menu must not.
+
+    A section loop treats Cancel/Escape (menu() returns None) as identical
+    to selecting the "back" row. They are one control with two faces, and
+    only one face survives a short terminal: the ROW is a list row (the
+    mesh_networks section paints 17 of 20 at 24x80, and "back" is appended
+    LAST, so "back" is what falls off), while the BUTTON is chrome and
+    cannot scroll. Unlabelled, whiptail paints "Cancel", which reads as
+    "abort", not "go up one level".
+
+    The MAIN menu is deliberately EXCLUDED and that exclusion is pinned
+    here, so the next reader sees a decision rather than an oversight:
+    Escape at the top level still counts as a dialog FAILURE in
+    _run_main_menu, so a button promising "Back" or "Exit" would not keep
+    its word. Fixing that honestly needs DialogError threaded through the
+    loop — queued in .claude/audits/review_provenance.md.
+
+    Handler-level menus are out of scope by design: ~119 of them treat
+    None as back too, but they are reached through their own surfaces and
+    were never measured for the scroll symptom. Also queued.
+    """
+
+    MAIN_MENU_FN = '_run_main_menu'
+
+    @staticmethod
+    def _menu_calls_by_function():
+        """[(enclosing function name, Call node)] for self.dialog.menu()."""
+        src = (Path(__file__).resolve().parents[1]
+               / 'src' / 'launcher_tui' / 'main.py').read_text()
+        tree = ast.parse(src)
+        found = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == 'menu'
+                        and isinstance(node.func.value, ast.Attribute)
+                        and node.func.value.attr == 'dialog'):
+                    found.append((fn.name, node))
+        return found
+
+    def test_every_section_menu_passes_cancel_label(self):
+        calls = self._menu_calls_by_function()
+        assert calls, "found no self.dialog.menu() calls — the parser drifted"
+        unlabelled = [
+            (fn, node.lineno) for fn, node in calls
+            if fn != self.MAIN_MENU_FN
+            and not any(kw.arg == 'cancel_label' for kw in node.keywords)
+        ]
+        assert not unlabelled, (
+            f"section menu(s) without cancel_label=: {unlabelled}. A menu "
+            "whose Cancel means 'back' must SAY so: pass "
+            "cancel_label=BACK_LABEL. The 'back' row can scroll off a "
+            "24x80 terminal; the button cannot.")
+
+    def test_the_main_menu_is_deliberately_unlabelled(self):
+        calls = self._menu_calls_by_function()
+        main_calls = [n for fn, n in calls if fn == self.MAIN_MENU_FN]
+        assert main_calls, (
+            f"no menu() call found in {self.MAIN_MENU_FN} — if the main "
+            "menu moved, move this pin with it")
+        labelled = [
+            n.lineno for n in main_calls
+            if any(kw.arg == 'cancel_label' for kw in n.keywords)
+        ]
+        assert not labelled, (
+            f"the MAIN menu got a cancel_label at line(s) {labelled}. "
+            "Escape there still counts as a dialog FAILURE, so the button "
+            "would not keep its promise. Fix _run_main_menu's None branch "
+            "first (needs DialogError), then label it.")
+
+    def test_no_call_site_hardcodes_the_label(self):
+        """The row label and the button label must be ONE constant."""
+        literals = [
+            (fn, n.lineno, kw.value.value)
+            for fn, n in self._menu_calls_by_function()
+            for kw in n.keywords
+            if kw.arg == 'cancel_label' and isinstance(kw.value, ast.Constant)
+        ]
+        assert not literals, (
+            f"cancel_label hardcoded at {literals} — use BACK_LABEL so the "
+            "button and the 'back' row can never disagree.")

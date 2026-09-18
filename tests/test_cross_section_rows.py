@@ -249,7 +249,10 @@ class TestTheRealPrimaryLoopRendersTheMark:
         _ctx, _registry, holder = _make(MESHCORE)
         seen = []
 
-        def fake_menu(title, subtitle, choices):
+        # **kwargs: the real menu() takes cancel_label=; a double with a
+        # fixed arity turns a NEW keyword into a TypeError about the
+        # stand-in rather than a finding about the code under test.
+        def fake_menu(title, subtitle, choices, **kwargs):
             seen.append(list(choices))
             return "back"
 
@@ -316,7 +319,10 @@ class TestTheRnsSubMenuRendersTheAlias:
         ctx, registry, _h = _make(MESHCORE)
         seen = []
 
-        def fake_menu(title, subtitle, choices):
+        # **kwargs: the real menu() takes cancel_label=; a double with a
+        # fixed arity turns a NEW keyword into a TypeError about the
+        # stand-in rather than a finding about the code under test.
+        def fake_menu(title, subtitle, choices, **kwargs):
             seen.append(list(choices))
             return "back"
 
