@@ -39,17 +39,24 @@ _LAB_WIRE_RE = _re.compile(
 def parse_meshcore_channel_header(content: str):
     """Split a MeshCore channel broadcast's baked-in header from its body.
 
-    MeshCore firmware prepends a ``"<channel> <sender>: "`` header to channel
-    broadcast text. The gateway sees that header *inside* ``content`` because
-    ``source_address`` is empty for channel broadcasts (so the bridge would
-    otherwise label them ``[MC:unknown]`` and leave the header in the body).
-    Example: ``"meshanchor p4: wx"`` → ``("p4", "wx")``.
+    MeshCore channel broadcast text arrives as ``"<sender name>: <text>"``
+    (the sending node's adv_name; e.g. node "meshanchor p4" sends
+    ``"meshanchor p4: wx"``). The gateway sees it *inside* ``content``
+    because ``source_address`` is empty for channel broadcasts (so the
+    bridge would otherwise label them ``[MC:unknown]`` and leave the header
+    in the body). Example: ``"meshanchor p4: wx"`` → ``("p4", "wx")``.
+
+    ⚠️ 2026-09-18: the header does NOT name a channel. It was read as
+    ``"<channel> <sender>"`` for months and a two-word node name was split
+    into a phantom channel + sender; the real slot is ``channel_idx`` on the
+    event (``metadata['channel']``). The label lift below keeps its long-
+    standing behaviour (last header token) pending a decision on carrying
+    the whole name; it is a provenance LABEL, never a channel identity.
 
     Splitting on the FIRST ``": "`` keeps a ``:`` inside the body intact
-    (URLs, clock times, ``"hey all: listen"``). The sender is the last
-    whitespace token of the header (the channel name precedes it). Returns
-    ``("", content)`` unchanged when no header separator is present, so
-    unprefixed text falls through to the caller's default labelling.
+    (URLs, clock times, ``"hey all: listen"``). Returns ``("", content)``
+    unchanged when no header separator is present, so unprefixed text falls
+    through to the caller's default labelling.
 
     Phase 2 (2026-05-24): lifting the bare command to index 0 is what lets
     the meshing-around bot (``explicitCmd=True``, only acts on index 0)
@@ -62,19 +69,17 @@ def parse_meshcore_channel_header(content: str):
 
 
 def _split_meshcore_channel_header(content: str):
-    """The ONE split behind both public helpers: ``(channel, sender, body)``.
+    """The ONE split behind the header lift: ``(name_prefix, label, body)``.
 
     Returns ``("", "", content)`` when no ``": "`` header is present.
-
-    ⚠️ Factored out 2026-09-18 so the CHANNEL NAME can be disclosed without a
-    second implementation of this parse. There are already two parsers of this
-    wire format in the tree and they DISAGREE: this one takes the sender as the
-    LAST header token (so a multi-word channel name stays intact), while
-    ``meshcore_handler._parse_meshcore_channel_text`` takes ``toks[0]`` as the
-    channel and ``toks[1]`` as the sender — which mis-parses any channel name
-    containing a space, and the oracle's name gate inherits that today. Do NOT
-    add a third; when the inbound channel POLICY is built, derive it from here
-    (honest_failure_modes #5 — two consumers of one concept WILL drift).
+    ``label`` is the LAST whitespace token of the header; ``name_prefix`` is
+    everything before it. ⚠️ The header is the sending node's NAME, not
+    ``"<channel> <sender>"`` — ``name_prefix`` is NOT a channel (2026-09-18;
+    a text-derived "[ch:<name_prefix>]" tag mislabelled Public traffic as
+    the private channel). Channel identity comes from ``channel_idx`` on the
+    event, never from text. ``meshcore_handler._parse_meshcore_channel_text``
+    still splits this header the old way for the oracle's name gate; that
+    gate is owed a move to the slot index.
     """
     sep = ": "
     idx = content.find(sep)
@@ -88,21 +93,6 @@ def _split_meshcore_channel_header(content: str):
     if not sender or not body:
         return "", "", content
     return channel, sender, body
-
-
-def meshcore_source_channel(content: str) -> str:
-    """The channel NAME a MeshCore broadcast carries, or ``""`` if unprefixed.
-
-    DISCLOSURE ONLY — nothing gates on this. Until 2026-09-18 the bridge logs
-    recorded no source channel at all: the ``<channel> <sender>: `` header was
-    parsed off and discarded, so Public and private inbound traffic were
-    INDISTINGUISHABLE in the primary log. That is why a months-old Public-channel
-    leak survived two models and the architect — the data needed to see it was
-    thrown away at the door. Log it first, learn what the wire actually says,
-    and only then build a policy on it (the 2026-09-18 incident: an index-based
-    guard shipped on an assumed field refused 100% of channel traffic).
-    """
-    return _split_meshcore_channel_header(content)[0]
 
 
 class MeshCoreBridgeMixin:
@@ -201,18 +191,20 @@ class MeshCoreBridgeMixin:
             # preserved so the LXMF re-emit loop guard (nested_drop_prefixes)
             # still drops echoes. (Phase 2, 2026-05-24.)
             label, body = src_label, content
-            src_channel = ""
             if is_broadcast:
                 parsed_sender, parsed_body = parse_meshcore_channel_header(content)
                 if parsed_sender:
                     label, body = parsed_sender, parsed_body
-                # Disclosure only — see meshcore_source_channel(). Nothing
-                # gates on this; it exists so an operator (or a probe) can
-                # SEE which MeshCore channel a bridged message came from.
-                src_channel = meshcore_source_channel(content)
-            # "?" is deliberate: an UNPREFIXED broadcast is a real case
-            # (parse returns "") and must read as unknown, never as a channel.
-            ch_tag = f"[ch:{src_channel or '?'}]"
+            # Source-slot disclosure: the INDEX the wire delivered
+            # (metadata['channel'], set by from_meshcore from channel_idx).
+            # 2026-09-18: this tag was briefly derived from the message TEXT
+            # and rendered the SENDER's name prefix ("meshanchor p4: wx" →
+            # "[ch:meshanchor]") on Public traffic — the text never named a
+            # channel. '?' means the payload named no slot: unknown, never
+            # assumed Public.
+            _meta = getattr(msg, 'metadata', None) or {}
+            _idx = _meta.get('channel') if isinstance(_meta, dict) else None
+            ch_tag = f"[ch:{'?' if _idx is None else _idx}]"
             prefix = f"[MC:{label}] "
             bridged_content = prefix + body
 

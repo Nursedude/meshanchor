@@ -55,6 +55,10 @@ from .meshcore_radio_config import (
 from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
 from .meshcore_dm_reply import PendingDmAcks
+from .meshcore_ingress import (
+    disclose_channel_ingress,
+    parse_meshcore_channel_text as _parse_meshcore_channel_text,
+)
 from .meshcore_radio_ops_mixin import MeshCoreRadioOpsMixin
 from .reconnect import ReconnectConfig, ReconnectStrategy
 from utils.meshcore_connection import (
@@ -73,27 +77,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def _parse_meshcore_channel_text(content):
-    """Split a MeshCore channel message into (channel_name, sender, text).
-
-    MeshCore delivers channel messages as ``<channel> <sender>: <text>`` (e.g.
-    ``"meshanchor p3: status"``) — the channel name and sender are embedded in
-    the payload text, and ``CanonicalMessage.source_address`` comes through
-    empty. Split on the FIRST ``": "``: the prefix's first word is the channel
-    NAME (lowercased), its second word the sender, and the remainder is the real
-    message. With no ``": "`` prefix (e.g. an un-prefixed message) the channel
-    can't be identified by name, so return ``(None, "", <stripped content>)`` —
-    which the name-scoped oracle then declines (fail-closed). Pure helper.
-    """
-    s = content or ""
-    if ": " in s:
-        prefix, _, text = s.partition(": ")
-        toks = prefix.split()
-        chan = toks[0].lower() if toks else None
-        sender = toks[1] if len(toks) >= 2 else ""
-        return chan, sender, text.strip()
-    return None, "", s.strip()
 
 
 # meshcore_py is an optional external dependency
@@ -674,6 +657,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
         try:
             msg = CanonicalMessage.from_meshcore(event)
             msg.is_broadcast = True
+            disclose_channel_ingress(self, event, msg)
 
             # Track for dual-path reconciliation
             content_hash = self._compute_channel_hash(msg)

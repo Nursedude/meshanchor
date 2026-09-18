@@ -1092,6 +1092,29 @@ class TestMeshOracleMeshcoreWiring:
         handler._oracle.handle.assert_called_once_with('abc123', 'status', None)
         assert handler._message_queue.empty()  # consumed, NOT bridged onward
 
+    def test_ingress_discloses_the_REAL_wire_slot_and_keys(self, handler, caplog):
+        """2026-09-18 ingress witness. Payload keys are meshcore_py reader.py's
+        CHANNEL_MSG_RECV ``res`` verbatim — ``channel_idx`` is the slot; there
+        is no ``channel`` / ``is_channel`` key on the wire. The log must name
+        the index and (first messages) the keys, so the wire shape is captured
+        in the journal, never assumed from a fixture."""
+        import logging
+        handler._oracle = None
+        event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
+            'type': 'CHAN', 'channel_idx': 0, 'path_len': 0, 'txt_type': 0,
+            'sender_timestamp': 1789767168, 'text': 'meshanchor p4: wx'})
+        loop = asyncio.new_event_loop()
+        try:
+            with caplog.at_level(logging.INFO):
+                loop.run_until_complete(handler._on_channel_message(event))
+        finally:
+            loop.close()
+        assert "MeshCore channel rx idx=0" in caplog.text, caplog.text
+        assert "'channel_idx'" in caplog.text
+        assert "text='meshanchor p4: wx'" in caplog.text
+        msg = handler._message_queue.get_nowait()
+        assert msg.metadata['channel'] == 0  # Public, as the wire said — not a name
+
     def test_channel_query_parsed_and_routed_by_name(self, handler):
         # Real MeshCore channel text: "<channel> <sender>: <text>" with an empty
         # source_address. The hook parses the channel NAME + sender + query.
