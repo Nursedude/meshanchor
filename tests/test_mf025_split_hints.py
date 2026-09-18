@@ -83,22 +83,15 @@ class TestTheHintReachesTheMessage:
                 [f], repo_root=str(Path(f).parents[2]))
             assert "trim comments to fit" in issues[0].message, rel
 
-    def test_meshcore_handler_names_its_proven_seam(self, oversized):
-        """Updated 2026-09-18 with the ChannelPath port.
-
-        This test used to assert the hint said there was NO upstream seam,
-        which was TRUE until the seam was built: MeshForge 8910c156 created
-        meshcore_channel_path.py and it was ported here in the same arc. A
-        hint that still said "nothing to port" would be the stale pointer the
-        hint exists to prevent — so the hint follows the world, and so does
-        this test. The two hinted files must still get DIFFERENT advice.
-        """
+    def test_meshcore_handler_is_told_there_is_NO_upstream_seam(
+            self, oversized):
+        """The two hinted files have different problems and must not be given
+        the same advice: MeshAnchor LEADS on MeshCore, so there is nothing to
+        port and a split there is a genuine design decision."""
         f = oversized("src/gateway/meshcore_handler.py")
         msg = lint.check_file_size_ratchet(
             [f], repo_root=str(Path(f).parents[2]))[0].message
-        assert "meshcore_channel_path" in msg, (
-            "MF025 refused the edit without naming the seam that already "
-            "exists — the reader is left to invent one or trim comments")
+        assert "NO " in msg and "upstream seam" in msg
         assert "_rns_bridge_xform" not in msg, "wrong file's advice"
 
     def test_an_unhinted_file_still_gets_the_plain_rule(self, oversized):

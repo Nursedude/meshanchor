@@ -914,20 +914,12 @@ MF025_SPLIT_HINTS = {
         ".claude/audits/review_provenance.md."
     ),
     'src/gateway/meshcore_handler.py': (
-        "⚠️ Do NOT trim comments to fit. A PROVEN seam now EXISTS (as of "
-        "2026-09-18): meshcore_channel_path.py — ChannelPath, owning the "
-        "dual-path dedup state, poll pacing, metrics and the inbound "
-        "source-channel policy. It was built in MeshForge 8910c156, where "
-        "MeshCore is disabled on every box so a refactor could not break a "
-        "live gateway, then ported here; it took this file 1,499 -> 1,437. "
-        "This hint used to say there was NO upstream seam. That was true "
-        "until the seam was built. For MORE room the next cohesive cluster is "
-        "the two async channel legs (_on_channel_message + "
-        "_poll_channel_messages), which would need an injected delivery sink "
-        "and poll source — a genuine design decision, and MeshAnchor still "
-        "LEADS on MeshCore (9 meshcore_* modules here vs 3 in MeshForge), so "
-        "find a seam with meaning, or say plainly that the file earns its "
-        "size."
+        "⚠️ Do NOT trim comments to fit. Unlike rns_bridge.py there is NO "
+        "upstream seam to port — MeshAnchor is the LEAD for MeshCore (9 "
+        "meshcore_* modules here vs 2 in MeshForge), so MF's smaller handler is "
+        "a thinner implementation, not a proven split. A split here is a real "
+        "design decision: find a seam with meaning, or say plainly that the "
+        "file earns its size."
     ),
 }
 
