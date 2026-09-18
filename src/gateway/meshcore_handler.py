@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional
 
 from .base_handler import BaseMessageHandler
 from .canonical_message import CanonicalMessage, Protocol
+from .meshcore_channel_path import ChannelPath
 from .config import GatewayConfig
 from .meshcore_radio_config import (
     MeshCoreRadioConfig,
@@ -198,32 +199,16 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             or (meshcore_config and getattr(meshcore_config, 'simulation_mode', False))
         )
 
-        # Channel message polling fallback (for meshcore_py #1232 bug)
-        self._last_channel_poll = 0.0
-        self._channel_poll_interval = (
-            getattr(meshcore_config, 'channel_poll_interval_sec', 5)
-            if meshcore_config else 5
-        )
-
-        # Dual-path tracking: event subscription + polling reconciliation
-        # Messages seen via event subscription (content_hash -> timestamp)
-        self._event_msg_hashes: Dict[str, float] = {}
-        # Messages discovered via polling (content_hash -> timestamp)
-        self._poll_msg_hashes: Dict[str, float] = {}
-        self._channel_hash_lock = threading.Lock()
-        self._channel_hash_window = 120  # seconds to keep hashes
-
-        # Channel message metrics (dual-path tracking for upstream bug #1232)
-        self._channel_metrics = {
-            'event_received': 0,      # Messages received via event subscription
-            'poll_discovered': 0,     # Messages discovered via polling
-            'event_missed': 0,        # Found by poll but not by event
-            'duplicate_reconciled': 0,  # Same message seen from both paths
-            'poll_cycles': 0,         # Total poll cycles run
-            'last_event_time': None,  # Timestamp of last event-delivered msg
-            'last_poll_time': None,   # Timestamp of last poll-delivered msg
-        }
-        self._metrics_log_interval = 50  # Log summary every N poll cycles
+        # Dual-path channel state, inbound source-channel policy and
+        # metrics live in ONE owner. Ported from MeshForge 8910c156
+        # (2026-09-18): nine attributes used to sit here while the code
+        # consuming them lived hundreds of lines away in two async legs — a
+        # reader/writer pair split across a boundary nothing enforced
+        # (honest_failure_modes #4). The split is also what freed the MF025
+        # headroom for the inbound Public-channel guard. See
+        # gateway/meshcore_channel_path.py for why a collaborator and not a
+        # mixin, and for what deliberately did NOT move.
+        self._channel_path = ChannelPath(meshcore_config)
 
         # Chat ring buffer — feeds the daemon's HTTP chat API and TUI.
         # Bounded so a long-running daemon can't grow unbounded; 200 entries
@@ -676,19 +661,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             msg.is_broadcast = True
 
             # Track for dual-path reconciliation
-            content_hash = self._compute_channel_hash(msg)
-            now = time.monotonic()
-            is_poll_dup = False
-
-            with self._channel_hash_lock:
-                self._event_msg_hashes[content_hash] = now
-                self._channel_metrics['event_received'] += 1
-                self._channel_metrics['last_event_time'] = datetime.now().isoformat()
-
-                # Check if polling already found this message
-                if content_hash in self._poll_msg_hashes:
-                    self._channel_metrics['duplicate_reconciled'] += 1
-                    is_poll_dup = True
+            content_hash = self._channel_path.compute_hash(msg)
+            is_poll_dup = self._channel_path.record_event(
+                content_hash, time.monotonic())
 
             if is_poll_dup:
                 logger.debug("Channel message already delivered via poll, skipping event path")
@@ -722,6 +697,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                         return
                 except Exception as e:
                     logger.debug(f"meshcore oracle (channel) handle error: {e}")
+
+            if not self._channel_path.bridge_allowed(msg):
+                self._channel_path.note_suppressed(msg)
+                return
 
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug("MeshCore channel message blocked by routing rules")
@@ -813,9 +792,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
         polling catches them, providing data for upstream bug analysis.
         """
         now = time.monotonic()
-        if now - self._last_channel_poll < self._channel_poll_interval:
+        if not self._channel_path.poll_due(now):
             return
-        self._last_channel_poll = now
+        self._channel_path.mark_polled(now)
 
         if not self._meshcore or not self._connected:
             return
@@ -824,9 +803,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
         if self._simulation_mode:
             return
 
-        with self._channel_hash_lock:
-            self._channel_metrics['poll_cycles'] += 1
-            poll_cycle = self._channel_metrics['poll_cycles']
+        poll_cycle = self._channel_path.begin_poll_cycle()
 
         try:
             if not hasattr(self._meshcore, 'commands'):
@@ -843,7 +820,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
 
             if not messages:
                 # Periodic metric logging
-                if poll_cycle % self._metrics_log_interval == 0:
+                if poll_cycle % self._channel_path.metrics_log_interval == 0:
                     self._log_channel_metrics()
                 return
 
@@ -852,23 +829,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                     msg = CanonicalMessage.from_meshcore(raw_msg)
                     msg.is_broadcast = True
 
-                    content_hash = self._compute_channel_hash(msg)
-                    is_event_dup = False
-
-                    with self._channel_hash_lock:
-                        self._poll_msg_hashes[content_hash] = now
-                        self._channel_metrics['last_poll_time'] = (
-                            datetime.now().isoformat()
-                        )
-
-                        if content_hash in self._event_msg_hashes:
-                            # Event already delivered this message
-                            self._channel_metrics['duplicate_reconciled'] += 1
-                            is_event_dup = True
-                        else:
-                            # Event MISSED this message — poll found it
-                            self._channel_metrics['poll_discovered'] += 1
-                            self._channel_metrics['event_missed'] += 1
+                    content_hash = self._channel_path.compute_hash(msg)
+                    is_event_dup = self._channel_path.record_poll(
+                        content_hash, now)
 
                     if is_event_dup:
                         continue  # Already processed via event path
@@ -878,6 +841,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                         f"Poll discovered channel message missed by event: "
                         f"{msg.content[:30]}..."
                     )
+
+                    if not self._channel_path.bridge_allowed(msg):
+                        self._channel_path.note_suppressed(msg)
+                        continue
 
                     if self._should_bridge and not self._should_bridge(msg):
                         continue
@@ -907,56 +874,27 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
         self._cleanup_channel_hashes()
 
         # Periodic metric logging
-        if poll_cycle % self._metrics_log_interval == 0:
+        if poll_cycle % self._channel_path.metrics_log_interval == 0:
             self._log_channel_metrics()
 
+    # The dual-path channel state now lives in ChannelPath. These stay as
+    # thin delegates because callers outside this file (and the existing
+    # test suite) reach for them by these names.
     def _compute_channel_hash(self, msg: CanonicalMessage) -> str:
         """Compute content hash for channel message dedup across paths."""
-        import hashlib
-        key = f"{msg.source_address}:{msg.content}"
-        return hashlib.sha256(key.encode()).hexdigest()[:16]
+        return self._channel_path.compute_hash(msg)
 
     def _cleanup_channel_hashes(self) -> None:
         """Remove expired entries from dual-path hash maps."""
-        now = time.monotonic()
-        cutoff = now - self._channel_hash_window
-
-        with self._channel_hash_lock:
-            expired_event = [k for k, v in self._event_msg_hashes.items()
-                             if v < cutoff]
-            for k in expired_event:
-                del self._event_msg_hashes[k]
-
-            expired_poll = [k for k, v in self._poll_msg_hashes.items()
-                            if v < cutoff]
-            for k in expired_poll:
-                del self._poll_msg_hashes[k]
+        self._channel_path.cleanup()
 
     def _log_channel_metrics(self) -> None:
         """Log periodic summary of channel message dual-path metrics."""
-        with self._channel_hash_lock:
-            m = self._channel_metrics.copy()
-
-        total = m['event_received'] + m['poll_discovered']
-        if total == 0:
-            return
-
-        event_pct = (m['event_received'] / total * 100) if total else 0
-        miss_pct = (m['event_missed'] / total * 100) if total else 0
-
-        logger.info(
-            f"MeshCore channel metrics: "
-            f"event={m['event_received']} ({event_pct:.0f}%), "
-            f"poll_discovered={m['poll_discovered']}, "
-            f"event_missed={m['event_missed']} ({miss_pct:.0f}%), "
-            f"reconciled={m['duplicate_reconciled']}, "
-            f"poll_cycles={m['poll_cycles']}"
-        )
+        self._channel_path.log_metrics()
 
     def get_channel_metrics(self) -> dict:
         """Get channel message dual-path metrics snapshot."""
-        with self._channel_hash_lock:
-            return self._channel_metrics.copy()
+        return self._channel_path.snapshot()
 
     async def _process_outbound(self) -> None:
         """Process outbound messages from the bridge → MeshCore."""
