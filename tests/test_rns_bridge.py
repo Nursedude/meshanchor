@@ -2649,6 +2649,29 @@ class TestMeshcoreEgressHeaderReformat:
         bridge.send_to_rns = MagicMock(return_value=False)
         return captured
 
+    def test_bridge_log_DISCLOSES_the_source_channel(self, bridge, caplog):
+        """The 2026-09-18 disclosure, proven by the rendered log line.
+
+        ⚠️ This asserts the LOG, not the helper. The helper is unit-tested
+        elsewhere; what failed the domain for months was that the log line
+        carried no channel, and what failed ME was trusting that a code path
+        I reasoned about actually rendered. So drive the real bridge and read
+        the real record.
+        """
+        import logging
+        self._capture_egress(bridge)
+        with caplog.at_level(logging.INFO):
+            bridge._process_meshcore_to_bridge(self._broadcast("meshanchor p4: wx"))
+        assert "Bridge MC→Mesh [ch:meshanchor]" in caplog.text, caplog.text
+
+    def test_unprefixed_broadcast_logs_unknown_channel_not_a_guess(self, bridge, caplog):
+        """An absent channel must render as '?', never as a real channel name."""
+        import logging
+        self._capture_egress(bridge)
+        with caplog.at_level(logging.INFO):
+            bridge._process_meshcore_to_bridge(self._broadcast("bare message"))
+        assert "Bridge MC→Mesh [ch:?]" in caplog.text, caplog.text
+
     def test_broadcast_lifts_command_to_index_zero(self, bridge):
         captured = self._capture_egress(bridge)
         bridge._process_meshcore_to_bridge(self._broadcast("meshanchor p4: wx"))
@@ -3242,3 +3265,70 @@ class TestRetentionPinsWired20260803:
                             "default_lxmf_destination": ""})
         assert call.called
         assert list(call.call_args[0][0]) == []
+
+
+class TestMeshcoreSourceChannelDisclosure:
+    """meshcore_source_channel — the DISCLOSURE half of the 2026-09-18 arc.
+
+    Nothing gates on this. It exists because the bridge logs recorded no
+    source channel at all: the ``<channel> <sender>: `` header was parsed off
+    and discarded, so Public and private inbound traffic were
+    indistinguishable in the primary log — which is why a months-old
+    Public-channel leak survived two models and the architect.
+    """
+
+    def _chan(self, content):
+        from gateway.meshcore_bridge_mixin import meshcore_source_channel
+        return meshcore_source_channel(content)
+
+    def test_real_world_example(self):
+        """The shape this repo documents and the wire actually sends."""
+        assert self._chan("meshanchor p4: wx") == "meshanchor"
+
+    def test_unprefixed_is_empty_not_a_guess(self):
+        """An unprefixed broadcast is a REAL case; it must read as unknown.
+
+        The 2026-09-18 incident was an absent value defaulting into a
+        meaningful one (missing channel -> 0 -> Public -> refuse). Absent
+        must stay absent here.
+        """
+        assert self._chan("just a bare message") == ""
+        assert self._chan("") == ""
+
+    def test_sender_only_header_has_no_channel(self):
+        assert self._chan("p4: wx") == ""
+
+    def test_multiword_channel_survives(self):
+        """The sender is the LAST header token, so the channel keeps its spaces."""
+        assert self._chan("my channel p4: wx") == "my channel"
+
+    def test_colon_in_body_is_not_a_header(self):
+        assert self._chan("meshanchor p4: see http://x/y: ok") == "meshanchor"
+
+    def test_agrees_with_the_public_2tuple_helper(self):
+        """Both helpers come from ONE split, so they cannot disagree."""
+        from gateway.meshcore_bridge_mixin import parse_meshcore_channel_header
+        content = "meshanchor p4: wx"
+        sender, body = parse_meshcore_channel_header(content)
+        assert (self._chan(content), sender, body) == ("meshanchor", "p4", "wx")
+
+    def test_KNOWN_DIVERGENCE_handler_parser_mis_splits_multiword(self):
+        """⚠️ Documents a LIVE defect that the channel POLICY must resolve.
+
+        ``meshcore_handler._parse_meshcore_channel_text`` takes ``toks[0]`` as
+        the channel and ``toks[1]`` as the sender, so a multi-word channel name
+        mis-parses — and the ORACLE's name gate
+        (MESHANCHOR_ORACLE_MESHCORE_CHANNELS) inherits that today. This test
+        exists so the divergence is deliberate and visible, NOT to bless it:
+        the inbound channel policy must derive from
+        ``_split_meshcore_channel_header``, never from the handler's copy
+        (honest_failure_modes #5).
+        """
+        from gateway.meshcore_handler import _parse_meshcore_channel_text
+        content = "my channel p4: wx"
+        h_chan, h_sender, _ = _parse_meshcore_channel_text(content)
+        assert (h_chan, h_sender) == ("my", "channel"), "handler parser changed"
+        assert self._chan(content) == "my channel"
+        assert h_chan != self._chan(content), (
+            "the two parsers now agree — if they were unified, delete this "
+            "test and say so in the commit")

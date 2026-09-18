@@ -55,17 +55,54 @@ def parse_meshcore_channel_header(content: str):
     the meshing-around bot (``explicitCmd=True``, only acts on index 0)
     actually trigger on commands bridged in from the MeshCore channel.
     """
+    _, sender, body = _split_meshcore_channel_header(content)
+    if not sender:
+        return "", content
+    return sender, body
+
+
+def _split_meshcore_channel_header(content: str):
+    """The ONE split behind both public helpers: ``(channel, sender, body)``.
+
+    Returns ``("", "", content)`` when no ``": "`` header is present.
+
+    ⚠️ Factored out 2026-09-18 so the CHANNEL NAME can be disclosed without a
+    second implementation of this parse. There are already two parsers of this
+    wire format in the tree and they DISAGREE: this one takes the sender as the
+    LAST header token (so a multi-word channel name stays intact), while
+    ``meshcore_handler._parse_meshcore_channel_text`` takes ``toks[0]`` as the
+    channel and ``toks[1]`` as the sender — which mis-parses any channel name
+    containing a space, and the oracle's name gate inherits that today. Do NOT
+    add a third; when the inbound channel POLICY is built, derive it from here
+    (honest_failure_modes #5 — two consumers of one concept WILL drift).
+    """
     sep = ": "
     idx = content.find(sep)
     if idx <= 0:
-        return "", content
+        return "", "", content
     header = content[:idx]
     body = content[idx + len(sep):]
     tokens = header.split()
     sender = tokens[-1] if tokens else ""
+    channel = " ".join(tokens[:-1]) if len(tokens) > 1 else ""
     if not sender or not body:
-        return "", content
-    return sender, body
+        return "", "", content
+    return channel, sender, body
+
+
+def meshcore_source_channel(content: str) -> str:
+    """The channel NAME a MeshCore broadcast carries, or ``""`` if unprefixed.
+
+    DISCLOSURE ONLY — nothing gates on this. Until 2026-09-18 the bridge logs
+    recorded no source channel at all: the ``<channel> <sender>: `` header was
+    parsed off and discarded, so Public and private inbound traffic were
+    INDISTINGUISHABLE in the primary log. That is why a months-old Public-channel
+    leak survived two models and the architect — the data needed to see it was
+    thrown away at the door. Log it first, learn what the wire actually says,
+    and only then build a policy on it (the 2026-09-18 incident: an index-based
+    guard shipped on an assumed field refused 100% of channel traffic).
+    """
+    return _split_meshcore_channel_header(content)[0]
 
 
 class MeshCoreBridgeMixin:
@@ -164,10 +201,18 @@ class MeshCoreBridgeMixin:
             # preserved so the LXMF re-emit loop guard (nested_drop_prefixes)
             # still drops echoes. (Phase 2, 2026-05-24.)
             label, body = src_label, content
+            src_channel = ""
             if is_broadcast:
                 parsed_sender, parsed_body = parse_meshcore_channel_header(content)
                 if parsed_sender:
                     label, body = parsed_sender, parsed_body
+                # Disclosure only — see meshcore_source_channel(). Nothing
+                # gates on this; it exists so an operator (or a probe) can
+                # SEE which MeshCore channel a bridged message came from.
+                src_channel = meshcore_source_channel(content)
+            # "?" is deliberate: an UNPREFIXED broadcast is a real case
+            # (parse returns "") and must read as unknown, never as a channel.
+            ch_tag = f"[ch:{src_channel or '?'}]"
             prefix = f"[MC:{label}] "
             bridged_content = prefix + body
 
@@ -181,7 +226,7 @@ class MeshCoreBridgeMixin:
             if self.meshtastic_path_available():
                 if self.send_to_meshtastic(bridged_content,
                                            channel=self.config.meshtastic.channel):
-                    logger.info(f"Bridge MC→Mesh: {bridged_content[:50]}...")
+                    logger.info(f"Bridge MC→Mesh {ch_tag}: {bridged_content[:50]}...")
                     with self._stats_lock:
                         self.stats.setdefault('messages_meshcore_to_mesh', 0)
                         self.stats['messages_meshcore_to_mesh'] += 1
@@ -208,9 +253,9 @@ class MeshCoreBridgeMixin:
                 sent_count = sum(1 for dh in dests if self.send_to_rns(bridged_content, dh))
                 if sent_count:
                     if len(dests) > 1:
-                        logger.info(f"Bridge MC→RNS: {sent_count}/{len(dests)} dest(s) — {bridged_content[:50]}...")
+                        logger.info(f"Bridge MC→RNS {ch_tag}: {sent_count}/{len(dests)} dest(s) — {bridged_content[:50]}...")
                     else:
-                        logger.info(f"Bridge MC→RNS: {bridged_content[:50]}...")
+                        logger.info(f"Bridge MC→RNS {ch_tag}: {bridged_content[:50]}...")
                     with self._stats_lock:
                         self.stats.setdefault('messages_meshcore_to_rns', 0)
                         self.stats['messages_meshcore_to_rns'] += 1
