@@ -735,3 +735,37 @@ unrecognized), so order is DETERMINISTIC and there is NO seed; the earlier
 `test_status_bar`/Issue-#37 attribution is unsupported. Repro: loop `pytest tests/`
 under load, capture the `FAILED` id + traceback (honest_status discards both; culprit
 unknown). [GH #144](https://github.com/Nursedude/meshanchor/issues/144).
+
+---
+
+## Inbound MeshCore channel identity — `channel_idx`, and the Public policy (2026-09-18)
+
+**Tell**: a bot cmd sent on MeshCore **Public** bridges to Meshtastic and its
+answer comes back on the meshanchor channel; or every channel message reads
+as slot 0; or a message sent on Public logs as the private channel.
+**Cause** (VERIFIED against this box's venv, meshcore_py 2.3.7 `reader.py`):
+CHANNEL_MSG_RECV carries the slot as `channel_idx` (+ `type` CHAN/PRIV) and
+never `channel`/`is_channel`/`destination`; `from_meshcore` read `channel`
+with default 0, so every live channel message was slot 0. The text header
+is the sending node's NAME (`meshanchor p4: wx` from node "meshanchor p4"),
+not `<channel> <sender>` — that is why Public traffic logged `[ch:meshanchor]`.
+**Fixed** `8540d7ec` (read `channel_idx`; `None` when absent = unknown, never
+Public; ingress line; `[ch:<idx>]` tag) and the inbound policy commit after it
+(`src/gateway/meshcore_ingress.py` `InboundChannelPolicy`: Public(0) refused
+by default, allowlist by index via `MESHANCHOR_MESHCORE_BRIDGE_CHANNELS` or
+`meshcore.bridge_source_channels`, ONE predicate on the event AND poll legs;
+oracle gate = the DEVICE's name for the slot, never text).
+**Read the posture from the journal, not the code**:
+`journalctl -u meshanchor-daemon | grep -E "inbound channel policy|channel rx idx=|inbound REFUSED"`
+— posture at connect (`allow=… source=… device-channels=0=Public 1=meshanchor`),
+one line per inbound message (`idx= name= keys= text=`), one line per refusal
+(slot, name, reason, the knob). `get_channel_metrics()` carries
+`channel_suppressed` + `inbound_policy`. ⚠️ `meshanchor-daemon` is a SYSTEM
+unit — `journalctl --user` reads empty. ⚠️ Fixtures that fabricate `channel`
+/ `is_channel` pin the author, not the wire — feed `reader.py`'s keys.
+**Still open**: every MeshCore message arrives `is_broadcast=True` (reader
+never sets `destination`); `_poll_channel_messages` gates on methods absent
+from 2.3.7 (inert leg); channel sends ignore the radio's OK/ERROR and nothing
+chunks by bytes for MeshCore (a 189-byte emoji reply is logged "re-emitted"
+and never airs — 12:12 HST leaderboard); `[MC:<label>]` lifts the LAST token
+of a multi-word node name.

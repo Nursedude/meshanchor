@@ -56,7 +56,11 @@ from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
 from .meshcore_dm_reply import PendingDmAcks
 from .meshcore_ingress import (
+    InboundChannelPolicy,
+    apply_inbound_policy,
+    channel_name_for,
     disclose_channel_ingress,
+    format_channel_metrics,
     parse_meshcore_channel_text as _parse_meshcore_channel_text,
 )
 from .meshcore_radio_ops_mixin import MeshCoreRadioOpsMixin
@@ -206,6 +210,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             'last_event_time': None,  # Timestamp of last event-delivered msg
             'last_poll_time': None,   # Timestamp of last poll-delivered msg
         }
+        # Inbound source-slot policy (2026-09-18) — ONE predicate for the
+        # event leg AND the poll leg, keyed on the wire's channel_idx.
+        self._inbound_policy = InboundChannelPolicy(getattr(config, 'meshcore', None))
         self._metrics_log_interval = 50  # Log summary every N poll cycles
 
         # Chat ring buffer — feeds the daemon's HTTP chat API and TUI.
@@ -363,6 +370,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                         self._reconnect.record_success()
                         self.health.record_connection_event("meshcore", "connected")
                         logger.info("MeshCore connection established")
+                        self._inbound_policy.log_posture(self)
                         self._notify_status("meshcore_connected")
                     else:
                         self._reconnect.record_failure()
@@ -689,16 +697,24 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             # Mesh oracle (read-only): a query on a whitelisted channel is
             # answered DIRECTED back to the asker (a DM, never a channel
             # broadcast — honors "broadcast is not auto-answered") and consumed.
-            # MeshCore channel text is "<channel> <sender>: <text>", so parse the
-            # channel NAME + sender out of it (msg.source_address comes through
-            # empty for channel messages) and match the channel by name. Per-
-            # sender cooldown also dedups the event-vs-poll dual delivery.
+            # The channel the oracle gates on is the DEVICE's name for the
+            # wire's slot index (2026-09-18) — never a word parsed out of the
+            # text, which is the sending node's NAME ("meshanchor p4: wx") and
+            # let Public queries through for months. The text still yields
+            # the sender label and the query body (source_address is empty
+            # for channel messages). Per-sender cooldown also dedups the
+            # event-vs-poll dual delivery.
+            slot = (msg.metadata or {}).get('channel')
+            dev_name = channel_name_for(self, slot)
             if self._oracle is not None:
                 try:
-                    chan_name, sender, query = _parse_meshcore_channel_text(
-                        msg.content)
+                    _, sender, query = _parse_meshcore_channel_text(msg.content)
                     who = sender or msg.source_address or ""
-                    reply = self._oracle.handle(who, query, chan_name)
+                    gate_name = dev_name.lower() if dev_name else None
+                    logger.debug(
+                        f"oracle channel gate: slot={slot} name={gate_name} "
+                        f"(from the device table, not the text)")
+                    reply = self._oracle.handle(who, query, gate_name)
                     # consume (default) stops here; bridge-through
                     # (MESHANCHOR_ORACLE_CONSUME=0) answers AND lets the command
                     # bridge to the other mesh for cross-mesh visibility.
@@ -706,6 +722,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                         return
                 except Exception as e:
                     logger.debug(f"meshcore oracle (channel) handle error: {e}")
+
+            # Inbound source-slot policy — the 2026-09-18 leak, closed on the
+            # REAL index. Same predicate as the poll leg below.
+            if not apply_inbound_policy(self, msg, dev_name):
+                return
 
             if self._should_bridge and not self._should_bridge(msg):
                 logger.debug("MeshCore channel message blocked by routing rules")
@@ -863,6 +884,12 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
                         f"{msg.content[:30]}..."
                     )
 
+                    # Same inbound source-slot predicate as the event leg —
+                    # a filter on one leg alone would leak every message the
+                    # other leg happened to carry.
+                    if not apply_inbound_policy(self, msg):
+                        continue
+
                     if self._should_bridge and not self._should_bridge(msg):
                         continue
 
@@ -920,27 +947,17 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
         """Log periodic summary of channel message dual-path metrics."""
         with self._channel_hash_lock:
             m = self._channel_metrics.copy()
-
-        total = m['event_received'] + m['poll_discovered']
-        if total == 0:
-            return
-
-        event_pct = (m['event_received'] / total * 100) if total else 0
-        miss_pct = (m['event_missed'] / total * 100) if total else 0
-
-        logger.info(
-            f"MeshCore channel metrics: "
-            f"event={m['event_received']} ({event_pct:.0f}%), "
-            f"poll_discovered={m['poll_discovered']}, "
-            f"event_missed={m['event_missed']} ({miss_pct:.0f}%), "
-            f"reconciled={m['duplicate_reconciled']}, "
-            f"poll_cycles={m['poll_cycles']}"
-        )
+        line = format_channel_metrics(m, self._inbound_policy)
+        if line:
+            logger.info(line)
 
     def get_channel_metrics(self) -> dict:
         """Get channel message dual-path metrics snapshot."""
         with self._channel_hash_lock:
-            return self._channel_metrics.copy()
+            m = self._channel_metrics.copy()
+        m['channel_suppressed'] = self._inbound_policy.suppressed
+        m['inbound_policy'] = self._inbound_policy.describe()
+        return m
 
     async def _process_outbound(self) -> None:
         """Process outbound messages from the bridge → MeshCore."""

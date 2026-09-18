@@ -1101,7 +1101,7 @@ class TestMeshOracleMeshcoreWiring:
         import logging
         handler._oracle = None
         event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
-            'type': 'CHAN', 'channel_idx': 0, 'path_len': 0, 'txt_type': 0,
+            'type': 'CHAN', 'channel_idx': 1, 'path_len': 0, 'txt_type': 0,
             'sender_timestamp': 1789767168, 'text': 'meshanchor p4: wx'})
         loop = asyncio.new_event_loop()
         try:
@@ -1109,20 +1109,23 @@ class TestMeshOracleMeshcoreWiring:
                 loop.run_until_complete(handler._on_channel_message(event))
         finally:
             loop.close()
-        assert "MeshCore channel rx idx=0" in caplog.text, caplog.text
+        assert "MeshCore channel rx idx=1" in caplog.text, caplog.text
         assert "'channel_idx'" in caplog.text
         assert "text='meshanchor p4: wx'" in caplog.text
         msg = handler._message_queue.get_nowait()
-        assert msg.metadata['channel'] == 0  # Public, as the wire said — not a name
+        assert msg.metadata['channel'] == 1  # the slot, as the wire said — not a name
 
     def test_channel_query_parsed_and_routed_by_name(self, handler):
-        # Real MeshCore channel text: "<channel> <sender>: <text>" with an empty
-        # source_address. The hook parses the channel NAME + sender + query.
+        # Channel text is "<sender name>: <text>" with an empty source_address.
+        # The hook takes sender + query from the text, but the channel NAME
+        # the oracle gates on is the DEVICE's name for the wire's slot
+        # (2026-09-18) — never a word out of the text.
+        handler.get_radio_state = lambda refresh=False: {'channels': [
+            {'idx': 0, 'name': 'Public'}, {'idx': 1, 'name': 'meshanchor'}]}
         handler._oracle = MagicMock()
         handler._oracle.handle.return_value = "dude-AI@x: nodes:?"
         event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
-            'text': 'meshanchor p3: status', 'destination': None,
-            'is_channel': True, 'channel': 0})
+            'type': 'CHAN', 'channel_idx': 1, 'text': 'meshanchor p3: status'})
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(handler._on_channel_message(event))
@@ -1141,9 +1144,10 @@ class TestMeshOracleMeshcoreWiring:
             handler._oracle = MagicMock()
             handler._oracle.handle.return_value = "dude-AI@x: nodes:?"
             handler._oracle.consume = False
+            handler.get_radio_state = lambda refresh=False: {'channels': [
+                {'idx': 0, 'name': 'Public'}, {'idx': 1, 'name': 'meshanchor'}]}
             event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
-                'text': 'meshanchor p3: status', 'sender': 'p3',
-                'destination': None, 'is_channel': True, 'channel': 1})
+                'type': 'CHAN', 'channel_idx': 1, 'text': 'meshanchor p3: status'})
             loop.run_until_complete(handler._on_channel_message(event))
             handler._oracle.handle.assert_called_once_with('p3', 'status', 'meshanchor')
             assert not handler._message_queue.empty()  # answered AND bridged
@@ -1162,8 +1166,10 @@ class TestMeshOracleMeshcoreWiring:
         handler.send_text = MagicMock(return_value=True)
         handler._oracle = handler._build_meshcore_oracle_responder()
         assert handler._oracle is not None
+        handler.get_radio_state = lambda refresh=False: {'channels': [
+            {'idx': 0, 'name': 'Public'}, {'idx': 1, 'name': 'meshanchor'}]}
         event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
-            'text': 'meshanchor p3: status', 'is_channel': True, 'channel': 0})
+            'type': 'CHAN', 'channel_idx': 1, 'text': 'meshanchor p3: status'})
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(handler._on_channel_message(event))

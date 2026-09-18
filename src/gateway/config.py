@@ -272,6 +272,11 @@ class MeshCoreConfig:
     auto_fetch_messages: bool = True      # Start auto message fetching on connect
     bridge_channels: bool = True          # Bridge channel (broadcast) messages
     bridge_dms: bool = True               # Bridge direct messages
+    # Inbound source-SLOT allowlist (2026-09-18): which MeshCore channel slots
+    # may bridge INTO the other meshes. None = every slot except Public(0).
+    # [] = bridge nothing (DM-only). Env MESHANCHOR_MESHCORE_BRIDGE_CHANNELS
+    # overrides. Keyed by the wire's channel_idx, never by a name in the text.
+    bridge_source_channels: Optional[List[int]] = None
 
     # Directed-DM reply leg (prototype 2026-08-28). Bridged content shaped
     # "@<contact> <text>" (from Meshtastic or RNS) is delivered as a MeshCore
