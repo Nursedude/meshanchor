@@ -86,6 +86,19 @@ class TestDefaultPosture:
         assert "Public is refused by default" in caplog.text
         assert BRIDGE_CHANNELS_ENV in caplog.text
 
+    def test_every_refusal_is_visible_at_INFO_not_just_the_first_three(self, caplog):
+        """13:13 HST 2026-09-18: refusals 4 and 5 went to DEBUG and the journal
+        showed ingress lines with no verdict. A reader must never have to
+        infer a refusal from silence."""
+        h, q = _handler()
+        with caplog.at_level(logging.INFO):
+            for _ in range(6):
+                _run(h, _wire_event(0))
+        lines = [r for r in caplog.records
+                 if "inbound REFUSED" in r.getMessage() and r.levelno == logging.INFO]
+        assert len(lines) == 6, [r.getMessage()[:60] for r in caplog.records]
+        assert "suppressed=6" in lines[-1].getMessage()
+
     def test_private_slot_bridges(self):
         h, q = _handler()
         _run(h, _wire_event(1))

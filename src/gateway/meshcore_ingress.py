@@ -201,10 +201,13 @@ class InboundChannelPolicy:
             self.suppressed += 1
             n = self.suppressed
         slot = (getattr(msg, 'metadata', None) or {}).get('channel')
-        # INFO for the first few and every 100th so an operator sees it
-        # without DEBUG; the counter rides the channel-metrics line always.
-        log = logger.info if n <= 3 or n % 100 == 0 else logger.debug
-        log(f"MeshCore inbound REFUSED slot={slot} name={name or '?'}: {reason}; "
+        # EVERY refusal at INFO. The first cut backed off to DEBUG after three,
+        # and within an hour (2026-09-18 13:13) a reader saw an ingress line
+        # with no verdict after it — the exact silence this disclosure exists
+        # to refuse. LoRa channel rates cannot flood a journal; the metrics
+        # line carries the running count regardless.
+        logger.info(
+            f"MeshCore inbound REFUSED slot={slot} name={name or '?'}: {reason}; "
             f"message not bridged (suppressed={n}) — set {BRIDGE_CHANNELS_ENV} to change")
         return n
 
