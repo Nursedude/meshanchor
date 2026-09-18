@@ -566,7 +566,7 @@ class MQTTHandler(BaseHandler):
                 ("autostart", f"Auto-Start          [{auto_status}] Start on TUI launch"),
                 ("autotelem", f"Auto Telemetry      [{telem_status}] Poll silent nodes"),
                 ("save", "Save & Exit"),
-                ("back", "Cancel"),
+                ("cancel", "Cancel"),
             ]
 
             choice = self.ctx.dialog.menu(
@@ -575,7 +575,7 @@ class MQTTHandler(BaseHandler):
                 choices
             )
 
-            if choice is None or choice == "back":
+            if choice is None or choice == "cancel":
                 break
 
             if choice == "local":
