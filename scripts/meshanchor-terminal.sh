@@ -12,14 +12,18 @@ MESHANCHOR_DIR="/opt/meshanchor"
 ICON_NAME="org.meshanchor.app"
 TITLE="MeshAnchor"
 
-# Root's bytecode must not land in the repo. Sourced, never copied — see
-# scripts/lib/pycache_prefix.sh for the fleet-wide census that forced this.
-# ⚠️ sudo resets the environment, so this MUST ride as `sudo VAR=... python3`;
-# exporting it out here would not reach the child.
-# shellcheck source=lib/pycache_prefix.sh
-. "$MESHANCHOR_DIR/scripts/lib/pycache_prefix.sh"
-
-TUI_CMD="sudo PYTHONPYCACHEPREFIX=$MA_ROOT_PYCACHE python3 $MESHANCHOR_DIR/src/launcher_tui/main.py"
+# ONE launch path, not two (2026-09-20). Until now this file built its own
+# privileged command — bare system `python3`, straight at launcher_tui/main.py
+# — while `meshanchor` / `meshanchor-tui` went through scripts/meshanchor-launcher.sh,
+# which picks the venv, sets PYTHONPYCACHEPREFIX and passes `--tui`. Two
+# programs for one icon is the drift class the launcher fix closed for the
+# CLI; the desktop icon was the last copy. Delegate: `tui` is the direct-TUI
+# path (no launcher menu, no NOC service startup — what this icon always did).
+# Keep it as TWO words with no spaces in the path: every emulator branch below
+# hands $TUI_CMD over differently (quoted for -e, word-split for konsole /
+# gnome-terminal) and this shape survives all of them like the old one did.
+# Drilled by scripts/guard_drill.py Layer D (the no-display branch).
+TUI_CMD="$MESHANCHOR_DIR/scripts/meshanchor-launcher.sh tui"
 
 # Log file for debugging launch issues
 LOG_FILE="/tmp/meshanchor-launch.log"
@@ -114,6 +118,11 @@ check_installation() {
 
     if [ ! -f "$MESHANCHOR_DIR/src/launcher_tui/main.py" ]; then
         show_error "launcher_tui not found at $MESHANCHOR_DIR/src/\n\nInstallation may be corrupted."
+        exit 1
+    fi
+
+    if [ ! -x "$MESHANCHOR_DIR/scripts/meshanchor-launcher.sh" ]; then
+        show_error "launcher script not found or not executable:\n$MESHANCHOR_DIR/scripts/meshanchor-launcher.sh\n\nInstallation may be corrupted."
         exit 1
     fi
 }

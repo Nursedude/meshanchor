@@ -5,7 +5,7 @@
 #
 # Consumers (keep this list current — it is the grep target when this changes):
 #   - scripts/meshanchor-launcher.sh   launch_tui + launch_prometheus
-#   - scripts/meshanchor-terminal.sh   TUI_CMD (the desktop launcher)
+#   - scripts/meshanchor-terminal.sh   delegates to meshanchor-launcher.sh `tui` (2026-09-20)
 #   - tests/test_regression_guards.py TestPrivilegedPycachePrefix
 #
 # WHY THIS EXISTS (measured fleet-wide 2026-09-20). The documented primary
