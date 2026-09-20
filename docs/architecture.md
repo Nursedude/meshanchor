@@ -93,7 +93,7 @@ sequenceDiagram
 | Bridge direction | MeshCore -> Meshtastic/RNS | Meshtastic -> MeshCore/RNS |
 | meshtasticd required? | No (optional gateway) | Yes (primary) |
 | meshcore package | Primary dependency | Optional |
-| Python version | 3.10+ | 3.9+ |
+| Python version | 3.10+ | 3.11+ |
 | Field-tested | Continuous deployment on `meshanchor-server` since 2026-05-02; 24h clean fleet soak 2026-05-11; LXMF bridge cross-federation 2026-05-09 | Yes (beta) |
 
 ### Design Principles
