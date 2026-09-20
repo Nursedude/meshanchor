@@ -76,7 +76,7 @@ Forked from MeshForge main on 2026-04-01. Shares the same TUI framework, gateway
 
 ```bash
 # Launch
-sudo python3 src/launcher_tui/main.py   # Primary interface (TUI)
+scripts/meshanchor-launcher.sh   # Primary interface (TUI)
 python3 src/standalone.py               # Zero-dependency RF tools
 # GTK4 desktop REMOVED — TUI is the only interface
 

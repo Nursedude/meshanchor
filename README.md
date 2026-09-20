@@ -33,7 +33,7 @@ Meshtastic, or to whatever else your site runs.**
 It runs on **one box**. No cloud, no subscriptions, no account.
 
 ```bash
-sudo python3 src/launcher_tui/main.py
+scripts/meshanchor-launcher.sh
 ```
 
 **Built for:** MeshCore developers, RF engineers, network operators, amateur
@@ -104,7 +104,7 @@ whose home radio matches yours; they interoperate.
 git clone https://github.com/Nursedude/meshanchor.git
 cd meshanchor
 sudo bash scripts/install_noc.sh       # guided install
-sudo python3 src/launcher_tui/main.py  # the NOC
+scripts/meshanchor-launcher.sh  # the NOC
 ```
 
 Runs on a Raspberry Pi with a MeshCore companion radio (RAK4631, Heltec V3,

@@ -138,12 +138,15 @@ fi
 
 # Install launcher scripts
 echo "Installing launcher scripts..."
-cp "$PROJECT_DIR/scripts/meshanchor-launcher.sh" /usr/local/bin/meshanchor
-chmod 755 /usr/local/bin/meshanchor
+# SYMLINKS, not copies (ported from MeshForge e25ee21d, 2026-09-20). This
+# script runs on EVERY update.sh, and a `cp` here re-froze the installed
+# command at install time while the repo moved on. A symlink cannot go stale.
+# ⚠️ Never go back to `cp`/`cat >`: both FOLLOW a symlink, so they would
+# write straight through into the repo script and corrupt it.
+ln -sfn "$PROJECT_DIR/scripts/meshanchor-launcher.sh" /usr/local/bin/meshanchor
 
 # Install terminal launcher (sets proper window class for icons)
-cp "$PROJECT_DIR/scripts/meshanchor-terminal.sh" /usr/local/bin/meshanchor-terminal
-chmod 755 /usr/local/bin/meshanchor-terminal
+ln -sfn "$PROJECT_DIR/scripts/meshanchor-terminal.sh" /usr/local/bin/meshanchor-terminal
 
 
 # Install polkit policy (for pkexec authentication)

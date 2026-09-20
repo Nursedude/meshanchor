@@ -1588,18 +1588,22 @@ echo -e "  ${GREEN}✓ Daemon type: $DAEMON_TYPE${NC}"
 echo -e "${CYAN}[8/8] Creating system integration...${NC}"
 
 # Main command
-cat > /usr/local/bin/meshanchor << 'MESHANCHOR_CMD'
-#!/bin/bash
-cd /opt/meshanchor
-exec sudo /opt/meshanchor/venv/bin/python src/launcher.py "$@"
-MESHANCHOR_CMD
-chmod +x /usr/local/bin/meshanchor
+# SYMLINK, not a generated copy (ported from MeshForge e25ee21d, 2026-09-20):
+# this heredoc froze the installed command at install time, and its
+# privileged `venv/bin/python` wrote root-owned __pycache__ into the repo on
+# every run. scripts/meshanchor-launcher.sh now owns this logic — venv
+# selection, PYTHONPYCACHEPREFIX and all — and a symlink tracks it.
+# ⚠️ Never restore a heredoc here: `cat >` FOLLOWS a symlink and would write
+# through into the repo script.
+ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh /usr/local/bin/meshanchor
 
 # NOC orchestrator command
 cat > /usr/local/bin/meshanchor-noc << 'NOC_CMD'
 #!/bin/bash
 cd /opt/meshanchor/src
-exec sudo /opt/meshanchor/venv/bin/python -m core.orchestrator "$@"
+# Keep root bytecode out of the repo (scripts/lib/pycache_prefix.sh).
+. /opt/meshanchor/scripts/lib/pycache_prefix.sh
+exec sudo PYTHONPYCACHEPREFIX="$MA_ROOT_PYCACHE" /opt/meshanchor/venv/bin/python -m core.orchestrator "$@"
 NOC_CMD
 chmod +x /usr/local/bin/meshanchor-noc
 

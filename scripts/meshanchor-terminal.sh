@@ -11,7 +11,15 @@
 MESHANCHOR_DIR="/opt/meshanchor"
 ICON_NAME="org.meshanchor.app"
 TITLE="MeshAnchor"
-TUI_CMD="sudo python3 $MESHANCHOR_DIR/src/launcher_tui/main.py"
+
+# Root's bytecode must not land in the repo. Sourced, never copied — see
+# scripts/lib/pycache_prefix.sh for the fleet-wide census that forced this.
+# ⚠️ sudo resets the environment, so this MUST ride as `sudo VAR=... python3`;
+# exporting it out here would not reach the child.
+# shellcheck source=lib/pycache_prefix.sh
+. "$MESHANCHOR_DIR/scripts/lib/pycache_prefix.sh"
+
+TUI_CMD="sudo PYTHONPYCACHEPREFIX=$MA_ROOT_PYCACHE python3 $MESHANCHOR_DIR/src/launcher_tui/main.py"
 
 # Log file for debugging launch issues
 LOG_FILE="/tmp/meshanchor-launch.log"
@@ -151,7 +159,7 @@ if has_display; then
 
     # Nothing worked - show error
     log_msg "No terminal emulator found!"
-    show_error "No terminal emulator found!\n\nInstall one with:\n  sudo apt install xterm\n\nOr run directly:\n  sudo python3 $MESHANCHOR_DIR/src/launcher_tui/main.py"
+    show_error "No terminal emulator found!\n\nInstall one with:\n  sudo apt install xterm\n\nOr run directly:\n  $MESHANCHOR_DIR/scripts/meshanchor-launcher.sh"
     exit 1
 else
     # No display (SSH session) - run TUI directly

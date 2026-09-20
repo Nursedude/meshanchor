@@ -73,7 +73,7 @@ the rationale behind each default, see
 ### Already Have meshtasticd?
 
 ```bash
-sudo python3 src/launcher_tui/main.py
+scripts/meshanchor-launcher.sh
 ```
 
 ### RF Tools Only (no sudo, no radio)
@@ -155,7 +155,7 @@ sudo python3 src/launcher.py --verify-install
 # Manual checks
 python3 -c "from src.__version__ import __version__; print(__version__)"
 python3 -m pytest tests/ -v --tb=short
-sudo python3 src/launcher_tui/main.py
+scripts/meshanchor-launcher.sh
 ```
 
 ### Troubleshooting

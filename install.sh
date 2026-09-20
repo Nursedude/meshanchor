@@ -216,28 +216,21 @@ fi
 echo -e "${CYAN}[7/7] Creating system commands...${NC}"
 
 # Main launcher wizard (default)
-cat > /usr/local/bin/meshanchor << 'EOF'
-#!/bin/bash
-cd /opt/meshanchor
-if [[ -f .no-venv ]]; then
-    exec sudo python3 src/launcher.py "$@"
-else
-    exec sudo /opt/meshanchor/venv/bin/python src/launcher.py "$@"
-fi
-EOF
-chmod +x /usr/local/bin/meshanchor
+# SYMLINKS, not generated copies (ported from MeshForge 4e726548, 2026-09-20).
+# Until then these were written here with `cat >`, so every `git pull` updated
+# the repo and left the installed command frozen at install time — two
+# different `meshanchor` programs under one name. A symlink cannot go stale.
+#
+# ⚠️ This is also why `cat >` must never come back here: `cat >` FOLLOWS a
+# symlink, so re-adding it would write this heredoc straight through into
+# scripts/meshanchor-launcher.sh and corrupt the repo file. `ln -sfn`
+# replaces the link itself. TestPrivilegedPycachePrefix pins this.
+ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh /usr/local/bin/meshanchor
 
-# TUI access (raspi-config style)
-cat > /usr/local/bin/meshanchor-tui << 'EOF'
-#!/bin/bash
-cd /opt/meshanchor
-if [[ -f .no-venv ]]; then
-    exec sudo python3 src/launcher_tui/main.py "$@"
-else
-    exec sudo /opt/meshanchor/venv/bin/python src/launcher_tui/main.py "$@"
-fi
-EOF
-chmod +x /usr/local/bin/meshanchor-tui
+# `meshanchor-tui` is the DIRECT-TUI alias. The script dispatches on its own
+# basename: invoked as meshanchor-tui it passes launcher.py `--tui` (no menu,
+# no NOC service startup), so one target serves both names correctly.
+ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh /usr/local/bin/meshanchor-tui
 
 echo -e "${GREEN}  ✓ Commands created: meshanchor, meshanchor-tui${NC}"
 

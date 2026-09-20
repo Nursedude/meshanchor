@@ -1410,3 +1410,204 @@ class TestInstallerProvisionsUnattendedUpgrades:
         assert 'check_fail "unattended-upgrades installed"' in v
         assert "sudo apt install -y unattended-upgrades" in v, "the FAIL must name the fix"
         assert "20auto-upgrades" in v, "installed-but-idle must be distinguishable from installed"
+
+
+class TestPrivilegedPycachePrefix:
+    """Every PRIVILEGED python3 launch must carry PYTHONPYCACHEPREFIX.
+
+    PORTED from MeshForge (b29e26ae + b7c523c2 + e25ee21d, 2026-09-20). The
+    census below is MeshForge's; meshanchor-server carried 8 root-owned
+    files in this repo on the day of the port.
+
+    WHY (measured fleet-wide 2026-09-20). Python caches bytecode for each
+    module it IMPORTS next to the source, so `sudo python3
+    src/launcher_tui/main.py` — the documented primary launch — left
+    root-owned `__pycache__` inside the repo on every run. SEVEN of the ten
+    fleet boxes were affected, the worst two carrying 4,059 and 1,910
+    root-owned files; three also carried root-owned VENVS while their units
+    declare a non-root `User=`, which fails any dependency install. The tell was WHERE the files were —
+    `src/launcher_tui/handlers/__pycache__` — and those dirs were then
+    unwritable by wh6gxz, so the *unprivileged* TUI silently stopped caching
+    bytecode at all.
+
+    It had been "cured" by repeated fleet-wide `chown -R` sweeps. It kept
+    coming back because it regenerates on documented, everyday use. A guard
+    is the fix; a sweep is a mop.
+
+    ⚠️ This guard exists because the condition is INVISIBLE in a green
+    suite and on a freshly-chowned fleet — nothing else fails when a
+    launcher loses the prefix, until a Pi has thousands of root-owned files
+    again weeks later. `scripts/guard_drill.py` shape: plant a bare
+    `sudo python3 ... main.py` in any launcher and this must go red.
+
+    Unprivileged launches are deliberately NOT required to set it: they
+    write wh6gxz-owned cache in-repo, which is correct and fast.
+    """
+
+    REPO = os.path.dirname(SRC_DIR)
+    # Shell files that may invoke the interpreter with elevated privilege OR
+    # install the commands that do.
+    #
+    # ⚠️ This list started as three files and MISSED TWO GENERATORS
+    # (2026-09-20): scripts/install-desktop.sh `cp`-ed the launcher over the
+    # installed command on EVERY update.sh run, and scripts/install_noc.sh
+    # wrote its own privileged heredoc there. Both would have silently
+    # reverted the fix this class exists to protect. A guard with a
+    # hand-listed scope is only as good as the grep that built it — and the
+    # grep that built the first version was truncated by `head`.
+    SCANNED = (
+        'scripts/meshanchor-launcher.sh',
+        'scripts/meshanchor-terminal.sh',
+        'install.sh',
+        'scripts/install-desktop.sh',
+        'scripts/install_noc.sh',
+        'scripts/update.sh',
+    )
+    # Every file that may create /usr/local/bin/meshanchor*.
+    INSTALLERS = (
+        'install.sh',
+        'scripts/install-desktop.sh',
+        'scripts/install_noc.sh',
+    )
+
+    def _privileged_python_lines(self, text):
+        """Lines that run python as root: via `sudo`, OR via `exec env` in a
+        branch already known to be root.
+
+        ⚠️ The first version matched the `sudo` form ONLY, reasoning that it
+        is the one that resets the environment. But `sudo meshanchor` runs the
+        launcher SCRIPT as root, so it takes the `EUID -eq 0` branch — the
+        `exec env PYTHONPYCACHEPREFIX=... python` line — and that is the
+        privileged launch the operator actually types. Drilled 2026-09-20 by
+        the adversarial review of cfad33b2..e25ee21d: with the prefix stripped
+        from that branch, all three tests stayed GREEN. The guard's fourth
+        instance of the defect it guards against. A launcher's root branch is
+        privileged by construction; match it too.
+        """
+        out = []
+        for i, line in enumerate(text.splitlines(), 1):
+            s = line.strip()
+            if s.startswith('#'):
+                continue
+            # Match ANY interpreter, not the literal `python3`: the installed
+            # wrappers run `sudo /opt/meshanchor/venv/bin/python ...`, which
+            # caches bytecode identically. An earlier version of this guard
+            # keyed on `python3` and was blind to exactly those two lines —
+            # the guard's own instance of the defect it exists to catch.
+            # Advice TEXT is not a launch: `echo "... run: sudo python3 x"`
+            # is documentation. Match only lines that execute.
+            if re.match(r'(?:echo|printf|cat)\b', s) or '"  ' in s.split('sudo')[0]:
+                continue
+            # Three shapes: `sudo ... <python>`, `exec env ... <python>` (the
+            # root branch as written), and `exec "$py" ...` (the root branch
+            # with the prefix STRIPPED — `$py` is the launcher's interpreter
+            # variable and only ever names a privileged launch). A bare
+            # `exec python3 ...` is NOT matched: launch_maps runs unprivileged.
+            if re.search(r'(?:\bsudo\b|\bexec\s+env\b)[^|;]*'
+                         r'(?:\bpython3?\b|/bin/python3?\b|\$py\b)'
+                         r'|\bexec\s+"?\$py\b', s):
+                out.append((i, s))
+        return out
+
+    def test_every_privileged_python3_sets_pycache_prefix(self):
+        offenders = []
+        scanned_any = False
+        for rel in self.SCANNED:
+            path = os.path.join(self.REPO, rel)
+            if not os.path.exists(path):
+                continue
+            with open(path, 'r', encoding='utf-8') as fh:
+                text = fh.read()
+            for lineno, line in self._privileged_python_lines(text):
+                scanned_any = True
+                if 'PYTHONPYCACHEPREFIX' not in line:
+                    offenders.append(f"{rel}:{lineno}: {line}")
+        # A guard that silently scans nothing is not a guard (the probe-blind
+        # class): if no privileged launch exists at all, the files moved and
+        # this test must be re-aimed rather than pass vacuously.
+        assert scanned_any, (
+            "no `sudo ... python3` launch found in any of "
+            f"{self.SCANNED} — the launchers moved; re-aim this guard "
+            "instead of deleting it (scripts/lib/pycache_prefix.sh explains why)")
+        assert offenders == [], (
+            "privileged python3 launch without PYTHONPYCACHEPREFIX — root "
+            "bytecode will land in the repo again (the chown-sweep cause, "
+            "2026-09-20). Pass it as `sudo PYTHONPYCACHEPREFIX=\"$MF_ROOT_PYCACHE\" "
+            "python3 ...` (sudo resets the env, so exporting it will NOT "
+            "reach the child) and source scripts/lib/pycache_prefix.sh:\n  "
+            + "\n  ".join(offenders))
+
+    def test_installed_commands_are_symlinks_not_generated_copies(self):
+        """`/usr/local/bin/meshanchor*` must be SYMLINKED into the repo, never
+        written with `cat >`.
+
+        Two reasons, both load-bearing:
+
+        1. A generated copy goes stale. Until 2026-09-20 install.sh wrote
+           these with a heredoc, so `git pull` updated the repo and left the
+           installed command frozen at install time. The fleet had drifted
+           into TWO different `meshanchor` programs, and the
+           privileged-bytecode fix reached the repo without reaching the
+           command anyone types — `fleet_pull` alone could not have fixed it.
+        2. `cat >` FOLLOWS a symlink. Once these are links, re-adding a
+           heredoc would write it straight THROUGH into
+           scripts/meshanchor-launcher.sh and corrupt the repo file. That is a
+           destructive regression, not a cosmetic one.
+        """
+        offenders = []
+        lines = []
+        for rel in self.INSTALLERS:
+            path = os.path.join(self.REPO, rel)
+            if not os.path.exists(path):
+                continue
+            with open(path, 'r', encoding='utf-8') as fh:
+                flines = fh.read().splitlines()
+            if rel == 'install.sh':
+                lines = flines
+            for i, l in enumerate(flines, 1):
+                t = l.strip()
+                if t.startswith('#'):
+                    continue
+                # `cp`, `cat >`, `tee` and mf_write_stdin all FOLLOW a symlink.
+                # ONLY the two commands converted to symlinks. The other
+                # meshanchor-* commands (noc/lora/status/web/map) are still
+                # generated copies — a real but SEPARATE staleness debt,
+                # queued rather than silently widened into this guard.
+                dest = r'/usr/local/bin/meshanchor(?:-tui)?(?![-\w])'
+                if re.search(r'(?:cat|tee|mf_write_stdin)\s[^|]*>?\s*' + dest, t) \
+                        or re.search(r'\bcp\b[^|]*\s' + dest, t):
+                    offenders.append(f"{rel}:{i}: {t}")
+        assert offenders == [], (
+            "install.sh writes /usr/local/bin/meshanchor* as a generated copy. "
+            "Use `ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh <dest>` "
+            "— a copy goes stale on every pull, and `cat >` follows a symlink "
+            "and would corrupt the repo script:\n  " + "\n  ".join(offenders))
+        # And the links must actually be created (absence is not success).
+        # ⚠️ EXACT-LINE match, never a substring: `/usr/local/bin/meshanchor-tui`
+        # CONTAINS `/usr/local/bin/meshanchor`, so a substring test stayed green
+        # with the real line deleted — it was satisfied by the alias. Caught by
+        # drilling this guard, which is the only reason it is right.
+        target = 'ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh /usr/local/bin/meshanchor'
+        stripped = [l.strip() for l in lines]
+        for dest in ('meshanchor', 'meshanchor-tui'):
+            want = f'ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh /usr/local/bin/{dest}'
+            assert want in stripped, (
+                f"install.sh no longer symlinks /usr/local/bin/{dest} — that "
+                f"installed command would not exist at all. Expected exactly: {want}")
+        assert target in stripped
+
+    def test_launchers_source_the_shared_constant(self):
+        """ONE constant, not a per-file literal (honest_failure_modes #5:
+        independent hardcodes WILL drift)."""
+        missing = []
+        for rel in ('scripts/meshanchor-launcher.sh', 'scripts/meshanchor-terminal.sh'):
+            path = os.path.join(self.REPO, rel)
+            if not os.path.exists(path):
+                continue
+            with open(path, 'r', encoding='utf-8') as fh:
+                text = fh.read()
+            if 'lib/pycache_prefix.sh' not in text:
+                missing.append(rel)
+        assert missing == [], (
+            "launcher defines the pycache path itself instead of sourcing "
+            "scripts/lib/pycache_prefix.sh: " + ", ".join(missing))
