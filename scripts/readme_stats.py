@@ -90,8 +90,13 @@ def _count_handler_modules() -> int | None:
         if p.name == "__init__.py":
             continue
         try:
-            if re.search(r"^\s*handler_id\s*=", p.read_text(), re.M):
-                n += 1
+            # COUNT ASSIGNMENTS, NOT FILES: one module may define more than
+            # one handler (MeshForge's fleet_health.py defines two), so a
+            # per-file tally silently undercounts. Found 2026-09-21 when the
+            # file count said 82 against three independent sources that all
+            # said 83 — the manifest, capability_index.md's get_all_handlers()
+            # figure, and the raw assignment count.
+            n += len(re.findall(r"^\s*handler_id\s*=", p.read_text(), re.M))
         except OSError:
             return None
     return n
