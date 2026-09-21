@@ -35,7 +35,6 @@ Requires: pip install meshcore (Python 3.10+)
 import asyncio
 from utils.boundary_timing import timed_boundary
 import logging
-import os
 import threading
 import time
 from collections import deque
@@ -54,6 +53,7 @@ from .meshcore_radio_config import (
 )
 from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
+from .meshcore_oracle_mixin import MeshCoreOracleMixin
 from .meshcore_dm_reply import PendingDmAcks
 from .meshcore_ingress import (
     InboundChannelPolicy,
@@ -108,7 +108,7 @@ __all__ = [
 from gateway.meshcore_simulator import MeshCoreSimulator
 
 
-class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
+class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleMixin,
                       MeshCoreContactCaptureMixin, BaseMessageHandler):
     """
     Handles MeshCore companion radio connection and message processing.
@@ -244,78 +244,6 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             self._oracle = self._build_meshcore_oracle_responder()
         except Exception as e:  # pragma: no cover - never break handler init
             logger.debug(f"meshcore oracle not initialized: {e}")
-
-    def _build_meshcore_oracle_responder(self):
-        """Construct the read-only MeshCore oracle responder, or None if disabled.
-
-        Default OFF (opt-in via MESHANCHOR_ORACLE_ENABLED) — the env is checked
-        BEFORE importing the oracle so a disabled daemon pays no import cost.
-        Access is additive: a known sender (MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST)
-        OR a whitelisted channel NAME (MESHANCHOR_ORACLE_MESHCORE_CHANNELS).
-        MeshCore channel messages arrive as ``<channel> <sender>: <text>``, so the
-        channel is matched by NAME and the embedded sender is the reply target
-        (see ``_on_channel_message`` + ``_parse_meshcore_channel_text``). Replies
-        go DIRECTED (DM) to the asker via send_text; the audit log lives under the
-        MeshAnchor data dir. Read-only — never controls services or mutates.
-        """
-        import os
-        if str(os.environ.get("MESHANCHOR_ORACLE_ENABLED", "")).strip().lower() \
-                not in ("1", "true", "yes", "on"):
-            return None
-        import socket
-
-        from oracle import fetch_api_status, oracle_log_path, read_snapshot
-        from oracle.responder import MeshOracleResponder
-        from utils.jsonl_log import append_jsonl
-
-        def _snapshot():
-            return read_snapshot(status=fetch_api_status(), box=socket.gethostname())
-
-        # Reply on the PRIVATE channel slot (not a DM): a MeshCore channel
-        # query's asker is a display name from the message prefix, NOT a
-        # resolvable contact — a DM drops (and the contact-not-found fallback
-        # is correctly blocked to avoid the slot-0/Public leak, 2026-05-19). A
-        # private-channel oracle answers the group ON the channel. The slot is
-        # the configured private channel (bridge_target_channel); override with
-        # MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT.
-        try:
-            _reply_slot = int(os.environ.get(
-                "MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT",
-                getattr(self.config.meshcore, "bridge_target_channel", 1)) or 1)
-        except (TypeError, ValueError):
-            _reply_slot = 1
-
-        def _send(text: str, dest: str, channel) -> bool:
-            # Channel BROADCAST on the private slot (dest/channel here are the
-            # asker name / channel name — not usable as TX targets).
-            return self.send_text(text, destination=None, channel=_reply_slot)
-
-        def _log(record: dict) -> None:
-            try:
-                p = oracle_log_path()
-                p.parent.mkdir(parents=True, exist_ok=True)
-                err = append_jsonl(str(p), [record], 2 * 1024 * 1024)
-                if err:  # honest_failure_modes #9: a swallow leaves a witness
-                    logger.warning(f"mesh oracle audit log write failed: {err}")
-            except Exception as e:  # pragma: no cover - best-effort audit log
-                logger.debug(f"mesh oracle (meshcore) log append failed: {e}")
-
-        # MeshCore channel messages arrive as "<channel> <sender>: <text>", so
-        # the channel identity is a NAME (e.g. "meshanchor"), matched against
-        # this lowercased name set — cleaner + more robust than the opaque,
-        # per-message numeric index.
-        allowed_channels = {
-            tok.strip().lower()
-            for tok in os.environ.get(
-                "MESHANCHOR_ORACLE_MESHCORE_CHANNELS", "").split(",")
-            if tok.strip()
-        }
-
-        return MeshOracleResponder.from_env(
-            snapshot_fn=_snapshot, send_fn=_send, log_fn=_log,
-            transport="meshcore",
-            allowlist_env="MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST",
-            allowed_channels=allowed_channels)
 
     def connect(self) -> bool:
         """MeshCore connection is managed by run_loop() via async _connect()."""
@@ -695,8 +623,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin,
             )
 
             # Mesh oracle (read-only): a query on a whitelisted channel is
-            # answered DIRECTED back to the asker (a DM, never a channel
-            # broadcast — honors "broadcast is not auto-answered") and consumed.
+            # answered to the GROUP on the private reply slot (the asker is a
+            # display name, not a contact; DMs get a directed reply) and consumed.
             # The channel the oracle gates on is the DEVICE's name for the
             # wire's slot index (2026-09-18) — never a word parsed out of the
             # text, which is the sending node's NAME ("meshanchor p4: wx") and

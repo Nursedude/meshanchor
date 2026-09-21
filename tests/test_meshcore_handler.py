@@ -1042,7 +1042,8 @@ class TestMeshOracleMeshcoreWiring:
 
     Access is additive: a DM is identity-gated (MESHANCHOR_ORACLE_MESHCORE_
     ALLOWLIST), a channel query is channel-gated (MESHANCHOR_ORACLE_MESHCORE_
-    CHANNELS). Both reply DIRECTED to the asker and consume the query.
+    CHANNELS). A DM is answered DIRECTED to the asker; a channel query is
+    answered to the group on the private slot. Both consume the query.
     """
 
     def test_oracle_default_off(self, handler, monkeypatch):
@@ -1205,3 +1206,80 @@ class TestMeshOracleMeshcoreWiring:
         finally:
             loop.close()
         assert not handler._message_queue.empty()
+
+
+class TestMeshOracleDmReplyIsDirected:
+    """A DM query's reply goes back to the ASKER, never onto a channel.
+
+    Drilled 2026-09-20 (the DM-first Public-bot leg): the reply closure
+    broadcast every oracle answer on the private slot regardless of who
+    asked, so a DM from a community node would have been answered onto OUR
+    private channel — the asker never sees it, the group sees a reply to a
+    question it never saw. The payload here is meshcore_py 2.3.7 reader.py's
+    CONTACT_MSG_RECV ``res`` verbatim (``pubkey_prefix``, ``path_len``,
+    ``txt_type``, ``sender_timestamp``, ``text``) — no fabricated ``sender``
+    / ``destination`` / ``is_channel`` keys, which the wire never carries.
+    """
+
+    ASKER = "a1b2c3d4e5f6"  # 6-byte pubkey prefix as reader.py hex()es it
+
+    def _wire_dm(self, text="status", prefix=None):
+        return SimpleNamespace(type='CONTACT_MSG_RECV', payload={
+            'pubkey_prefix': prefix or self.ASKER, 'path_len': 2,
+            'txt_type': 0, 'sender_timestamp': 1789767168, 'text': text})
+
+    def _build(self, handler, monkeypatch, allowlist, channels=None):
+        monkeypatch.setenv("MESHANCHOR_ORACLE_ENABLED", "1")
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST", allowlist)
+        if channels is None:
+            monkeypatch.delenv("MESHANCHOR_ORACLE_MESHCORE_CHANNELS", raising=False)
+        else:
+            monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_CHANNELS", channels)
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT", "1")
+        monkeypatch.setattr("oracle.fetch_api_status", lambda *a, **k: None)
+        monkeypatch.setattr("utils.jsonl_log.append_jsonl", lambda *a, **k: None)
+        handler.send_text = MagicMock(return_value=True)
+        handler._oracle = handler._build_meshcore_oracle_responder()
+        assert handler._oracle is not None
+
+    def _run(self, handler, event):
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._on_contact_message(event))
+        finally:
+            loop.close()
+
+    def test_dm_reply_is_directed_to_the_asker_pubkey(self, handler, monkeypatch):
+        self._build(handler, monkeypatch, allowlist=self.ASKER)
+        self._run(handler, self._wire_dm("status"))
+        handler.send_text.assert_called_once()
+        kwargs = handler.send_text.call_args.kwargs
+        # the asker's wire identity is the DM target — a channel broadcast
+        # here is the defect this test was written to fail on
+        assert kwargs.get("destination") == self.ASKER, kwargs
+        assert kwargs.get("channel") != 0  # never lands on Public on any fallback
+        assert handler._message_queue.empty()  # consumed (default consume=True)
+
+    def test_dm_from_an_unlisted_pubkey_is_refused_not_broadcast(self, handler, monkeypatch):
+        self._build(handler, monkeypatch, allowlist="ffffffffffff")
+        self._run(handler, self._wire_dm("status"))
+        handler.send_text.assert_not_called()
+
+    def test_channel_reply_still_broadcasts_on_the_private_slot(self, handler, monkeypatch):
+        """The channel leg's contract is unchanged: the group is answered ON
+        the private channel (the asker there is a display name, not a
+        resolvable contact)."""
+        self._build(handler, monkeypatch, allowlist="", channels="meshanchor")
+        handler.get_radio_state = lambda refresh=False: {'channels': [
+            {'idx': 0, 'name': 'Public'}, {'idx': 1, 'name': 'meshanchor'}]}
+        event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload={
+            'type': 'CHAN', 'channel_idx': 1, 'path_len': 0, 'txt_type': 0,
+            'sender_timestamp': 1789767168, 'text': 'meshanchor p4: status'})
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._on_channel_message(event))
+        finally:
+            loop.close()
+        kwargs = handler.send_text.call_args.kwargs
+        assert kwargs.get("destination") is None
+        assert kwargs.get("channel") == 1
