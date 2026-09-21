@@ -182,12 +182,32 @@ class TestOracleGateUsesTheDeviceName:
         _run(h, _wire_event(0, text="meshanchor p4: status"))
         h._oracle.handle.assert_called_once_with("p4", "status", "public")
 
-    def test_unknown_slot_name_gates_as_None_fail_closed(self):
+    def test_unknown_slot_name_gates_fail_closed_and_is_never_None(self):
+        """Fail-closed — but NOT by passing None.
+
+        Until 2026-09-21 an unnamed slot gated as None, and the oracle's reply
+        closure uses ``channel is None`` to mean "this is a DM": an unnamed
+        slot therefore took the DM branch and answered whichever contact the
+        SENDER named in the message text. The token is now a sentinel that no
+        configured channel name can equal, so the gate is still closed and the
+        two legs stay distinguishable. This asserts the PROPERTY against the
+        real gate, not the literal the old test pinned.
+        """
+        from gateway.meshcore_ingress import UNNAMED_SLOT
+        from oracle.responder import MeshOracleResponder
+
         h, q = _handler()
         h.get_radio_state = lambda refresh=False: {'channels': []}
         h._oracle = MagicMock(); h._oracle.handle.return_value = None
         _run(h, _wire_event(1, text="meshanchor p4: status"))
-        h._oracle.handle.assert_called_once_with("p4", "status", None)
+        h._oracle.handle.assert_called_once_with("p4", "status", UNNAMED_SLOT)
+        assert UNNAMED_SLOT is not None
+
+        gate = MeshOracleResponder(
+            snapshot_fn=lambda: None, send_fn=lambda *a: True,
+            allowed_channels={"meshanchor", "public", ""})
+        assert gate._allowed("!p4", UNNAMED_SLOT) is False
+        assert gate._allowed("!p4", "meshanchor") is True  # control: can pass
 
 
 class TestLegibility:

@@ -59,6 +59,7 @@ from .meshcore_ingress import (
     InboundChannelPolicy,
     apply_inbound_policy,
     channel_name_for,
+    UNNAMED_SLOT,
     disclose_channel_ingress,
     format_channel_metrics,
     parse_meshcore_channel_text as _parse_meshcore_channel_text,
@@ -638,7 +639,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 try:
                     _, sender, query = _parse_meshcore_channel_text(msg.content)
                     who = sender or msg.source_address or ""
-                    gate_name = dev_name.lower() if dev_name else None
+                    # Never None on this leg: None is the DM leg's token and
+                    # the reply closure routes on it (UNNAMED_SLOT's comment).
+                    gate_name = dev_name.lower() if dev_name else UNNAMED_SLOT
                     logger.debug(
                         f"oracle channel gate: slot={slot} name={gate_name} "
                         f"(from the device table, not the text)")

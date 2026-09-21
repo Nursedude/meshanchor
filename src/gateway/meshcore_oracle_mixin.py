@@ -16,6 +16,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _is_wire_prefix(value: str) -> bool:
+    """True when ``value`` has the shape of a MeshCore DM target as the wire
+    carries it: the even-length hex ``pubkey_prefix`` meshcore_py's reader.py
+    sets on CONTACT_MSG_RECV (6 bytes = 12 hex today). A display name parsed
+    out of a channel message's text header never has it."""
+    v = str(value or "")
+    return (len(v) >= 8 and len(v) % 2 == 0
+            and all(c in "0123456789abcdefABCDEF" for c in v))
+
+
 class MeshCoreOracleMixin:
     """Construct the MeshCore oracle responder (opt-in, default OFF)."""
     def _build_meshcore_oracle_responder(self):
@@ -27,8 +37,10 @@ class MeshCoreOracleMixin:
         OR a whitelisted channel NAME (MESHANCHOR_ORACLE_MESHCORE_CHANNELS).
         MeshCore channel messages arrive as ``<channel> <sender>: <text>``, so the
         channel is matched by NAME and the embedded sender is the reply target
-        (see ``_on_channel_message`` + ``_parse_meshcore_channel_text``). Replies
-        go DIRECTED (DM) to the asker via send_text; the audit log lives under the
+        (see ``_on_channel_message`` + ``_parse_meshcore_channel_text``). A DM is
+        answered DIRECTED to the asker's wire pubkey_prefix; a CHANNEL query is
+        answered to the group on the private reply slot — see ``_send`` for which
+        leg is which and how it is decided. The audit log lives under the
         MeshAnchor data dir. Read-only — never controls services or mutates.
         """
         import os
@@ -61,9 +73,23 @@ class MeshCoreOracleMixin:
             _reply_slot = 1
 
         def _send(text: str, dest: str, channel) -> bool:
-            if channel is None and dest:
+            # ``channel is None`` is the DM leg and ONLY the DM leg: the channel
+            # leg passes the device's name for the slot, or UNNAMED_SLOT when the
+            # device cannot name it — never None (meshcore_ingress.UNNAMED_SLOT).
+            if channel is not None:
+                return self.send_text(text, destination=None, channel=_reply_slot)
+            # Second, independent guard, so this closure is safe whatever a
+            # future call site passes: a DM target is a WIRE fact — the
+            # pubkey_prefix reader.py hands us, always hex. Anything else
+            # arrived from TEXT (a sender-chosen display name), and answering
+            # it would DM whichever contact the asker named. Refuse, and never
+            # fall back to a broadcast (the 2026-05-19 Public leak).
+            if dest and _is_wire_prefix(dest):
                 return self.send_text(text, destination=dest, channel=_reply_slot)
-            return self.send_text(text, destination=None, channel=_reply_slot)
+            logger.warning(
+                f"oracle DM reply refused — destination {dest!r} is not a wire "
+                f"pubkey_prefix; not delivered, not broadcast")
+            return False
 
         def _log(record: dict) -> None:
             try:

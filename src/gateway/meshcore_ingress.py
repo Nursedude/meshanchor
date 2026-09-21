@@ -142,6 +142,16 @@ def resolve_bridge_channels(meshcore_config: Any) -> Tuple[Optional[frozenset], 
     return frozenset(out), source
 
 
+# Gate token for a channel message whose slot the DEVICE cannot name.
+# NOT None, and that is the whole point: None is the DM leg's token, and the
+# oracle's reply closure discriminates the two legs on it. Folding "unnamed
+# slot" into "DM" made a CHANNEL reply a DIRECTED send addressed from the
+# sender's own text header (2026-09-21) — text-derived routing, the class the
+# 2026-09-18 channel_idx arc exists to refuse. The NUL prefix cannot collide
+# with a configured channel name, so the channel allowlist still fails closed.
+UNNAMED_SLOT = "\x00unnamed-slot"
+
+
 def channel_name_for(handler: Any, idx: Optional[int]) -> Optional[str]:
     """The DEVICE's name for slot ``idx`` (from the cached CHANNEL_INFO table
     the radio reported at connect), or None when unknown. Never from text."""

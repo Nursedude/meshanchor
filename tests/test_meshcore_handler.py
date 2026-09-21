@@ -1285,6 +1285,80 @@ class TestMeshOracleDmReplyIsDirected:
         assert kwargs.get("channel") == 1
 
 
+class TestMeshOracleChannelLegNeverDirects:
+    """A CHANNEL query is never answered by a DIRECTED send addressed from the
+    sender's own text.
+
+    Drilled 2026-09-21 reviewing `3b510eb3`. That fix discriminated the two
+    oracle legs on ``channel is None`` — but the channel leg passed
+    ``dev_name.lower() if dev_name else None``, and ``channel_name_for``
+    returns None FOUR ways (slot idx absent, radio state unreadable, slot not
+    in the device table, empty name). So an unnamed slot took the DM branch
+    with ``dest`` = the display name parsed out of the message text, and
+    ``_find_contact`` matches ``address == adv_name``: the reply went to
+    whichever contact the ASKER named. Text-derived routing — the class the
+    2026-09-18 ``channel_idx`` arc exists to refuse. Both tests below failed
+    on `3b510eb3` with ``destination='RAK1'``.
+
+    Latent there, not live: it needs answer-all, which is exactly the
+    ``ALLOWLIST=*`` opening the Public-bot plan proposes.
+    """
+
+    CHAN_EVENT = dict(type='CHAN', channel_idx=3, path_len=4, txt_type=0,
+                      sender_timestamp=1789767168, text='meshanchor RAK1: status')
+
+    def _build_answer_all(self, handler, monkeypatch):
+        monkeypatch.setenv("MESHANCHOR_ORACLE_ENABLED", "1")
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_ALLOWLIST", "*")
+        monkeypatch.delenv("MESHANCHOR_ORACLE_MESHCORE_CHANNELS", raising=False)
+        monkeypatch.setenv("MESHANCHOR_ORACLE_MESHCORE_REPLY_SLOT", "1")
+        monkeypatch.setattr("oracle.fetch_api_status", lambda *a, **k: None)
+        monkeypatch.setattr("utils.jsonl_log.append_jsonl", lambda *a, **k: None)
+        handler.send_text = MagicMock(return_value=True)
+        handler._oracle = handler._build_meshcore_oracle_responder()
+        assert handler._oracle is not None
+
+    def _run(self, handler):
+        event = SimpleNamespace(type='CHANNEL_MSG_RECV', payload=dict(self.CHAN_EVENT))
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._on_channel_message(event))
+        finally:
+            loop.close()
+
+    def test_slot_missing_from_the_device_table_still_broadcasts(self, handler, monkeypatch):
+        self._build_answer_all(handler, monkeypatch)
+        handler.get_radio_state = lambda refresh=False: {'channels': [
+            {'idx': 0, 'name': 'Public'}, {'idx': 1, 'name': 'meshanchor'}]}
+        self._run(handler)
+        assert handler.send_text.called
+        kwargs = handler.send_text.call_args.kwargs
+        assert kwargs.get("destination") is None, kwargs
+        assert kwargs.get("channel") == 1
+
+    def test_unreadable_radio_state_still_broadcasts(self, handler, monkeypatch):
+        """A transiently cold state cache must not change WHO gets the reply."""
+        self._build_answer_all(handler, monkeypatch)
+
+        def _boom(refresh=False):
+            raise RuntimeError("radio state cache cold")
+
+        handler.get_radio_state = _boom
+        self._run(handler)
+        assert handler.send_text.called
+        assert handler.send_text.call_args.kwargs.get("destination") is None
+
+    def test_reply_closure_refuses_a_non_wire_dm_target(self, handler, monkeypatch):
+        """The closure's own guard, independent of what the leg passes: a DM
+        target that is not a wire pubkey_prefix is dropped, never broadcast."""
+        self._build_answer_all(handler, monkeypatch)
+        responder = handler._oracle
+        assert responder._send_fn("reply", "meshanchor p4", None) is False
+        handler.send_text.assert_not_called()
+        assert responder._send_fn("reply", "7eb0fa289c11", None) is True
+        assert handler.send_text.call_args.kwargs.get("destination") == "7eb0fa289c11"
+
+
 class TestContactNormalisation:
     """meshcore_py 2.3.7 reader.py CONTACTS fields verbatim: public_key is a
     hex STRING there (the simulator hands bytes); type 2 = repeater."""
