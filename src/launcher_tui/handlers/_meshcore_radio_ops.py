@@ -3,9 +3,12 @@
 Extracted from ``meshcore.py`` to keep that file under the 1500-line cap
 (see CLAUDE.md). Mirrors the ``_meshchatx_service_ops.py`` mixin pattern:
 the methods here run on a ``MeshCoreHandler`` instance that already
-provides ``self.ctx``, ``self.CHAT_API_BASE``, ``self._radio_fetch_state``,
-``self._radio_put``, ``self._show_write_result``, ``self._fmt_freq``, and
-``self._fmt_bw``.
+provides ``self.ctx`` and ``self.CHAT_API_BASE`` (host class), plus
+``self._radio_fetch_state``, ``self._radio_put``,
+``self._show_write_result``, ``self._fmt_freq`` and ``self._fmt_bw``,
+which moved to ``MeshCoreRadioMixin`` in ``_meshcore_radio.py`` on
+2026-09-21 (roadmap 1a). Both mixins land on the same class, so the
+contract is unchanged — only its home moved.
 
 Three menu items live here:
 

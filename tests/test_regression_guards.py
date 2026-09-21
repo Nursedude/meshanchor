@@ -283,7 +283,10 @@ class TestServiceCheckContract:
     #                    in-process-TUI case from a systemd unit
     # meshcore.py + ai_tools.py are MA-divergent surfaces (no MeshForge twin) —
     # a dedicated honest-signal audit of them is tracked in the arc plan.
-    MULTILINE_READ_ALLOW = {'_rns_repair.py', 'meshcore.py', 'ai_tools.py'}
+    # '_meshcore_daemon.py' replaced 'meshcore.py' on 2026-09-21 (roadmap 1a):
+    # the daemon pane moved to its own mixin and took the raw is-active read
+    # with it; meshcore.py no longer contains one, so its slot was retired.
+    MULTILINE_READ_ALLOW = {'_rns_repair.py', '_meshcore_daemon.py', 'ai_tools.py'}
 
     def test_no_new_raw_systemctl_state_checks(self):
         """No NEW files should use raw systemctl for service state decisions."""
