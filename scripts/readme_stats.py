@@ -71,10 +71,30 @@ def _count_test_files() -> int | None:
 
 
 def _count_handler_modules() -> int | None:
+    """Count TUI handlers — modules that declare ``handler_id``.
+
+    NOT a file count. ``handlers/`` also holds private mixin/helper modules
+    (``_meshcore_radio.py``, ``_nomadnet_io_ops.py``, …) that a handler
+    composes but the registry never dispatches. Globbing ``*.py`` counted
+    those too and overstated the figure by 17 as of 2026-09-21 (89 files vs
+    72 handlers) — a capability claim inflated by refactors that added no
+    capability. ``handler_id`` is the registry's own contract, so it is the
+    thing to measure rather than a filename convention that a future helper
+    could break.
+    """
     d = ROOT / "src" / "launcher_tui" / "handlers"
     if not d.is_dir():
         return None
-    return len([p for p in d.glob("*.py") if p.name != "__init__.py"])
+    n = 0
+    for p in d.glob("*.py"):
+        if p.name == "__init__.py":
+            continue
+        try:
+            if re.search(r"^\s*handler_id\s*=", p.read_text(), re.M):
+                n += 1
+        except OSError:
+            return None
+    return n
 
 
 # key -> zero-arg computation returning the ground-truth int, or None when the
