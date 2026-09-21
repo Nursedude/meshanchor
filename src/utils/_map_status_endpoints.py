@@ -285,6 +285,25 @@ class StatusEndpointsMixin:
         # self-identifies.
         status["app"] = _build_app_block()
 
+        # Read-gate coherence — ported from MeshForge (lead repo). Found on
+        # THIS box 2026-09-20: meshanchor-map's cors.conf drop-in hardcodes a
+        # /24 the box is not on, so /fleet/logs, /fleet/run_test, /api/los and
+        # /api/coverage refused every LAN client while /api/status (ungated)
+        # read 200. VERDICT ONLY — never the trusted CIDRs; this endpoint is
+        # unauthenticated and those networks are operator LAN topology.
+        try:
+            from utils.map_http_handler import read_gate_self_coverage
+            status["read_gate"] = read_gate_self_coverage(self.allowed_origins)
+        except Exception as e:  # unobservable != healthy, and != broken
+            logger.debug(f"read-gate coverage failed: {e}")
+            status["read_gate"] = {
+                "self_covered": None,
+                "posture": "unknown",
+                "origins_configured": None,
+                "reason": f"coverage check itself failed ({type(e).__name__}) "
+                          f"— UNKNOWN, not a verdict",
+            }
+
         # Include history stats if available
         if self.collector and self.collector._history:
             try:

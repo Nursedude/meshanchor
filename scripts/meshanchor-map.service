@@ -20,13 +20,26 @@ RuntimeDirectory=meshanchor
 # the canonical :5000 + :5001 on the NOC during the 2-week side-by-side
 # field-test (per the boundary observability road map). On cutover, flip
 # these back to 5000 + 5001 — see the corresponding road map item.
-# --cors-origins set so the fleet dashboard (hosted from meshanchor-server
-# at :5000) can reach this box's /fleet/logs etc. cross-origin from a
-# browser. Prefix-matched (see _send_cors_header) so 192.168.86. covers
-# every host on the operator's /24 without per-box config. Add new LAN
-# prefixes here if the fleet expands (e.g. AREDN 10.x.y.z).
+# --cors-origins set so the fleet dashboard can reach this box's /fleet/logs
+# etc. cross-origin from a browser. Prefix-matched (see _send_cors_header):
+# a dot-terminated host prefix covers that whole /24.
+#
+# DERIVED from `hostname -I`, never hardcoded (ported from MeshForge
+# 2026-07-26; the gap was found 2026-09-20). This file used to pin one
+# literal /24 with the comment "covers every host on the operator's /24" —
+# true when written, and the NOC has since moved to a different subnet, so
+# the gate refused EVERY LAN client while /api/status (ungated) kept
+# answering 200. A hardcoded operator subnet is not portable and rots on the
+# next DHCP move; see read_gate_self_coverage(), which makes a box say so.
+#
+# DOUBLE ESCAPE on the derivation: %% is systemd's literal %, so bash sees
+# ${ip%.*} (strip the last octet). A single % would be eaten by systemd and
+# bash's own %% would strip all octets.
 ExecStart=/bin/bash -c '\
-    CORS="http://localhost,http://127.0.0.1,http://192.168.86."; \
+    CORS="http://localhost,http://127.0.0.1"; \
+    for ip in $(hostname -I 2>/dev/null); do \
+        case "$ip" in *.*.*.*) CORS="$CORS,http://$${ip%%.*}.";; esac; \
+    done; \
     if [ -x /opt/meshanchor/venv/bin/python ]; then \
         exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5002 --websocket-port 5003 --cors-origins "$CORS"; \
     else \
