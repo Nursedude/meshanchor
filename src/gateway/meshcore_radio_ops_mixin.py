@@ -264,9 +264,26 @@ class MeshCoreRadioOpsMixin:
             out["reason"] = f"get_contacts failed: {e}"
             return out
         contacts = [self._normalise_contact(c) for c in raw]
-        contacts.sort(key=lambda c: c.get("last_advert") or 0, reverse=True)
+        # Order by LASTMOD — this radio's own receipt clock. `last_advert` is
+        # the SENDER's clock and is forgeable/wrong in practice (8 of 67
+        # contacts read >1y off on RAK1, 2026-09-20), so ordering by it puts
+        # a node with a bad RTC at the top of a list whose "last heard"
+        # column says otherwise (honest_failure_modes #6). Ties fall back to
+        # last_advert so the order is still total.
+        contacts.sort(key=lambda c: ((c.get("lastmod") or 0),
+                                     (c.get("last_advert") or 0)), reverse=True)
         out.update(observed=True, count=len(contacts), contacts=contacts)
         return out
+
+    @staticmethod
+    def _local_iso(epoch: Any) -> Optional[str]:
+        """Epoch → local ISO, or None when absent/unusable. Absent is None,
+        never the epoch rendered as 1970 (the 2026-09-02 sentinel class)."""
+        try:
+            return (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(float(epoch)))
+                    if epoch else None)
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
 
     @classmethod
     def _normalise_contact(cls, c: Any) -> Dict[str, Any]:
@@ -276,10 +293,9 @@ class MeshCoreRadioOpsMixin:
         pk_hex = pk.hex() if isinstance(pk, (bytes, bytearray)) else (str(pk) if pk else "")
         ctype = g("type")
         la = g("last_advert")
-        try:
-            la_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(float(la))) if la else None
-        except (TypeError, ValueError, OverflowError):
-            la_iso = None
+        lm = g("lastmod")
+        la_iso = cls._local_iso(la)
+        lm_iso = cls._local_iso(lm)
         return {
             "name": g("adv_name") or "",
             "public_key": pk_hex,
@@ -288,7 +304,10 @@ class MeshCoreRadioOpsMixin:
             "role": cls.CONTACT_TYPES.get(ctype) if ctype is not None else None,
             "last_advert": la,
             "last_advert_iso": la_iso,
-            "lastmod": g("lastmod"),
+            "lastmod": lm,
+            # THIS radio's receipt clock — the honest "last heard". The pane
+            # renders this one; `last_advert*` is the sender's own claim.
+            "lastmod_iso": lm_iso,
             "out_path_len": g("out_path_len"),  # -1 = no path (flood), else hops
             "adv_lat": g("adv_lat"),
             "adv_lon": g("adv_lon"),

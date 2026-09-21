@@ -1359,6 +1359,62 @@ class TestMeshOracleChannelLegNeverDirects:
         assert handler.send_text.call_args.kwargs.get("destination") == "7eb0fa289c11"
 
 
+class TestContactSnapshotOrdering:
+    """The contact list is ordered by the clock we OWN.
+
+    `last_advert` is the sender's own clock and is wrong in the field (8 of
+    67 contacts on RAK1 read >1y off, 2026-09-20). Ordering by it puts a node
+    with a bad RTC at the top of a list whose "last heard" column is
+    `lastmod` — this radio's receipt clock. Added 2026-09-21 reviewing
+    `9ac1f53d`, which sorted on `last_advert`.
+    """
+
+    FORGED = {'public_key': 'aa' * 32, 'adv_name': 'bad clock', 'type': 1,
+              'last_advert': 4102444800, 'lastmod': 1789000000}   # advert in 2100
+    RECENT = {'public_key': 'bb' * 32, 'adv_name': 'heard just now', 'type': 1,
+              'last_advert': 1700000000, 'lastmod': 1789960000}
+
+    def _snapshot(self, handler, raw):
+        handler._connected = True
+        handler._meshcore = SimpleNamespace(commands=SimpleNamespace(
+            get_contacts=lambda: "coro"))
+        handler._run_radio_write = lambda coro: "evt"
+        handler._extract_contacts = lambda evt: raw
+        return handler.get_contacts_snapshot()
+
+    def test_ordered_by_lastmod_not_the_senders_advert_clock(self, handler):
+        snap = self._snapshot(handler, [self.FORGED, self.RECENT])
+        assert snap["observed"] is True and snap["count"] == 2
+        assert [c["name"] for c in snap["contacts"]] == \
+            ["heard just now", "bad clock"]
+
+    def test_lastmod_iso_is_published_for_the_pane(self, handler):
+        snap = self._snapshot(handler, [self.RECENT])
+        c = snap["contacts"][0]
+        assert c["lastmod_iso"] == time.strftime(
+            "%Y-%m-%dT%H:%M:%S", time.localtime(self.RECENT["lastmod"]))
+        assert c["lastmod_iso"] != c["last_advert_iso"]
+
+    def test_absent_clocks_are_None_never_1970(self, handler):
+        snap = self._snapshot(handler, [{'public_key': 'cc' * 32,
+                                         'adv_name': 'no clocks', 'type': 1}])
+        c = snap["contacts"][0]
+        assert c["lastmod_iso"] is None and c["last_advert_iso"] is None
+
+    def test_unreadable_table_is_not_an_empty_list(self, handler):
+        handler._connected = True
+        handler._meshcore = SimpleNamespace(commands=SimpleNamespace(
+            get_contacts=lambda: "coro"))
+
+        def _boom(coro):
+            raise RuntimeError("radio did not answer")
+
+        handler._run_radio_write = _boom
+        snap = handler.get_contacts_snapshot()
+        assert snap["observed"] is False and snap["count"] == 0
+        assert "radio did not answer" in snap["reason"]
+
+
 class TestContactNormalisation:
     """meshcore_py 2.3.7 reader.py CONTACTS fields verbatim: public_key is a
     hex STRING there (the simulator hands bytes); type 2 = repeater."""
