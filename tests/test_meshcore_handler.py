@@ -1296,7 +1296,11 @@ class TestContactNormalisation:
         n = handler._normalise_contact(c)
         assert n["prefix"] == "7eb0fa289c11" and len(n["public_key"]) == 64
         assert n["role"] == "companion" and n["out_path_len"] == -1
-        assert n["last_advert"] == 1789960000 and n["last_advert_iso"].startswith("2026-09-20")
+        # the ISO form is the BOX's local clock — derive the expectation the
+        # same way rather than pin a date (CI runs UTC; the twin runs HST —
+        # a date literal here pinned the author's timezone, not the code)
+        assert n["last_advert"] == 1789960000
+        assert n["last_advert_iso"] == time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(1789960000))
 
     def test_unknown_type_and_missing_fields_are_none_not_guessed(self, handler):
         n = handler._normalise_contact({'adv_name': 'x', 'public_key': b'\xaa\xbb', 'type': 9})
