@@ -1064,6 +1064,12 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._send_json({"channels": handler.get_known_channels()})
             return
 
+        # /chat/contacts — the radio's own contact table (2026-09-20: the NOC
+        # could not show its radio's contacts; the phone was the only reader).
+        if self.path.rstrip("/") == "/chat/contacts":
+            self._send_json(handler.get_contacts_snapshot())
+            return
+
         self._send_error_json(404, f"Unknown chat path: {self.path}")
 
     # Radio endpoints (GET /radio + PUT /radio/*) live in `utils.radio_api`

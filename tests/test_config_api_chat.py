@@ -5,6 +5,7 @@ spinning up a real HTTP server — we mock just enough of the
 BaseHTTPRequestHandler I/O surface to drive _handle_chat_get and
 _handle_chat_send.
 """
+import asyncio
 import io
 import json
 import os
@@ -179,3 +180,33 @@ class TestChatSend:
         result = _read_response(h)
         assert result == {"error": "MeshCore send queue full or not connected"}
         h.send_response.assert_called_with(503)
+
+
+class TestChatContacts:
+    """/chat/contacts — the radio's own contact table through the daemon
+    (2026-09-20). Empty ≠ unobservable: not-connected must say so."""
+
+    def test_not_connected_is_unobservable_not_empty(self, active_handler):
+        h = _make_handler_stub("/chat/contacts")
+        h._handle_chat_get()
+        body = _read_response(h)
+        assert body["observed"] is False
+        assert body["count"] == 0 and body["contacts"] == []
+        assert "not connected" in body["reason"]
+
+    def test_connected_simulator_lists_contacts_with_hex_keys(self, active_handler):
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(active_handler._connect())
+        finally:
+            loop.close()
+        h = _make_handler_stub("/chat/contacts")
+        h._handle_chat_get()
+        body = _read_response(h)
+        assert body["observed"] is True and body["reason"] is None
+        assert body["count"] == len(body["contacts"]) >= 3
+        by_name = {c["name"]: c for c in body["contacts"]}
+        alpha = by_name["SimNode-Alpha"]
+        assert alpha["public_key"] == "010203040506"   # bytes → hex, JSON-safe
+        assert alpha["prefix"] == "010203040506"       # what a DM's pubkey_prefix carries
+        assert alpha["role"] is None                   # simulator sets no wire type

@@ -15,6 +15,7 @@ Host class must provide ``self._radio`` (MeshCoreRadioConfig),
 """
 
 import asyncio
+import time
 import logging
 from typing import Any, Dict, Optional
 
@@ -234,3 +235,62 @@ class MeshCoreRadioOpsMixin:
             return asyncio.run(coro)
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return fut.result(timeout=10.0)
+
+    #: MeshCore contact ``type`` on the wire → role (meshcore_py reader.py).
+    CONTACT_TYPES = {1: "companion", 2: "repeater", 3: "room", 4: "sensor"}
+
+    def get_contacts_snapshot(self) -> Dict[str, Any]:
+        """The radio's OWN contact table, read live through the daemon's loop.
+
+        Born 2026-09-20: the NOC could not show its radio's contacts — the
+        daemon holds the port, so the list lived only on the phone. Uses the
+        same ``get_contacts()`` the DM send path resolves against, bridged by
+        ``_run_radio_write`` (one loop bridge, honest_failure_modes #5).
+        Honest on failure: an unreadable table is ``observed=False`` with
+        the reason and ``count=0`` — never an empty list that reads as
+        "no contacts" (unobservable ≠ empty, honest_failure_modes #1).
+        """
+        out: Dict[str, Any] = {"ts": time.time(), "observed": False,
+                               "count": 0, "contacts": [], "reason": None}
+        mc = getattr(self, "_meshcore", None)
+        if mc is None or not getattr(self, "_connected", False):
+            out["reason"] = "meshcore not connected"
+            return out
+        try:
+            cmds = getattr(mc, "commands", mc)
+            evt = self._run_radio_write(cmds.get_contacts())
+            raw = self._extract_contacts(evt)
+        except Exception as e:  # the radio did not answer — say so, never []
+            out["reason"] = f"get_contacts failed: {e}"
+            return out
+        contacts = [self._normalise_contact(c) for c in raw]
+        contacts.sort(key=lambda c: c.get("last_advert") or 0, reverse=True)
+        out.update(observed=True, count=len(contacts), contacts=contacts)
+        return out
+
+    @classmethod
+    def _normalise_contact(cls, c: Any) -> Dict[str, Any]:
+        """One contact → plain JSON. Keys are meshcore_py's; absent = None."""
+        g = (lambda k: c.get(k)) if isinstance(c, dict) else (lambda k: getattr(c, k, None))
+        pk = g("public_key")
+        pk_hex = pk.hex() if isinstance(pk, (bytes, bytearray)) else (str(pk) if pk else "")
+        ctype = g("type")
+        la = g("last_advert")
+        try:
+            la_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(float(la))) if la else None
+        except (TypeError, ValueError, OverflowError):
+            la_iso = None
+        return {
+            "name": g("adv_name") or "",
+            "public_key": pk_hex,
+            "prefix": pk_hex[:12],          # what a DM's pubkey_prefix carries
+            "type": ctype,
+            "role": cls.CONTACT_TYPES.get(ctype) if ctype is not None else None,
+            "last_advert": la,
+            "last_advert_iso": la_iso,
+            "lastmod": g("lastmod"),
+            "out_path_len": g("out_path_len"),  # -1 = no path (flood), else hops
+            "adv_lat": g("adv_lat"),
+            "adv_lon": g("adv_lon"),
+            "flags": g("flags"),
+        }

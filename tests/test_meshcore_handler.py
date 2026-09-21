@@ -1283,3 +1283,22 @@ class TestMeshOracleDmReplyIsDirected:
         kwargs = handler.send_text.call_args.kwargs
         assert kwargs.get("destination") is None
         assert kwargs.get("channel") == 1
+
+
+class TestContactNormalisation:
+    """meshcore_py 2.3.7 reader.py CONTACTS fields verbatim: public_key is a
+    hex STRING there (the simulator hands bytes); type 2 = repeater."""
+
+    def test_wire_shaped_contact(self, handler):
+        c = {'public_key': '7eb0fa289c11' + '00' * 26, 'adv_name': 'meshanchor p4',
+             'type': 1, 'flags': 0, 'out_path_len': -1, 'out_path': '',
+             'adv_lat': 19.4, 'adv_lon': -155.3, 'last_advert': 1789960000, 'lastmod': 1789960001}
+        n = handler._normalise_contact(c)
+        assert n["prefix"] == "7eb0fa289c11" and len(n["public_key"]) == 64
+        assert n["role"] == "companion" and n["out_path_len"] == -1
+        assert n["last_advert"] == 1789960000 and n["last_advert_iso"].startswith("2026-09-20")
+
+    def test_unknown_type_and_missing_fields_are_none_not_guessed(self, handler):
+        n = handler._normalise_contact({'adv_name': 'x', 'public_key': b'\xaa\xbb', 'type': 9})
+        assert n["role"] is None and n["last_advert"] is None and n["last_advert_iso"] is None
+        assert n["public_key"] == "aabb"
