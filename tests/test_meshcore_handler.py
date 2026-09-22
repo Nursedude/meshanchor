@@ -428,6 +428,45 @@ class TestNodeTracking:
         finally:
             loop.close()
 
+    def test_advertisement_stamps_receipt_clock(self, handler, mock_node_tracker):
+        """A FIRST advertisement must carry OUR receipt time, not None.
+
+        Regression (2026-09-21): `_on_advertisement` built the UnifiedNode
+        without `last_seen`, and only `_merge_node` stamps it — via
+        `existing.update_seen()` — so a node heard exactly ONCE sat at None
+        forever. Measured live on meshanchor-server the same day: 14 of 22
+        meshcore nodes had `last_seen=None` while 8 carried real times.
+
+        Why it matters beyond the field: the contacts pane's "last heard"
+        column has no other truthful source. `last_advert` is the SENDER's
+        clock (live range 2022-12-31 .. 2084-12-21) and `lastmod` is the
+        firmware's record-modified stamp used by meshcore_py as an
+        If-Modified-Since sync cursor, frozen 8 days back. A pane reading
+        either renders "never heard" for a node heard seconds ago.
+        """
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(handler._connect())
+
+            before = datetime.now()
+            event = SimpleNamespace(
+                type='ADVERTISEMENT',
+                payload={'adv_name': 'FirstHeard', 'pubkey_prefix': 'f00dcafe'},
+            )
+            loop.run_until_complete(handler._on_advertisement(event))
+            after = datetime.now()
+
+            assert mock_node_tracker.add_node.called
+            node = mock_node_tracker.add_node.call_args[0][0]
+            assert node.last_seen is not None, (
+                "first advert left no receipt clock - the pane would render "
+                "a live node as never heard"
+            )
+            assert before <= node.last_seen <= after
+            assert node.is_online is True
+        finally:
+            loop.close()
+
     def test_advertisement_object_payload(self, handler, mock_node_tracker):
         """Advertisement with object-style payload."""
         loop = asyncio.new_event_loop()

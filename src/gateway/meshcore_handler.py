@@ -718,6 +718,16 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             if hasattr(node, 'meshcore_pubkey'):
                 node.meshcore_pubkey = pubkey
 
+            # Stamp OUR receipt clock before handing it over. add_node()
+            # only merges into an EXISTING node, and it is _merge_node's
+            # update_seen() that sets last_seen — so without this a node
+            # heard exactly ONCE stayed at last_seen=None forever (measured
+            # 2026-09-21: 14 of 22 meshcore nodes on meshanchor-server).
+            # This is the only honest "last heard" the contacts pane has:
+            # last_advert is the SENDER's clock and lastmod is the firmware's
+            # record-modified sync cursor, neither a receipt time.
+            node.update_seen()
+
             self.node_tracker.add_node(node)
             logger.debug(f"MeshCore node discovered: {adv_name} ({pubkey[:8]})")
 
