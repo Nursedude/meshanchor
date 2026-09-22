@@ -226,8 +226,8 @@ class MeshCoreContactsMixin:
                   "every row below, not 'never'.")
         print()
         print(f"  {'':1} {'NAME':<22} {'ROLE':<10} {'PREFIX':<13} "
-              f"{'LAST HEARD':<12} {'PATH':<8} POSITION")
-        print("  " + "-" * 86)
+              f"{'LAST HEARD':<14} {'PATH':<8} POSITION")
+        print("  " + "-" * 88)
 
         for row, known, seen, ours in decorated:
             if receipts is None:
@@ -245,7 +245,7 @@ class MeshCoreContactsMixin:
                   f"{(row.get('name') or '(unnamed)')[:22]:<22} "
                   f"{(row.get('role') or '?')[:10]:<10} "
                   f"{(row.get('prefix') or '?')[:13]:<13} "
-                  f"{last:<12} "
+                  f"{last:<14} "
                   f"{self._contacts_path(row.get('out_path_len')):<8} "
                   f"{self._contacts_position(row.get('adv_lat'), row.get('adv_lon'))}")
 
