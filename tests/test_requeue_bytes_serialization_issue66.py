@@ -61,7 +61,7 @@ def _mock_gateway_config_min():
 def bridge_with_real_queue(tmp_path):
     """Bridge with a real PersistentMessageQueue wired in (radio handlers mocked)."""
     with patch("gateway.rns_bridge.GatewayConfig") as MockConfig, \
-         patch("gateway.rns_bridge.UnifiedNodeTracker"), \
+         patch("gateway.rns_bridge.get_node_tracker"), \
          patch("gateway.rns_bridge.BridgeHealthMonitor"), \
          patch("gateway.rns_bridge.DeliveryTracker"), \
          patch("gateway.rns_bridge.MeshtasticHandler") as MockHandler, \

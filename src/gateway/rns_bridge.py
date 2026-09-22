@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from .base_handler import (chunk_for_mesh, get_rf_tx_registry,
                            is_rns_to_mesh_echo)
 from .config import GatewayConfig
-from .node_tracker import UnifiedNodeTracker, UnifiedNode
+from .node_tracker import UnifiedNodeTracker, UnifiedNode, get_node_tracker
 from .reconnect import ReconnectStrategy
 from .bridge_health import (
     BridgeHealthMonitor, DeliveryTracker,
@@ -181,7 +181,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
 
     def __init__(self, config: Optional[GatewayConfig] = None):
         self.config = config or GatewayConfig.load()
-        self.node_tracker = UnifiedNodeTracker()
+        self.node_tracker = get_node_tracker()  # ONE per process; see its docstring
         # Arm node retention. This call is what makes TTL eviction live — the
         # tracker stays inert until told what is pinned, so this line and
         # _evict_expired_nodes wire together or fail together

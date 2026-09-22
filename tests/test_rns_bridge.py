@@ -153,7 +153,7 @@ def _mock_gateway_config(**overrides):
 def bridge():
     """Create a fully-mocked RNSMeshtasticBridge for unit testing."""
     with patch("gateway.rns_bridge.GatewayConfig") as MockConfig, \
-         patch("gateway.rns_bridge.UnifiedNodeTracker") as MockTracker, \
+         patch("gateway.rns_bridge.get_node_tracker") as MockTracker, \
          patch("gateway.rns_bridge.BridgeHealthMonitor") as MockHealth, \
          patch("gateway.rns_bridge.DeliveryTracker") as MockDelivery, \
          patch("gateway.rns_bridge.MeshtasticHandler") as MockHandler, \
@@ -188,7 +188,7 @@ def bridge():
 def bridge_no_cb():
     """Bridge with circuit breaker disabled."""
     with patch("gateway.rns_bridge.GatewayConfig") as MockConfig, \
-         patch("gateway.rns_bridge.UnifiedNodeTracker"), \
+         patch("gateway.rns_bridge.get_node_tracker"), \
          patch("gateway.rns_bridge.BridgeHealthMonitor"), \
          patch("gateway.rns_bridge.DeliveryTracker"), \
          patch("gateway.rns_bridge.MeshtasticHandler") as MockHandler, \
@@ -563,7 +563,7 @@ class TestRoutingLegacy:
     def _make_bridge_with_rules(self, rules, default_route="bidirectional", enabled=True):
         """Create bridge with specific routing rules."""
         with patch("gateway.rns_bridge.GatewayConfig") as MockConfig, \
-             patch("gateway.rns_bridge.UnifiedNodeTracker"), \
+             patch("gateway.rns_bridge.get_node_tracker"), \
              patch("gateway.rns_bridge.BridgeHealthMonitor"), \
              patch("gateway.rns_bridge.DeliveryTracker"), \
              patch("gateway.rns_bridge.MeshtasticHandler") as MockHandler, \
@@ -3252,7 +3252,7 @@ class TestRetentionPinsWired20260803:
         cfg = GatewayConfig()
         for k, v in rns_overrides.items():
             setattr(cfg.rns, k, v)
-        with patch("gateway.rns_bridge.UnifiedNodeTracker") as MockTracker, \
+        with patch("gateway.rns_bridge.get_node_tracker") as MockTracker, \
              patch("gateway.rns_bridge.BridgeHealthMonitor"), \
              patch("gateway.rns_bridge.DeliveryTracker"), \
              patch("gateway.rns_bridge.ReconnectStrategy"):

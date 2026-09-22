@@ -517,7 +517,7 @@ class TestChannelPlaceholderEmitDispatch:
         The bridge's own LXMF/RNS surface is mocked out."""
         from unittest.mock import patch, MagicMock
         with patch("gateway.rns_bridge.GatewayConfig") as MockConfig, \
-             patch("gateway.rns_bridge.UnifiedNodeTracker"), \
+             patch("gateway.rns_bridge.get_node_tracker"), \
              patch("gateway.rns_bridge.BridgeHealthMonitor"), \
              patch("gateway.rns_bridge.DeliveryTracker"), \
              patch("gateway.rns_bridge.MeshtasticHandler") as MockHandler, \

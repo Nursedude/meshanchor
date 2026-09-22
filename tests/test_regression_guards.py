@@ -853,6 +853,87 @@ class TestRNSReticulumChokepoint:
         )
 
 
+class TestSingleNodeTrackerContract:
+    """Enforce: UnifiedNodeTracker is constructed only by its own singleton.
+
+    Root-caused live on meshanchor-server 2026-09-22. The daemon ran TWO
+    trackers over one node_cache.json — RNSMeshtasticBridge built a private
+    one while the daemon's NodeTrackerService held the get_node_tracker()
+    singleton. The bridge's grew from RX; the singleton sat on the snapshot it
+    loaded at startup and, because services stop in reverse registration
+    order, flushed that snapshot LAST, over the live file.
+
+    Three-point drill across one daemon stop:
+
+        before stop   77 nodes (rns 57 / meshcore 20)  newest 22:32:12
+        after  stop   52 nodes (rns 38 / meshcore 14)  newest 22:01:09
+
+    25 records destroyed and newest last_seen 31 minutes backward, roughly
+    four times a day on the restart timer. The earlier cure swept expired
+    nodes before that flush, which only addresses the too-MANY direction —
+    eviction cannot add back nodes the flushing instance never heard.
+
+    Two consumers of one artifact share ONE object (honest_failure_modes #5).
+    The behavioural twin of this guard is
+    test_node_tracker.py::test_stop_does_not_flush_when_never_started.
+    """
+
+    # Only node_tracker.py may construct one: get_node_tracker() is the
+    # chokepoint, and its module owns the singleton global it caches into.
+    ALLOWLISTED = {
+        'node_tracker.py',
+    }
+
+    def test_tracker_constructed_only_in_chokepoint(self):
+        """No file outside node_tracker.py constructs a UnifiedNodeTracker."""
+        matches = _scan_python_files(
+            r'(=\s*\w*\.?UnifiedNodeTracker\s*\(|\breturn\s+\w*\.?UnifiedNodeTracker\s*\()',
+            exclude_files=list(self.ALLOWLISTED),
+        )
+        violations = [
+            f"{filepath}:{lineno}: {line.strip()}"
+            for filepath, lineno, line in matches
+        ]
+        assert not violations, (
+            f"Found {len(violations)} private UnifiedNodeTracker "
+            f"construction(s). Use get_node_tracker() from "
+            f"gateway.node_tracker — a second instance over one "
+            f"node_cache.json is the 2026-09-22 shutdown clobber (25 live "
+            f"node records destroyed per daemon stop).\n\n"
+            f"Violations:\n" + "\n".join(violations)
+        )
+
+    def test_chokepoint_exports_accessor_and_reset(self):
+        """node_tracker must expose get_node_tracker() and reset_node_tracker()."""
+        path = os.path.join(SRC_DIR, 'gateway', 'node_tracker.py')
+        assert os.path.exists(path), "src/gateway/node_tracker.py is missing"
+        with open(path, 'r') as f:
+            content = f.read()
+        assert 'def get_node_tracker(' in content, (
+            "gateway/node_tracker.py must define get_node_tracker() — the "
+            "single-instance chokepoint"
+        )
+        assert 'def reset_node_tracker(' in content, (
+            "gateway/node_tracker.py must define reset_node_tracker() — "
+            "without it every test that builds a bridge inherits the previous "
+            "test's node set, because the bridge now shares the singleton"
+        )
+
+    def test_stop_is_authority_gated(self):
+        """stop() must refuse to flush from an instance that never started.
+
+        Source-level so the invariant cannot be quietly deleted while the
+        behavioural test is skipped or rewritten.
+        """
+        path = os.path.join(SRC_DIR, 'gateway', 'node_tracker.py')
+        with open(path, 'r') as f:
+            content = f.read()
+        assert '_ever_started' in content, (
+            "the write-authority flag is gone — an unstarted tracker can "
+            "flush its stale snapshot again (2026-09-22 clobber)"
+        )
+
+
 class TestServingNeverBlocksOnCollection:
     """Invariant 1 of the recurring map-wedge class (the 2026-06-23 MeshForge
     moc1 spin; ported from MeshForge): a serving/collection path must never
