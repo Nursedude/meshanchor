@@ -136,3 +136,44 @@ class TestStatusLineCarriesIt:
              patch("handlers.meshcore._GatewayConfig", loader):
             line = handler._meshcore_status_line()
         assert "unavailable" in line.lower()
+
+class TestFirmwareInfoPane:
+    """The OTHER renderer of the same fact.
+
+    Two surfaces print firmware: the landing brief and this pane. A first
+    pass at 1c relabelled only the radio VIEW pane and left this one saying
+    "Firmware: 19-Apr-2026 (proto v11)" — the tests were green and the
+    wrong label was still on screen, because nothing pinned this renderer.
+    Found by rendering against the live daemon, not by reading. When a
+    label is fixed, grep for its copies and pin each one.
+    """
+
+    def _render(self, handler, payload, capsys):
+        import json
+        resp = MagicMock()
+        resp.read.return_value = json.dumps(payload).encode()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = lambda *a: False
+        with patch("urllib.request.urlopen", return_value=resp):
+            handler._meshcore_firmware_info()
+        return capsys.readouterr().out
+
+    def test_build_and_proto_are_labelled_for_what_they_are(
+            self, handler, capsys):
+        out = self._render(handler, {"firmware": LIVE}, capsys)
+        assert "Build:" in out and "19-Apr-2026" in out
+        assert "Companion proto: v11" in out
+        # The mislabel this pane actually shipped with.
+        assert "Firmware:    19-Apr-2026  (proto v11)" not in out
+
+    def test_pane_says_the_radio_cannot_report_a_release(self, handler, capsys):
+        """Pinned on the explicit sentence, not the bare word "release".
+
+        The first draft accepted `"release" in out.lower()`, which the
+        pre-existing "Latest releases:" link already satisfied — so it
+        passed against the very code it was written to reject. Caught by
+        drilling the mutant: it stayed green while its sibling failed.
+        """
+        out = self._render(handler, {"firmware": LIVE}, capsys)
+        assert "never a" in out and "release number" in out
+        assert "cannot tell you it is running" in out

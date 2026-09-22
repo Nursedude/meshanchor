@@ -144,12 +144,17 @@ class MeshCoreRadioOpsMixin:
         source = info.get("source")
         ts = info.get("last_refresh_ts")
 
+        # Label these for what they ARE (roadmap 1c). fw_build is a BUILD
+        # DATE and fw_ver is the companion PROTOCOL version; the radio
+        # reports no release string at all. "Firmware: ... (proto v11)"
+        # reads as "running firmware 11" against an actual release of
+        # 1.15.0 — a confident wrong label on the exact fact an operator
+        # is deciding a flash against.
         print(f"  Node Name:   {node}")
         print(f"  Model:       {model}")
+        print(f"  Build:       {fw}")
         if fw_ver is not None:
-            print(f"  Firmware:    {fw}  (proto v{fw_ver})")
-        else:
-            print(f"  Firmware:    {fw}")
+            print(f"  Companion proto: v{fw_ver}")
         if source == "simulator":
             print("  Source:      SIMULATOR (daemon is in simulation mode)")
         elif source:
@@ -160,6 +165,9 @@ class MeshCoreRadioOpsMixin:
             print(f"  Last read:   {ago}s ago")
 
         print()
+        print("  The radio reports a BUILD DATE and a protocol version, never a")
+        print("  release number — compare the build date against the release you")
+        print("  intend to flash; it cannot tell you it is running 1.15.0.")
         print("  Latest releases: https://github.com/meshcore-dev/MeshCore/releases")
         print("  OTA flash flow is not yet automated — flash via meshcore-cli.")
         self.ctx.wait_for_enter()
