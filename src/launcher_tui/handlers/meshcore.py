@@ -9,6 +9,7 @@ import logging
 from backend import clear_screen
 from handler_protocol import BaseHandler
 from handlers._meshcore_chat import MeshCoreChatMixin
+from handlers._meshcore_contacts import MeshCoreContactsMixin
 from handlers._meshcore_daemon import MeshCoreDaemonMixin
 from handlers._meshcore_radio import MeshCoreRadioMixin
 from handlers._meshcore_radio_ops import MeshCoreRadioOpsMixin
@@ -31,7 +32,8 @@ _is_gateway_running, _get_gateway_stats, _HAS_GW_CLI = safe_import(
 
 
 class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
-                      MeshCoreChatMixin, MeshCoreDaemonMixin,
+                      MeshCoreChatMixin, MeshCoreContactsMixin,
+                      MeshCoreDaemonMixin,
                       BaseHandler):
     """TUI handler for MeshCore companion radio management."""
 
@@ -69,6 +71,7 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
                 ("radio", "Radio Config        LoRa params, channels, TX power"),
                 ("enable", "Enable/Disable      Toggle MeshCore in gateway"),
                 ("nodes", "View Nodes          MeshCore network nodes"),
+                ("contacts", "View Contacts       Radio's contact table + last heard"),
                 ("stats", "Statistics          Message & connection stats"),
                 ("chat", "Chat                Send / view messages via daemon"),
                 ("daemon", "Daemon Control      Status / start / stop / journal"),
@@ -91,6 +94,7 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
                 "radio": ("MeshCore Radio Config", self._meshcore_radio_menu),
                 "enable": ("Enable/Disable", self._meshcore_toggle),
                 "nodes": ("MeshCore Nodes", self._meshcore_nodes),
+                "contacts": ("MeshCore Contacts", self._meshcore_contacts),
                 "stats": ("MeshCore Stats", self._meshcore_stats),
                 "chat": ("MeshCore Chat", self._meshcore_chat),
                 "daemon": ("Daemon Control", self._meshcore_daemon_control),

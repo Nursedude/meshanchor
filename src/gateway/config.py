@@ -297,6 +297,16 @@ class MeshCoreConfig:
     # box, and grows only with declared intent (2026-08-29). Empty = inert.
     repliable_contacts: list = field(default_factory=list)
 
+    # Contacts that are OURS (adv_names or pubkey prefixes), for the TUI
+    # contacts pane (roadmap 1b). Same matching contract as
+    # repliable_contacts. Policy-in-config, not firmware state: the radio's
+    # table cannot tell our own nodes from a stranger's, so ownership is a
+    # thing the operator DECLARES and the pane RENDERS against — which is
+    # also what lets an absence be a row instead of silence. A declared
+    # contact missing from the table is shown as ABSENT rather than simply
+    # not appearing. Empty = inert (nothing marked, no absences claimed).
+    our_contacts: list = field(default_factory=list)
+
     # Testing
     simulation_mode: bool = False         # Run without hardware (fake events)
 
