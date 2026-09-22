@@ -493,6 +493,12 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
             return "Oracle:      OFF (default; MESHANCHOR_ORACLE_ENABLED unset)"
         chans = posture.get("channels") or []
         cooldown = posture.get("cooldown_s")
+        # Fields the daemon could not read off the responder are NAMED, not
+        # quietly rendered as zeros — an enabled oracle with allowlist=0 is
+        # a real fail-closed posture, so a defaulted 0 would be a confident
+        # wrong answer rather than an obvious blank.
+        unreadable = posture.get("unreadable") or []
+        suffix = f"  ⚠ unreadable: {','.join(unreadable)}" if unreadable else ""
         return ("Oracle:      ON  answer_all={} allowlist={} channels={} "
                 "cooldown={} consume={}".format(
                     posture.get("answer_all", False),
@@ -500,7 +506,7 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
                     ",".join(str(c) for c in chans) if chans else "-",
                     f"{cooldown:g}s" if isinstance(cooldown, (int, float))
                     else "?",
-                    posture.get("consume", False)))
+                    posture.get("consume", False)) + suffix)
 
     def _meshcore_stats(self):
         """Show MeshCore statistics from the live bridge."""

@@ -30,13 +30,28 @@ from handlers.meshcore import MeshCoreHandler as TuiMeshCoreHandler  # noqa: E40
 from gateway.meshcore_handler import MeshCoreHandler as DaemonMeshCoreHandler  # noqa: E402
 from utils.stats_api import _oracle_posture  # noqa: E402
 
-# The live posture on meshanchor-server 2026-09-21, from the daemon's own
-# build line: answer_all=False allowlist=1 channels=meshanchor
-# cooldown=10s consume=False
-LIVE_ORACLE = SimpleNamespace(
-    answer_all=False, allowlist={"7eb0fa289c11"},
-    allowed_channels={"meshanchor"}, cooldown_s=10.0,
-    consume=False, transport="meshcore")
+def _live_oracle():
+    """A REAL MeshOracleResponder in the live posture, never a stub.
+
+    ⚠️ This was a SimpleNamespace carrying the attribute names taken from
+    from_env's constructor kwargs (allowlist=, allowed_channels=, ...).
+    The real class stores them privately (_allowlist, _allowed_channels,
+    _answer_all, _cooldown_s, _transport); only `consume` is public. The
+    stub therefore encoded the author's assumption and agreed with the
+    reader's identical assumption, so the suite was green while the daemon
+    served allowlist=0 channels=[] cooldown=null against its own build log
+    saying allowlist=1 channels=meshanchor cooldown=10s.
+
+    A fixture that fabricates field names pins the author, not the object.
+    Build the real thing; it is the only witness that can disagree.
+    """
+    from oracle.responder import MeshOracleResponder
+    return MeshOracleResponder(
+        snapshot_fn=lambda: {}, send_fn=lambda *a, **k: True,
+        log_fn=lambda r: None,
+        allowlist={"7eb0fa289c11"}, allowed_channels={"meshanchor"},
+        answer_all=False, cooldown_s=10.0, transport="meshcore",
+        consume=False)
 
 
 @pytest.fixture
@@ -86,7 +101,7 @@ class TestPostureFromTheDaemon:
         assert pb != po
 
     def test_enabled_reports_the_live_shape(self):
-        h = SimpleNamespace(_oracle_error=None, _oracle=LIVE_ORACLE)
+        h = SimpleNamespace(_oracle_error=None, _oracle=_live_oracle())
         p = _oracle_posture(h)
         assert p == {"observable": True, "enabled": True, "answer_all": False,
                      "allowlist": 1, "channels": ["meshanchor"],
@@ -94,10 +109,33 @@ class TestPostureFromTheDaemon:
                      "transport": "meshcore"}
 
     def test_allowlist_is_a_count_not_the_tokens(self):
-        h = SimpleNamespace(_oracle_error=None, _oracle=LIVE_ORACLE)
+        h = SimpleNamespace(_oracle_error=None, _oracle=_live_oracle())
         p = _oracle_posture(h)
         assert p["allowlist"] == 1
         assert "7eb0fa289c11" not in repr(p)
+
+    def test_every_field_is_actually_read_off_the_real_object(self):
+        """No field may fall through to a default.
+
+        This is the pin the SimpleNamespace stub could not provide: it
+        fails if any attribute name drifts from what the class really
+        stores, which is exactly how the daemon shipped allowlist=0.
+        """
+        h = SimpleNamespace(_oracle_error=None, _oracle=_live_oracle())
+        p = _oracle_posture(h)
+        assert "unreadable" not in p, p.get("unreadable")
+        assert p["allowlist"] == 1
+        assert p["channels"] == ["meshanchor"]
+        assert p["cooldown_s"] == 10.0
+        assert p["transport"] == "meshcore"
+
+    def test_an_unreadable_field_is_named_not_defaulted(self):
+        """A responder missing a field must SAY so, not report a zero."""
+        h = SimpleNamespace(_oracle_error=None,
+                            _oracle=SimpleNamespace(consume=False))
+        p = _oracle_posture(h)
+        assert p["unreadable"], "silently defaulted every field"
+        assert "allowlist" in p["unreadable"]
 
 
 class TestHandlerRecordsABuildFailure:

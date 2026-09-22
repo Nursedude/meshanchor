@@ -55,6 +55,9 @@ def _get_active_bridge(handler: Any):
     return bridge
 
 
+_MISSING = object()
+
+
 def _oracle_posture(meshcore_handler) -> dict:
     """The oracle leg's posture, as the DAEMON actually built it.
 
@@ -84,19 +87,47 @@ def _oracle_posture(meshcore_handler) -> dict:
     oracle = getattr(meshcore_handler, "_oracle", None)
     if oracle is None:
         return {"observable": True, "enabled": False}
+    # ⚠️ MeshOracleResponder stores these PRIVATELY (_allowlist,
+    # _allowed_channels, _answer_all, _cooldown_s, _transport); only
+    # `consume` is public. A first pass read the CONSTRUCTOR's parameter
+    # names instead — a proxy for the object, not the object — and every
+    # getattr fell through to its default, so the daemon served
+    # allowlist=0 channels=[] cooldown=null while its own build log said
+    # allowlist=1 channels=meshanchor cooldown=10s. "allowlist: 0" is not
+    # a null result either: an enabled oracle with an empty allowlist is a
+    # real, fail-closed posture, so the default was a CONFIDENT WRONG
+    # answer, not an obvious blank.
+    #
+    # Hence the sentinel: a field we cannot read is named in `unreadable`
+    # rather than silently defaulted into the healthy domain.
+    missing = []
+
+    def _read(*names, default=None):
+        for n in names:
+            v = getattr(oracle, n, _MISSING)
+            if v is not _MISSING:
+                return v
+        missing.append(names[0].lstrip("_"))
+        return default
+
     # Count, never the tokens: the roadmap asks for a count, and the
     # allowlist holds node keys that do not need a wider audience than
     # the box already gives them.
-    return {
+    posture = {
         "observable": True,
         "enabled": True,
-        "answer_all": bool(getattr(oracle, "answer_all", False)),
-        "allowlist": len(getattr(oracle, "allowlist", ()) or ()),
-        "channels": sorted(getattr(oracle, "allowed_channels", ()) or ()),
-        "cooldown_s": getattr(oracle, "cooldown_s", None),
-        "consume": bool(getattr(oracle, "consume", False)),
-        "transport": getattr(oracle, "transport", None),
+        "answer_all": bool(_read("_answer_all", "answer_all", default=False)),
+        "allowlist": len(_read("_allowlist", "allowlist", default=()) or ()),
+        "channels": sorted(
+            str(c) for c in (_read("_allowed_channels", "allowed_channels",
+                                   default=()) or ())),
+        "cooldown_s": _read("_cooldown_s", "cooldown_s"),
+        "consume": bool(_read("consume", "_consume", default=False)),
+        "transport": _read("_transport", "transport"),
     }
+    if missing:
+        posture["unreadable"] = sorted(missing)
+    return posture
 
 
 def handle_get(handler: Any) -> None:
