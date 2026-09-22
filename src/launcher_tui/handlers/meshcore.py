@@ -117,7 +117,12 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
                 return "MeshCore: DISABLED in gateway config"
             conn = mc.connection_type
             device = mc.device_path if conn == "serial" else f"{mc.tcp_host}:{mc.tcp_port}"
-            return f"MeshCore: ENABLED ({conn} -> {device})"
+            # Roadmap 1c: the firmware fact rides the landing subtitle so
+            # "what is this radio running?" costs zero menus. Cached +
+            # short-timeout (_meshcore_fw_brief) — the subtitle is rebuilt
+            # on every redraw, so it must never block the menu.
+            return (f"MeshCore: ENABLED ({conn} -> {device}) | "
+                    f"{self._meshcore_fw_brief()}")
         except Exception:
             # Distinct from the no-module neutral subtitle above: a config-read
             # failure must not masquerade as "feature unavailable" (S7, #74-#77).

@@ -106,10 +106,16 @@ class MeshCoreRadioMixin:
         fw_ver = state.get("fw_ver")
         print(f"  Node Name:      {node}")
         print(f"  Model:          {model}")
+        # Label these for what they ARE. fw_build is a BUILD DATE and
+        # fw_ver is the companion PROTOCOL version; the radio reports no
+        # release string at all, so "Firmware: ... v11" would read as
+        # "running firmware 11" against an actual release of 1.15.0.
+        print(f"  Build:          {fw}")
         if fw_ver is not None:
-            print(f"  Firmware:       {fw} (proto v{fw_ver})")
-        else:
-            print(f"  Firmware:       {fw}")
+            print(f"  Companion proto: v{fw_ver}")
+        print("  (the radio reports a build date and a protocol version,")
+        print("   never a release number - compare the BUILD DATE against")
+        print("   the MeshCore release you intend to flash)")
 
         # LoRa parameters
         freq = state.get("radio_freq_mhz")
@@ -153,11 +159,16 @@ class MeshCoreRadioMixin:
 
         self.ctx.wait_for_enter()
 
-    def _radio_fetch_state(self, refresh: bool = False) -> dict:
+    def _radio_fetch_state(self, refresh: bool = False,
+                           timeout: float = 10) -> dict:
         """GET /radio[?refresh=1] from the daemon. Returns a result dict.
 
         Shape on success: {"ok": True, "radio": {...}}.
         Shape on failure: {"ok": False, "status": int|None, "error": str}.
+
+        ``timeout`` is a parameter because the menu SUBTITLE calls this on
+        every redraw (roadmap 1c) and must not block a menu for 10s on an
+        unreachable daemon; interactive panes keep the long default.
         """
         import json
         import urllib.error
@@ -168,7 +179,7 @@ class MeshCoreRadioMixin:
             url += "?refresh=1"
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = json.loads(resp.read().decode("utf-8") or "{}")
                 radio = body.get("radio") if isinstance(body, dict) else None
                 return {"ok": True, "radio": radio or {}}
@@ -181,6 +192,69 @@ class MeshCoreRadioMixin:
             return {"ok": False, "status": e.code, "error": msg}
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             return {"ok": False, "status": None, "error": str(e)}
+
+    # ── firmware brief (roadmap 1c) ─────────────────────────────────────
+    #
+    # The FIRST firmware fact a user sees. It used to live three levels
+    # down (MeshCore -> Radio Config -> Firmware Info), so the question
+    # driving the whole update arc — "what is this radio running?" — cost
+    # three menus to answer.
+    #
+    # ⚠️ What the radio actually reports, measured on meshanchorRAK1
+    # 2026-09-21 — neither field is a release version:
+    #   fw_build  '19-Apr-2026'  a BUILD DATE string (reader.py reads 12
+    #                            bytes at fw_ver >= 3), not "1.15.0"
+    #   fw_ver    11             the COMPANION PROTOCOL version, a single
+    #                            byte the library feature-gates on
+    #                            (>= 3, >= 9, >= 10). Not firmware 11.
+    # So this brief says "build" and "proto" and never "version". Calling
+    # fw_ver a version would read as "this radio runs 11" while the actual
+    # release is 1.15.0 — a confident wrong label on the exact fact the
+    # operator is deciding a flash against.
+
+    FW_BRIEF_TTL = 30.0
+
+    def _meshcore_fw_brief(self) -> str:
+        """One short clause for the menu subtitle. Never raises.
+
+        Cached for FW_BRIEF_TTL because the subtitle is rebuilt on every
+        menu redraw; without it, sitting on the menu would poll the daemon
+        once per keystroke.
+        """
+        import time
+
+        now = time.monotonic()
+        cached = getattr(self, "_fw_brief_cache", None)
+        if cached and now - cached[0] < self.FW_BRIEF_TTL:
+            return cached[1]
+
+        try:
+            result = self._radio_fetch_state(timeout=1.5)
+        except Exception:
+            result = {"ok": False, "status": None, "error": "fetch failed"}
+
+        if not result.get("ok"):
+            # Unreachable is UNKNOWN, never "no firmware" — an absent
+            # answer must not render as an answer.
+            brief = "firmware ? (daemon unreachable)"
+        else:
+            state = result.get("radio") or {}
+            model = state.get("model")
+            build = state.get("fw_build")
+            ver = state.get("fw_ver")
+            if not (model or build or ver is not None):
+                brief = "firmware ? (radio not read yet)"
+            else:
+                parts = [str(model) if model else "unknown model",
+                         f"build {build}" if build else "build ?"]
+                if ver is not None:
+                    parts.append(f"proto v{ver}")
+                if state.get("source") == "simulator":
+                    parts.insert(0, "[SIM]")
+                brief = " ".join(parts)
+
+        self._fw_brief_cache = (now, brief)
+        return brief
 
     def _radio_put(self, sub_path: str, body: dict) -> dict:
         """PUT to /radio/<sub_path>. Returns shaped result dict.
