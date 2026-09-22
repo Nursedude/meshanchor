@@ -4,7 +4,10 @@ MeshCore Handler — MeshCore companion radio management.
 Converted from meshcore_mixin.py as part of the mixin-to-registry migration.
 """
 
+import json
 import logging
+import urllib.error
+import urllib.request
 
 from backend import clear_screen
 from handler_protocol import BaseHandler
@@ -508,34 +511,77 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
                     else "?",
                     posture.get("consume", False)) + suffix)
 
+    STATS_TIMEOUT = 5
+
+    def _stats_fetch(self):
+        """``(payload, error)`` from ``GET /api/stats`` on the daemon.
+
+        ``(None, reason)`` on any failure. A 503 is the daemon answering
+        "bridge not active" (utils.stats_api) — its own words are the
+        reason; a 404 is a daemon build that predates the route. Neither
+        is "unreachable", and none of them is "zero".
+        """
+        try:
+            req = urllib.request.Request(
+                f"{self.CHAT_API_BASE}/api/stats",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=self.STATS_TIMEOUT) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = json.loads(e.read().decode("utf-8")).get("error") or ""
+            except Exception:
+                body = ""
+            if e.code == 404:
+                return None, ("daemon is up but predates /api/stats (HTTP 404) - "
+                              "restart it: MeshCore -> Daemon Control -> Restart")
+            return None, f"daemon answered HTTP {e.code}: {body or e.reason}"
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+            return None, str(e)
+        if not isinstance(payload, dict):
+            return None, "response was not a JSON object"
+        return payload, None
+
     def _meshcore_stats(self):
         """Show MeshCore statistics from the live bridge."""
         clear_screen()
         print("=== MeshCore Statistics ===\n")
 
-        if not _HAS_GW_CLI:
-            print("  Gateway CLI module not available.")
+        # The daemon runs in ANOTHER process (meshanchor-daemon.service), so
+        # the in-process handle behind _is_gateway_running() is empty here
+        # and made this pane say "not running" from every TUI, forever —
+        # which also meant the oracle posture line (roadmap 1d) never
+        # rendered live (found 2026-09-22 porting 1e into MeshForge, MF
+        # `19c3f961`). Ask the daemon's own /api/stats; fall back to the
+        # in-process handle only when this process IS the daemon.
+        gw_stats, err = self._stats_fetch()
+        if gw_stats is None and _HAS_GW_CLI and _is_gateway_running():
+            try:
+                gw_stats = _get_gateway_stats()
+            except Exception as e:
+                print(f"  Error reading gateway stats: {e}")
+                self.ctx.wait_for_enter()
+                return
+            gw_stats = dict(gw_stats)
+            gw_stats.setdefault("oracle", None)   # in-process shape lacks it
+        if gw_stats is None:
+            print(f"  Daemon unreachable at {self.CHAT_API_BASE}/api/stats: {err}\n")
+            print("  Statistics are UNKNOWN, not zero. Start the daemon in-app:")
+            print("    MeshCore -> Daemon Control -> Start")
             self.ctx.wait_for_enter()
             return
 
-        if not _is_gateway_running():
-            print("  Gateway bridge is not running.\n")
-            print("  Start the bridge to collect MeshCore statistics.")
-            self.ctx.wait_for_enter()
-            return
-
-        try:
-            gw_stats = _get_gateway_stats()
-        except Exception as e:
-            print(f"  Error reading gateway stats: {e}")
-            self.ctx.wait_for_enter()
-            return
-
-        stats = gw_stats.get('statistics', gw_stats)
+        stats = gw_stats.get('stats') or gw_stats.get('statistics') or gw_stats
         connected = gw_stats.get('meshcore_connected', False)
+        running = gw_stats.get('running')
+        bridge_state = (gw_stats.get('status')
+                        or ('Running' if running else 'Stopped' if running is False
+                            else 'unknown'))
 
         print(f"  Connection:  {'CONNECTED' if connected else 'DISCONNECTED'}")
-        print(f"  Bridge:      {gw_stats.get('status', 'unknown')}")
+        print(f"  Bridge:      {bridge_state}")
         print(f"  {self._oracle_posture_line(gw_stats.get('oracle'))}\n")
 
         print(f"  Messages RX:    {stats.get('meshcore_rx', 0)}")

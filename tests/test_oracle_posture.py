@@ -188,3 +188,85 @@ class TestPostureLine:
         for token in ("answer_all=False", "allowlist=1",
                       "channels=meshanchor", "cooldown=10s", "consume=False"):
             assert token in line, f"{token!r} missing from {line!r}"
+
+
+# ── the pane that CARRIES the line must be able to see the daemon ────────
+#
+# Found 2026-09-22 while porting 1e into MeshForge: _meshcore_stats was gated
+# on _is_gateway_running(), an in-process global that meshanchor-daemon (a
+# separate process) never sets in the TUI, so the pane said "not running"
+# from every TUI and the posture line above never rendered live. The
+# 09-21/22 verification was of the daemon's /api/stats over curl, not of
+# the pane. These pin the pane reading the daemon's OWN endpoint.
+
+import json as _json
+import urllib.error as _uerr
+
+
+def _http(payload):
+    resp = MagicMock()
+    resp.read.return_value = _json.dumps(payload).encode()
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = lambda *a: False
+    return patch("urllib.request.urlopen", return_value=resp)
+
+
+class TestStatsPaneReadsTheDaemon:
+    def test_fetch_targets_the_daemons_own_endpoint(self, handler):
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")) as uo:
+            payload, err = handler._stats_fetch()
+        assert payload is None and "refused" in err
+        assert uo.call_args[0][0].full_url == "http://127.0.0.1:8081/api/stats"
+
+    def test_unreachable_daemon_is_unknown_not_zero(self, handler, capsys):
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")), \
+             patch("handlers.meshcore._is_gateway_running", return_value=False):
+            handler._meshcore_stats()
+        out = capsys.readouterr().out
+        assert "UNKNOWN" in out and "unreachable" in out
+        assert "Messages RX" not in out          # no counters rendered as zero
+        assert "Daemon Control" in out           # in-app remediation, not a shell line
+
+    def test_live_daemon_renders_the_posture_line_and_counters(self, handler, capsys):
+        with _http({"running": True, "meshcore_connected": True,
+                    "oracle": {"observable": True, "enabled": True, "answer_all": False,
+                               "allowlist": 1, "channels": ["meshanchor"],
+                               "cooldown_s": 10.0, "consume": False},
+                    "uptime_seconds": 3700,
+                    "stats": {"meshcore_rx": 7, "meshcore_tx": 2, "meshcore_acks": 1}}):
+            handler._meshcore_stats()
+        out = capsys.readouterr().out
+        assert "CONNECTED" in out and "Bridge:      Running" in out
+        assert ("Oracle:      ON  answer_all=False allowlist=1 channels=meshanchor "
+                "cooldown=10s consume=False") in out
+        assert "Messages RX:    7" in out and "Uptime: 1h 1m 40s" in out
+
+    def test_503_is_the_daemons_own_reason_not_unreachable(self, handler, capsys):
+        """utils.stats_api answers 503 {"error": "Gateway bridge not active"}
+        while the daemon is up and starting — its words, not ours."""
+        body = _json.dumps({"error": "Gateway bridge not active"}).encode()
+        err = _uerr.HTTPError("u", 503, "Service Unavailable", {}, None)
+        err.read = lambda: body
+        with patch("urllib.request.urlopen", side_effect=err), \
+             patch("handlers.meshcore._is_gateway_running", return_value=False):
+            handler._meshcore_stats()
+        out = capsys.readouterr().out
+        assert "HTTP 503" in out and "Gateway bridge not active" in out
+
+    def test_404_is_an_older_daemon_build(self, handler):
+        err = _uerr.HTTPError("u", 404, "Not Found", {}, None)
+        err.read = lambda: b""
+        with patch("urllib.request.urlopen", side_effect=err):
+            payload, reason = handler._stats_fetch()
+        assert payload is None and "predates" in reason and "Restart" in reason
+
+    def test_in_process_fallback_only_when_this_process_is_the_daemon(self, handler, capsys):
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")), \
+             patch("handlers.meshcore._is_gateway_running", return_value=True), \
+             patch("handlers.meshcore._get_gateway_stats", return_value={
+                 "running": True, "status": "Running", "meshcore_connected": False,
+                 "statistics": {"meshcore_rx": 1}, "uptime_seconds": 5}):
+            handler._meshcore_stats()
+        out = capsys.readouterr().out
+        assert "DISCONNECTED" in out and "Messages RX:    1" in out
+        assert "UNKNOWN (daemon did not report a posture" in out
