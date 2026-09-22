@@ -1,10 +1,10 @@
 # MeshAnchor Maps Dependencies (radio_maps, gateway, full profiles)
 
 # Coverage map generation
-folium>=0.15.0
+folium>=0.20.0
 
 # MessagePack — decodes the map.meshcore.dev public-directory feed
 # (12MB / ~42k positioned MeshCore nodes) consumed by
 # utils/_map_collector_meshcore_public.py. Without msgpack the public
 # fetcher silently returns 0 features.
-msgpack>=1.0.0
+msgpack>=1.2.2
