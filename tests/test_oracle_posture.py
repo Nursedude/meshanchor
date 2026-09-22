@@ -1,0 +1,152 @@
+"""Oracle posture: published by the daemon, rendered by the TUI (roadmap 1d).
+
+The posture is decided by env vars in the DAEMON's process — on
+meshanchor-server the allowlist arrives via a systemd drop-in. So it must
+be reported by the process that built the responder, never recomputed from
+the TUI's own environment. These tests pin that, and pin the three
+outcomes staying distinct: UNKNOWN, BUILD FAILED, and OFF are different
+claims and collapsing any pair reports a broken oracle as a deliberate one.
+"""
+
+import os
+import sys
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'launcher_tui'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.dirname(__file__))
+
+from handler_test_utils import make_handler_context  # noqa: E402
+# TWO different classes share the name MeshCoreHandler: the TUI one that
+# RENDERS the posture line, and the gateway one that BUILDS the responder.
+# A first draft of this file asserted the daemon's attribute on the TUI
+# object and failed; its sibling fed the TUI object to _oracle_posture and
+# PASSED, reporting a readable posture for an object that has no oracle at
+# all. Import both under distinct names so that cannot recur.
+from handlers.meshcore import MeshCoreHandler as TuiMeshCoreHandler  # noqa: E402
+from gateway.meshcore_handler import MeshCoreHandler as DaemonMeshCoreHandler  # noqa: E402
+from utils.stats_api import _oracle_posture  # noqa: E402
+
+# The live posture on meshanchor-server 2026-09-21, from the daemon's own
+# build line: answer_all=False allowlist=1 channels=meshanchor
+# cooldown=10s consume=False
+LIVE_ORACLE = SimpleNamespace(
+    answer_all=False, allowlist={"7eb0fa289c11"},
+    allowed_channels={"meshanchor"}, cooldown_s=10.0,
+    consume=False, transport="meshcore")
+
+
+@pytest.fixture
+def handler():
+    """The TUI handler — the thing that RENDERS the line."""
+    h = TuiMeshCoreHandler()
+    h.set_context(make_handler_context())
+    h.ctx.wait_for_enter = MagicMock()
+    return h
+
+
+def _daemon_handler(build_side_effect=None):
+    """The gateway handler — the thing that BUILDS the responder."""
+    import threading
+    from queue import Queue
+    cfg = SimpleNamespace(meshcore=SimpleNamespace(
+        enabled=True, device_path='/dev/ttyUSB1', baud_rate=115200,
+        connection_type='serial', tcp_host='localhost', tcp_port=4000,
+        auto_fetch_messages=True, bridge_channels=True, bridge_dms=True,
+        simulation_mode=True, bridge_target_channel=1,
+        channel_poll_interval_sec=5, repliable_contacts=[],
+        dm_replies_enabled=False, bridge_source_channels=None,
+        advert_heartbeat_sec=0, advert_heartbeat_flood=False))
+    patcher = patch.object(
+        DaemonMeshCoreHandler, "_build_meshcore_oracle_responder",
+        side_effect=build_side_effect if build_side_effect
+        else (lambda self=None: None))
+    with patcher:
+        return DaemonMeshCoreHandler(
+            config=cfg, node_tracker=MagicMock(), health=MagicMock(),
+            stop_event=threading.Event(), stats={}, stats_lock=threading.Lock(),
+            message_queue=Queue(maxsize=10))
+
+
+class TestPostureFromTheDaemon:
+    def test_no_handler_is_unobservable_not_off(self):
+        p = _oracle_posture(None)
+        assert p["observable"] is False
+        assert "enabled" not in p        # must not assert a state it cannot see
+
+    def test_build_failure_is_distinct_from_disabled(self):
+        broken = SimpleNamespace(_oracle_error="RuntimeError: boom", _oracle=None)
+        off = SimpleNamespace(_oracle_error=None, _oracle=None)
+        pb, po = _oracle_posture(broken), _oracle_posture(off)
+        assert pb["enabled"] is False and pb["error"]
+        assert po["enabled"] is False and "error" not in po
+        assert pb != po
+
+    def test_enabled_reports_the_live_shape(self):
+        h = SimpleNamespace(_oracle_error=None, _oracle=LIVE_ORACLE)
+        p = _oracle_posture(h)
+        assert p == {"observable": True, "enabled": True, "answer_all": False,
+                     "allowlist": 1, "channels": ["meshanchor"],
+                     "cooldown_s": 10.0, "consume": False,
+                     "transport": "meshcore"}
+
+    def test_allowlist_is_a_count_not_the_tokens(self):
+        h = SimpleNamespace(_oracle_error=None, _oracle=LIVE_ORACLE)
+        p = _oracle_posture(h)
+        assert p["allowlist"] == 1
+        assert "7eb0fa289c11" not in repr(p)
+
+
+class TestHandlerRecordsABuildFailure:
+    def test_a_raising_builder_leaves_a_witness(self):
+        """Without this, a FAILED oracle and an off-by-design one are
+        indistinguishable — both just leave self._oracle None."""
+        h = _daemon_handler(build_side_effect=RuntimeError("boom"))
+        assert h._oracle is None
+        assert h._oracle_error and "boom" in h._oracle_error
+        assert _oracle_posture(h)["error"]
+
+    def test_a_clean_build_records_no_error(self):
+        h = _daemon_handler()
+        assert h._oracle is None and h._oracle_error is None
+        p = _oracle_posture(h)
+        assert p == {"observable": True, "enabled": False}
+
+
+class TestPostureLine:
+    def test_off_says_off_and_why(self, handler):
+        line = handler._oracle_posture_line(
+            {"observable": True, "enabled": False})
+        assert "OFF" in line and "MESHANCHOR_ORACLE_ENABLED" in line
+
+    def test_build_failure_is_loud_and_never_reads_as_off(self, handler):
+        line = handler._oracle_posture_line(
+            {"observable": True, "enabled": False, "error": "RuntimeError: boom"})
+        assert "BUILD FAILED" in line and "boom" in line
+        assert "OFF (" not in line
+
+    def test_unobservable_never_reads_as_off(self, handler):
+        line = handler._oracle_posture_line(
+            {"observable": False, "reason": "no meshcore handler on this bridge"})
+        assert "UNKNOWN" in line
+        assert "OFF (" not in line
+
+    def test_missing_key_from_an_older_daemon_is_unknown(self, handler):
+        """A daemon that predates this field must not read as a disabled
+        oracle — absence of the report is not a report of absence."""
+        line = handler._oracle_posture_line(None)
+        assert "UNKNOWN" in line
+        assert "OFF (" not in line
+
+    def test_enabled_matches_the_daemons_own_vocabulary(self, handler):
+        line = handler._oracle_posture_line({
+            "observable": True, "enabled": True, "answer_all": False,
+            "allowlist": 1, "channels": ["meshanchor"], "cooldown_s": 10.0,
+            "consume": False, "transport": "meshcore"})
+        # Same words the journal uses, so a grep and this pane agree.
+        for token in ("answer_all=False", "allowlist=1",
+                      "channels=meshanchor", "cooldown=10s", "consume=False"):
+            assert token in line, f"{token!r} missing from {line!r}"

@@ -465,6 +465,43 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
 
         self.ctx.wait_for_enter()
 
+    @staticmethod
+    def _oracle_posture_line(posture) -> str:
+        """One line for the oracle leg (roadmap 1d).
+
+        Wording tracks the daemon's own build log
+        (``mesh oracle (meshcore) responder built: answer_all=... ``) on
+        purpose: a journal grep and this pane should describe the posture
+        in the SAME vocabulary, so an operator comparing them is not
+        translating between two dialects of the same fact.
+
+        The posture dict is built by the daemon (utils.stats_api), never
+        from this process's env — the TUI's environment is not the
+        daemon's, and the allowlist here comes from a systemd drop-in.
+        """
+        if posture is None:
+            # An older daemon, or a payload without the key. Not "off".
+            return ("Oracle:      UNKNOWN (daemon did not report a posture; "
+                    "older build?)")
+        if not posture.get("observable", False):
+            reason = posture.get("reason") or "not observable"
+            return f"Oracle:      UNKNOWN ({reason}) - not the same as OFF"
+        if posture.get("error"):
+            # Asked for, did not come up. The loudest of the three.
+            return f"Oracle:      BUILD FAILED - {posture['error']}"
+        if not posture.get("enabled", False):
+            return "Oracle:      OFF (default; MESHANCHOR_ORACLE_ENABLED unset)"
+        chans = posture.get("channels") or []
+        cooldown = posture.get("cooldown_s")
+        return ("Oracle:      ON  answer_all={} allowlist={} channels={} "
+                "cooldown={} consume={}".format(
+                    posture.get("answer_all", False),
+                    posture.get("allowlist", 0),
+                    ",".join(str(c) for c in chans) if chans else "-",
+                    f"{cooldown:g}s" if isinstance(cooldown, (int, float))
+                    else "?",
+                    posture.get("consume", False)))
+
     def _meshcore_stats(self):
         """Show MeshCore statistics from the live bridge."""
         clear_screen()
@@ -492,7 +529,8 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
         connected = gw_stats.get('meshcore_connected', False)
 
         print(f"  Connection:  {'CONNECTED' if connected else 'DISCONNECTED'}")
-        print(f"  Bridge:      {gw_stats.get('status', 'unknown')}\n")
+        print(f"  Bridge:      {gw_stats.get('status', 'unknown')}")
+        print(f"  {self._oracle_posture_line(gw_stats.get('oracle'))}\n")
 
         print(f"  Messages RX:    {stats.get('meshcore_rx', 0)}")
         print(f"  Messages TX:    {stats.get('meshcore_tx', 0)}")

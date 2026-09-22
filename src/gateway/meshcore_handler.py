@@ -241,10 +241,18 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
         # MESHANCHOR_ORACLE_ENABLED is set (self._oracle stays None and the RX
         # hooks are no-ops). Read-only — never controls services or mutates.
         self._oracle = None
+        # A BUILD FAILURE must not be indistinguishable from "off by
+        # design". Both leave self._oracle None, so without this the
+        # posture surface (and anyone reading it) reports a broken oracle
+        # as a deliberately disabled one — honest_failure_modes #1, and #9:
+        # the swallow now leaves a witness a reader can see, not a debug
+        # line nobody greps.
+        self._oracle_error = None
         try:
             self._oracle = self._build_meshcore_oracle_responder()
         except Exception as e:  # pragma: no cover - never break handler init
-            logger.debug(f"meshcore oracle not initialized: {e}")
+            self._oracle_error = f"{type(e).__name__}: {e}"
+            logger.warning(f"meshcore oracle FAILED to build: {e}")
 
     def connect(self) -> bool:
         """MeshCore connection is managed by run_loop() via async _connect()."""

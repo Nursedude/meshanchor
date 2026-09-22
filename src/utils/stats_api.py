@@ -55,6 +55,50 @@ def _get_active_bridge(handler: Any):
     return bridge
 
 
+def _oracle_posture(meshcore_handler) -> dict:
+    """The oracle leg's posture, as the DAEMON actually built it.
+
+    Why this is published by the daemon instead of computed in the TUI:
+    the posture is decided by env vars in the DAEMON's process — on
+    meshanchor-server the allowlist comes from a systemd drop-in. A TUI
+    reading its own ``os.environ`` would report the posture of whichever
+    shell launched the TUI, confidently and wrongly. Only the process that
+    built the responder can say what it built (calibrated_claims rule 7:
+    verify the consumer-of-record, not a proxy for it).
+
+    Three outcomes, deliberately distinct — collapsing any pair of them
+    would report a broken or unobservable oracle as a deliberately
+    disabled one:
+
+      observable=False   no meshcore handler on this bridge; we cannot
+                         see, which is UNKNOWN and never "off"
+      enabled=False + error   the oracle was asked for and FAILED to build
+      enabled=False           off by design (the default; the env is unset)
+    """
+    if meshcore_handler is None:
+        return {"observable": False,
+                "reason": "no meshcore handler on this bridge"}
+    err = getattr(meshcore_handler, "_oracle_error", None)
+    if err:
+        return {"observable": True, "enabled": False, "error": err}
+    oracle = getattr(meshcore_handler, "_oracle", None)
+    if oracle is None:
+        return {"observable": True, "enabled": False}
+    # Count, never the tokens: the roadmap asks for a count, and the
+    # allowlist holds node keys that do not need a wider audience than
+    # the box already gives them.
+    return {
+        "observable": True,
+        "enabled": True,
+        "answer_all": bool(getattr(oracle, "answer_all", False)),
+        "allowlist": len(getattr(oracle, "allowlist", ()) or ()),
+        "channels": sorted(getattr(oracle, "allowed_channels", ()) or ()),
+        "cooldown_s": getattr(oracle, "cooldown_s", None),
+        "consume": bool(getattr(oracle, "consume", False)),
+        "transport": getattr(oracle, "transport", None),
+    }
+
+
 def handle_get(handler: Any) -> None:
     """Serve GET /api/stats — localhost-only.
 
@@ -122,6 +166,7 @@ def handle_get(handler: Any) -> None:
             reemit_stats = None
 
     payload = {
+        "oracle": _oracle_posture(meshcore_handler),
         "running": bool(getattr(bridge, "_running", False)),
         "uptime_seconds": uptime_seconds,
         "start_time": start_time_iso,
