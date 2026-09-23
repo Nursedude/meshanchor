@@ -2,3 +2,4 @@
 
 # Testing
 pytest>=9.1.1
+pytest-timeout>=2.4.0  # @pytest.mark.timeout is used under --strict-markers; CI installed it by bare name only, so a box could not collect its own suite (twin canary 2026-09-22)
