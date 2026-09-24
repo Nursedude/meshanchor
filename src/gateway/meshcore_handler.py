@@ -62,6 +62,7 @@ from .meshcore_ingress import (
     UNNAMED_SLOT,
     disclose_channel_ingress,
     format_channel_metrics,
+    reach_of,
     parse_meshcore_channel_text as _parse_meshcore_channel_text,
 )
 from .meshcore_radio_ops_mixin import MeshCoreRadioOpsMixin
@@ -624,11 +625,14 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 return
 
             # Mirror to chat buffer (independent of routing-rule outcome).
+            # The slot is metadata['channel'] (09-18); CanonicalMessage has no
+            # .channel, so getattr read None and the pane showed "? ?".
             self.record_chat_message(
                 direction="rx",
                 text=msg.content or "",
-                channel=getattr(msg, "channel", None),
+                channel=(msg.metadata or {}).get('channel'),
                 sender=msg.source_address,
+                reach=reach_of(getattr(event, 'payload', None)),
             )
 
             # Mesh oracle (read-only): a query on a whitelisted channel is
@@ -1278,6 +1282,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
         channel: Optional[int] = None,
         sender: Optional[str] = None,
         destination: Optional[str] = None,
+        reach: Optional[str] = None,
     ) -> None:
         """Append a chat entry to the ring buffer.
 
@@ -1293,6 +1298,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 "channel": channel,
                 "sender": sender,
                 "destination": destination,
+                "reach": reach,
                 "text": text,
             })
 

@@ -253,6 +253,7 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         channel: Optional[int] = None,
         sender: Optional[str] = None,
         destination: Optional[str] = None,
+        reach: Optional[str] = None,
     ) -> None:
         with self._chat_buffer_lock:
             self._chat_seq += 1
@@ -263,6 +264,7 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
                 "channel": channel,
                 "sender": sender,
                 "destination": destination,
+                "reach": reach,
                 "text": text,
             })
 
@@ -355,7 +357,7 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         self.record_chat_message(
             direction="rx",
             text=msg.content or "",
-            channel=getattr(msg, "channel", None),
+            channel=(msg.metadata or {}).get('channel'),  # not msg.channel (09-18)
             sender=msg.source_address,
             destination=msg.destination_address,
         )

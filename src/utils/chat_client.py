@@ -111,9 +111,23 @@ def _format_entry(entry: Dict[str, Any],
     ts = _format_ts(entry.get("ts", 0))
     direction = entry.get("direction", "rx")
     channel = entry.get("channel")
-    sender = entry.get("sender") or "?"
     destination = entry.get("destination")
     text = entry.get("text", "")
+    reach = entry.get("reach")
+    # Sender (2026-09-23, operator's pane showed "? ?" and "?:"):
+    # - our own sends are "me" — the daemon records no sender for tx;
+    # - a CHANNEL rx carries no sender key on the wire; the sender's
+    #   self-reported name is the text's own "Name: …" prefix, so no
+    #   placeholder is printed (a "?" read as a fault);
+    # - a DM rx carries a pubkey prefix; absent is "?" (a real unknown).
+    if direction == "tx":
+        sender = entry.get("sender") or "me"
+    elif entry.get("sender"):
+        sender = entry["sender"]
+    elif channel is not None and not destination:
+        sender = None
+    else:
+        sender = "?"
 
     if direction == "tx":
         arrow = _color("33", "→")  # yellow
@@ -126,8 +140,13 @@ def _format_entry(entry: Dict[str, Any],
     elif channel is not None:
         tag = _color("35", _channel_label(channel, channel_names))
     else:
-        tag = "?"
+        # The wire named no slot: say so, never a bare "?".
+        tag = _color("35", "ch?(unknown slot)")
+    if reach:
+        tag = f"{tag} {_color('2', reach)}"
 
+    if sender is None:
+        return f"[{ts}] {arrow} {tag} · {text}"
     name = _color("1", sender)
     return f"[{ts}] {arrow} {tag} {name}: {text}"
 
