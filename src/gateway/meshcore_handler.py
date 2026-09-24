@@ -1071,10 +1071,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                     if contact:
                         with timed_boundary("meshcore.send_msg",
                                             target=destination):
-                            send_evt = await self._meshcore.commands.send_msg(
-                                contact, text)
+                            send_evt = await self._meshcore.commands.send_msg(contact, text)
                         err = companion_error(send_evt)
                         if err is not None:
+                            self._notice_dm_refused(destination, err, reply_ctx)
                             return _companion_refused(err, msg_id, f"DM {destination!r}")
                         if reply_ctx is not None:
                             self._register_dm_ack_watch(

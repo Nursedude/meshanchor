@@ -14,7 +14,7 @@ Expects on the host class:
 
 import logging
 from queue import Full
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .canonical_message import CanonicalMessage, Protocol
 from .meshcore_dm_reply import ack_code_hex
@@ -62,6 +62,20 @@ class MeshCoreDmAckMixin:
                 self.stats['meshcore_dm_ack_watch'] += 1
         except Exception as e:
             logger.debug(f"DM ack-watch registration failed: {e}")
+
+    def _notice_dm_refused(self, destination: str, err: str,
+                           reply_ctx: Optional[Dict[str, Any]]) -> None:
+        """A companion-refused DM that carries a reply_ctx must not vanish
+        silently from the originating mesh — same contract as the
+        contact-not-found branch (review C, 2026-09-23). Never raises."""
+        if reply_ctx is None:
+            return
+        try:
+            self._emit_dm_notice(
+                f"✗ MeshCore companion refused the DM to '{destination}' "
+                f"({err}) — reply not delivered", reply_ctx)
+        except Exception as e:
+            logger.debug(f"DM refusal notice failed: {e}")
 
     def _correlate_dm_ack(self, payload: Any) -> None:
         """Match an ACK event against watched DMs; emit the ✓ notice on a hit.

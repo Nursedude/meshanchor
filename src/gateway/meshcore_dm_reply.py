@@ -192,5 +192,8 @@ def companion_error(evt: Any) -> Optional[str]:
         return None
     payload = getattr(evt, "payload", None)
     if isinstance(payload, dict):
-        return str(payload.get("reason") or payload.get("error") or "error")
+        # reader.py dispatches a device ERR frame as {"error_code": n,
+        # "code_string": "ERR_CODE_..."} — no "reason" key (review C).
+        return str(payload.get("reason") or payload.get("error")
+                   or payload.get("code_string") or "error")
     return "error"
