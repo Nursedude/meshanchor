@@ -110,6 +110,22 @@ __all__ = [
 from gateway.meshcore_simulator import MeshCoreSimulator
 
 
+def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
+               note: str = "") -> None:
+    """MeshCore egress → delivery_counters (2026-09-23): the primary radio's
+    sends never reached the Delivery screen, so a busy leg read as silence.
+    Lazy import — the module-level form deadlocked threaded startup
+    (bridge_send_mixin._LazyDeliveryCounters). record() never raises."""
+    try:
+        from gateway import delivery_counters as dc
+        dc.record(dc.DeliveryState(state), msg_id or f"meshcore-{time.time():.3f}",
+                  protocol="meshcore",
+                  drop_reason=dc.DropReason(reason) if reason else None,
+                  note=note[:80])
+    except Exception as e:
+        logger.warning(f"MeshCore delivery record failed ({state}): {e}")
+
+
 class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleMixin,
                       MeshCoreContactCaptureMixin, BaseMessageHandler):
     """
@@ -922,7 +938,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
         try:
             channel = 0
             reply_ctx = None
+            msg_id = None
             if isinstance(msg, CanonicalMessage):
+                msg_id = msg.id
                 text = msg.to_meshcore_text()
                 dest = msg.destination_address
                 reply_ctx = msg.metadata.get('dm_reply_ctx')
@@ -936,6 +954,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             elif isinstance(msg, dict):
                 text = msg.get('message', '')
                 dest = msg.get('destination')
+                msg_id = msg.get('id')
                 meta = msg.get('metadata')
                 if isinstance(meta, dict):
                     reply_ctx = meta.get('dm_reply_ctx')
@@ -960,7 +979,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 dest = None
 
             success = await self._send_message(text, dest, channel=channel,
-                                               reply_ctx=reply_ctx)
+                                               reply_ctx=reply_ctx, msg_id=msg_id)
 
             if success:
                 with self._stats_lock:
@@ -991,6 +1010,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
         destination: Optional[str] = None,
         channel: int = 0,
         reply_ctx: Optional[Dict[str, Any]] = None,
+        msg_id: Optional[str] = None,
     ) -> bool:
         """
         Send a text message to the MeshCore network.
@@ -1010,6 +1030,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             True if sent successfully.
         """
         if not self._meshcore or not self._connected:
+            _record_tx("dropped", msg_id, "non_retriable_error", "not connected")
             return False
 
         # RF egress chokepoint — every MeshCore send funnels through here,
@@ -1044,6 +1065,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                         if reply_ctx is not None:
                             self._register_dm_ack_watch(
                                 send_evt, destination, reply_ctx)
+                        _record_tx("sent", msg_id, note=f"dm {destination}")
                         return True
                 # Contact resolution failed (advert aged out, peer never
                 # seen, etc.) — drop the DM rather than broadcasting it.
@@ -1068,6 +1090,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                     self._emit_dm_notice(
                         f"✗ no MeshCore contact matching "
                         f"'{destination}' — reply not delivered", reply_ctx)
+                _record_tx("dropped", msg_id, "destination_unreachable",
+                           f"no contact {destination}")
                 return False
             else:
                 # Channel broadcast
@@ -1083,11 +1107,14 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                         await self._meshcore.send_channel_txt_msg(text)
                 else:
                     logger.error("MeshCore instance has no send method")
+                    _record_tx("dropped", msg_id, "non_retriable_error", "no send method")
                     return False
+                _record_tx("sent", msg_id, note=f"ch{channel}")
                 return True
 
         except Exception as e:
             logger.error(f"Failed to send MeshCore message: {e}")
+            _record_tx("dropped", msg_id, "non_retriable_error", str(e))
             return False
 
     @staticmethod
