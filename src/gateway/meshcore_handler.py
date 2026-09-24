@@ -54,7 +54,7 @@ from .meshcore_radio_config import (
 from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
 from .meshcore_oracle_mixin import MeshCoreOracleMixin
-from .meshcore_dm_reply import PendingDmAcks
+from .meshcore_dm_reply import PendingDmAcks, companion_error
 from .meshcore_ingress import (
     InboundChannelPolicy,
     apply_inbound_policy,
@@ -124,6 +124,14 @@ def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
                   note=note[:80])
     except Exception as e:
         logger.warning(f"MeshCore delivery record failed ({state}): {e}")
+
+
+def _companion_refused(err: str, msg_id: Optional[str], what: str) -> bool:
+    """meshcore_py never raises on a failed send: the ERROR Event IS the
+    failure (review 2026-09-23 — it was being recorded as SENT)."""
+    logger.warning(f"MeshCore {what} refused by the companion: {err}")
+    _record_tx("dropped", msg_id, "non_retriable_error", f"companion {err}")
+    return False
 
 
 class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleMixin,
@@ -568,8 +576,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             self.record_chat_message(
                 direction="rx",
                 text=msg.content or "",
-                channel=None,
+                channel=None,  # a DM has no slot by design (pane renders "DM")
                 sender=msg.source_address,
+                reach=reach_of(getattr(event, 'payload', None)),
             )
 
             # Mesh oracle (read-only): answer a query DIRECTED back to the
@@ -1003,6 +1012,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 f"MeshCore outbound refused by tx_guard — dropped: {e}")
         except Exception as e:
             logger.error(f"Error processing outbound MeshCore message: {e}")
+            # It must not vanish from the Delivery record (review 2026-09-23).
+            _record_tx("dropped", msg_id, "non_retriable_error", f"outbound: {e}")
 
     async def _send_message(
         self,
@@ -1062,6 +1073,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                                             target=destination):
                             send_evt = await self._meshcore.commands.send_msg(
                                 contact, text)
+                        err = companion_error(send_evt)
+                        if err is not None:
+                            return _companion_refused(err, msg_id, f"DM {destination!r}")
                         if reply_ctx is not None:
                             self._register_dm_ack_watch(
                                 send_evt, destination, reply_ctx)
@@ -1098,7 +1112,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 if hasattr(self._meshcore, 'commands'):
                     with timed_boundary("meshcore.send_chan_msg",
                                         target=str(channel)):
-                        await self._meshcore.commands.send_chan_msg(channel, text)
+                        chan_evt = await self._meshcore.commands.send_chan_msg(
+                            channel, text)
+                    err = companion_error(chan_evt)
+                    if err is not None:
+                        return _companion_refused(err, msg_id, f"ch{channel}")
                 elif hasattr(self._meshcore, 'send_channel_txt_msg'):
                     # Simulator path — keeps the historical method name
                     # for backwards-compat with MeshCoreSimulator.

@@ -139,6 +139,13 @@ def _format_entry(entry: Dict[str, Any],
         tag = _color("36", f"DM[{destination[:8]}]")
     elif channel is not None:
         tag = _color("35", _channel_label(channel, channel_names))
+    elif direction == "rx" and entry.get("sender"):
+        # A contact (direct) message: the wire names NO slot for a DM by
+        # design, and CONTACT_MSG_RECV always carries pubkey_prefix while a
+        # channel rx never carries a sender key. The daemon records a DM rx
+        # with channel=None and no destination (it is addressed to us), so
+        # this is a DM, not an unknown slot (review B, 2026-09-23).
+        tag = _color("36", "DM")
     else:
         # The wire named no slot: say so, never a bare "?".
         tag = _color("35", "ch?(unknown slot)")

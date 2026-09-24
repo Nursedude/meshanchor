@@ -346,6 +346,24 @@ class TestStateTransitionContract:
         states = [e.state for e in c.history_for(msg_id)]
         assert states[-1] == DeliveryState.DROPPED
 
+    def test_meshcore_drops_do_not_move_the_rns_confirmation_rate(self):
+        """A protocol outside confirmable_protocols has no CONFIRMED
+        counterpart, so its failures can only drag the rate down — they are
+        the blind spot, not the denominator."""
+        c = DeliveryCounters()
+        for i in range(4):
+            c.record(DeliveryState.CONFIRMED, f"lxmf-{i}", protocol="rns")
+        c.record(DeliveryState.DROPPED, "lxmf-x", protocol="rns",
+                  drop_reason=DropReason.RNS_DELIVERY_FAILED)
+        before = c.snapshot()["confirmation_rate"]
+        assert before == 0.8
+        for i in range(4):
+            c.record(DeliveryState.DROPPED, f"mc-{i}", protocol="meshcore",
+                      drop_reason=DropReason.DESTINATION_UNREACHABLE)
+        snap = c.snapshot()
+        assert snap["confirmation_rate"] == before
+        assert snap["confirmable_protocols"] == ["rns"]
+
     def test_lifecycle_independent_per_msg_id(self):
         """Two messages in flight at once each carry their own history;
         the snapshot's confirmation_rate is the aggregate, but

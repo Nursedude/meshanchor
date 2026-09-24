@@ -165,7 +165,12 @@ def confirmation_window(snap: dict) -> dict:
     # Vocabulary owned by delivery_counters — imported, never re-listed.
     from gateway.delivery_counters import DELIVERY_FAILURE_REASONS
     conf = failed = 0
-    for e in recent or ():
+    # Walk the ring only when something can confirm — the inline code this
+    # replaced returned `no_confirmable_protocol` BEFORE touching the ring,
+    # so a corrupt entry (unhashable protocol) never raised on a box with no
+    # confirmable protocol; the extraction moved the walk ahead of that
+    # early return (review B differential fuzz, 2026-09-23).
+    for e in (recent or ()) if confirmable else ():
         if not isinstance(e, dict) or e.get("protocol") not in confirmable:
             continue
         st = e.get("state")

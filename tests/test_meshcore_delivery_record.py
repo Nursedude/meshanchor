@@ -132,3 +132,66 @@ def test_meshcore_sends_stay_out_of_the_stall_judgement(handler):
     snap = dc.get_singleton().snapshot()
     assert snap["state_by_protocol"]["sent"]["meshcore"] == 5
     assert "meshcore" not in confirmation_window(snap)["confirmable"]
+
+
+class _Evt:
+    """meshcore_py 2.3.14 Event shape: .type / .payload / .is_error()."""
+    def __init__(self, typ, payload):
+        self.type = typ
+        self.payload = payload
+
+    def is_error(self):
+        return self.type == "command_error"
+
+
+def test_companion_error_event_on_channel_send_is_a_drop(handler):
+    """send_chan_msg NEVER raises: a companion timeout / device ERR comes
+    back as Event(ERROR, {reason}) (meshcore/commands/base.py send())."""
+    cmds = _commands()
+    cmds.send_chan_msg = AsyncMock(
+        return_value=_Evt("command_error", {"reason": "timeout"}))
+    handler._connected = True
+    handler._meshcore = MagicMock(commands=cmds)
+    assert _run(handler._send_message("hi", channel=1)) is False
+    (ev,) = _meshcore_events()
+    assert ev.state is dc.DeliveryState.DROPPED
+    assert "timeout" in ev.note
+
+
+def test_companion_error_event_on_dm_is_a_drop_and_not_ack_watched(handler):
+    contact = {"public_key": b"\xab\xcd", "adv_name": "p3"}
+    cmds = _commands()
+    cmds.get_contacts = AsyncMock(return_value=SimpleNamespace(payload=[contact]))
+    cmds.send_msg = AsyncMock(
+        return_value=_Evt("command_error", {"reason": "no_event_received"}))
+    handler._connected = True
+    handler._meshcore = MagicMock(commands=cmds)
+    assert _run(handler._send_message("hi", destination="abcd")) is False
+    (ev,) = _meshcore_events()
+    assert ev.state is dc.DeliveryState.DROPPED
+    assert handler.stats.get('meshcore_dm_ack_watch', 0) == 0
+
+
+def test_ok_event_on_channel_send_is_sent(handler):
+    cmds = _commands()
+    cmds.send_chan_msg = AsyncMock(return_value=_Evt("command_ok", {}))
+    handler._connected = True
+    handler._meshcore = MagicMock(commands=cmds)
+    assert _run(handler._send_message("hi", channel=1)) is True
+    (ev,) = _meshcore_events()
+    assert ev.state is dc.DeliveryState.SENT
+
+
+def test_outbound_render_failure_still_records_a_drop(handler):
+    handler._connected = True
+    handler._meshcore = MagicMock(commands=_commands())
+
+    class Boom(CanonicalMessage):
+        def to_meshcore_text(self):
+            raise ValueError("render failed")
+
+    handler._send_queue.put_nowait(Boom(content="hi", is_broadcast=True))
+    _run(handler._process_outbound())
+    (ev,) = _meshcore_events()
+    assert ev.state is dc.DeliveryState.DROPPED
+    assert "render failed" in ev.note

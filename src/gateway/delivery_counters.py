@@ -197,6 +197,7 @@ def compute_confirmation_view(
     state_totals: Dict[str, int],
     state_by_protocol: Dict[str, Dict[str, int]],
     drop_reasons: Dict[str, int],
+    drop_reasons_by_protocol: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Dict[str, Any]:
     """Honest confirmation accounting from raw counters (MF Issue #74 port,
     2026-07-19 — the pre-port ``confirmed / sent`` read 7.625 = ">762%
@@ -229,9 +230,26 @@ def compute_confirmation_view(
 
     confirmable = sorted(p for p, c in confirmed_by_proto.items() if _pos_int(c) > 0)
     confirmable_set = set(confirmable)
-    failures = sum(
-        _pos_int((drop_reasons or {}).get(r, 0)) for r in DELIVERY_FAILURE_REASONS
-    )
+    if drop_reasons_by_protocol and confirmable_set:
+        # Once we know which protocols confirm, judge only those: failures
+        # on a protocol that never confirms (MeshCore channel sends) have no
+        # CONFIRMED counterpart, so they could only drag the rate down —
+        # they are the blind spot, surfaced separately, not the denominator
+        # (2026-09-23). With nothing confirmed yet the global sum stands, so
+        # "attempted and failed, none confirmed" still reads 0.0, not None.
+        failures = sum(
+            _pos_int(v)
+            for p, reasons in drop_reasons_by_protocol.items()
+            if p in confirmable_set
+            for r, v in (reasons or {}).items()
+            if r in DELIVERY_FAILURE_REASONS
+        )
+    else:
+        # Pre-2026-09-23 DBs carry no per-protocol drop keys: keep the
+        # global sum rather than reading "no failures".
+        failures = sum(
+            _pos_int((drop_reasons or {}).get(r, 0)) for r in DELIVERY_FAILURE_REASONS
+        )
     terminal = confirmed + failures
     rate = confirmed / terminal if terminal > 0 else None
     unconfirmable_sent = sum(
@@ -632,6 +650,14 @@ class DeliveryCounters:
                 counter_keys.append(
                     f"state_proto.{event.state.value}.{event.protocol}"
                 )
+                if event.drop_reason is not None:
+                    # Per-protocol drop reasons: the confirmation view must
+                    # count failures only on protocols that can confirm
+                    # (reviewer probe P2, 2026-09-23 — MeshCore drops moved
+                    # the RNS-only rate 1.0 -> 0.5).
+                    counter_keys.append(
+                        f"drop_proto.{event.drop_reason.value}.{event.protocol}"
+                    )
             for key in counter_keys:
                 conn.execute(
                     "INSERT INTO counters(key, value) VALUES(?, 1) "
@@ -692,6 +718,7 @@ class DeliveryCounters:
         ``recent_limit`` argument caps the JSON size (default
         ``SNAPSHOT_RECENT_LIMIT``).
         """
+        snapshot_failed = False
         try:
             with self._connect() as conn:
                 rows = conn.execute(
@@ -730,12 +757,14 @@ class DeliveryCounters:
             events_rows = []
             terminal_rows = []
             ring_capacity = self._ring_cap
+            snapshot_failed = True
 
         state_totals: Dict[str, int] = {s.value: 0 for s in DeliveryState}
         drop_reasons: Dict[str, int] = {r.value: 0 for r in DropReason}
         state_by_protocol: Dict[str, Dict[str, int]] = {
             s.value: {} for s in DeliveryState
         }
+        drop_reasons_by_protocol: Dict[str, Dict[str, int]] = {}
         first_event_ts: Optional[float] = None
         last_event_ts: Optional[float] = None
         # Cross-process health fields (set by the last writer's
@@ -755,6 +784,9 @@ class DeliveryCounters:
             elif key.startswith("state_proto."):
                 _, state_v, proto = key.split(".", 2)
                 state_by_protocol.setdefault(state_v, {})[proto] = value
+            elif key.startswith("drop_proto."):
+                _, reason_v, proto = key.split(".", 2)
+                drop_reasons_by_protocol.setdefault(proto, {})[reason_v] = value
             elif key == "meta.first_event_ts":
                 first_event_ts = value / 1000.0
             elif key == "meta.last_event_ts":
@@ -771,7 +803,8 @@ class DeliveryCounters:
         # Honest confirmation accounting (MF #74 port, 2026-07-19): the old
         # cross-population `confirmed / sent` read 7.625 live on this fleet.
         confirmation = compute_confirmation_view(
-            state_totals, state_by_protocol, drop_reasons)
+            state_totals, state_by_protocol, drop_reasons,
+            drop_reasons_by_protocol=drop_reasons_by_protocol)
 
         # events_rows comes back newest-first from the DESC ORDER BY;
         # the snapshot contract is newest-LAST so the operator can
@@ -840,6 +873,14 @@ class DeliveryCounters:
                 "last_write_error_ts": write_error_ts,
                 "last_write_error": self._last_write_error,
             }
+            if snapshot_failed:
+                # The DB could not be read THIS call: every zero above is an
+                # assertion, not an observation, and the preflight value is
+                # the reader's stale startup state. Mark it so the Delivery
+                # screen / probes read UNKNOWN instead of QUIET (MF parity,
+                # delivery_counters.py `db_unobservable`; hfm #1, #2).
+                health["db_unobservable"] = True
+                health["preflight_ok"] = None
 
         return {
             "state_totals": state_totals,

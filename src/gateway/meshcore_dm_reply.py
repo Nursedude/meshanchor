@@ -173,3 +173,24 @@ def ack_code_hex(value: Any) -> str:
     if isinstance(value, str):
         return value.strip().lower()
     return ""
+
+
+def companion_error(evt: Any) -> Optional[str]:
+    """meshcore_py (2.3.14) ``send_msg`` / ``send_chan_msg`` return an Event
+    and NEVER raise: a companion timeout, ``no_event_received`` or a device
+    ERR frame arrive as ``Event(EventType.ERROR, {"reason": ...})``
+    (``meshcore/commands/base.py`` ``send()``). Returns the reason string
+    when the send failed, None when it succeeded or when the object is not
+    Event-shaped (simulator / test double returning None or bool: absence
+    of an error is not an error). Reviewer finding 2026-09-23: the handler
+    recorded every ERROR event as SENT."""
+    is_err = getattr(evt, "is_error", None)
+    try:
+        if not (callable(is_err) and is_err()):
+            return None
+    except Exception:
+        return None
+    payload = getattr(evt, "payload", None)
+    if isinstance(payload, dict):
+        return str(payload.get("reason") or payload.get("error") or "error")
+    return "error"
