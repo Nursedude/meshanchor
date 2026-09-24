@@ -1118,11 +1118,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                     if err is not None:
                         return _companion_refused(err, msg_id, f"ch{channel}")
                 elif hasattr(self._meshcore, 'send_channel_txt_msg'):
-                    # Simulator path — keeps the historical method name
-                    # for backwards-compat with MeshCoreSimulator.
+                    # Simulator: not egress, so never a delivery record (review A F5).
                     with timed_boundary("meshcore.send_chan_msg",
                                         target=str(channel)):
                         await self._meshcore.send_channel_txt_msg(text)
+                    return True
                 else:
                     logger.error("MeshCore instance has no send method")
                     _record_tx("dropped", msg_id, "non_retriable_error", "no send method")

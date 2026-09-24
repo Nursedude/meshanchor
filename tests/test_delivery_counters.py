@@ -944,3 +944,43 @@ class TestCrossProcessWriteErrorTruthIssue74:
         c.record(DeliveryState.SENT, "m2", protocol="rns")
         health = c.snapshot()["health"]
         assert health["consecutive_write_errors"] == 2
+
+
+class TestLegacyDropsStayInTheDenominator:
+    """Review A_2 follow-up (2026-09-23, found porting it to MeshForge): the
+    per-protocol denominator must not DROP failures recorded before drops
+    carried a protocol key. Otherwise the first tagged drop switches the rate
+    to lifetime-confirmed / post-patch-failures — meshanchor-server would read
+    ~0.999 instead of 0.943, and moc ~0.99996 instead of ~0.98."""
+
+    def _legacy_drop(self, c, n):
+        # A pre-patch drop: bump only the global drop.<reason> + state keys,
+        # exactly what the old _persist wrote (no drop_proto.* key).
+        with c._connect() as conn:
+            for key in ("drop.rns_delivery_failed", "state.dropped",
+                        "state_proto.dropped.rns"):
+                conn.execute(
+                    "INSERT INTO counters(key, value) VALUES(?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = value + ?",
+                    (key, n, n))
+            conn.commit()
+
+    def test_first_tagged_drop_does_not_forgive_legacy_failures(self):
+        c = DeliveryCounters()
+        for i in range(8):
+            c.record(DeliveryState.CONFIRMED, f"lxmf-{i}", protocol="rns")
+        self._legacy_drop(c, 2)
+        assert c.snapshot()["confirmation_rate"] == 0.8     # 8 / (8 + 2)
+        c.record(DeliveryState.DROPPED, "lxmf-x", protocol="rns",
+                 drop_reason=DropReason.RNS_DELIVERY_FAILED)
+        # 8 / (8 + 2 legacy + 1 tagged) — NOT 8 / 9
+        assert c.snapshot()["confirmation_rate"] == 8 / 11
+
+    def test_unconfirmable_tagged_drop_still_does_not_move_the_rate(self):
+        c = DeliveryCounters()
+        for i in range(8):
+            c.record(DeliveryState.CONFIRMED, f"lxmf-{i}", protocol="rns")
+        self._legacy_drop(c, 2)
+        c.record(DeliveryState.DROPPED, "mc-1", protocol="meshcore",
+                 drop_reason=DropReason.DESTINATION_UNREACHABLE)
+        assert c.snapshot()["confirmation_rate"] == 0.8

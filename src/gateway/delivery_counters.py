@@ -230,26 +230,32 @@ def compute_confirmation_view(
 
     confirmable = sorted(p for p, c in confirmed_by_proto.items() if _pos_int(c) > 0)
     confirmable_set = set(confirmable)
+    global_failures = {
+        r: _pos_int((drop_reasons or {}).get(r, 0)) for r in DELIVERY_FAILURE_REASONS
+    }
     if drop_reasons_by_protocol and confirmable_set:
-        # Once we know which protocols confirm, judge only those: failures
-        # on a protocol that never confirms (MeshCore channel sends) have no
-        # CONFIRMED counterpart, so they could only drag the rate down —
-        # they are the blind spot, surfaced separately, not the denominator
-        # (2026-09-23). With nothing confirmed yet the global sum stands, so
-        # "attempted and failed, none confirmed" still reads 0.0, not None.
-        failures = sum(
-            _pos_int(v)
-            for p, reasons in drop_reasons_by_protocol.items()
-            if p in confirmable_set
-            for r, v in (reasons or {}).items()
-            if r in DELIVERY_FAILURE_REASONS
-        )
+        # Judge only protocols that can confirm: a failure on one that never
+        # confirms (MeshCore channel sends) has no CONFIRMED counterpart, so
+        # it is the blind spot, surfaced separately — not the denominator.
+        # Drops recorded before drop_proto.* keys existed (2026-09-23) carry
+        # no protocol and STAY in the denominator: forgiving them would pair
+        # lifetime confirmations with post-patch failures only (1 MeshCore
+        # drop read 1.0 over real RNS failures). Unattributed = global
+        # minus what is attributed; a protocol-less drop lands there too.
+        attributed = dict.fromkeys(DELIVERY_FAILURE_REASONS, 0)
+        failures = 0
+        for p, reasons in drop_reasons_by_protocol.items():
+            for r, v in (reasons or {}).items():
+                if r in attributed:
+                    attributed[r] += _pos_int(v)
+                    if p in confirmable_set:
+                        failures += _pos_int(v)
+        failures += sum(max(0, global_failures[r] - attributed[r])
+                        for r in DELIVERY_FAILURE_REASONS)
     else:
-        # Pre-2026-09-23 DBs carry no per-protocol drop keys: keep the
-        # global sum rather than reading "no failures".
-        failures = sum(
-            _pos_int((drop_reasons or {}).get(r, 0)) for r in DELIVERY_FAILURE_REASONS
-        )
+        # No per-protocol keys yet, or nothing has confirmed: the global sum,
+        # so "attempted and failed, none confirmed" still reads 0.0.
+        failures = sum(global_failures.values())
     terminal = confirmed + failures
     rate = confirmed / terminal if terminal > 0 else None
     unconfirmable_sent = sum(

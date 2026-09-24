@@ -195,3 +195,14 @@ def test_outbound_render_failure_still_records_a_drop(handler):
     (ev,) = _meshcore_events()
     assert ev.state is dc.DeliveryState.DROPPED
     assert "render failed" in ev.note
+
+
+def test_simulator_send_leaves_no_delivery_record(handler):
+    """Review A F5: the in-process simulator is not egress; with
+    simulation_mode on a real box its fake sends must not land in the real
+    delivery DB as MeshCore traffic."""
+    from gateway.meshcore_handler import MeshCoreSimulator
+    handler._meshcore = MeshCoreSimulator()
+    handler._connected = True
+    assert _run(handler._send_message("sim text", channel=1)) is True
+    assert _meshcore_events() == []
