@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.db_helpers import connect_tuned
+from utils.delivery_labels import canonical_protocol, lane_of
 from utils.paths import get_real_user_home
 
 
@@ -539,6 +540,12 @@ class DeliveryCounters:
             drop_reason = DropReason.UNKNOWN
         if state == DeliveryState.DROPPED and drop_reason is None:
             drop_reason = DropReason.UNKNOWN
+        # A routing lane (dual-radio primary/secondary) is not a transport:
+        # count it under the transport, keep the lane in the note (review C F7).
+        lane = lane_of(protocol)
+        protocol = canonical_protocol(protocol)
+        if lane:
+            note = f"lane={lane} {note}".strip()
 
         event = DeliveryEvent(
             ts=ts if ts is not None else time.time(),
@@ -789,10 +796,15 @@ class DeliveryCounters:
                 drop_reasons[key[5:]] = value
             elif key.startswith("state_proto."):
                 _, state_v, proto = key.split(".", 2)
-                state_by_protocol.setdefault(state_v, {})[proto] = value
+                # Pre-F7 history carries lane labels; merge them into the
+                # transport (+=, several keys can map to one protocol).
+                by = state_by_protocol.setdefault(state_v, {})
+                proto = canonical_protocol(proto)
+                by[proto] = by.get(proto, 0) + value
             elif key.startswith("drop_proto."):
                 _, reason_v, proto = key.split(".", 2)
-                drop_reasons_by_protocol.setdefault(proto, {})[reason_v] = value
+                by = drop_reasons_by_protocol.setdefault(canonical_protocol(proto), {})
+                by[reason_v] = by.get(reason_v, 0) + value
             elif key == "meta.first_event_ts":
                 first_event_ts = value / 1000.0
             elif key == "meta.last_event_ts":
@@ -821,7 +833,7 @@ class DeliveryCounters:
                 "ts": ts,
                 "id": msg_id,
                 "state": state,
-                "protocol": protocol,
+                "protocol": canonical_protocol(protocol),
                 "drop_reason": drop_reason,
             }
             if note:
@@ -832,7 +844,7 @@ class DeliveryCounters:
         # judging confirmation rates needs state/protocol/drop_reason only.
         recent_terminal: List[Dict[str, Any]] = [
             {"ts": ts, "id": msg_id, "state": state,
-             "protocol": protocol, "drop_reason": drop_reason}
+             "protocol": canonical_protocol(protocol), "drop_reason": drop_reason}
             for (ts, msg_id, state, protocol, drop_reason)
             in reversed(terminal_rows)
         ]
@@ -962,7 +974,8 @@ class DeliveryCounters:
                 dr_enum = DropReason.UNKNOWN
         return DeliveryEvent(
             ts=ts, id=msg_id, state=state_enum,
-            protocol=protocol, drop_reason=dr_enum, note=note or "",
+            protocol=canonical_protocol(protocol), drop_reason=dr_enum,
+            note=note or "",
         )
 
     # ── test helpers ───────────────────────────────────────────
