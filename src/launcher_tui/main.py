@@ -738,7 +738,8 @@ class MeshAnchorLauncher:
 
     def _dashboard_menu(self):
         """Dashboard - Status, health, alerts, propagation."""
-        _ORDERING = ["status", "weather", "network", "nodes", "health", "score",
+        # "delivery" (the END: did messages arrive) right after status (2026-09-23).
+        _ORDERING = ["status", "delivery", "weather", "network", "nodes", "health", "score",
                       "datapath", "stack_health", "metrics", "analytics", "latency",
                       "reports", "alerts"]
         while True:

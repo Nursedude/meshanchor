@@ -69,7 +69,7 @@ The full capability inventory, including what is proven in the field and what st
 
 | Feature | Tests | Notes |
 |---------|-------|-------|
-| Handler registry | 70 | <!--STAT:handlers-->72<!--/STAT--> handler files, Protocol + BaseHandler pattern |
+| Handler registry | 70 | <!--STAT:handlers-->73<!--/STAT--> handler files, Protocol + BaseHandler pattern |
 | whiptail/dialog backend | -- | raspi-config style, SSH-friendly |
 | Deployment profile selector | 76 | 5 profiles, MeshCore-first ordering, auto-detect, full matrix pinned |
 | Startup health checks | 38 | Profile-aware classification (required / optional / not_applicable) |
@@ -98,7 +98,7 @@ The full capability inventory, including what is proven in the field and what st
 ### Testing Reality Check
 
 MeshAnchor has **~5,900 automated tests** (run `python3 -m pytest tests/ --co -q`
-for the live count) across <!--STAT:testfiles-->245<!--/STAT--> test files. However, automated tests
+for the live count) across <!--STAT:testfiles-->246<!--/STAT--> test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.

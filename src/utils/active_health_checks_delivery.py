@@ -129,9 +129,57 @@ def check_queue_backlog(
     )
 
 
+#: Confirmable terminal events needed before a rate is judged — named so the
+#: TUI Delivery screen says "too few to judge" at the SAME floor.
+DELIVERY_STALL_MIN_TERMINAL = 20
+
+
+def confirmation_window(snap: dict) -> dict:
+    """The windowed confirmation count ``check_delivery_confirmation_stall``
+    judges, as a pure function of a delivery snapshot — one implementation
+    for the check and the TUI Delivery screen (hfm #5, 2026-09-23).
+
+    Keys: ``confirmable`` (set of protocols that have ever confirmed),
+    ``ring_source`` (``recent_terminal`` | ``recent``), ``ring`` (the list
+    judged, or None when neither ring is a list), ``confirmed``, ``failed``.
+
+    Behaviour-identical to the inline code it replaced, including set
+    membership (a MeshForge twin of this extraction swapped the set for a
+    list and changed behaviour on corrupt payloads — its review caught it).
+
+    Prefer the terminal-only ring: a general FIFO lets unconfirmable traffic
+    evict the terminals this needs, so it reads `low_traffic` while a TOTAL
+    collapse reads the same. See TestConfirmationRingStarvation.
+    """
+    confirmed_by_proto = (snap.get("state_by_protocol") or {}).get("confirmed") or {}
+    confirmable = {
+        p for p, c in confirmed_by_proto.items()
+        if isinstance(c, (int, float)) and not isinstance(c, bool) and c > 0
+    }
+    recent = snap.get("recent_terminal")
+    ring_source = "recent_terminal" if isinstance(recent, list) else "recent"
+    if not isinstance(recent, list):
+        recent = snap.get("recent")
+    if not isinstance(recent, list):
+        recent = None
+    # Vocabulary owned by delivery_counters — imported, never re-listed.
+    from gateway.delivery_counters import DELIVERY_FAILURE_REASONS
+    conf = failed = 0
+    for e in recent or ():
+        if not isinstance(e, dict) or e.get("protocol") not in confirmable:
+            continue
+        st = e.get("state")
+        if st == "confirmed":
+            conf += 1
+        elif st == "dropped" and e.get("drop_reason") in DELIVERY_FAILURE_REASONS:
+            failed += 1
+    return {"confirmable": confirmable, "ring_source": ring_source,
+            "ring": recent, "confirmed": conf, "failed": failed}
+
+
 def check_delivery_confirmation_stall(
     *,
-    min_terminal: int = 20,
+    min_terminal: int = DELIVERY_STALL_MIN_TERMINAL,
     rate_degraded: float = 0.50,
     rate_wedge: float = 0.10,
     snap: Optional[dict] = None,
@@ -172,40 +220,16 @@ def check_delivery_confirmation_stall(
     if not isinstance(snap, dict):
         return HealthResult(healthy=True, reason="no_traffic")
 
-    # Confirmable = protocols that have ever recorded a `confirmed` event.
-    confirmed_by_proto = (snap.get("state_by_protocol") or {}).get("confirmed") or {}
-    confirmable = {
-        p for p, c in confirmed_by_proto.items()
-        if isinstance(c, (int, float)) and not isinstance(c, bool) and c > 0
-    }
+    # The count lives in confirmation_window() — shared with the TUI Delivery
+    # screen so the operator reads the SAME judgement (hfm #5, 2026-09-23).
+    win = confirmation_window(snap)
+    confirmable = win["confirmable"]
     if not confirmable:
         return HealthResult(healthy=True, reason="no_confirmable_protocol")
-
-    # Prefer the terminal-only ring: a general FIFO lets unconfirmable
-    # traffic evict the terminals this check needs, so it reads
-    # `low_traffic` while a TOTAL collapse reads the same. Ring size does
-    # not fix that; density does. See TestConfirmationRingStarvation.
-    recent = snap.get("recent_terminal")
-    ring_source = "recent_terminal" if isinstance(recent, list) else "recent"
-    if not isinstance(recent, list):
-        recent = snap.get("recent")
-    if not isinstance(recent, list):
+    recent, ring_source = win["ring"], win["ring_source"]
+    if recent is None:
         return HealthResult(healthy=True, reason="no_recent_ring")
-
-    # Vocabulary owned by delivery_counters — imported, never re-listed
-    # (honest_failure_modes #5: two independent hardcodes WILL drift).
-    from gateway.delivery_counters import DELIVERY_FAILURE_REASONS
-    ring_conf = 0
-    ring_failed = 0
-    for e in recent:
-        if not isinstance(e, dict) or e.get("protocol") not in confirmable:
-            continue
-        st = e.get("state")
-        if st == "confirmed":
-            ring_conf += 1
-        elif st == "dropped" and e.get("drop_reason") in DELIVERY_FAILURE_REASONS:
-            ring_failed += 1
-
+    ring_conf, ring_failed = win["confirmed"], win["failed"]
     terminal = ring_conf + ring_failed
     if terminal < min_terminal:
         # ⚠️ healthy=True here means "cannot judge", NOT "confirmations
