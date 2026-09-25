@@ -321,6 +321,8 @@ class TestMeshforgeMapsHandler:
         h.execute("mf_bogus")
         ctx.safe_call.assert_not_called()
 
+    # hand-off to a browser is only attempted in a graphical session (2026-09-25)
+    @patch.dict(os.environ, {"DISPLAY": ":0"})
     def test_open_browser_calls_webbrowser_with_url(self):
         h = MeshforgeMapsHandler()
         ctx = MagicMock()

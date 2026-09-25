@@ -127,8 +127,8 @@ class MeshforgeMapsHandler(BaseHandler):
         # www-browser) and run it INSIDE this TUI's terminal, blocking the menu
         # (non-author review 2026-09-25, observed on the MA server). Say so.
         if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            print("No graphical session here (no DISPLAY / WAYLAND_DISPLAY) — nothing")
-            print("was opened. Open this in a browser on another machine:")
+            print("A graphical browser is not available here (no DISPLAY / WAYLAND_DISPLAY)")
+            print("— nothing was opened. Open this in a browser on another machine:")
             print(f"  {url}")
             try:
                 self.ctx.wait_for_enter("\nPress Enter to return to menu...")

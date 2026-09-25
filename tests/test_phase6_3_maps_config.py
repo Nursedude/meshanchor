@@ -503,6 +503,8 @@ class TestConfigureEndpointDialog:
 
 
 class TestPhase6BackwardCompat:
+    # hand-off to a browser is only attempted in a graphical session (2026-09-25)
+    @patch.dict(os.environ, {"DISPLAY": ":0"})
     def test_handler_open_browser_uses_localhost_by_default(
         self, isolated_config_dir
     ):
@@ -518,6 +520,8 @@ class TestPhase6BackwardCompat:
             h._open_browser()
         mock_open.assert_called_once_with(f"http://{DEFAULT_HOST}:{DEFAULT_PORT}")
 
+    # hand-off to a browser is only attempted in a graphical session (2026-09-25)
+    @patch.dict(os.environ, {"DISPLAY": ":0"})
     def test_handler_open_browser_uses_overridden_url(
         self, isolated_config_dir
     ):

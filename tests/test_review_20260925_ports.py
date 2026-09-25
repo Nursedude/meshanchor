@@ -62,7 +62,7 @@ def test_open_without_a_graphical_session_launches_nothing(monkeypatch, capsys):
     monkeypatch.setattr(mm.webbrowser, "open", lambda *a, **k: called.append(a) or True)
     h._open_browser()
     out = capsys.readouterr().out
-    assert called == [] and "No graphical session" in out and "Open this in a browser" in out
+    assert called == [] and "graphical browser is not available here" in out and "Open this in a browser" in out
 
 
 def test_a_true_from_webbrowser_is_a_handoff_not_a_window(monkeypatch, capsys):
