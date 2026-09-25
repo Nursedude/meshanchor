@@ -148,6 +148,13 @@ class ReportGenerator:
                     lines.append("*Health scorer not initialized — no node data available.*")
                 else:
                     snapshot = scorer.get_snapshot()
+                if scorer is not None and not snapshot.node_count and not snapshot.service_count:
+                    # With nothing reporting, the scorer's category DEFAULTS rendered
+                    # as "65/100 (fair)" (MeshForge truth sweep 2026-09-22, ported
+                    # 2026-09-25) — a score of nothing is not a score.
+                    lines.append("**Overall Score: UNKNOWN** — no nodes or services "
+                                 "reporting to the health scorer; nothing was measured.")
+                elif scorer is not None:
                     lines.append(f"**Overall Score: {snapshot.overall_score:.0f}/100** "
                                  f"({snapshot.status})")
                     lines.append("")
@@ -372,8 +379,10 @@ class ReportGenerator:
         # Gather recommendations from all subsystems
         try:
             scorer = _get_health_scorer()
-            if scorer:
-                snapshot = scorer.get_snapshot()
+            snapshot = scorer.get_snapshot() if scorer else None
+            # An empty scorer holds DEFAULTS, not a measurement: recommending
+            # "health is degraded" from it was a finding from nothing (2026-09-25).
+            if snapshot is not None and (snapshot.node_count or snapshot.service_count):
                 if snapshot.overall_score < 50:
                     recommendations.append(
                         ("urgent", "Network health is critical — investigate immediately"))
@@ -406,7 +415,8 @@ class ReportGenerator:
                         'scheduled': '[!]', 'monitor': '[?]'}.get(priority, '-')
                 lines.append(f"- {icon} **[{priority.upper()}]** {action}")
         else:
-            lines.append("No actionable recommendations at this time. Network is healthy.")
+            lines.append("No recommendations from what was measured — this is not a "
+                         "health verdict (sections above say what could not be measured).")
 
         self._sections.append(ReportSection(
             heading="Recommendations",
