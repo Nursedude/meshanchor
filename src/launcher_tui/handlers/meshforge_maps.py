@@ -25,6 +25,7 @@ flag needed.
 """
 
 import logging
+import os
 import webbrowser
 
 from handler_protocol import BaseHandler
@@ -122,17 +123,35 @@ class MeshforgeMapsHandler(BaseHandler):
         client = self._client()
         url = client.web_url
         print(f"Opening {url} ...\n")
+        # No graphical session: webbrowser would pick a TEXT browser (lynx /
+        # www-browser) and run it INSIDE this TUI's terminal, blocking the menu
+        # (non-author review 2026-09-25, observed on the MA server). Say so.
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            print("No graphical session here (no DISPLAY / WAYLAND_DISPLAY) — nothing")
+            print("was opened. Open this in a browser on another machine:")
+            print(f"  {url}")
+            try:
+                self.ctx.wait_for_enter("\nPress Enter to return to menu...")
+            except KeyboardInterrupt:
+                print()
+            return
         try:
-            # open() RETURNS False when no browser could be started; the old
-            # code ignored it and printed "Browser launched." regardless (truth
-            # sweep port 2026-09-24). Opening is not reachability either —
+            # open() RETURNS False when no browser could be started. True only
+            # means a launcher was HANDED the URL — most controllers are fire-
+            # and-forget (Popen, then return), so a window is not observable
+            # from here (review 2026-09-25). And opening is not reachability:
             # the map server itself is checked only by Status.
             if webbrowser.open(url):
-                print("Browser launched (the map server itself was not checked —")
-                print("use Status to probe it).")
+                try:
+                    name = getattr(webbrowser.get(), "name", "the default browser")
+                except webbrowser.Error:
+                    name = "the default browser"
+                print(f"Handed {url} to {name}.")
+                print("Whether a window opened is not observable from here (the launcher")
+                print("returns before the browser does); the map server itself was not")
+                print("checked — use Status to probe it.")
             else:
-                print("Could not launch a browser — none found in this environment")
-                print("(a headless / ssh session has no default browser).")
+                print("Could not launch a browser — none found in this environment.")
                 print(f"Open manually: {url}")
         except webbrowser.Error as e:
             print(f"Could not launch browser: {e}")

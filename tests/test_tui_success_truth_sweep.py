@@ -268,9 +268,14 @@ BOX_STATE_DIRS = (
     "/etc/reticulum", "/etc/meshtasticd", "/etc/systemd", "/lib/systemd",
     "/usr/lib/systemd", "/proc/net", "/var/lib/meshforge", "/run/meshforge",
     "/etc/meshanchor", "/var/lib/meshanchor", "/run/meshanchor",
+    # Read by handlers deeper than level two (non-author review 2026-09-25):
+    # hardware.py / first_run.py (boot config, device tree), broker.py (mosquitto),
+    # nomadnet config, and the meshing_around sys.path probe.
+    "/boot", "/proc/device-tree", "/etc/mosquitto", "/etc/nomadnetwork",
+    "/opt/meshing_around_meshanchor",
     "/dev/serial", "/sys/class", "/sys/bus",
 )
-BOX_STATE_NAMES = ("/dev/tty", "/dev/spidev", "/dev/gpiochip", "/dev/i2c")
+BOX_STATE_NAMES = ("/dev/tty", "/dev/spidev", "/dev/gpiochip", "/dev/i2c", "/dev/rfcomm", "/dev/bus")
 _EMPTY_LISTING = ("/dev",)
 _BOX_STATE_TOUCHES: list = []
 

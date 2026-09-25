@@ -94,19 +94,23 @@ class NodeHealthHandler(BaseHandler):
                 continue
             results.append((name, host, port, success, rtt_ms))
 
+            # A TCP connect proves a LISTENER, not a working service
+            # (meshtasticd binds :9443 with or without a working web client) —
+            # so this says OPEN, never "HEALTHY" (MF 2026-09-23; ported 09-25
+            # after the non-author review of the MA sweep port).
             if success:
                 if rtt_ms < 10:
                     color = "\033[0;32m"
-                    label = "HEALTHY"
+                    label = "OPEN"
                 elif rtt_ms < 100:
                     color = "\033[0;33m"
-                    label = "OK"
+                    label = "OPEN"
                 else:
                     color = "\033[0;31m"
                     label = "SLOW"
                 print(f"  {color}{label:8s}\033[0m {name:<22} {rtt_ms:>7.1f}ms  ({host}:{port})")
             else:
-                print(f"  \033[0;31m{'DOWN':8s}\033[0m {name:<22} {'---':>7}    ({host}:{port})")
+                print(f"  \033[0;31m{'CLOSED':8s}\033[0m {name:<22} {'---':>7}    ({host}:{port})")
 
         up_count = sum(1 for r in results if r[3])
         down_count = len(results) - up_count
@@ -114,17 +118,27 @@ class NodeHealthHandler(BaseHandler):
         up_results = [r for r in results if r[3]]
         avg_rtt = sum(r[4] for r in up_results) / len(up_results) if up_results else 0.0
 
+        try:
+            from utils.latency_monitor import NOT_TCP_PROBED
+        except ImportError:
+            NOT_TCP_PROBED = ()
+        for name, why in NOT_TCP_PROBED:
+            print(f"  {'--':8s} {name:<22} {'':>7}    not TCP-probed: {why}")
+
         print(f"\n{'='*50}")
-        print(f"  Services: {up_count} up, {down_count} down"
+        print(f"  Ports: {up_count} accepting, {down_count} not accepting"
               + (f", {unknown_count} UNKNOWN (probe could not be made)" if unknown_count else ""))
+        print("  A port that accepts proves something is LISTENING there, not that")
+        print("  the service works. A closed port may be off by design on this box.")
         if up_results:
             print(f"  Avg RTT:  {avg_rtt:.1f}ms")
-
         if down_count > 0:
-            print("\n  Down services may need to be started:")
-            for name, host, port, success, _ in results:
-                if not success:
-                    print(f"    sudo systemctl start {name.split('_')[0]}")
+            # No raw "sudo systemctl start <name>" here: the TCP probe is not
+            # the authority on a service (it read rnsd DOWN on every healthy
+            # box — a unix-socket shared instance — and handed the operator an
+            # rnsd restart, the #69 race trigger). systemd is the authority.
+            print("\n  A closed port is not a stopped service. Check the service itself")
+            print("  under the service menu before starting anything.")
 
         print()
         self.ctx.wait_for_enter()

@@ -49,7 +49,9 @@ Action = Tuple[str, str]  # (menu_section, action_tag)
 #: without an uncertainty word. Keep the why short and checkable.
 LOCAL_ONLY: Dict[Action, str] = {
     ("about", "version"): "static text: version string, feature list, licence",
-    ("about", "sysinfo"): "reads /proc, os.uname, disk usage of THIS box — no external",
+    ("about", "sysinfo"): "reads /proc, os.uname, disk usage of THIS box, and runs "
+                          "`lsb_release -ds` (a dead subprocess drops the Distro line — "
+                          "an omission, not a claim) — no network external",
     ("about", "help"): "static keyboard-shortcut and documentation text",
     ("about", "deps"): "importlib probes of THIS interpreter's packages — [OK] means "
                        "'imports here', which is local truth, not a service claim",
