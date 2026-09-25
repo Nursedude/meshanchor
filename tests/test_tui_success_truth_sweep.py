@@ -350,6 +350,21 @@ def _kill_box_state(monkeypatch, empty_dir: Path):
     if globber is not None:
         monkeypatch.setattr(globber, "scandir", staticmethod(lists(os.scandir)))
         monkeypatch.setattr(globber, "lstat", staticmethod(reads(os.lstat)))
+    # Python <= 3.10 routes EVERY Path method through pathlib._NormalAccessor,
+    # whose attributes are os.stat / os.scandir / io.open … bound at class
+    # creation — so Path.exists(), .iterdir(), .read_text() went around every
+    # os patch above. MA's CI 3.10 leg witnessed it as real /dev listings
+    # (2026-09-24, first CI run of this port); the stat/open reads it could
+    # NOT witness were just as real. MF runs 3.11+ only (no accessor there).
+    import types as _types
+    accessor = getattr(__import__("pathlib"), "_NormalAccessor", None)
+    if accessor is not None:
+        for name, val in list(vars(accessor).items()):
+            if isinstance(val, _types.FunctionType) or name.startswith("_"):
+                continue  # a real method (e.g. a Python-level wrapper), not a bound builtin
+            patched = io.open if name == "open" else getattr(os, name, None)
+            if callable(patched):
+                monkeypatch.setattr(accessor, name, staticmethod(patched))
 
 
 def _rehome(val, home: Path):
