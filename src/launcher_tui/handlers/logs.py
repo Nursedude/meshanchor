@@ -11,7 +11,8 @@ from typing import List
 
 from backend import clear_screen
 from handler_protocol import BaseHandler
-from utils.paths import get_real_user_home
+from utils.paths import ReticulumPaths, get_real_user_home
+from utils.service_check import is_service_unit_installed
 
 try:
     from utils.logging_config import set_log_level, get_current_log_level, cleanup_old_logs
@@ -127,13 +128,56 @@ class LogsHandler(BaseHandler):
             ['journalctl', '-u', 'rnsd', '-f', '-n', '30', '--no-pager'],
         )
 
-    def _view_live_all(self):
-        cmd = ['journalctl', '-f', '-n', '30', '--no-pager']
-        for unit in self.MESH_UNITS:
-            cmd.extend(['-u', unit])
-        self._view_live_log("Mesh services live log", cmd)
+    def _mesh_journal_args(self):
+        """(journalctl match args, notes) for the mesh units THIS box has.
 
-    def _run_snapshot(self, title: str, cmd: List[str], timeout: int = 15) -> None:
+        A unit with no unit file made the journal's unit filter print "-- No
+        entries --", which read as a quiet service; a USER-scope unit (nomadnet
+        on meshanchor-server) never matches the system unit filter at all
+        (2026-09-25, ported from MeshForge e52a04f6)."""
+        args, absent, user = [], [], []
+        for unit in self.MESH_UNITS:
+            if is_service_unit_installed(unit):
+                args += ['-u', unit]
+            elif is_service_unit_installed(unit, user=True):
+                args += ['--user-unit', unit]
+                user.append(unit)
+            else:
+                absent.append(unit)
+        notes = []
+        if absent:
+            notes.append(f"Not installed on this box: {', '.join(absent)} — no lines "
+                         "from them means ABSENT, not quiet.")
+        if user:
+            notes.append(f"User-scope unit(s): {', '.join(user)} (read with --user-unit).")
+        if 'rnsd' not in absent:
+            notes.append("rnsd runs with --service and logs to its config dir's "
+                         "'logfile', not the journal — see rnsd Logs.")
+        return args, notes
+
+    def _run_units_snapshot(self, title: str, base_cmd: List[str], timeout: int = 15) -> None:
+        args, notes = self._mesh_journal_args()
+        if not args:
+            clear_screen()
+            print(f"=== {title} ===\n")
+            for n in notes:
+                print(f"  {n}")
+            print("  None of the mesh units exist on this box.")
+            self.ctx.wait_for_enter()
+            return
+        self._run_snapshot(title, base_cmd + args, timeout=timeout, notes=notes)
+
+    def _view_live_all(self):
+        args, _notes = self._mesh_journal_args()
+        if not args:
+            self.ctx.dialog.msgbox("Mesh services live log",
+                                   "None of the mesh units exist on this box.")
+            return
+        self._view_live_log("Mesh services live log",
+                            ['journalctl', '-f', '-n', '30', '--no-pager'] + args)
+
+    def _run_snapshot(self, title: str, cmd: List[str], timeout: int = 15,
+                      notes: List[str] = ()) -> None:
         """Print one command's output in the terminal, or say why it could not.
 
         A missing tool (no journalctl / dmesg on this box) used to escape into
@@ -143,6 +187,10 @@ class LogsHandler(BaseHandler):
         """
         clear_screen()
         print(f"=== {title} ===\n")
+        for n in notes:
+            print(f"  {n}")
+        if notes:
+            print()
         try:
             subprocess.run(cmd, timeout=timeout)
         except FileNotFoundError:
@@ -156,24 +204,39 @@ class LogsHandler(BaseHandler):
         self.ctx.wait_for_enter()
 
     def _view_error_logs(self):
-        cmd = ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager']
-        for unit in self.MESH_UNITS:
-            cmd.extend(['-u', unit])
-        self._run_snapshot("Mesh Service Errors (last hour, priority err+)", cmd, timeout=30)
+        self._run_units_snapshot("Mesh Service Errors (last hour, priority err+)",
+                                 ['journalctl', '-p', 'err', '--since', '1 hour ago',
+                                  '--no-pager'], timeout=30)
 
     def _view_meshtasticd_recent(self):
         self._run_snapshot("meshtasticd (last 50 lines)",
                            ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'])
 
     def _view_rnsd_recent(self):
-        self._run_snapshot("rnsd (last 50 lines)",
-                           ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'])
+        """rnsd's REAL log is its config dir's 'logfile' (`rnsd --service` logs
+        to file); the journal holds only systemd's start/stop lines, so this
+        screen could never show an RNS error (MeshForge e52a04f6, 2026-09-25)."""
+        path = ReticulumPaths.get_config_dir() / "logfile"
+        notes = []
+        try:
+            raw = path.read_bytes()
+            lines = raw.replace(b"\x00", b"").decode("utf-8", "replace").splitlines()
+            nul = raw.count(b"\x00")
+            notes.append(f"{path}: last 50 of {len(lines)} lines"
+                         + (f"; {nul} NUL byte(s) stripped (likely power-loss truncation)" if nul else ""))
+            notes.extend(lines[-50:] or ["(file is empty)"])
+        except FileNotFoundError:
+            notes.append(f"{path}: not found — rnsd may not run with --service here, "
+                         "or uses another config dir")
+        except OSError as e:
+            notes.append(f"{path}: UNREADABLE ({e}) — rnsd's log could not be read")
+        notes.append("--- systemd journal (start/stop only under --service) ---")
+        self._run_snapshot("rnsd Logs",
+                           ['journalctl', '-u', 'rnsd', '-n', '15', '--no-pager'], notes=notes)
 
     def _view_boot_messages(self):
-        cmd = ['journalctl', '-b', '-n', '100', '--no-pager']
-        for unit in self.MESH_UNITS:
-            cmd.extend(['-u', unit])
-        self._run_snapshot("Mesh Service Boot Messages (this boot)", cmd)
+        self._run_units_snapshot("Mesh Service Boot Messages (this boot)",
+                                 ['journalctl', '-b', '-n', '100', '--no-pager'])
 
     def _view_kernel_messages(self):
         self._run_snapshot("Kernel messages (dmesg)",
