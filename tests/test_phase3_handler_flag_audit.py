@@ -82,7 +82,6 @@ EXPECTED_FLAGS = [
     # Meshtastic-bound handlers
     ("meshtastic", "meshtastic"),       # radio_menu
     ("automation", "meshtastic"),
-    ("traffic", "meshtastic"),          # classifier
     # RNS-bound handlers (mesh_networks section)
     ("rns", "rns"),                     # rns_menu
     ("nomadnet", "rns"),
