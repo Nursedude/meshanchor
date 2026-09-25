@@ -830,7 +830,7 @@ class MeshAnchorLauncher:
         _ORDERING = ["meshtastic", "rns", "gateway",
                       "preflight", "test_gateway_rx", "export",
                       "aredn",
-                      "messaging", "traffic", "mqtt", "favorites", "ham", "services",
+                      "messaging", "mqtt", "favorites", "ham", "services",
                       "nomadnet"]
         # meshtastic / rns / gateway are REGISTRY-owned (radio_menu.py,
         # rns_menu.py, gateway.py), each declaring its own flag. They used
