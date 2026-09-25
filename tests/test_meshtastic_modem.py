@@ -12,7 +12,7 @@ import sys
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for p in (os.path.join(HERE, "..", "src"), os.path.join(HERE, "..", "src", "launcher_tui")):
+for p in (HERE, os.path.join(HERE, "..", "src"), os.path.join(HERE, "..", "src", "launcher_tui")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -68,3 +68,44 @@ def test_gateway_template_dialog_shows_firmware_numbers(monkeypatch):
     h.ctx = type("C", (), {"dialog": Dialog()})()
     h._apply_gateway_template("mtnmesh")
     assert "Spreading Factor: SF9" in shown["text"]
+
+
+# --- channel maths (RadioInterface.cpp) against facts known independently ---
+
+def test_long_fast_default_lands_on_the_fleets_slot_20():
+    # The fleet's LongFast segment is ch20 / 906.875 MHz (measured on the radios).
+    assert mm.channel_centre_mhz("LONG_FAST") == (906.875, 20, 104)
+
+
+def test_explicit_slot_follows_the_firmware_formula():
+    assert mm.channel_centre_mhz("SHORT_TURBO", 8) == (905.75, 8, 52)   # fleet's ShortTurbo ch8
+    assert mm.channel_centre_mhz("LONG_FAST", 1)[0] == 902.125
+
+
+def test_djb2_is_the_firmware_hash():
+    assert mm.djb2("") == 5381
+    assert mm.djb2("a") == 5381 * 33 + ord("a")
+
+
+def _slot_screen(menus, inputs):
+    from handler_test_utils import FakeDialog, make_handler_context
+    from handlers.rf_tools import RFToolsHandler
+    d = FakeDialog()
+    d._menu_returns, d._inputbox_returns = list(menus), list(inputs)
+    h = RFToolsHandler()
+    h.set_context(make_handler_context(dialog=d))
+    h._calc_frequency_slot()
+    return "\n".join(str(a[1]) for k, a, _ in d.calls if k == "msgbox")
+
+
+def test_slot_calculator_numbers_slots_like_the_radio():
+    """2026-09-25: typing the radio's channel_num 20 gave 907.125 MHz (0-based)."""
+    assert "Center Frequency: 906.875 MHz" in _slot_screen(["US", "LONG_FAST", "slot"], ["20"])
+    assert "channel_num 20" in _slot_screen(["US", "LONG_FAST", "name"], [""])
+    assert "Center Frequency: 905.750 MHz" in _slot_screen(["US", "SHORT_TURBO", "slot"], ["8"])
+
+
+def test_region_table_is_the_firmwares():
+    assert mm.REGIONS["JP"] == (920.5, 923.5, 0.0)
+    assert mm.REGIONS["SG_923"][0] == 917.0
+    assert "UK_868" not in mm.REGIONS and "PH" not in mm.REGIONS
