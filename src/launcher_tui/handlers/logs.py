@@ -153,6 +153,9 @@ class LogsHandler(BaseHandler):
         if 'rnsd' not in absent:
             notes.append("rnsd runs with --service and logs to its config dir's "
                          "'logfile', not the journal — see rnsd Logs.")
+        if 'nomadnet' not in absent:
+            notes.append("nomadnet logs to ~/.nomadnetwork/logfile; the journal holds "
+                         "only its start/stop lines.")
         return args, notes
 
     def _run_units_snapshot(self, title: str, base_cmd: List[str], timeout: int = 15) -> None:
