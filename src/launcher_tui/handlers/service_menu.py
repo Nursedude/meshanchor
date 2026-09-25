@@ -612,13 +612,25 @@ class ServiceMenuHandler(BaseHandler):
                 print("  MeshAnchor proxies at :5000/mesh/ with filtering.")
                 self.ctx.wait_for_enter()
 
+    def _print_unit_status(self, unit: str) -> None:
+        """`systemctl status <unit>` to the terminal, or say why it could not
+        be shown. A missing systemctl escaped into safe_call AFTER the restart
+        had already run, so the operator saw "File Not Found" instead of the
+        restart's own result (truth sweep level two, 2026-09-24)."""
+        try:
+            subprocess.run(['systemctl', 'status', unit, '--no-pager', '-l'], timeout=10)
+        except subprocess.TimeoutExpired:
+            print(f"\nUNKNOWN — 'systemctl status {unit}' did not answer within 10s.")
+        except OSError as e:
+            print(f"\nUNKNOWN — unit status could not be read (systemctl: {e}).")
+
     def _restart_meshtasticd_service(self):
         """Restart the meshtasticd service."""
         clear_screen()
         print("Restarting meshtasticd...\n")
         success, msg = apply_config_and_restart('meshtasticd')
         print(msg)
-        subprocess.run(['systemctl', 'status', 'meshtasticd', '--no-pager', '-l'], timeout=10)
+        self._print_unit_status('meshtasticd')
         self.ctx.wait_for_enter()
 
     def _start_rnsd_service(self):
@@ -630,7 +642,7 @@ class ServiceMenuHandler(BaseHandler):
         else:
             success, msg = start_service('rnsd')
             print(msg)
-            subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+            self._print_unit_status('rnsd')
         self.ctx.wait_for_enter()
 
     def _restart_rnsd_service(self):
@@ -645,7 +657,7 @@ class ServiceMenuHandler(BaseHandler):
         else:
             success, msg = restart_service('rnsd')
             print(msg)
-            subprocess.run(['systemctl', 'status', 'rnsd', '--no-pager', '-l'], timeout=10)
+            self._print_unit_status('rnsd')
         self.ctx.wait_for_enter()
 
     def _fix_spi_config(self, has_native: bool = False):

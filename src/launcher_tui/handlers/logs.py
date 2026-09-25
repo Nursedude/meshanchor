@@ -95,6 +95,13 @@ class LogsHandler(BaseHandler):
         try:
             proc = subprocess.Popen(cmd)
             proc.wait(timeout=300)
+        except FileNotFoundError:
+            # The tool is absent (no journalctl on this box). Say so here;
+            # letting it escape gave safe_call's generic "File Not Found"
+            # (KNOWN_CRASHED_L2, 2026-09-22).
+            print(f"  UNKNOWN — '{cmd[0]}' is not installed on this box, so this")
+            print("  log cannot be followed here. Nothing was read.")
+            self.ctx.wait_for_enter()
         except subprocess.TimeoutExpired:
             print("\n[Log view timed out after 5 minutes]")
         except KeyboardInterrupt:
@@ -126,47 +133,51 @@ class LogsHandler(BaseHandler):
             cmd.extend(['-u', unit])
         self._view_live_log("Mesh services live log", cmd)
 
-    def _view_error_logs(self):
+    def _run_snapshot(self, title: str, cmd: List[str], timeout: int = 15) -> None:
+        """Print one command's output in the terminal, or say why it could not.
+
+        A missing tool (no journalctl / dmesg on this box) used to escape into
+        safe_call as a generic "File Not Found" dialog, and a timeout escaped
+        the same way (truth sweep level two, 2026-09-24 — MeshForge fixed its
+        copy by moving these into an in-app pane; MA keeps terminal output).
+        """
         clear_screen()
-        print("=== Mesh Service Errors (last hour, priority err+) ===\n")
+        print(f"=== {title} ===\n")
+        try:
+            subprocess.run(cmd, timeout=timeout)
+        except FileNotFoundError:
+            print(f"  UNKNOWN — '{cmd[0]}' is not installed on this box, so this")
+            print("  log cannot be shown here. Nothing was read.")
+        except subprocess.TimeoutExpired:
+            print(f"\n  UNKNOWN — '{cmd[0]}' did not finish within {timeout}s;")
+            print("  the output above (if any) is incomplete.")
+        except OSError as e:
+            print(f"  UNKNOWN — '{cmd[0]}' could not be started: {e}")
+        self.ctx.wait_for_enter()
+
+    def _view_error_logs(self):
         cmd = ['journalctl', '-p', 'err', '--since', '1 hour ago', '--no-pager']
         for unit in self.MESH_UNITS:
             cmd.extend(['-u', unit])
-        subprocess.run(cmd, timeout=30)
-        self.ctx.wait_for_enter()
+        self._run_snapshot("Mesh Service Errors (last hour, priority err+)", cmd, timeout=30)
 
     def _view_meshtasticd_recent(self):
-        clear_screen()
-        print("=== meshtasticd (last 50 lines) ===\n")
-        subprocess.run(
-            ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'],
-            timeout=15
-        )
-        self.ctx.wait_for_enter()
+        self._run_snapshot("meshtasticd (last 50 lines)",
+                           ['journalctl', '-u', 'meshtasticd', '-n', '50', '--no-pager'])
 
     def _view_rnsd_recent(self):
-        clear_screen()
-        print("=== rnsd (last 50 lines) ===\n")
-        subprocess.run(
-            ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'],
-            timeout=15
-        )
-        self.ctx.wait_for_enter()
+        self._run_snapshot("rnsd (last 50 lines)",
+                           ['journalctl', '-u', 'rnsd', '-n', '50', '--no-pager'])
 
     def _view_boot_messages(self):
-        clear_screen()
-        print("=== Mesh Service Boot Messages (this boot) ===\n")
         cmd = ['journalctl', '-b', '-n', '100', '--no-pager']
         for unit in self.MESH_UNITS:
             cmd.extend(['-u', unit])
-        subprocess.run(cmd, timeout=15)
-        self.ctx.wait_for_enter()
+        self._run_snapshot("Mesh Service Boot Messages (this boot)", cmd)
 
     def _view_kernel_messages(self):
-        clear_screen()
-        print("=== Kernel messages (dmesg) ===\n")
-        subprocess.run(['dmesg', '--time-format=reltime'], timeout=10)
-        self.ctx.wait_for_enter()
+        self._run_snapshot("Kernel messages (dmesg)",
+                           ['dmesg', '--time-format=reltime'], timeout=10)
 
     def _view_meshanchor_logs(self):
         home = get_real_user_home()

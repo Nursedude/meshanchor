@@ -123,9 +123,17 @@ class MeshforgeMapsHandler(BaseHandler):
         url = client.web_url
         print(f"Opening {url} ...\n")
         try:
-            webbrowser.open(url)
-            print("Browser launched.")
-            print("(If nothing happened, your environment may lack a default browser.)")
+            # open() RETURNS False when no browser could be started; the old
+            # code ignored it and printed "Browser launched." regardless (truth
+            # sweep port 2026-09-24). Opening is not reachability either —
+            # the map server itself is checked only by Status.
+            if webbrowser.open(url):
+                print("Browser launched (the map server itself was not checked —")
+                print("use Status to probe it).")
+            else:
+                print("Could not launch a browser — none found in this environment")
+                print("(a headless / ssh session has no default browser).")
+                print(f"Open manually: {url}")
         except webbrowser.Error as e:
             print(f"Could not launch browser: {e}")
             print(f"Open manually: {url}")

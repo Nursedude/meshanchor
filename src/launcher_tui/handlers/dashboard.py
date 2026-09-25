@@ -580,8 +580,9 @@ class DashboardHandler(BaseHandler):
 
     def _generate_and_view_report(self):
         """Generate a full status report and display it."""
-        import subprocess as _sp
-        _sp.run(['clear'], check=False, timeout=5)
+        # clear_screen, not a raw `clear` subprocess — a box without `clear`
+        # crashed here into safe_call (MF truth sweep 2026-09-22; ported).
+        clear_screen()
         print("=== Generating Network Status Report ===\n")
         print("Collecting data from all subsystems...\n")
 
@@ -598,8 +599,9 @@ class DashboardHandler(BaseHandler):
 
     def _generate_and_save_report(self):
         """Generate a report and save it to a file."""
-        import subprocess as _sp
-        _sp.run(['clear'], check=False, timeout=5)
+        # clear_screen, not a raw `clear` subprocess — a box without `clear`
+        # crashed here into safe_call (MF truth sweep 2026-09-22; ported).
+        clear_screen()
         print("=== Generating & Saving Report ===\n")
 
         if not _HAS_REPORT_GEN:
@@ -614,12 +616,21 @@ class DashboardHandler(BaseHandler):
 
     def _health_score_display(self):
         """Show comprehensive network health score with category breakdown."""
-        import subprocess as _sp
-        _sp.run(['clear'], check=False, timeout=5)
+        # clear_screen, not a raw `clear` subprocess — a box without `clear`
+        # crashed here into safe_call (MF truth sweep 2026-09-22; ported).
+        clear_screen()
         print("=== Network Health Score ===\n")
 
         scorer = get_health_scorer()
         snapshot = scorer.get_snapshot()
+        if not snapshot.node_count and not snapshot.service_count:
+            # With nothing reporting, the category DEFAULTS rendered a
+            # confident "65/100 (fair)" (MF truth sweep 2026-09-22; ported).
+            print("  Overall: UNKNOWN — no nodes or services are reporting to")
+            print("  the health scorer; nothing was measured.")
+            print()
+            self.ctx.wait_for_enter()
+            return
 
         score = snapshot.overall_score
         bar_len = 30

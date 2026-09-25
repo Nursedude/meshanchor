@@ -158,12 +158,14 @@ class ServiceDiscoveryHandler(BaseHandler):
 
         self.ctx.dialog.infobox("Scanning", f"Scanning {network} for Meshtastic devices...\nThis may take a minute...")
 
-        nmap_available = subprocess.run(
-            ['which', 'nmap'],
-            capture_output=True, timeout=5
-        ).returncode == 0
+        # shutil.which, not `which` in a subprocess: a box without `which`
+        # crashed this screen before it scanned anything (KNOWN_CRASHED_L2).
+        import shutil
+        nmap_available = shutil.which('nmap') is not None
 
         found_devices = []
+        scan_failed = None  # why the scan could not be completed, if it couldn't
+        method = "nmap" if nmap_available else "TCP connect sweep of the /24"
 
         if nmap_available:
             try:
@@ -178,6 +180,7 @@ class ServiceDiscoveryHandler(BaseHandler):
                             found_devices.append(parts[1])
             except (subprocess.SubprocessError, OSError) as e:
                 logger.debug("nmap scan failed: %s", e)
+                scan_failed = f"nmap failed: {e}"
         else:
             base = '.'.join(network.split('.')[:3])
             for i in range(1, 255):
@@ -190,8 +193,19 @@ class ServiceDiscoveryHandler(BaseHandler):
             for ip in found_devices:
                 lines.append(f"  - {ip}:4403")
             self.ctx.dialog.msgbox("Network Scan Results", "\n".join(lines))
+        elif scan_failed:
+            # A failed scan is not an empty network (it used to say "No
+            # Meshtastic devices found" after swallowing the error).
+            self.ctx.dialog.msgbox(
+                "Network Scan",
+                f"UNKNOWN — the scan of {network} did not complete:\n  {scan_failed}\n\n"
+                f"Nothing can be said about devices on that range.")
         else:
-            self.ctx.dialog.msgbox("Network Scan", "No Meshtastic devices found on port 4403")
+            self.ctx.dialog.msgbox(
+                "Network Scan",
+                f"No host in {network} accepted a connection on :4403 "
+                f"({method}).\n\nA device that firewalls 4403, runs without "
+                f"its TCP API, or sits on another subnet would not show here.")
 
     def _detect_network_range(self) -> str:
         try:

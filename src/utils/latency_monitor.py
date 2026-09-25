@@ -12,12 +12,16 @@ Services monitored:
 - MQTT (1883) - message broker
 """
 
+import logging
 import socket
 import time
 import threading
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+#: Witness channel for probes that could not be made (see ProbeUnobservable).
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,6 +39,12 @@ class ServiceHealth:
     host: str
     port: int
     samples: deque = field(default_factory=lambda: deque(maxlen=120))
+    #: Wall-clock of the first probe that could not be MADE since the last
+    #: real observation; None while probes are being made. While set, the
+    #: samples above are history, not the present — `status` says UNKNOWN
+    #: rather than holding the last verdict silently (hfm #2, review
+    #: 2026-09-23: an EMFILE box read HEALTHY forever on one old sample).
+    unobservable_since: Optional[float] = None
 
     @property
     def is_reachable(self) -> bool:
@@ -71,8 +81,9 @@ class ServiceHealth:
 
     @property
     def status(self) -> str:
-        """HEALTHY, DEGRADED, or DOWN."""
-        if not self.samples:
+        """HEALTHY, DEGRADED, DOWN — or UNKNOWN when there is no sample, or
+        the probe currently cannot be made (the samples are stale history)."""
+        if not self.samples or self.unobservable_since is not None:
             return "UNKNOWN"
         if not self.is_reachable:
             return "DOWN"
@@ -92,6 +103,7 @@ class ServiceHealth:
             'jitter_ms': round(self.jitter_ms, 1),
             'packet_loss_pct': round(self.packet_loss_pct, 1),
             'samples': len(self.samples),
+            'unobservable_since': self.unobservable_since,
         }
 
 
@@ -104,14 +116,27 @@ DEFAULT_SERVICES = [
 ]
 
 
+class ProbeUnobservable(OSError):
+    """The probe could not be MADE (no socket could be opened). Distinct from
+    a refused/timed-out connect: that is an observation that nothing
+    answered; this is no observation at all, and must never read as
+    CLOSED/DOWN (honest_failure_modes #1; TUI truth sweep 2026-09-22)."""
+
+
 def probe_tcp(host: str, port: int, timeout: float = 2.0) -> Tuple[bool, float]:
     """
     Measure TCP connection time to a service.
 
     Returns:
         (success, rtt_ms) - Whether connection succeeded and round-trip time
+
+    Raises:
+        ProbeUnobservable: a socket could not be created at all.
     """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except OSError as e:
+        raise ProbeUnobservable(f"cannot open a socket: {e}") from e
     sock.settimeout(timeout)
     start = time.monotonic()
     try:
@@ -157,6 +182,7 @@ class LatencyMonitor:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self.unobservable_probes = 0  # witness: probes that could not be made
 
         for name, host, port in (services or DEFAULT_SERVICES):
             self._services[name] = ServiceHealth(name=name, host=host, port=port)
@@ -165,7 +191,19 @@ class LatencyMonitor:
         """Run one probe cycle across all services. Thread-safe."""
         with self._lock:
             for svc in self._services.values():
-                success, rtt = probe_tcp(svc.host, svc.port)
+                try:
+                    success, rtt = probe_tcp(svc.host, svc.port)
+                except ProbeUnobservable as e:
+                    # No sample: an unmade probe is unknown, not a failure
+                    # (and must not kill the monitor thread). Witnessed on
+                    # the monitor AND on the service, so its status stops
+                    # holding the last verdict while nothing is observed.
+                    self.unobservable_probes += 1
+                    if svc.unobservable_since is None:
+                        svc.unobservable_since = time.time()
+                    logger.debug("latency probe %s unobservable: %s", svc.name, e)
+                    continue
+                svc.unobservable_since = None
                 svc.samples.append(LatencySample(
                     timestamp=time.time(),
                     rtt_ms=rtt,

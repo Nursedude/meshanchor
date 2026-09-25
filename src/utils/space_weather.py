@@ -79,6 +79,12 @@ class SpaceWeatherData:
 
     # Band assessments (derived)
     band_conditions: Dict[str, BandCondition] = field(default_factory=dict)
+    #: How many of the four sources (Kp, A, SFI, X-ray) actually ANSWERED.
+    #: 0 means every field above is a default, not an observation — the
+    #: storm level reads QUIET and the bands read Fair because nothing was
+    #: measured, not because conditions are calm (truth sweep 2026-09-22;
+    #: honest_failure_modes #1/#2). Consumers must not render 0 as weather.
+    sources_answered: int = 0
 
     # Raw data for debugging
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -472,6 +478,17 @@ class SpaceWeatherAPI:
             data.solar_flux, data.k_index, data.a_index
         )
 
+        # Count what was OBSERVED. With every source dead the fields above
+        # are all None and the defaults (QUIET, Fair) would render as calm
+        # weather stamped "updated now" — a dead network wearing a healthy
+        # value. Nothing answered → not updated, and say so.
+        data.sources_answered = sum(
+            1 for v in (data.k_index, data.a_index, data.solar_flux, data.xray_flux)
+            if v is not None
+        )
+        if data.sources_answered == 0:
+            data.updated = None
+
         return data
 
     def get_quick_summary(self) -> str:
@@ -481,6 +498,14 @@ class SpaceWeatherAPI:
             String like "SFI:125 K:2 Quiet - Good HF conditions"
         """
         data = self.get_current_conditions()
+
+        # Nothing answered → there is no summary. Until 2026-09-22 the storm
+        # level (default QUIET) was appended unconditionally, so the
+        # "Data unavailable" branch below could never run and a dead
+        # network summarised as "Quiet" (non-author review, sibling of the
+        # get_space_weather fix — hfm #5: grep the copies).
+        if data.sources_answered == 0:
+            return "Data unavailable - no space weather source answered"
 
         parts = []
 

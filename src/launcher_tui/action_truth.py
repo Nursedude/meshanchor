@@ -1,0 +1,99 @@
+"""Success-truth classification of every TUI action — DATA, not behaviour.
+
+Ported from MeshForge 2026-09-24 (MF born 2026-09-22 from the operator's
+question *"have we checked every single item in the TUI?"*). Until this
+port MeshAnchor's TUI surface had never been walked as a whole: it received
+MF's honesty fixes one port at a time, and `parity_check.py` does not track
+`launcher_tui/`, so an unported lie here was invisible. A routing test
+proves dispatch returned True; a screen that says "no alerts" with the
+network dead passes it.
+
+`tests/test_tui_success_truth_sweep.py` closes the gap: it dispatches EVERY
+registered action with every external DEAD (sockets refused, subprocess
+absent, no tools on PATH, the operator's home swapped for an empty one, box state — /etc/reticulum,
+/etc/meshtasticd, /etc/meshanchor, unit files, /proc/net, device nodes —
+absent) and
+requires the FIRST SCREEN — every dialog including infobox, plus stdout —
+to carry a word of uncertainty — UNKNOWN / unreachable / not installed /
+failed … — or to be listed here as an action that never asks an external
+in the first place. Scope is TWO dialog levels: every action's first
+screen, and every item of its first menu (level two gates crashes, hangs,
+status rows and the home/box-state witnesses — not text). New actions are covered by construction (honest_failure_modes #7: a
+closed enum needs closed consumers), so the audit TERMINATES instead of
+recurring every session.
+
+Two tables, both closed:
+
+* ``LOCAL_ONLY`` — actions whose screen is a pure function of the box's own
+  files/CPU (RF maths, about/version, viewing a local config). They are
+  allowed to render with no uncertainty word because they had nothing to be
+  uncertain about. Each entry names WHY; an entry without a why is a lie
+  waiting to age.
+* ``KNOWN_FALSE_OK`` — the FROZEN BASELINE of actions that DO consult an
+  external and still rendered a confident screen with everything dead.
+  These are findings, listed so they are legible and cannot grow: the sweep
+  fails if a NEW action lands here, and it fails the other way when a
+  listed action starts telling the truth ("remove it from the baseline").
+  The baseline only shrinks (the MF025 pattern).
+
+MeshForge renders these as the **Truth** column of its capability index;
+MeshAnchor has no generated index yet, so here the table itself is the grep.
+"""
+from __future__ import annotations
+
+from typing import Dict, Tuple
+
+Action = Tuple[str, str]  # (menu_section, action_tag)
+
+#: (section, tag) -> why this action needs no external and so may render
+#: without an uncertainty word. Keep the why short and checkable.
+LOCAL_ONLY: Dict[Action, str] = {
+    ("about", "version"): "static text: version string, feature list, licence",
+    ("about", "sysinfo"): "reads /proc, os.uname, disk usage of THIS box — no external",
+    ("about", "help"): "static keyboard-shortcut and documentation text",
+    ("about", "deps"): "importlib probes of THIS interpreter's packages — [OK] means "
+                       "'imports here', which is local truth, not a service claim",
+}
+
+#: (section, tag) -> the false-OK text it rendered, dated. FROZEN: add
+#: nothing here without a provenance row; remove an entry the day its
+#: action starts saying UNKNOWN.
+KNOWN_FALSE_OK: Dict[Action, str] = {}
+
+#: (section, tag) -> the exception that escaped the handler into safe_call
+#: with every external dead, dated. safe_call's dialog is honest; the
+#: handler did not handle its own failure (honest_failure_modes #1).
+#: FROZEN like KNOWN_FALSE_OK: a NEW crash fails the sweep; remove an entry
+#: the day its handler catches the failure itself.
+KNOWN_CRASHED: Dict[Action, str] = {
+}
+
+
+_NO_TOOL = "FileNotFoundError from a subprocess escapes to safe_call ('File Not Found' dialog)"
+
+#: (section, tag, item) -> the exception that escaped a LEVEL-TWO item (one
+#: menu below the action) into safe_call with every external dead. Same
+#: contract as KNOWN_CRASHED: frozen, shrink-only, a NEW crash fails the
+#: sweep. First walk 2026-09-22. safe_call's dialog is honest in each case —
+#: these are handlers that let the failure escape rather than lies; the
+#: latency pair is deliberately NOT "fixed" by returning unreachable, since
+#: a socket that could not be created observed nothing (hfm #1).
+KNOWN_CRASHED_L2: Dict[Tuple[str, str, str], str] = {
+}
+
+
+def truth_class(section: str, tag: str) -> str:
+    """The Truth-column value for one action.
+
+    ``local-only`` — listed in LOCAL_ONLY; ``⚠️ false-ok`` / ``⚠️ crashes``
+    — in a frozen baseline; ``sweep`` — proven by the dead-externals sweep on
+    every commit.
+    """
+    key = (section, tag)
+    if key in KNOWN_FALSE_OK:
+        return "⚠️ false-ok"
+    if key in KNOWN_CRASHED:
+        return "⚠️ crashes"
+    if key in LOCAL_ONLY:
+        return "local-only"
+    return "sweep"
