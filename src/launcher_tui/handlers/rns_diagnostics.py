@@ -729,23 +729,38 @@ class RNSDiagnosticsHandler(BaseHandler):
             return False
 
     def _check_lxmf_app_conflict(self) -> Optional[str]:
-        """Check if an LXMF app (NomadNet) holds port 37428.
+        """'NomadNet' only when NomadNet OWNS the RNS shared-instance socket
+        instead of rnsd (the #69 inversion), else None.
 
-        NomadNet can create its own RNS shared instance,
-        which conflicts with rnsd if both try to bind port 37428.
-
-        Returns the app name if conflict detected, None otherwise.
+        This used to return 'NomadNet' whenever a nomadnet process existed —
+        the normal state, where NomadNet is a CLIENT of rnsd's shared
+        instance — and the Fix Port Conflict flow then offered to
+        `pkill -f nomadnet` (MeshForge a9d41365, 2026-09-25). Now it asks the
+        socket's actual owner (`ss -xnpl`, parsed by the byte-locked
+        rns_init helpers, which handle spaced instance names). An
+        unobservable scan never claims a conflict.
         """
         try:
-            result = subprocess.run(
-                ['pgrep', '-f', 'nomadnet'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                return "NomadNet"
-        except (subprocess.SubprocessError, OSError):
-            pass
-
+            from utils.paths import ReticulumPaths
+            from utils.rns_init import _parse_ss_listener_line, cmdline_is_rnsd_shaped
+            name = ReticulumPaths.get_configured_instance_name() or "default"
+            proc = subprocess.run(["ss", "-xnpl"], capture_output=True, text=True, timeout=5)
+            for line in proc.stdout.splitlines():
+                parsed = _parse_ss_listener_line(line, name)
+                if parsed is None:
+                    continue
+                pid, comm = parsed
+                if comm == "rnsd":
+                    continue
+                try:
+                    with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                        cmdline = fh.read().replace(b"\x00", b" ").decode("utf-8", "replace")
+                except OSError:
+                    continue
+                if "nomadnet" in cmdline.lower() and not cmdline_is_rnsd_shaped(cmdline):
+                    return "NomadNet"
+        except (subprocess.SubprocessError, OSError, ImportError) as e:
+            logger.debug("shared-instance owner check failed: %s", e)
         return None
 
     def _check_rns_interface_health(self):
