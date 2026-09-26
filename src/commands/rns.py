@@ -834,7 +834,7 @@ def check_connectivity() -> CommandResult:
 
         # Count enabled interfaces
         for iface in config_result.data.get('interfaces', []):
-            if iface.get('settings', {}).get('enabled', 'yes') == 'yes':
+            if interface_enabled(iface.get('settings', {})):
                 connectivity['interfaces_enabled'] += 1
 
         if connectivity['interfaces_enabled'] == 0:
@@ -1356,3 +1356,6 @@ def identity_exposure(path) -> str:
         return ""
     return (f"private key file is mode {oct(mode & 0o777)[2:]} — readable/writable by "
             f"{' and '.join(who)}; should be 600, owned by the rnsd user")
+
+
+from utils.rns_interface_flags import interface_enabled  # noqa: E402,F401  (re-export)
