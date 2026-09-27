@@ -333,16 +333,15 @@ class RNSDissector(PacketDissector):
             packet.rns_dest_hash = dest_hash
 
         # Source hash (for announces)
+        # Unknown stays EMPTY — "local" claimed THIS node sent it, stamped on
+        # every packet with no source (port of MeshForge 417a16e9).
         source_hash = metadata.get("source_hash", metadata.get("identity_hash"))
         if isinstance(source_hash, str):
-            try:
-                packet.source = source_hash
-            except ValueError:
-                packet.source = "local"
+            packet.source = source_hash
         elif isinstance(source_hash, bytes):
             packet.source = source_hash.hex()
         else:
-            packet.source = metadata.get("source", "local")
+            packet.source = metadata.get("source", "")
 
         packet.destination = metadata.get("destination", "")
         if packet.rns_dest_hash:

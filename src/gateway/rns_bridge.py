@@ -72,6 +72,7 @@ from ._rns_bridge_connection import RNSConnectionMixin
 from .bridge_ack_mixin import BridgeAckMixin
 from .bridge_health_mixin import BridgeHealthMixin
 from .bridge_send_mixin import BridgeSendMixin
+from .bridge_rns_events_mixin import BridgeRnsEventsMixin
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class BridgedMessage:
 
 class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                           BridgeAckMixin, BridgeHealthMixin,
-                          BridgeSendMixin):
+                          BridgeSendMixin, BridgeRnsEventsMixin):
     """
     Main gateway bridge between RNS, Meshtastic, and MeshCore networks.
 
@@ -1037,153 +1038,6 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 )
         except Exception as e:
             logger.error("Failed to start meshtastic re-emit bridge: %s", e)
-
-    def _on_lxmf_receive(self, message):
-        """Handle incoming LXMF message"""
-        try:
-            # Update node info
-            source_hash = message.source_hash
-            node = UnifiedNode.from_rns(source_hash)
-            self.node_tracker.add_node(node)
-
-            # Capture LXMF message for traffic inspection
-            if HAS_RNS_SNIFFER:
-                try:
-                    sniffer = get_rns_sniffer()
-                    if sniffer and sniffer._running:
-                        # LXMessage.content can be either bytes (binary LXMF
-                        # payload) or str — encode only when we got text.
-                        # (MeshForge #1162: 'bytes'.encode() raised, dropping
-                        # the capture; delivery itself was unaffected.)
-                        raw_content = message.content or b''
-                        content_bytes = (
-                            raw_content.encode('utf-8')
-                            if isinstance(raw_content, str)
-                            else raw_content
-                        )
-                        packet_info = RNSPacketInfo(
-                            packet_type=RNSPacketType.DATA,
-                            source_hash=source_hash,
-                            direction="inbound",
-                            payload=content_bytes,
-                            payload_size=len(content_bytes),
-                            announce_aspect="lxmf.delivery",
-                        )
-                        sniffer._store_packet(packet_info)
-                except Exception as e:
-                    logger.debug(f"RNS sniffer LXMF capture error: {e}")
-
-            # Decode LXMF bytes->str up front so stored records and the
-            # BridgedMessage carry clean text, not Python bytes reprs.
-            # Without this, messages.db logs "[b'Meshtastic'] b'...'".
-            content_str = (
-                message.content.decode("utf-8", errors="replace")
-                if isinstance(message.content, (bytes, bytearray))
-                else (message.content or "")
-            )
-            title_str = (
-                message.title.decode("utf-8", errors="replace")
-                if isinstance(message.title, (bytes, bytearray))
-                else (message.title or "")
-            )
-
-            msg = BridgedMessage(
-                source_network="rns",
-                source_id=source_hash.hex(),
-                destination_id=None,
-                content=content_str,
-                title=title_str,
-                metadata={
-                    'lxmf_stamp': message.stamp,
-                }
-            )
-
-            # Store incoming message for UI/history
-            try:
-                from commands import messaging
-                # Combine title and content for RNS messages (decoded)
-                content = content_str
-                if title_str:
-                    content = f"[{title_str}] {content}"
-                messaging.store_incoming(
-                    from_id=source_hash.hex(),
-                    content=content,
-                    network="rns",
-                    to_id=None,  # LXMF doesn't have destination in received messages
-                )
-            except Exception as e:
-                logger.debug(f"Could not store incoming RNS message: {e}")
-
-            # Queue for bridging if enabled (non-blocking to prevent deadlock)
-            if self._router.should_bridge(msg):
-                try:
-                    self._rns_to_mesh_queue.put_nowait(msg)
-                except Full:
-                    logger.warning("RNS→Mesh queue full, dropping message")
-                    with self._stats_lock:
-                        self.stats['errors'] += 1
-
-            # Notify callbacks
-            self._notify_message(msg)
-
-            # LXMF→MeshCore re-emit hook. Only acts when the operator
-            # opted in via meshtastic_reemit.enabled=True AND the LXMF
-            # source_hash matches one of the configured
-            # MeshtasticBroadcastBridge identities. Cheap no-op
-            # otherwise. Wrapped so a bridge bug can't take down the
-            # gateway's LXMF RX path.
-            if self._meshtastic_reemit:
-                try:
-                    self._meshtastic_reemit.on_lxmf_message(
-                        source_hash, content_str,
-                    )
-                except Exception as e:
-                    logger.debug(f"meshtastic_reemit hook error: {e}")
-
-        except Exception as e:
-            logger.error(f"Error processing LXMF message: {e}")
-
-    def _on_rns_announce(self, dest_hash, announced_identity, app_data):
-        """Handle RNS announce for node discovery"""
-        try:
-            # Capture announce packet for traffic inspection
-            if HAS_RNS_SNIFFER:
-                try:
-                    import RNS
-                    sniffer = get_rns_sniffer()
-                    if sniffer and sniffer._running:
-                        packet_info = RNSPacketInfo(
-                            packet_type=RNSPacketType.ANNOUNCE,
-                            destination_hash=dest_hash,
-                            direction="inbound",
-                            announce_app_data=app_data,
-                            announce_aspect="lxmf.delivery",
-                        )
-                        # Get identity hash if available
-                        if announced_identity:
-                            try:
-                                packet_info.source_hash = announced_identity.hash
-                                packet_info.announce_identity = announced_identity.hash
-                            except Exception:
-                                pass
-                        # Get hop count
-                        try:
-                            if RNS.Transport.has_path(dest_hash):
-                                hops = RNS.Transport.hops_to(dest_hash)
-                                packet_info.hops = hops if hops is not None else 0
-                        except Exception:
-                            pass
-                        sniffer._store_packet(packet_info)
-                except Exception as e:
-                    logger.debug(f"RNS sniffer capture error: {e}")
-
-            node = UnifiedNode.from_rns(dest_hash, app_data=app_data)
-            self.node_tracker.add_node(node)
-            logger.debug(f"Discovered RNS node: {dest_hash.hex()[:8]}")
-        except Exception as e:
-            logger.error(f"Error processing RNS announce: {e}")
-
-    # Routing delegated to MessageRouter (see gateway/message_routing.py)
 
     def get_routing_stats(self) -> Dict[str, Any]:
         """Get routing classifier statistics."""

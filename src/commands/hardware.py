@@ -653,7 +653,10 @@ def get_radio_health() -> CommandResult:
                     'seconds_since_boot': report.seconds_since_boot,
                 }
         else:
-            health['http_nodes'] = 0
+            # meshtasticd never serves /json/nodes (#76): UNAVAILABLE stays
+            # None, never 0 — 0 raised a false "Web module mismatch" on every
+            # meshtasticd box (port of MeshForge 0511b410).
+            health['http_nodes'] = None
     except ImportError:
         logger.debug("meshtastic_http not available")
     except Exception as e:

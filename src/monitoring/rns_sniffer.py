@@ -940,6 +940,10 @@ def integrate_with_traffic_inspector() -> bool:
             metadata = {
                 "protocol": "rns",
                 "dest_hash": rns_packet.destination_hash.hex() if rns_packet.destination_hash else "",
+                # source + direction MUST ride along (port of MeshForge 417a16e9):
+                # without them every row read source "local", direction inbound.
+                "source_hash": rns_packet.source_hash.hex() if rns_packet.source_hash else "",
+                "direction": rns_packet.direction,
                 "hops": rns_packet.hops,
                 "interface": rns_packet.interface_name,
                 "packet_type": rns_packet.packet_type.name,

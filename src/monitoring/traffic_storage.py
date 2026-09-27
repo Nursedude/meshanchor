@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 import threading
 import time
 from collections import defaultdict
@@ -650,13 +651,20 @@ class TrafficLogger:
         self._write_header()
 
     def _write_header(self) -> None:
-        """Write log file header."""
+        """Append a session header naming the process that wrote it.
+
+        APPEND, never truncate (port of MeshForge fe5c4ef5, 2026-09-26): 'w'
+        erased the log on every construction — every daemon restart and every
+        time Traffic Inspector was merely opened. Size is bounded by
+        _maybe_rotate(); several processes may append, so each header names one.
+        """
         try:
-            with open(self._log_path, 'w') as f:
+            with open(self._log_path, 'a') as f:
                 f.write("=" * 100 + "\n")
                 f.write(" MESHANCHOR TRAFFIC LOG ".center(100, "=") + "\n")
                 f.write("=" * 100 + "\n")
-                f.write(f"Started: {datetime.now().isoformat()}\n")
+                f.write(f"Started: {datetime.now().isoformat()}  "
+                        f"pid={os.getpid()} ({Path(sys.argv[0]).name or 'python'})\n")
                 f.write(f"Log file: {self._log_path}\n")
                 f.write("-" * 100 + "\n")
                 f.write(f"{'Time':<12} {'Dir':<4} {'Proto':<10} {'Source':<14} "
