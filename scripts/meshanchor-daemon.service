@@ -30,7 +30,12 @@ RestartSec=10
 # Adding one would SIGABRT the process every <interval>s for no reason.
 
 # Runtime directory (auto-created by systemd)
+# Preserve: this dir is SHARED with meshanchor-map.service (same RuntimeDirectory=). With the
+# default (no), stopping EITHER unit deletes it — the map's daily restart wiped
+# the daemon's PID file, so `daemon.py stop` exited 1 on every stop and
+# status/double-start guards went blind (2026-09-27).
 RuntimeDirectory=meshanchor
+RuntimeDirectoryPreserve=yes
 
 # Security hardening (mirrors meshanchor.service)
 NoNewPrivileges=true

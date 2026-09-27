@@ -1638,6 +1638,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/meshanchor/src
 RuntimeDirectory=meshanchor
+RuntimeDirectoryPreserve=yes
 ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python -m utils.map_data_service --daemon --port 5000; else exec python3 -m utils.map_data_service --daemon --port 5000; fi'
 ExecStop=/bin/kill -TERM $MAINPID
 TimeoutStopSec=10
@@ -1683,6 +1684,7 @@ Restart=on-failure
 RestartSec=10
 # No WatchdogSec: daemon.py does not sd_notify; would cause SIGABRT loop.
 RuntimeDirectory=meshanchor
+RuntimeDirectoryPreserve=yes
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
