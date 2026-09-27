@@ -1426,6 +1426,16 @@ SyslogIdentifier=rnsd
 WantedBy=multi-user.target
 RNSD_SERVICE
 
+    # IPv6-DAD wait drop-in: without it AutoInterface binds a still-`tentative`
+    # fe80 at boot and rnsd exits 255. Same template update.sh deploys, so a
+    # fresh box is born with it (ported from MeshForge fb140f58, 2026-09-26).
+    if [[ -f "$INSTALL_DIR/templates/systemd/rnsd.service.d/10-wait-for-ipv6-ll.conf" ]]; then
+        mkdir -p /etc/systemd/system/rnsd.service.d
+        sed "s#/opt/meshanchor/#${INSTALL_DIR}/#g" \
+            < "$INSTALL_DIR/templates/systemd/rnsd.service.d/10-wait-for-ipv6-ll.conf" \
+            > /etc/systemd/system/rnsd.service.d/10-wait-for-ipv6-ll.conf
+    fi
+
     # Also deploy user-level service template for non-root setups
     #
     # Ported from MeshForge 2026-09-10 (lead repo, 7916d12d). $SUDO_USER and

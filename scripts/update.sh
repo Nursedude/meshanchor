@@ -276,6 +276,38 @@ RNSD_SVC
     fi
 fi
 
+# Deploy the rnsd IPv6-DAD wait drop-in. Without it, RNS AutoInterface binds a
+# still-`tentative` fe80 address at boot and rnsd exits 255. Ported from
+# MeshForge 2026-09-26 (fb140f58; root cause MF becd34cb, 2026-09-10): the
+# drop-in was hand-deployed there, one box never got it, and it crashed on a
+# reboot. Written only when the content differs, then picked up by the
+# daemon-reload below. rnsd is NOT restarted here: the gate acts at rnsd's
+# next start, and a restart just to apply it would open the #69 race window.
+RNSD_LL_TMPL="$INSTALL_DIR/templates/systemd/rnsd.service.d/10-wait-for-ipv6-ll.conf"
+RNSD_LL_DST="/etc/systemd/system/rnsd.service.d/10-wait-for-ipv6-ll.conf"
+if [[ -f /etc/systemd/system/rnsd.service && -f "$RNSD_LL_TMPL" ]]; then
+    # The template names /opt/meshanchor; follow a checkout that lives elsewhere.
+    RNSD_LL_BODY="$(sed "s#/opt/meshanchor/#${INSTALL_DIR}/#g" "$RNSD_LL_TMPL")"
+    # A box carrying BOTH checkouts (MeshForge + MeshAnchor) must not flip the
+    # file between the two on every update: an installed copy that differs only
+    # in which checkout's wait_for_ipv6_ll.sh it runs, where that script exists
+    # and is executable, is current. Any other difference is rewritten.
+    RNSD_LL_NORM='s#^ExecStartPre=[^ ]*/scripts/wait_for_ipv6_ll\.sh#ExecStartPre=@WAIT@#'
+    RNSD_LL_CUR="$(sed -nE 's#^ExecStartPre=([^ ]*/scripts/wait_for_ipv6_ll\.sh).*#\1#p' "$RNSD_LL_DST" 2>/dev/null)"
+    if [[ -f "$RNSD_LL_DST" && -n "$RNSD_LL_CUR" && -x "$RNSD_LL_CUR" \
+          && "$(sed -E "$RNSD_LL_NORM" "$RNSD_LL_DST")" == "$(printf '%s\n' "$RNSD_LL_BODY" | sed -E "$RNSD_LL_NORM")" ]]; then
+        echo -e "  ${GREEN}✓ rnsd IPv6-DAD wait drop-in already current (runs ${RNSD_LL_CUR})${NC}"
+    elif [[ "$(cat "$RNSD_LL_DST" 2>/dev/null)" != "$RNSD_LL_BODY" ]]; then
+        mkdir -p "$(dirname "$RNSD_LL_DST")"
+        printf '%s\n' "$RNSD_LL_BODY" > "$RNSD_LL_DST"
+        chmod 644 "$RNSD_LL_DST"
+        echo -e "  ${GREEN}✓ rnsd IPv6-DAD wait drop-in installed (applies at rnsd's next start)${NC}"
+        SVC_UPDATED=true
+    else
+        echo -e "  ${GREEN}✓ rnsd IPv6-DAD wait drop-in already current${NC}"
+    fi
+fi
+
 # Deploy user-level service templates
 #
 # Ported from MeshForge 2026-09-10 (lead repo; MF scripts/update.sh + the
