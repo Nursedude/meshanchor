@@ -463,8 +463,9 @@ def diagnose_rns_connectivity(handler, error_output: str):
                 "Stopping rnsd service...",
             )
             stop_service('rnsd')
+            # exact process name — `-f rnsd` matched any cmdline with "rnsd"
             subprocess.run(
-                ['pkill', '-f', 'rnsd'],
+                ['pkill', '-x', 'rnsd'],
                 capture_output=True, timeout=5,
             )
             time.sleep(1)

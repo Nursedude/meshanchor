@@ -986,7 +986,69 @@ def disable_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
         return False, f"Error: {e}"
 
 
-def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
+def _operator_user_prefix() -> List[str]:
+    """argv prefix that lands a ``systemctl --user`` call on the OPERATOR's
+    user manager when MeshAnchor runs as root via sudo; ``[]`` otherwise.
+
+    Under sudo a plain ``systemctl --user`` asks ROOT's user manager, which
+    does not exist (measured on the MeshForge twin 2026-09-27: rc=1 "Failed
+    to connect to user scope bus" while the unit was active). Keyed on
+    SUDO_USER, like the handlers' ``_user_systemctl_argv``; a root daemon
+    under systemd carries no SUDO_USER and is unaffected. Twin of MeshForge
+    ``service_check._operator_user_prefix``.
+    """
+    if os.geteuid() != 0:
+        return []
+    sudo_user = os.environ.get('SUDO_USER', '')
+    if not sudo_user or sudo_user == 'root':
+        return []
+    try:
+        import pwd
+        uid = pwd.getpwnam(sudo_user).pw_uid
+    except KeyError:
+        logger.warning("SUDO_USER=%s not in passwd; user-scope systemctl "
+                       "will reach root's (absent) user manager", sudo_user)
+        return []
+    runtime_dir = f"/run/user/{uid}"
+    return [
+        'sudo', '-u', sudo_user, '-H', 'env',
+        f'XDG_RUNTIME_DIR={runtime_dir}',
+        f'DBUS_SESSION_BUS_ADDRESS=unix:path={runtime_dir}/bus',
+    ]
+
+
+def _unit_verb_argv(verb: str, unit: str, user: bool = False) -> List[str]:
+    """``systemctl [--user] <verb> <unit>`` — system scope sudo-wrapped when
+    not root, user scope routed to the operator's manager under sudo."""
+    if user:
+        return _operator_user_prefix() + ['systemctl', '--user', verb, unit]
+    return _sudo_cmd(['systemctl', verb, unit])
+
+
+def is_user_unit_active(unit: str, timeout: int = 5) -> Optional[bool]:
+    """Is a USER-scope unit active on the operator's user manager?
+    (``check_service`` is system-scope only on MeshAnchor.)
+
+    None = the user manager was unreachable — unobservable, NOT inactive.
+    """
+    try:
+        r = subprocess.run(
+            _operator_user_prefix() + ['systemctl', '--user', 'is-active', unit],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug("user unit %s state unreadable: %s", unit, e)
+        return None
+    state = r.stdout.strip()
+    if r.returncode == 0 or state in ('activating', 'reloading'):
+        return True  # a starting client can still grab the socket
+    if state in ('inactive', 'failed', 'deactivating'):
+        return False
+    return None  # e.g. "Failed to connect to user scope bus"
+
+
+def start_service(service_name: str, timeout: int = 30,
+                  user: bool = False) -> Tuple[bool, str]:
     """
     Start a systemd service.
 
@@ -1008,7 +1070,7 @@ def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
         with timed_boundary("systemd.start", target=service_name,
                             threshold_s=30.0):
             result = subprocess.run(
-                _sudo_cmd(['systemctl', 'start', service_name]),
+                _unit_verb_argv('start', service_name, user),
                 capture_output=True,
                 text=True,
                 timeout=timeout
@@ -1033,7 +1095,8 @@ def start_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
         return False, f"Error: {e}"
 
 
-def stop_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
+def stop_service(service_name: str, timeout: int = 30,
+                 user: bool = False) -> Tuple[bool, str]:
     """
     Stop a systemd service.
 
@@ -1055,7 +1118,7 @@ def stop_service(service_name: str, timeout: int = 30) -> Tuple[bool, str]:
         with timed_boundary("systemd.stop", target=service_name,
                             threshold_s=30.0):
             result = subprocess.run(
-                _sudo_cmd(['systemctl', 'stop', service_name]),
+                _unit_verb_argv('stop', service_name, user),
                 capture_output=True,
                 text=True,
                 timeout=timeout
