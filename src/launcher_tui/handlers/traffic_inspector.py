@@ -1,5 +1,5 @@
 """
-Traffic Inspector Handler — Wireshark-grade mesh traffic visibility TUI.
+Traffic Inspector Handler — mesh traffic visibility TUI (Wireshark-style filters).
 
 Converted from traffic_inspector_mixin.py as part of the mixin-to-registry migration.
 Provides packet capture, filtering, path visualization, and traffic statistics.
@@ -73,7 +73,7 @@ class TrafficInspectorHandler(BaseHandler):
             return None
 
     def _menu_traffic_inspector(self) -> None:
-        """Traffic Inspector - Wireshark-grade mesh traffic visibility."""
+        """Traffic Inspector - mesh traffic visibility with Wireshark-style filters."""
         if not HAS_INSPECTOR:
             self.ctx.dialog.msgbox(
                 "Traffic Inspector Not Available",
@@ -91,7 +91,7 @@ class TrafficInspectorHandler(BaseHandler):
 
             choice = self.ctx.dialog.menu(
                 "Traffic Inspector",
-                f"Wireshark-grade mesh traffic visibility\n"
+                f"Mesh traffic visibility\n"
                 f"Capture: {capture_status}",
                 choices=[
                     ("capture", f"{capture_action}        - {'Stop' if capturing else 'Start'} packet capture"),

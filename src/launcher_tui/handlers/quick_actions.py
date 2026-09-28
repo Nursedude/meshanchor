@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 from utils.service_check import (
     check_systemd_service, check_process_running, check_port,
     check_rns_shared_instance, check_service, ServiceState,
-    apply_config_and_restart,
+    apply_config_and_restart, get_rns_shared_instance_info,
 )
 
 # First-party modules for quick actions
@@ -241,19 +241,12 @@ class QuickActionsHandler(BaseHandler):
         ports = [
             (4403, 'meshtasticd TCP API'),
             (9443, 'meshtasticd Web Client'),
-            (37428, 'rnsd (RNS shared instance)'),
             (1883, 'MQTT broker'),
         ]
 
-        _rns_port = 37428
-
         for port, desc in ports:
             try:
-                if port == _rns_port:
-                    port_open = check_rns_shared_instance()
-                else:
-                    port_open = check_port(port, host='127.0.0.1', timeout=1.0)
-
+                port_open = check_port(port, host='127.0.0.1', timeout=1.0)
                 if port_open:
                     print(f"  * {port:<6} {desc}")
                 else:
@@ -261,6 +254,22 @@ class QuickActionsHandler(BaseHandler):
             except (OSError, ValueError) as e:
                 logger.debug("Port %d check failed: %s", port, e)
                 print(f"  ? {port:<6} {desc} (check failed)")
+
+        # RNS shared instance: on Linux an abstract AF_UNIX socket
+        # (@rns/<instance>), NOT a port — it used to print as "37428".
+        # Presence only: WHO holds it (rnsd vs a #69 squatter) is not
+        # checked here; RNS › Diagnostics does that.
+        try:
+            si = get_rns_shared_instance_info()
+            if si.get('available'):
+                print(f"  * RNS shared instance: {si.get('detail', '')}")
+                print("           (present — owner not checked here; "
+                      "see RNS › Diagnostics)")
+            else:
+                print("  - RNS shared instance (not present)")
+        except (OSError, ValueError) as e:
+            logger.debug("RNS shared instance check failed: %s", e)
+            print("  ? RNS shared instance (check failed)")
 
         print()
         self.ctx.wait_for_enter("Press Enter to continue...")
