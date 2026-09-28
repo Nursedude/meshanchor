@@ -5,9 +5,11 @@ Converted from radio_menu_mixin.py as part of the mixin-to-registry migration.
 """
 
 import logging
+import re
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from backend import clear_screen
@@ -535,25 +537,182 @@ class RadioMenuHandler(BaseHandler):
             )
 
     def _radio_set_name(self):
-        """Set node long name via meshtastic CLI."""
-        name = self.ctx.dialog.inputbox(
-            "Node Name",
-            "Enter node long name:",
-            ""
-        )
-        if not name:
-            return
+        """Set node name through the hardened owner writer below.
 
-        short = self.ctx.dialog.inputbox(
-            "Short Name",
-            "Enter short name (max 4 chars):",
-            name[:4]
-        )
+        This used to be a blank-pre-fill writer: no read of the current name,
+        no confirm, no `"` refusal, the short name pre-filled from the long
+        one, raw `--set-owner` to the radio. MeshAnchor has no
+        meshtasticd_radio handler to delegate to (MeshForge does, 949736ee),
+        so the writer MeshForge fixed after the 2026-09-20 rename incidents is
+        carried here verbatim (TUI audit finding 2).
+        """
+        self._set_owner_name()
 
-        cmd = [self.ctx.get_meshtastic_cli(), '--host', 'localhost', '--set-owner', name]
-        if short:
-            cmd.extend(['--set-owner-short', short[:4]])
-        self._radio_run(cmd, "Setting Node Name")
+    # --- owner writer: verbatim twin of MeshForge meshtasticd_radio ---
+    # `meshtastic --info` prints OUR owner on exactly one line —
+    # `Owner: <long> (<short>)` (meshtastic/mesh_interface.py showInfo) —
+    # and then "Nodes in mesh:" followed by EVERY node's user JSON, where each
+    # entry carries its own `"longName": "...",` line.
+    _OWNER_LINE = re.compile(r'^\s*Owner:\s*(?P<long>.*?)\s*\((?P<short>[^()]*)\)\s*$')
+
+    @classmethod
+    def _parse_current_owner(cls, raw):
+        """Return (long_name, short_name) of OUR node from `--info` output.
+
+        ⚠️ Until 2026-09-20 this dialog scanned the WHOLE output for any line
+        containing `longName`, kept the LAST match, and stripped it with
+        `split(':')` + `strip('"')`. The last such line is some OTHER node
+        in the node list, and the strip leaves the trailing fragment — so
+        the dialog offered `GreenPanda",` / `Meshtastic 8d30",` as the
+        "current" name, and one Enter wrote a stranger's name (and, via the
+        matching shortName line, its short name `8D30`) to the radio. That
+        is how the desktop box's radio lost its real name more than once.
+        Read only the Owner line; stop at the node list; absent = blank,
+        never a guess. The CLI prints a literal `None` for a field it has no
+        record of (`Owner: None (None)` right after a meshtasticd restart,
+        before our own node is in its DB) — that is absent too, never a name.
+        """
+        for line in (raw or '').splitlines():
+            m = cls._OWNER_LINE.match(line)
+            if m:
+                long_, short_ = m.group('long').strip(), m.group('short').strip()
+                return (('' if long_ == 'None' else long_),
+                        ('' if short_ == 'None' else short_))
+            if line.strip().startswith('Nodes in mesh'):
+                break
+        return '', ''
+
+    @classmethod
+    def _owner_was_read(cls, raw) -> bool:
+        """True only when `--info` printed an Owner line that is NOT the
+        CLI's no-record placeholder `Owner: None (None)`."""
+        for line in (raw or '').splitlines():
+            m = cls._OWNER_LINE.match(line)
+            if m:
+                return not (m.group('long').strip() == 'None'
+                            and m.group('short').strip() == 'None')
+            if line.strip().startswith('Nodes in mesh'):
+                break
+        return False
+
+    def _set_owner_name(self):
+        """Set node owner name (long name and short name)."""
+        self.ctx.dialog.infobox("Owner", "Getting current owner info...")
+
+        try:
+            sys.path.insert(0, str(self.ctx.src_dir))
+            from commands import meshtastic as mesh_cmd
+
+            result = mesh_cmd.get_node_info()
+            current_long = ""
+            current_short = ""
+
+            raw = (getattr(result, 'raw', None) or getattr(result, 'raw_output', None) or "")
+            if result.success and raw:
+                current_long, current_short = self._parse_current_owner(raw)
+
+            # "none" means the radio HAS no name; a failed read is not that.
+            # With the CLI dead this dialog used to say "current: none" — the
+            # same words as an unnamed radio — and invite a write on top of
+            # a name it never saw (truth sweep 2026-09-22). Three states, two
+            # labels: "none" only when the CLI succeeded AND printed an Owner
+            # line that was genuinely empty; `Owner: None (None)` is the CLI
+            # having NO RECORD (right after a restart) and a missing line is a
+            # read that did not happen — both UNKNOWN, never a name-shaped
+            # blank (non-author review 2026-09-22).
+            absent = ('none' if (result.success and self._owner_was_read(raw))
+                      else 'UNKNOWN — could not read the radio')
+
+            long_name = self.ctx.dialog.inputbox(
+                "Set Long Name",
+                f"Enter node name (current: {current_long or absent}):",
+                current_long or ""
+            )
+
+            if long_name is None:
+                return
+
+            short_name = self.ctx.dialog.inputbox(
+                "Set Short Name",
+                f"Enter 4-char short name (current: {current_short or absent}):",
+                current_short or ""
+            )
+
+            if short_name is None:
+                return
+
+            # A field left as pre-filled is NOT written back. Accepting the
+            # defaults used to rewrite both — and set_owner_short's .upper()
+            # turned an unchanged lowercase `moc3` into `MOC3` on one Enter.
+            if long_name == current_long:
+                long_name = ""
+            if short_name == current_short:
+                short_name = ""
+            if long_name:
+                long_name = long_name[:40]
+            if short_name:
+                short_name = short_name[:4].upper()
+
+            # A double quote in a node name is not something an operator
+            # means — it is the signature of the old pre-fill bug (`GreenPanda",`).
+            # Refuse at the authoring boundary rather than write it to the
+            # radio (honest_failure_modes #3).
+            bad = [n for n in (long_name, short_name) if n and '"' in n]
+            if bad:
+                self.ctx.dialog.msgbox(
+                    "Error",
+                    "A node name cannot contain a double quote (\").\n\n"
+                    f"Refused: {bad[0]}\n\n"
+                    "This shape is what the old dialog pre-filled from the node "
+                    "list; type the name you mean instead.")
+                return
+
+            changes_made = []
+
+            if long_name:
+                self.ctx.dialog.infobox("Setting", f"Setting long name to: {long_name}")
+                result = mesh_cmd.set_owner(long_name)
+                if result.success:
+                    changes_made.append(f"Long name: {long_name}")
+                else:
+                    self.ctx.dialog.msgbox("Error", f"Failed to set long name:\n{result.message}")
+                    return
+
+            if short_name:
+                self.ctx.dialog.infobox("Setting", f"Setting short name to: {short_name}")
+                result = mesh_cmd.set_owner_short(short_name)
+                if result.success:
+                    changes_made.append(f"Short name: {short_name}")
+                else:
+                    self.ctx.dialog.msgbox("Error", f"Failed to set short name:\n{result.message}")
+                    return
+
+            if changes_made:
+                from utils.device_config_store import save_device_settings
+                owner_data = {}
+                if long_name:
+                    owner_data['long_name'] = long_name
+                if short_name:
+                    owner_data['short_name'] = short_name
+                saved = save_device_settings({'owner': owner_data})
+
+                if saved:
+                    self.ctx.dialog.msgbox("Success",
+                        f"Owner settings updated:\n\n"
+                        + "\n".join(changes_made)
+                        + "\n\nSaved for restart persistence.")
+                else:
+                    self.ctx.dialog.msgbox("Partial Success",
+                        f"Owner settings updated on device:\n\n"
+                        + "\n".join(changes_made)
+                        + "\n\nWARNING: Failed to save for restart "
+                        "persistence. Settings will be lost on next "
+                        "meshtasticd restart.")
+            else:
+                self.ctx.dialog.msgbox("Info", "No changes made.")
+
+        except Exception as e:
+            self.ctx.dialog.msgbox("Error", f"Failed to set owner name:\n{e}")
 
     def _radio_position_menu(self):
         """Position submenu: view settings or set fixed lat/lon."""
