@@ -786,12 +786,11 @@ class TestRNSReticulumChokepoint:
     # Allowlisted homes for an actual RNS.Reticulum() construction:
     #   - rns_init.py: THE chokepoint (open_reticulum + the watchdog-guarded
     #     constructor).
-    #   - rns_interfaces.py: a `python3 -c` connectivity probe that runs in an
-    #     ISOLATED subprocess with its own timeout and tests NomadNet's OWN
-    #     venv RNS, so it cannot route through the in-process chokepoint.
+    #   (rns_interfaces.py removed 2026-09-28 — its NomadNet probe now calls
+    #   open_reticulum() inside NomadNet's own interpreter; the old exemption
+    #   covered the #68 hang but not the #69 squat. TUI audit finding 7.)
     ALLOWLISTED = {
         'rns_init.py',
-        'rns_interfaces.py',
     }
 
     def test_reticulum_constructed_only_in_chokepoint(self):
