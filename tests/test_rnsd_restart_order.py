@@ -290,3 +290,60 @@ class TestOperatorUserScope:
         from utils import service_check as sc
         with patch("os.geteuid", return_value=0):
             assert sc._unit_verb_argv("stop", "rnsd") == ["systemctl", "stop", "rnsd"]
+
+
+class TestEveryRestartSiteIsOrdered:
+    """Port of MF 42368f25: the four sites that restarted rnsd bare."""
+
+    def test_commands_rns_restart_is_ordered(self):
+        from commands import rns
+        rel = MagicMock(ok=True, summary=lambda: "rnsd owns the shared instance.")
+        with patch("utils.rnsd_restart_order.ordered_restart_rnsd",
+                   return_value=(True, rel, ro.ClientHold())) as ordered, \
+             patch.object(rns, "stop_service") as bare_stop:
+            result = rns.restart_rnsd()
+        ordered.assert_called_once()
+        bare_stop.assert_not_called()
+        assert result.success
+
+    def test_commands_rns_restart_reports_left_stopped(self):
+        from commands import rns
+        rel = ro.ReleaseResult(rnsd_owns=False, left_stopped=["nomadnet (user)"])
+        with patch("utils.rnsd_restart_order.ordered_restart_rnsd",
+                   return_value=(True, rel, ro.ClientHold())):
+            result = rns.restart_rnsd()
+        assert not result.success and "nomadnet (user)" in result.message
+
+    def _tui_site(self, handler_cls_path, method, capsys):
+        import importlib
+        mod_name, cls_name = handler_cls_path.rsplit(".", 1)
+        mod = importlib.import_module(mod_name)
+        h = getattr(mod, cls_name).__new__(getattr(mod, cls_name))
+        h.ctx = MagicMock()
+        h._has_systemd_unit = MagicMock(return_value=True)
+        h._print_unit_status = MagicMock()
+        with patch("handlers._rns_repair.restart_rnsd_reported",
+                   return_value=(False, "left STOPPED: nomadnet (user)")) as rr, \
+             patch.object(mod, "subprocess", MagicMock()), \
+             patch.object(mod, "clear_screen", MagicMock()):
+            getattr(h, method)()
+        rr.assert_called_once()
+        assert "left STOPPED: nomadnet (user)" in capsys.readouterr().out
+
+    def test_quick_actions_restart_is_ordered(self, capsys):
+        self._tui_site("handlers.quick_actions.QuickActionsHandler",
+                       "_qa_restart_rnsd", capsys)
+
+    def test_service_menu_restart_is_ordered(self, capsys):
+        self._tui_site("handlers.service_menu.ServiceMenuHandler",
+                       "_restart_rnsd_service", capsys)
+
+    def test_drift_fix_holds_clients_across_rnsd_restart(self):
+        import inspect
+        from handlers.rns_diagnostics import RNSDiagnosticsHandler
+        src = inspect.getsource(RNSDiagnosticsHandler._offer_drift_fix)
+        hold = src.index("hold_rns_clients()")
+        stop = src.index("stop_service('rnsd')")
+        start = src.index("start_service('rnsd')")
+        release = src.index("release_rns_clients(hold)")
+        assert hold < stop < start < release

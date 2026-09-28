@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 from utils.service_check import (
     check_systemd_service, check_process_running, check_port,
     check_rns_shared_instance, check_service, ServiceState,
-    apply_config_and_restart, restart_service,
+    apply_config_and_restart,
 )
 
 # First-party modules for quick actions
@@ -213,9 +213,12 @@ class QuickActionsHandler(BaseHandler):
     def _qa_restart_rnsd(self):
         """Quick: restart rnsd service."""
         clear_screen()
-        print("Restarting rnsd...\n")
+        print("Restarting rnsd (RNS clients first)...\n")
         try:
-            success, msg = restart_service('rnsd')
+            # #69 repair order: RNS clients down → rnsd → rnsd OWNS @rns →
+            # clients up. A bare restart let a client host the shared instance.
+            from handlers._rns_repair import restart_rnsd_reported
+            _ok, msg = restart_rnsd_reported()
             print(msg)
             subprocess.run(
                 ['systemctl', 'status', 'rnsd', '--no-pager', '-l'],
