@@ -20,6 +20,13 @@ from backend import clear_screen
 logger = logging.getLogger(__name__)
 
 
+def _daemon_log_path():
+    """Where a TUI-started daemon's output goes — the file "Daemon Logs"
+    falls back to. One path for the writer and the reader."""
+    from utils.paths import get_real_user_home
+    return get_real_user_home() / ".local" / "share" / "meshanchor" / "daemon.log"
+
+
 class DaemonHandler(BaseHandler):
     """MeshAnchor Daemon — headless NOC services."""
 
@@ -132,14 +139,39 @@ class DaemonHandler(BaseHandler):
         ):
             return
 
+        # On MeshAnchor the daemon normally IS a service (meshanchor-daemon
+        # runs daemon.py). A TUI-started copy would be refused by daemon.py's
+        # PID guard with a bare "exited immediately" (TUI audit finding 8;
+        # MeshForge 3d0e1980) — say what is actually happening instead.
+        from utils.service_check import check_service
+        try:
+            svc_up = check_service("meshanchor-daemon").available
+        except Exception:
+            svc_up = None
+        if svc_up is not False:
+            self.ctx.dialog.msgbox(
+                "Daemon NOT Started",
+                ("The daemon already runs as the meshanchor-daemon service.\n"
+                 "Use Service Control to restart it."
+                 if svc_up else
+                 "Could not tell whether the meshanchor-daemon service is\n"
+                 "running — not starting a second daemon."))
+            return
+
         try:
             daemon_script = self.ctx.src_dir / "daemon.py"
+            # Output goes to the file "Daemon Logs" falls back to — it went to
+            # /dev/null, so a TUI-started daemon's logs existed nowhere.
+            log_path = _daemon_log_path()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_fh = open(log_path, "ab")
             proc = subprocess.Popen(
                 [sys.executable, str(daemon_script), "start", "--foreground"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+            log_fh.close()  # the child keeps its own descriptor
             # Verify daemon started successfully
             import time
             time.sleep(2)
@@ -229,9 +261,11 @@ class DaemonHandler(BaseHandler):
         print("=== MeshAnchor Daemon Logs (last 100 lines) ===\n")
 
         try:
-            # Try journalctl first (systemd)
+            # The unit that runs daemon.py is meshanchor-daemon; the
+            # "meshanchor" unit runs core.orchestrator, so reading it showed
+            # another program's log under the daemon's name (finding 8).
             result = subprocess.run(
-                ['journalctl', '-u', 'meshanchor', '-n', '100',
+                ['journalctl', '-u', 'meshanchor-daemon', '-n', '100',
                  '--no-pager', '--output=short-iso'],
                 capture_output=True, text=True, timeout=10
             )
@@ -240,8 +274,7 @@ class DaemonHandler(BaseHandler):
                 print(output)
             else:
                 # Fall back to daemon log file
-                from utils.paths import get_real_user_home
-                log_file = get_real_user_home() / ".local" / "share" / "meshanchor" / "daemon.log"
+                log_file = _daemon_log_path()
                 if log_file.exists():
                     lines = log_file.read_text().splitlines()
                     for line in lines[-100:]:
