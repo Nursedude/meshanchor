@@ -33,6 +33,7 @@ check_service, apply_config_and_restart, _HAS_SERVICE_CHECK = safe_import(
 
 # Import device scanner
 from utils.device_scanner import DeviceScanner
+from utils.meshtasticd_overlay import install_overlay
 
 # Import startup checker for hardware detection
 StartupChecker, _HAS_STARTUP_CHECKER = safe_import('startup_checks', 'StartupChecker')
@@ -475,8 +476,12 @@ class FirstRunHandler(BaseHandler):
             config_d.mkdir(parents=True, exist_ok=True)
             dst = config_d / src.name
 
-            # Copy config file
-            shutil.copy2(src, dst)
+            # Sanitized, never a raw copy: an overlay overrides config.yaml.
+            stripped = install_overlay(src, dst)
+            if stripped:
+                logger.warning("HAT overlay %s: stripped %s before install "
+                               "(belongs in config.yaml)", src.name,
+                               ", ".join(stripped))
 
             # Restart meshtasticd — honest-signal: gate on the real (ok, msg).
             ok, msg = apply_config_and_restart('meshtasticd')
@@ -827,8 +832,12 @@ class FirstRunHandler(BaseHandler):
             config_d.mkdir(parents=True, exist_ok=True)
             dest = config_d / config_file
 
-            # Copy config file
-            shutil.copy2(source, dest)
+            # Sanitized, never a raw copy: an overlay overrides config.yaml.
+            stripped = install_overlay(source, dest)
+            if stripped:
+                logger.warning("HAT overlay %s: stripped %s before install "
+                               "(belongs in config.yaml)", source.name,
+                               ", ".join(stripped))
 
             # Restart meshtasticd — honest-signal: gate on the real (ok, msg).
             ok, msg = apply_config_and_restart('meshtasticd')

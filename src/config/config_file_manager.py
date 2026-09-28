@@ -785,7 +785,13 @@ class ConfigFileManager:
         if Confirm.ask(f"\n[yellow]Activate {selected}?[/yellow]", default=True):
             try:
                 self.CONFIG_D.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
+                # Sanitized, never a raw copy: an overlay overrides config.yaml.
+                from utils.meshtasticd_overlay import install_overlay
+                stripped = install_overlay(src, dst)
+                if stripped:
+                    console.print(
+                        f"[yellow]Stripped {', '.join(stripped)} — those belong "
+                        f"in /etc/meshtasticd/config.yaml, not an overlay[/yellow]")
                 console.print(f"[green]Activated: {selected}[/green]")
                 console.print(f"[dim]Copied to: {dst}[/dim]")
 

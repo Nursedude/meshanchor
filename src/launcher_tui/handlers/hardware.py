@@ -114,6 +114,7 @@ class HardwareHandler(BaseHandler):
         GREEN = "\033[0;32m"
         DIM = "\033[2m"
         YELLOW = "\033[0;33m"
+        RED = "\033[0;31m"
         RESET = "\033[0m"
 
         # --- SPI ---
@@ -228,6 +229,21 @@ class HardwareHandler(BaseHandler):
                     print("  (empty)")
             else:
                 print("  (not found)")
+
+        # config.d/ overlays override config.yaml — flag what they carry (#58).
+        from utils.meshtasticd_overlay import audit_overlays
+        ov_status, ov_lines = audit_overlays()
+        if ov_status == 'port_moved':
+            print(f"  {RED}✗ overlay moves the meshtasticd API off :9443{RESET}")
+        elif ov_status == 'overrides':
+            print(f"  {YELLOW}! overlay overrides config.yaml{RESET}")
+        elif ov_status == 'unreadable':
+            print(f"  {YELLOW}! UNKNOWN — an overlay could not be read{RESET}")
+        for line in ov_lines:
+            print(f"    {line}")
+        if ov_status in ('port_moved', 'overrides'):
+            print(f"  {DIM}  fix: remove those blocks from the file in config.d/ — "
+                  f"they belong in /etc/meshtasticd/config.yaml{RESET}")
 
         # --- Service status ---
         try:
