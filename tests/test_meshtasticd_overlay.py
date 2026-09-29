@@ -116,3 +116,89 @@ def test_hardware_screen_renders_a_moved_port(capsys):
     out = capsys.readouterr().out
     assert "moves the meshtasticd API off :9443" in out
     assert "Port: 443" in out
+
+
+# ----------------------------------------------------------------------------
+# MeshForge frontier review S1 (2026-09-28), ported: the installer's two raw
+# `cp` sites now activate through scripts/sanitize_overlay.py (the ONE
+# sanitizer), a failure installs nothing, and every shipped template must
+# carry hardware keys only — the doctor must read `ok` on a raw copy.
+# ----------------------------------------------------------------------------
+
+_REPO = Path(__file__).resolve().parent.parent
+_CLI = _REPO / "scripts" / "sanitize_overlay.py"
+_BROKEN = """\
+Lora:
+  Module: sx1262
+  CS: 21
+  IRQ: 16
+  Busy: 20
+  Reset: 18
+
+Webserver:
+  Port: 443
+  RootPath: /usr/share/meshtasticd/web
+
+TCP:
+  Port: 4403
+"""
+
+
+def test_shipped_templates_carry_only_hardware_keys():
+    files = sorted((_REPO / "templates" / "available.d").glob("*.yaml"))
+    assert len(files) >= 30, "the glob is aimed wrong"
+    carrying = {f.name: sorted(set(yaml.safe_load(f.read_text()) or {})
+                               & mo.HAT_OVERLAY_FORBIDDEN_KEYS) for f in files}
+    assert {k: v for k, v in carrying.items() if v} == {}
+
+
+def test_every_shipped_template_audits_ok_raw(tmp_path):
+    config_d = tmp_path / "config.d"
+    config_d.mkdir()
+    for f in (_REPO / "templates" / "available.d").glob("*.yaml"):
+        (config_d / f.name).write_text(f.read_text())
+    status, lines = mo.audit_overlays(config_d)
+    assert status == "ok", lines
+
+
+def test_installer_has_no_raw_copy_into_config_d():
+    text = (_REPO / "scripts" / "install_noc.sh").read_text()
+    raw = [ln.strip() for ln in text.splitlines()
+           if ln.lstrip().startswith("cp ") and "config.d/" in ln
+           and "available.d" not in ln.split("config.d/")[0]]
+    assert raw == [], raw
+    assert text.count("install_hat_overlay \"$AVAIL_DIR/") == 2
+    assert "scripts/sanitize_overlay.py" in text
+    assert "python3-yaml" in text
+
+
+def _cli(*args):
+    import subprocess
+    return subprocess.run([sys.executable, str(_CLI), *map(str, args)],
+                          capture_output=True, text=True, timeout=30)
+
+
+def test_cli_strips_into_a_directory(tmp_path):
+    src = tmp_path / "lora-MeshAdv-900M30S.yaml"
+    src.write_text(_BROKEN)
+    dst_dir = tmp_path / "config.d"
+    r = _cli(src, f"{dst_dir}/")
+    assert r.returncode == 0, r.stderr
+    loaded = yaml.safe_load((dst_dir / src.name).read_text())
+    assert "Webserver" not in loaded and "TCP" not in loaded and "Lora" in loaded
+    assert "Webserver" in r.stdout and "config.yaml" in r.stdout
+
+
+def test_cli_clean_template_keeps_bytes(tmp_path):
+    src = _REPO / "templates" / "available.d" / "waveshare-sx1262.yaml"
+    dst_dir = tmp_path / "config.d"
+    r = _cli(src, f"{dst_dir}/")
+    assert r.returncode == 0 and "clean" in r.stdout
+    assert (dst_dir / src.name).read_text() == src.read_text()
+
+
+def test_cli_unreadable_source_writes_nothing(tmp_path):
+    dst_dir = tmp_path / "config.d"
+    r = _cli(tmp_path / "missing.yaml", f"{dst_dir}/")
+    assert r.returncode == 2 and "cannot read" in r.stderr
+    assert not dst_dir.exists()
