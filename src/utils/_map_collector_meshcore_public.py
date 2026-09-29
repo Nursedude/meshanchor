@@ -112,6 +112,7 @@ class MeshCorePublicCollectorMixin:
         Returns empty list when the feature is disabled, msgpack is missing,
         the network is unreachable, or the payload doesn't parse.
         """
+        self._meshcore_public_cap = None  # set again only if this pass caps
         if not _HAS_MSGPACK:
             logger.debug(
                 "meshcore_public: msgpack library not available, "
@@ -237,13 +238,26 @@ class MeshCorePublicCollectorMixin:
         """
         features: List[Dict] = []
         skipped = 0
-        for i, rec in enumerate(records):
-            if i >= max_nodes:
-                logger.warning(
-                    "meshcore_public: hit max_nodes cap of %d, stopping",
-                    max_nodes,
-                )
-                break
+        total = len(records)
+        if total > max_nodes:
+            # The upstream list is NOT ordered by recency (measured 2026-09-28:
+            # 64,139 records, the cut-off tail was slightly FRESHER than the
+            # head), so cutting at index max_nodes dropped an arbitrary 22% —
+            # 5,747 nodes heard within 7 days, 10 of Hawaii's 53. When we must
+            # cap, keep the most recently heard; undated records go last.
+            def _recency(rec) -> float:
+                if not isinstance(rec, dict):
+                    return float("-inf")
+                t = self._meshcore_public_timestamp_to_epoch(rec.get("la"))
+                return t if t is not None else float("-inf")
+            records = sorted(records, key=_recency, reverse=True)[:max_nodes]
+            logger.warning(
+                "meshcore_public: %d records exceed max_nodes cap of %d — kept "
+                "the %d most recently heard (raise meshcore_public_max_nodes "
+                "in map_settings.json to show all)",
+                total, max_nodes, max_nodes,
+            )
+        for rec in records:
             if not isinstance(rec, dict):
                 skipped += 1
                 continue
@@ -290,9 +304,14 @@ class MeshCorePublicCollectorMixin:
                 }
             features.append(feature)
 
+        # Witness for the source summary: the map must not present a capped
+        # set as the whole directory.
+        self._meshcore_public_cap = (
+            {"kept": len(features), "of": total} if total > max_nodes else None
+        )
         logger.debug(
             "meshcore_public: %d features (%d skipped, %d total records)",
-            len(features), skipped, len(records),
+            len(features), skipped, total,
         )
         return features
 

@@ -541,7 +541,10 @@ class MapDataCollector(
             f"mqtt:{sources.get('mqtt', 0)} "
             f"tracker:{sources.get('node_tracker', 0)} "
             f"rns_direct:{sources.get('rns_direct', 0)} "
-            f"meshcore_public:{sources.get('meshcore_public', 0)})"
+            f"meshcore_public:{sources.get('meshcore_public', 0)}"
+            + (f" capped of {sources['meshcore_public_capped']['of']}"
+               if sources.get('meshcore_public_capped') else "")
+            + ")"
         )
 
         # Cache result
@@ -1334,6 +1337,9 @@ class MapDataCollector(
         # Surface meshtastic-disabled state so the map UI / API can
         # display "Meshtastic gateway disabled by profile" if needed.
         summary["meshtastic_enabled"] = self._meshtastic_enabled
+        cap = getattr(self, "_meshcore_public_cap", None)
+        if cap:
+            summary["meshcore_public_capped"] = cap
         summary["meshforge_maps_enabled"] = self._meshforge_maps_enabled
         # Flag if HTTP was used (source tag on features)
         if tcp and any(f.get("properties", {}).get("source") == "meshtasticd_http" for f in tcp):

@@ -185,3 +185,50 @@ class TestMeshCorePublicCollector:
             features = host._collect_meshcore_public()
         assert len(features) == 1
         assert features[0]["properties"]["pubkey"] == "aabbcc"
+
+
+def _rec(tag: str, ts):
+    return {"pk": bytes.fromhex(tag * 32), "n": tag, "lat": 21.3, "lon": -157.8,
+            "la": msgpack.Timestamp(ts, 0) if ts is not None else None}
+
+
+class TestCapKeepsFreshest:
+    """2026-09-28: the upstream list is not ordered by recency (64,139 records;
+    the cut tail was slightly FRESHER than the head), so cutting at index
+    max_nodes dropped an arbitrary 22% — incl. 10 of Hawaii's 53 nodes."""
+
+    def test_cap_keeps_most_recently_heard(self, host):
+        stale = [_rec("0" + str(i), 1_000_000 + i) for i in range(5)]
+        fresh = [_rec("a" + str(i), 1_777_000_000 + i) for i in range(3)]
+        feats = host._meshcore_public_to_features(stale + fresh, max_nodes=3)
+        assert {f["properties"]["name"] for f in feats} == {"a0", "a1", "a2"}
+
+    def test_undated_records_go_last(self, host):
+        recs = [_rec("0" + str(i), None) for i in range(3)] + [_rec("a1", 1_777_000_000)]
+        feats = host._meshcore_public_to_features(recs, max_nodes=1)
+        assert [f["properties"]["name"] for f in feats] == ["a1"]
+
+    def test_cap_witness_says_kept_of_total(self, host):
+        recs = [_rec("0" + str(i), 1_000_000 + i) for i in range(5)]
+        host._meshcore_public_to_features(recs, max_nodes=2)
+        assert host._meshcore_public_cap == {"kept": 2, "of": 5}
+
+    def test_no_witness_when_under_cap(self, host):
+        host._meshcore_public_to_features([_rec("01", 1_000_000)], max_nodes=5)
+        assert host._meshcore_public_cap is None
+
+    def test_witness_reset_when_source_disabled(self, host):
+        host._meshcore_public_cap = {"kept": 1, "of": 9}
+        host._settings = {"meshcore_public_enabled": False}
+        host._collect_meshcore_public()
+        assert host._meshcore_public_cap is None
+
+    def test_source_summary_reports_the_cap(self):
+        from src.utils.map_data_collector import MapDataCollector
+        c = MapDataCollector(meshtastic_enabled=False, enable_history=False,
+                             meshforge_maps_enabled=False)
+        c._meshcore_public_cap = {"kept": 50000, "of": 64139}
+        summary = c._get_source_summary([], [], [], meshcore_public=[{}] * 3)
+        assert summary["meshcore_public_capped"] == {"kept": 50000, "of": 64139}
+        c._meshcore_public_cap = None
+        assert "meshcore_public_capped" not in c._get_source_summary([], [], [])
