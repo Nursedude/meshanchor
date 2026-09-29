@@ -79,3 +79,48 @@ def _same_local_host(origin: str, request_host: Optional[str],
     name = m.group(1).lower()
     dialled = request_host.rsplit(":", 1)[0].lower() if ":" in request_host else request_host.lower()
     return name == dialled and _local_only_name(name)
+
+
+class HostRuleMixin:
+    """The Host rule at dispatch, for EVERY route (port of MF Option A,
+    2026-09-28, Fable re-review #2): 15 ungated GETs still answered a
+    DNS-rebinding page while only ``_reject_if_untrusted`` checked Host.
+    ``/healthz`` + ``/metrics`` are exempt (no mesh data; scrapers). Kept here,
+    not in the handler, for the MF025 size cap. Needs ``self._serve_json``."""
+
+    #: Paths answered whatever Host the client dialled: liveness + scrape
+    #: endpoints that carry no mesh data and are polled by tooling that may
+    #: address a box by any name (Prometheus, uptime monitors).
+    _HOST_EXEMPT_PATHS = frozenset({'/healthz', '/metrics'})
+
+    def _serve_host_refusal(self, host) -> None:
+        self._serve_json(
+            {"error": "forbidden",
+             "detail": (f"This box does not answer requests addressed to "
+                        f"{host!r}: open it by IP, by its bare name, or by a "
+                        f"local name (.local / .home.arpa / .internal / "
+                        f".local.mesh). A public name here is what a DNS-"
+                        f"rebinding page would send. Behind a reverse proxy, "
+                        f"forward the upstream's own host (docs/REST_API.md).")},
+            status=403)
+
+    def _refuse_untrusted_host(self, path_only: Optional[str] = None) -> bool:
+        """Send 403 + return True when the request was addressed to a name
+        DNS rebinding could hand an attacker."""
+        if path_only is None:
+            from urllib.parse import urlparse
+            path_only = urlparse(self.path).path.rstrip('/')
+        if (path_only or '/') in self._HOST_EXEMPT_PATHS:
+            return False
+        headers = getattr(self, 'headers', None)
+        host = headers.get('Host') if headers is not None else None
+        if _host_header_trusted(host):
+            return False
+        self._serve_host_refusal(host)
+        return True
+
+    def do_HEAD(self):
+        """HEAD on the static tree (stdlib) — behind the same Host rule."""
+        if self._refuse_untrusted_host():
+            return
+        super().do_HEAD()

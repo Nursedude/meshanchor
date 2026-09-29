@@ -93,7 +93,7 @@ from utils._map_radio_endpoints import RadioEndpointsMixin
 from utils._map_fleet import FleetEndpointsMixin
 from utils._map_node_endpoints import NodeDataEndpointsMixin
 from utils._map_status_endpoints import StatusEndpointsMixin
-from utils._map_trust_gate import _host_header_trusted, _local_only_name, _same_local_host  # noqa: F401  (F2/F3 port)
+from utils._map_trust_gate import HostRuleMixin, _host_header_trusted, _local_only_name, _same_local_host  # noqa: F401  (F2/F3/Option A port)
 
 
 # App-identifying HTTP Server: header (cross-domain fleet presence, Layer 0).
@@ -292,6 +292,7 @@ class MapRequestHandler(
     MeshtasticProxyMixin,
     NodeDataEndpointsMixin,
     StatusEndpointsMixin,
+    HostRuleMixin,
     SimpleHTTPRequestHandler,
 ):
     """HTTP handler that serves the map HTML and node GeoJSON API."""
@@ -349,14 +350,7 @@ class MapRequestHandler(
             host = headers.get('Host') if headers is not None else None
             if _host_header_trusted(host):
                 return False
-            self._serve_json(
-                {"error": "forbidden",
-                 "detail": (f"This box does not answer trusted reads addressed to "
-                            f"{host!r}: open it by IP, by its bare name, or by a "
-                            f"local name (.local / .home.arpa / .internal / "
-                            f".local.mesh). A public name here is what a DNS-"
-                            f"rebinding page would send.")},
-                status=403)
+            self._serve_host_refusal(host)
             return True
         try:
             client = self.client_address[0]
@@ -536,7 +530,8 @@ class MapRequestHandler(
         self._last_status = 0  # send_response will overwrite
 
         try:
-            self._dispatch_get()
+            if not self._refuse_untrusted_host(path_only):
+                self._dispatch_get()
         finally:
             try:
                 from utils import map_metrics
@@ -690,6 +685,8 @@ class MapRequestHandler(
 
         GET endpoints remain open for LAN/AREDN access.
         """
+        if self._refuse_untrusted_host():
+            return
         # Fleet test runner is allowlist-protected — open to LAN so the
         # dashboard (which may be loaded from any /24 host) can fire the
         # safe set of lab units. Safety is enforced by `_FLEET_TESTS`
@@ -726,6 +723,8 @@ class MapRequestHandler(
 
         All PUT endpoints are mutating (radio TX) — restricted to localhost.
         """
+        if self._refuse_untrusted_host():
+            return
         if not self._is_localhost():
             self.send_error(403, "Radio control only allowed from localhost")
             return
@@ -739,6 +738,8 @@ class MapRequestHandler(
 
     def do_OPTIONS(self):
         """Handle CORS preflight requests."""
+        if self._refuse_untrusted_host():
+            return
         self.send_response(200)
         self._send_cors_header()
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS')
