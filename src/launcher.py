@@ -316,6 +316,16 @@ def launch_gateway_bridge(src_dir):
 
     try:
         config = GatewayConfig.load()
+        if config.load_error:
+            # MF review S3 (2026-09-28): load() returns DEFAULTS with
+            # load_error set when gateway.json exists but cannot be read, and
+            # save() refuses to write those defaults over it — this path then
+            # ran a default bridge with enabled=True, silently. Start nothing.
+            print(f"{Colors.RED}Gateway config failed to load: {config.load_error}{Colors.NC}")
+            print(f"{Colors.YELLOW}Refusing to start the bridge on defaults over "
+                  f"{config.get_config_path()} — fix the file (or reset it from "
+                  f"the TUI) and retry.{Colors.NC}")
+            return
         if not config.enabled:
             print(f"{Colors.YELLOW}Gateway bridge is disabled in config.{Colors.NC}")
             print(f"Enable it in ~/.config/meshanchor/gateway.json or via the UI.\n")
@@ -323,7 +333,10 @@ def launch_gateway_bridge(src_dir):
                 enable = input(f"Enable and start now? [y/N]: ").strip().lower()
                 if enable in ['y', 'yes']:
                     config.enabled = True
-                    config.save()
+                    if not config.save():
+                        print(f"{Colors.RED}Could not save gateway.json — "
+                              f"not starting the bridge.{Colors.NC}")
+                        return
                 else:
                     return
             except (KeyboardInterrupt, EOFError):
