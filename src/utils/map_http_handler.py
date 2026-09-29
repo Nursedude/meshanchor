@@ -93,6 +93,7 @@ from utils._map_radio_endpoints import RadioEndpointsMixin
 from utils._map_fleet import FleetEndpointsMixin
 from utils._map_node_endpoints import NodeDataEndpointsMixin
 from utils._map_status_endpoints import StatusEndpointsMixin
+from utils._map_trust_gate import _host_header_trusted, _local_only_name  # noqa: F401  (F2 port)
 
 
 # App-identifying HTTP Server: header (cross-domain fleet presence, Layer 0).
@@ -344,7 +345,19 @@ class MapRequestHandler(
         It echoes only the CALLER's own address — never the trusted networks
         (MF015: publishing them hands out LAN topology)."""
         if self._client_is_trusted():
-            return False
+            headers = getattr(self, 'headers', None)
+            host = headers.get('Host') if headers is not None else None
+            if _host_header_trusted(host):
+                return False
+            self._serve_json(
+                {"error": "forbidden",
+                 "detail": (f"This box does not answer trusted reads addressed to "
+                            f"{host!r}: open it by IP, by its bare name, or by a "
+                            f"local name (.local / .home.arpa / .internal / "
+                            f".local.mesh). A public name here is what a DNS-"
+                            f"rebinding page would send.")},
+                status=403)
+            return True
         try:
             client = self.client_address[0]
         except (IndexError, AttributeError, TypeError):
