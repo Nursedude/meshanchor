@@ -99,3 +99,42 @@ def test_cross_box_fleet_dashboard_fire_is_not_broken(server):
     status, _, body = _req(srv, "POST", "/fleet/run-test", json.dumps({"test": "no-such-test"}),
                            {"Content-Type": "application/json", "Origin": page})
     assert status not in (403, 415), body   # past both gates; the allowlist answers
+
+
+@pytest.mark.parametrize("name", ["meshanchor-server", "moc", "node.local", "moc.mf.internal"])
+@pytest.mark.parametrize("path", ["/fleet/run-test", "/api/radio/message"])
+def test_own_dashboard_opened_by_name_is_not_refused(server, name, path):
+    # Fable re-review 2026-09-28 #1: the F3 port dropped same-origin-by-NAME, so
+    # the self-box "Run Tests" button 403'd whenever the page was opened as
+    # http://<name>:5000. The IP-only cross-box test above could not see it.
+    srv, _ = server
+    port = srv.server_address[1]
+    body = json.dumps({"test": "no-such-test"}) if path == "/fleet/run-test" else MSG
+    status, _, resp = _req(srv, "POST", path, body,
+                           {"Content-Type": "application/json",
+                            "Origin": f"http://{name}:{port}", "Host": f"{name}:{port}"})
+    assert status not in (403, 415), (name, path, resp)
+
+
+def test_a_hostile_page_cannot_borrow_the_same_name_rule(server):
+    srv, sent = server
+    port = srv.server_address[1]
+    for origin, host in ((f"http://evil.example:{port}", f"evil.example:{port}"),   # public name
+                         (f"http://moc:{port}", f"other:{port}"),                  # names differ
+                         (f"http://moc:{port + 1}", f"moc:{port}")):               # port differs
+        status, _, _ = _req(srv, "POST", "/api/radio/message", MSG,
+                            {"Content-Type": "application/json", "Origin": origin, "Host": host})
+        assert status == 403, (origin, host)
+    assert sent == []
+
+
+@pytest.mark.parametrize("ctype", ["application/x-www-form-urlencoded",
+                                   "multipart/form-data; boundary=x"])
+def test_every_cors_safelisted_type_is_refused(server, ctype):
+    # a <form> can send these two without a preflight — the guard must refuse
+    # them as it refuses text/plain (Fable re-review #4, mutant M1 survived)
+    srv, sent = server
+    status, _, _ = _req(srv, "POST", "/api/radio/message", MSG,
+                        {"Content-Type": ctype, "Origin": "http://evil.example"})
+    assert status == 415
+    assert sent == []

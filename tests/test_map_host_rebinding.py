@@ -76,3 +76,26 @@ def test_host_rule_uses_the_local_name_vocabulary():
     for name in ("moc", "x.local", "x.home.arpa", "x.internal", "x.local.mesh"):
         assert tg._host_header_trusted(name + ":5000") is tg._local_only_name(name) is True
     assert tg._host_header_trusted("evil.example:5000") is tg._local_only_name("evil.example") is False
+
+
+def test_standalone_map_with_no_lan_origins_still_checks_host(monkeypatch):
+    # the loopback-only map (no --cors-origins) is exactly MA's "browser ON the
+    # box" rebinding case — the Host rule must not depend on a LAN being set
+    # (Fable re-review #4, mutant M2 survived)
+    monkeypatch.setattr(MapRequestHandler, "allowed_origins", None)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), MapRequestHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert _get(srv, "/fleet/logs", "evil.example:5000")[0] == 403
+        assert _get(srv, "/fleet/logs", "127.0.0.1:5000")[0] == 400
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.parametrize("name", ["x.internal.evil.example", "x.local.evil.example",
+                                  "evil.local.mesh.example.com", "x.home.arpa.example"])
+def test_a_local_suffix_in_the_middle_is_not_local(name):
+    # suffixes match at the END only (Fable re-review #4, mutant M4 survived)
+    assert tg._local_only_name(name) is False
+    assert tg._host_header_trusted(name + ":5000") is False

@@ -3,7 +3,8 @@
 MF keeps every trust rule in its ``utils/_map_trust_gate.py``; MeshAnchor's
 IP/Origin rules still live in ``map_http_handler.py`` (MA never took MF's
 WebSocket gate, 151eaa00), so only the Host rule and the local-name vocabulary
-it needs live here. ``_local_only_name`` and ``_host_header_trusted`` are
+it needs live here. ``_local_only_name``, ``_host_header_trusted`` and
+``_same_local_host`` are
 byte-identical to MF's — keep them that way.
 """
 import ipaddress
@@ -61,3 +62,20 @@ def _host_header_trusted(host: Optional[str]) -> bool:
     except ValueError:
         pass
     return _local_only_name(name)
+
+
+def _same_local_host(origin: str, request_host: Optional[str],
+                     page_port: Optional[int]) -> bool:
+    """The page and the socket were reached by the SAME local-only name: the
+    map opened as ``http://moc:5000`` connects ``ws://moc:5001`` (the status
+    endpoint builds that URL from the page's Host), so Origin names the host
+    the browser itself dialled. Found 2026-09-25: the IP-prefix list refused
+    every map opened by hostname (moc: IP origin 101, hostname origin 403)."""
+    if not request_host or page_port is None:
+        return False
+    m = re.match(r'^http://([^/:]+):(\d+)$', origin or "")
+    if not m or int(m.group(2)) != int(page_port):
+        return False
+    name = m.group(1).lower()
+    dialled = request_host.rsplit(":", 1)[0].lower() if ":" in request_host else request_host.lower()
+    return name == dialled and _local_only_name(name)

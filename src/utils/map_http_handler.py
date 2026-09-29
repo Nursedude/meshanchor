@@ -93,7 +93,7 @@ from utils._map_radio_endpoints import RadioEndpointsMixin
 from utils._map_fleet import FleetEndpointsMixin
 from utils._map_node_endpoints import NodeDataEndpointsMixin
 from utils._map_status_endpoints import StatusEndpointsMixin
-from utils._map_trust_gate import _host_header_trusted, _local_only_name  # noqa: F401  (F2 port)
+from utils._map_trust_gate import _host_header_trusted, _local_only_name, _same_local_host  # noqa: F401  (F2/F3 port)
 
 
 # App-identifying HTTP Server: header (cross-domain fleet presence, Layer 0).
@@ -400,7 +400,16 @@ class MapRequestHandler(
             return False
         origins = (self.allowed_origins if self.allowed_origins
                    else self._DEFAULT_ORIGINS + ['http://127.0.0.1'])
-        if _origin_allowed(origin, origins):
+        try:
+            page_port = self.server.server_address[1]
+        except (AttributeError, IndexError, TypeError):
+            page_port = None
+        # Same-origin by a local NAME too (MF's browser_origin_allowed): the
+        # dashboard opened as http://meshanchor-server:5000 fires its own
+        # run-test with that Origin — refused by the IP list alone (Fable
+        # re-review 2026-09-28 #1, the 09-25 MF "hostname origin 403" shape).
+        if (_origin_allowed(origin, origins)
+                or _same_local_host(origin, self.headers.get('Host'), page_port)):
             return False
         self._serve_json(
             {"error": "forbidden",
