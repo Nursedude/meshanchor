@@ -80,7 +80,7 @@ class TestSendMessageDestinationClamp:
     def test_out_of_range_destination_rejected(self):
         body = json.dumps({"text": "hi", "destination": "99999999999"}).encode()
         h = _base_handler("/api/radio/message")
-        h.headers = {"Content-Length": str(len(body))}
+        h.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
         h.rfile = io.BytesIO(body)
         cap = {}
         h._serve_json = lambda payload, status=200: cap.update(status=status, payload=payload)

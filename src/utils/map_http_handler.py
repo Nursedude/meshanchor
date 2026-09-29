@@ -360,6 +360,43 @@ class MapRequestHandler(
             status=403)
         return True
 
+    def _reject_cross_site_write(self) -> bool:
+        """Send 415/403 + return True for a write a hostile PAGE could forge.
+
+        Port of MF's guard (Fable review 2026-09-28, F3). The IP gate cannot
+        see CSRF: a trusted browser visiting an attacker's page sends the
+        attacker's POST from a trusted address — here, loopback, so a browser
+        ON this box. A ``text/plain`` POST is a CORS "simple request" (no
+        preflight) and the body was parsed as JSON anyway.
+
+        Two checks: the body must be declared ``application/json`` (forces a
+        preflight the browser will not pass cross-origin), and a PRESENT Origin
+        must pass the same rule ``do_OPTIONS`` grants a preflight by — so a
+        cross-box Fleet dashboard fire that works today still works. No Origin
+        = not a browser (curl, scripts).
+        """
+        ctype = (self.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+        if ctype != 'application/json':
+            self._serve_json(
+                {"error": "unsupported media type",
+                 "detail": "Send the body as JSON with 'Content-Type: application/json'."},
+                status=415)
+            return True
+        origin = self.headers.get('Origin')
+        if origin is None:
+            return False
+        origins = (self.allowed_origins if self.allowed_origins
+                   else self._DEFAULT_ORIGINS + ['http://127.0.0.1'])
+        if _origin_allowed(origin, origins):
+            return False
+        self._serve_json(
+            {"error": "forbidden",
+             "detail": (f"Cross-site write refused: Origin {origin!r} is not this "
+                        f"map. Send it from the map page itself, or without a "
+                        f"browser.")},
+            status=403)
+        return True
+
     def _send_cors_header(self):
         """Send appropriate CORS header based on configuration.
 
@@ -698,6 +735,8 @@ class MapRequestHandler(
         Uses HTTP protobuf (send_text_direct) to avoid TCP contention
         with the meshtasticd web UI — fromradio is single-consumer.
         """
+        if self._reject_cross_site_write():
+            return
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length <= 0 or content_length > self._MAX_MESSAGE_BODY:

@@ -881,7 +881,7 @@ class FleetEndpointsMixin:
         untrusted network on this 0.0.0.0 bind (AREDN 10.x, VPN) can't trigger
         fleet traffic on demand. The LAN dashboard (operator /24) stays allowed.
         """
-        if self._reject_if_untrusted():
+        if self._reject_if_untrusted() or self._reject_cross_site_write():
             return
         import json as _json
         import socket as _socket
