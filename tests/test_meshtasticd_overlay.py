@@ -6,6 +6,7 @@ had no activation sanitizer and no surface that would show it. Port of
 MeshForge's sanitizer + Config Doctor overlay check (#58).
 """
 import os
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -163,10 +164,10 @@ def test_every_shipped_template_audits_ok_raw(tmp_path):
 
 def test_installer_has_no_raw_copy_into_config_d():
     text = (_REPO / "scripts" / "install_noc.sh").read_text()
-    raw = [ln.strip() for ln in text.splitlines()
-           if ln.lstrip().startswith("cp ") and "config.d/" in ln
-           and "available.d" not in ln.split("config.d/")[0]]
-    assert raw == [], raw
+    assert _cp_into_config_d(text) == [], _cp_into_config_d(text)
+    # R3: the sibling script must not TEACH the raw cp either
+    verify = (_REPO / "scripts" / "verify_post_install.sh").read_text()
+    assert _cp_into_config_d(verify) == [], _cp_into_config_d(verify)
     assert text.count("install_hat_overlay \"$AVAIL_DIR/") == 2
     assert "scripts/sanitize_overlay.py" in text
     assert "python3-yaml" in text
@@ -202,3 +203,25 @@ def test_cli_unreadable_source_writes_nothing(tmp_path):
     r = _cli(tmp_path / "missing.yaml", f"{dst_dir}/")
     assert r.returncode == 2 and "cannot read" in r.stderr
     assert not dst_dir.exists()
+
+
+def _cp_into_config_d(text):
+    """Every non-comment line that `cp`s ANYTHING into a config.d/ — a real
+    copy or a hint that teaches one. Re-review R2 (2026-09-29): the old filter
+    excluded lines whose prefix held `available.d`, i.e. the upstream-doc form
+    `cp /etc/meshtasticd/available.d/x.yaml /etc/meshtasticd/config.d/` — the
+    exact defect shape (#58) — and drilled red only because the old lines used
+    `$AVAIL_DIR`."""
+    return [ln.strip() for ln in text.splitlines()
+            if not ln.lstrip().startswith("#")
+            and re.search(r"\bcp\s", ln) and "config.d/" in ln]
+
+
+def test_cp_guard_catches_the_upstream_doc_form_and_hints():
+    upstream = "    cp /etc/meshtasticd/available.d/waveshare-sx1262.yaml /etc/meshtasticd/config.d/"
+    hint = '    echo "Fix: sudo cp $CONFIG_DIR/available.d/<hat>.yaml $CONFIG_DIR/config.d/"'
+    comment = "    # Activate ONE template into config.d/ — SANITIZED, never a raw cp (#58)."
+    ok = "    python3 scripts/sanitize_overlay.py $src $dst_dir/  # into config.d/"
+    assert len(_cp_into_config_d(upstream)) == 1
+    assert len(_cp_into_config_d(hint)) == 1
+    assert _cp_into_config_d(comment + "\n" + ok) == []

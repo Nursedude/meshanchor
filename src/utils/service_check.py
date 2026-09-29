@@ -1079,9 +1079,14 @@ def is_user_unit_active(unit: str, timeout: int = 5) -> Optional[bool]:
         logger.debug("user unit %s state unreadable: %s", unit, e)
         return None
     state = r.stdout.strip()
-    if r.returncode == 0 or state in ('activating', 'reloading'):
-        return True  # a starting client can still grab the socket
-    if state in ('inactive', 'failed', 'deactivating'):
+    if r.returncode == 0 or state in ('activating', 'reloading', 'deactivating'):
+        # a starting client can still grab the socket — and `deactivating`
+        # is HELD too (MF re-review R1, 2026-09-29, drilled): a client that
+        # CRASHED mid-teardown reads it for its whole TimeoutStopSec and
+        # Restart= brings it back BY ITSELF inside the rnsd window; an
+        # explicit stop issued now cancels that restart.
+        return True
+    if state in ('inactive', 'failed'):
         return False
     return None  # e.g. "Failed to connect to user scope bus"
 
@@ -1102,9 +1107,14 @@ def is_system_unit_active(unit: str, timeout: int = 5) -> Optional[bool]:
         logger.debug("system unit %s state unreadable: %s", unit, e)
         return None
     state = r.stdout.strip()
-    if r.returncode == 0 or state in ('activating', 'reloading'):
-        return True  # a starting client can still grab the socket
-    if state in ('inactive', 'failed', 'deactivating'):
+    if r.returncode == 0 or state in ('activating', 'reloading', 'deactivating'):
+        # a starting client can still grab the socket — and `deactivating`
+        # is HELD too (MF re-review R1, 2026-09-29, drilled): a client that
+        # CRASHED mid-teardown reads it for its whole TimeoutStopSec and
+        # Restart= brings it back BY ITSELF inside the rnsd window; an
+        # explicit stop issued now cancels that restart.
+        return True
+    if state in ('inactive', 'failed'):
         return False
     return None
 
