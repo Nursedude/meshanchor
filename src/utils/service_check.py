@@ -236,18 +236,23 @@ def _unit_file_absent(systemd_name: str) -> bool:
     measured 2026-09-28). A timeout, a missing systemctl or any other output
     is NOT evidence of absence and returns False.
     """
+    # A template INSTANCE (foo@bar) has no unit file of its own — ask for the
+    # TEMPLATE. `list-unit-files getty@tty9.service` prints "0 unit files
+    # listed" (rc 1) while getty@.service is enabled (measured systemd 257,
+    # MeshForge review S5 2026-09-28), so the instance read NOT_INSTALLED.
+    query = systemd_name.split('@', 1)[0] + '@' if '@' in systemd_name else systemd_name
     try:
-        with timed_boundary("systemd.list_unit_files", target=systemd_name):
+        with timed_boundary("systemd.list_unit_files", target=query):
             r = subprocess.run(
-                ['systemctl', 'list-unit-files', f'{systemd_name}.service'],
+                ['systemctl', 'list-unit-files', f'{query}.service'],
                 capture_output=True, text=True, timeout=5,
             )
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug("list-unit-files %s failed: %s", systemd_name, e)
+        logger.debug("list-unit-files %s failed: %s", query, e)
         return False
     out = r.stdout or ""
     return (r.returncode == 1 and "0 unit files listed" in out
-            and systemd_name not in out.replace("0 unit files listed", ""))
+            and query not in out.replace("0 unit files listed", ""))
 
 
 def check_service(name: str, port: Optional[int] = None, host: str = 'localhost',
@@ -463,15 +468,10 @@ def _check_service_uncached(name: str, port: Optional[int] = None,
                     detection_method="systemctl"
                 )
 
-            # Check if service unit exists
-            with timed_boundary("systemd.list_unit_files", target=systemd_name):
-                check_result = subprocess.run(
-                    ['systemctl', 'list-unit-files', f'{systemd_name}.service'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-            if systemd_name not in check_result.stdout:
+            # Check if service unit exists. POSITIVE evidence only, same rule
+            # as the "inactive" branch above — and template-aware (review S5):
+            # `foo@bar` never appears in list-unit-files output, `foo@.service` does.
+            if _unit_file_absent(systemd_name):
                 return ServiceStatus(
                     name=name,
                     available=False,
@@ -1084,6 +1084,29 @@ def is_user_unit_active(unit: str, timeout: int = 5) -> Optional[bool]:
     if state in ('inactive', 'failed', 'deactivating'):
         return False
     return None  # e.g. "Failed to connect to user scope bus"
+
+
+def is_system_unit_active(unit: str, timeout: int = 5) -> Optional[bool]:
+    """SYSTEM-scope twin of ``is_user_unit_active`` (MeshForge review S2,
+    2026-09-28). ``check_service(unit).available`` is a bool, so the rnsd
+    repair order read ``activating`` and a systemctl TIMEOUT both as "not
+    active → skip": a gateway in auto-restart when the repair began was not
+    held, not reported, and could squat ``@rns`` (the #69 shape).
+    None = unobservable, never "inactive"."""
+    try:
+        r = subprocess.run(
+            ['systemctl', 'is-active', unit],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug("system unit %s state unreadable: %s", unit, e)
+        return None
+    state = r.stdout.strip()
+    if r.returncode == 0 or state in ('activating', 'reloading'):
+        return True  # a starting client can still grab the socket
+    if state in ('inactive', 'failed', 'deactivating'):
+        return False
+    return None
 
 
 def start_service(service_name: str, timeout: int = 30,
