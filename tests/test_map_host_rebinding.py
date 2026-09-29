@@ -99,3 +99,11 @@ def test_a_local_suffix_in_the_middle_is_not_local(name):
     # suffixes match at the END only (Fable re-review #4, mutant M4 survived)
     assert tg._local_only_name(name) is False
     assert tg._host_header_trusted(name + ":5000") is False
+
+
+def test_same_local_host_requires_a_local_only_name():
+    # unit pin: the dispatch Host rule now refuses a public name one layer
+    # earlier, so the end-to-end test no longer pins this clause (Fable
+    # follow-up 2026-09-28, F-C, mutant M-K survived on MA)
+    assert tg._same_local_host("http://evil.example:5000", "evil.example:5000", 5000) is False
+    assert tg._same_local_host("http://moc:5000", "moc:5000", 5000) is True
