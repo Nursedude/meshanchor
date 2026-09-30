@@ -20,6 +20,7 @@ Surgical adjustments from MeshForge original:
 """
 
 import sys
+import json
 import re
 import secrets
 import base64
@@ -488,23 +489,84 @@ class ChannelConfigHandler(BaseHandler):
         except Exception as e:
             self.ctx.dialog.msgbox("Error", f"Failed:\n{e}")
 
+    # Channel 0's line in `meshtastic --info`. MeshForge twin: 43b2b08b.
+    _CH0_LINE = re.compile(r'Index 0: PRIMARY[^\n{]*(\{[^\n]*\})')
+    # nanopb ChannelSettings.name max_size:12 — 11 UTF-8 bytes + NUL.
+    CHANNEL_NAME_MAX_BYTES = 11
+
+    @classmethod
+    def _parse_primary_name(cls, info: str):
+        """Channel 0's name from `meshtastic --info`: "" when the primary is
+        unnamed (the firmware then shows its preset name), None when the
+        output carries no readable primary channel — a read that did not
+        happen. The CLI prints the channel through protobuf json_format
+        (ensure_ascii), so the object is JSON-DECODED: a regex capture handed
+        back escape text for any non-ASCII or quoted name (reader pair,
+        2026-09-29)."""
+        if not info or "Index 0: PRIMARY" not in info:
+            return None
+        m = cls._CH0_LINE.search(info)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(1))
+        except ValueError:
+            return None
+        name = obj.get("name", "") if isinstance(obj, dict) else None
+        return name if isinstance(name, str) else None
+
     def _set_primary_channel(self):
-        """Set primary channel name."""
-        name = self.ctx.dialog.inputbox(
-            "Primary Channel",
-            "Enter channel name (max 12 chars):",
-            "MeshAnchor"
-        )
+        """Set primary channel name.
 
-        if not name:
-            return
-
+        Pre-fills the radio's CURRENT name and writes only a deliberate,
+        confirmed change. It used to pre-fill "MeshAnchor" and write on one
+        Enter with no confirm — renaming the mesh's primary channel (MeshForge
+        fixed this in 43b2b08b; the MeshAnchor port missed it, found by the
+        2026-09-29 double-tap).
+        """
         try:
             sys.path.insert(0, str(self.ctx.src_dir))
             from commands import meshtastic as mesh_cmd
 
+            self.ctx.dialog.infobox("Primary Channel", "Reading the radio's channels...")
+            info = mesh_cmd.get_node_info()
+            raw = (getattr(info, 'raw', None) or getattr(info, 'raw_output', None) or "")
+            current = self._parse_primary_name(raw) if info.success else None
+            shown = ("(unnamed — firmware default)" if current == ""
+                     else repr(current) if current is not None and current != current.strip()
+                     else current if current is not None
+                     else "UNKNOWN — could not read the radio")
+            limit = self.CHANNEL_NAME_MAX_BYTES
+            name = self.ctx.dialog.inputbox(
+                "Primary Channel",
+                f"Enter channel name (max {limit} bytes; ō/ū/ʻ take 2):\n\nCurrent: {shown}",
+                current or ""
+            )
+            if name is None:
+                return
+            name = name.strip()
+            if not name or (current is not None and name == current.strip()):
+                self.ctx.dialog.msgbox("Primary Channel",
+                                       "No change — the primary channel name was not written.")
+                return
+            if len(name.encode("utf-8")) > limit:
+                # Refuse, never truncate: a cut name is a name nobody typed,
+                # and the CLI does not check — the firmware would drop it.
+                self.ctx.dialog.msgbox(
+                    "Primary Channel",
+                    f"Not written — '{name}' is {len(name.encode('utf-8'))} bytes; "
+                    f"the radio stores at most {limit}.")
+                return
+            if not self.ctx.dialog.yesno(
+                    "Rename Primary Channel",
+                    f"Rename the PRIMARY channel?\n\n  {shown}  ->  {name}\n\n"
+                    "Every node on this mesh must use the same primary channel\n"
+                    "name and key, or they stop hearing each other.",
+                    default_no=True):
+                return
+
             self.ctx.dialog.infobox("Setting", f"Setting channel name to {name}...")
-            result = mesh_cmd.set_channel_name(0, name[:12])
+            result = mesh_cmd.set_channel_name(0, name)
             self.ctx.dialog.msgbox("Result", result.message)
 
         except Exception as e:

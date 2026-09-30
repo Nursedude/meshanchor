@@ -341,19 +341,20 @@ class TestSetGatewayChannel:
 
 class TestBrandRenames:
 
-    def test_primary_default_uses_meshanchor(self):
-        """Regression guard: the primary-channel default placeholder must
-        say 'MeshAnchor' — a future copy-paste from MeshForge that forgets
-        the rename gets caught here."""
+    def test_primary_prefill_is_never_a_brand_name(self):
+        """Inverted 2026-09-29. This test used to REQUIRE init="MeshAnchor" —
+        it pinned the defect: one Enter on that pre-fill renamed the mesh's
+        primary channel. The pre-fill is now the radio's current name (or
+        blank), never either twin's brand."""
         h = _make_handler()
         h.ctx.dialog._inputbox_returns = ["overridden"]
-        with patch("commands.meshtastic.set_channel_name", return_value=_ok()):
+        with patch("commands.meshtastic.get_node_info",
+                   return_value=_ok()), \
+             patch("commands.meshtastic.set_channel_name", return_value=_ok()):
             h._set_primary_channel()
-        # The inputbox was called with init="MeshAnchor"
         inputbox_calls = [c for c in h.ctx.dialog.calls if c[0] == "inputbox"]
         assert inputbox_calls
-        kwargs = inputbox_calls[0][2]
-        assert kwargs.get("init") == "MeshAnchor"
+        assert inputbox_calls[0][2].get("init") not in ("MeshAnchor", "MeshForge")
 
     def test_gateway_yesno_mentions_meshanchor(self):
         """The gateway-channel explainer text must say MeshAnchor, not
