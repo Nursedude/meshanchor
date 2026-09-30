@@ -683,7 +683,7 @@ def diagnose_rns_port_conflict(handler):
         else:
             print("No rnsd found. A stale process may be holding the port.")
             print("  Find it:    sudo lsof -i UDP:37428")
-            print("  Kill stale: pkill -f rnsd")
+            print("  Kill stale: pkill -x rnsd")
             print("  Or wait ~30s for the socket to timeout")
     except (subprocess.SubprocessError, OSError) as e:
         logger.debug("RNS port conflict diagnosis failed: %s", e)
