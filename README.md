@@ -83,7 +83,7 @@ yours.
 | **meshforge-maps** | Discovery, browser launch, bidirectional data fusion on `:8808` | [MeshForge Maps](https://github.com/Nursedude/meshforge-maps) |
 | **MQTT monitoring** | Nodeless mesh observation, protobuf decode, traffic inspector | MQTT broker |
 | **RF engineering** | Link budget, Fresnel zone, FSPL, coverage maps, NOAA space weather | — |
-| **AI diagnostics** | Offline knowledge base, optional Claude PRO tier | — |
+| **AI diagnostics** | Offline knowledge base; optional AI assist with your own Claude API key or subscription | — |
 | **Prometheus / Grafana** | 50+ metrics, 5 pre-built dashboards | — |
 
 Optional add-on, installed from the TUI when you want it: **NomadNet**, a
@@ -124,7 +124,7 @@ Companion mode.
 - **Fleet observability** — collector + watchdog, 24h clean-soak passed
 - **Maps** — MeshCore map population, operator pins, meshforge-maps fusion
 - **RF engineering** — link budget, Fresnel, FSPL, space weather
-- **AI diagnostics** — offline knowledge base, optional Claude tier
+- **AI diagnostics** — offline knowledge base; optional AI assist with your own Claude API key (in-TUI assistant) or subscription (Claude Code in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
 
 ~6,500 tests across <!--STAT:testfiles-->289<!--/STAT--> test files (run
 `python3 -m pytest tests/ --co -q` for the live count).

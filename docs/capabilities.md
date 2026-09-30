@@ -152,23 +152,39 @@ RF tools, RNS/rnsd integration, NomadNet, service management, standalone tools.
 
 ---
 
-## AI Intelligence
+## AI Assist — optional, and yours to configure
 
-MeshAnchor includes two tiers of AI-powered network diagnostics:
+MeshAnchor works fully without AI, as a standalone box or across a fleet. AI assist
+is an option you configure; the app **measures which one you have and says
+so** — it never claims more than it has.
 
-### Standalone Mode (No Internet Required)
-- 20+ topic knowledge base covering mesh networking fundamentals
-- Rule-based diagnostic engine with pattern matching
-- Structured troubleshooting guides for common issues
-- Confidence scoring on diagnoses
-- Works completely offline — ideal for field deployment
+| You have | What you get | How to set it up |
+|---|---|---|
+| **Nothing** (the default) | Offline knowledge base (20+ topics), rule-based diagnostic engine, structured troubleshooting guides, confidence scoring — works in the field with no internet | Nothing to set up |
+| **A Claude API key** | The in-TUI **Claude Assistant** (*AI Diagnostics › Claude Assistant*): natural-language questions about mesh networking, answered by the Claude API | Install the optional SDK with the interpreter MeshAnchor runs on: `<venv>/bin/python -m pip install -r requirements/ai.txt` (Python ≥ 3.10). Put the key in `ANTHROPIC_API_KEY`, or in `~/.config/meshanchor/anthropic.key` with mode `600` — the TUI starts under `sudo`, which drops environment variables |
+| **A Claude subscription** | **Claude Code** run in the repo. It loads MeshAnchor's `CLAUDE.md`, rules, skills and verification gates — the same harness MeshAnchor is developed with | Install Claude Code, then as your own user: `cd /opt/meshanchor && claude` |
 
-### PRO Mode (Claude API)
-- Natural language troubleshooting ("Why is my MeshCore node offline?")
-- Log file analysis with suggested actions
-- Context-aware responses (knows your network topology)
-- Predictive issue detection
-- Falls back to Standalone when API unavailable
+**What the assistant tells you.** Its opening screen reports what it found:
+the API as *configured, not contacted yet* (key and package present), *no key*
+(with the exact file it looked for) or *package not installed*, and whether
+Claude Code was found. Every answer then says whether the **Claude API** or the
+**local knowledge base** answered it — and, when a configured API did not, why
+(package missing, the model declined, an error). The API SDK cannot use a Claude
+subscription; that is what Claude Code is for.
+
+**What it does not do (yet).** The API assistant is chat Q&A. Log analysis and
+the troubleshooting guides are local, rule-based features whether or not a key
+is set, and the assistant has no live view of your network or its devices.
+
+```python
+from utils.claude_assistant import ClaudeAssistant, check_availability
+
+print(check_availability())          # configured / no_key / no_package + Claude Code path
+assistant = ClaudeAssistant()
+r = assistant.ask("Node !abc123 has -15dB SNR, is that okay?")
+print(r.answer)
+print(r.mode.value, r.fallback_reason)   # who answered, and why not the API
+```
 
 ---
 
