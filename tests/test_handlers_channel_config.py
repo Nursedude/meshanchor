@@ -208,6 +208,7 @@ class TestSetChannelPsk:
     def test_random_passes_random_to_cli(self):
         h = _make_handler()
         h.ctx.dialog._menu_returns = ["random"]
+        h.ctx.dialog._yesno_returns = [True]  # key-change confirm (default No)
         with patch(
             "commands.meshtastic.set_channel_psk", return_value=_ok()
         ) as mock:
@@ -217,6 +218,7 @@ class TestSetChannelPsk:
     def test_none_passes_none_to_cli(self):
         h = _make_handler()
         h.ctx.dialog._menu_returns = ["none"]
+        h.ctx.dialog._yesno_returns = [True]  # key-change confirm (default No)
         with patch(
             "commands.meshtastic.set_channel_psk", return_value=_ok()
         ) as mock:
@@ -226,11 +228,12 @@ class TestSetChannelPsk:
     def test_default_passes_aq_token(self):
         h = _make_handler()
         h.ctx.dialog._menu_returns = ["default"]
+        h.ctx.dialog._yesno_returns = [True]  # key-change confirm (default No)
         with patch(
             "commands.meshtastic.set_channel_psk", return_value=_ok()
         ) as mock:
             h._set_channel_psk(2)
-            mock.assert_called_once_with(2, "AQ==")
+            mock.assert_called_once_with(2, "default")  # "AQ==" raises TypeError in the CLI
 
     def test_custom_blank_input_aborts(self):
         h = _make_handler()
@@ -246,14 +249,17 @@ class TestSetChannelPsk:
 
 class TestSetChannelName:
 
-    def test_truncates_name_to_12_chars(self):
+    def test_over_long_name_is_refused_not_truncated(self):
+        # Was test_truncates_name_to_12_chars — it PINNED the defect: the CLI
+        # reports success on an over-long name and the radio keeps the old one
+        # (measured on the sim 2026-09-29). Refuse, never truncate.
         h = _make_handler()
         h.ctx.dialog._inputbox_returns = ["a" * 30]
-        with patch(
-            "commands.meshtastic.set_channel_name", return_value=_ok()
-        ) as mock:
+        h.ctx.dialog._yesno_returns = [True]   # answer the rename confirm: only the length check may refuse
+        with patch("commands.meshtastic.set_channel_name") as mock:
             h._set_channel_name(3)
-            mock.assert_called_once_with(3, "a" * 12)
+            mock.assert_not_called()
+        assert "Not written" in (h.ctx.dialog.last_msgbox_text or "")
 
     def test_empty_input_aborts(self):
         h = _make_handler()
