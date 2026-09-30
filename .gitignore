@@ -60,3 +60,7 @@ CLAUDE.local.md
 # Session context (local only)
 .claude/CURRENT.md
 .claude/scheduled_tasks.lock
+# Per-operator permission grants (service control, push). The TRACKED
+# settings.json no longer pre-approves those (e9b2142f), so a clone's agent
+# asks; a clone must never commit its own grants back (MeshForge twin: :62).
+.claude/settings.local.json
