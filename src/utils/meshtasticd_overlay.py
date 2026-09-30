@@ -27,6 +27,49 @@ MESHTASTICD_API_PORT = 9443
 CONFIG_D = Path('/etc/meshtasticd/config.d')
 
 
+# Top-level keys meshtasticd itself reads — measured, not recalled:
+#   grep -oE 'yamlConfig\["[A-Za-z0-9_]+"\]' src/platform/portduino/PortduinoGlue.cpp | sort -u
+# on v2.7.26.54e0d8d gives these 12. A key outside this set is silently
+# ignored — a `Serial:`-only overlay configures nothing (verified with
+# `meshtasticd --output-yaml`: merged config identical to no overlay).
+MESHTASTICD_TOP_LEVEL_KEYS = frozenset({
+    'Config', 'Display', 'General', 'GPIO', 'GPS', 'HostMetrics', 'I2C',
+    'Input', 'Logging', 'Lora', 'Touchscreen', 'Webserver',
+})
+
+
+def classify_overlay(content: str) -> str:
+    """What a meshtasticd overlay IS, from its content, never its filename.
+
+    Judged on what survives activation: the keys HAT_OVERLAY_FORBIDDEN_KEYS
+    strips (Webserver, Logging, General, …) are removed first, so a
+    `Serial:` + `Webserver:` file is 'ignored', not a radio.
+      'ch341'   — `Lora:` with `spidev: ch341` (exact, as the firmware
+                  compares): a USB-SPI board (MeshToad, MeshStick, …).
+      'spi'     — any other `Lora:` overlay (a HAT on the Pi's SPI bus).
+      'aux'     — no `Lora:`, but keys meshtasticd reads (Display, GPS,
+                  I2C, …): a real overlay, NOT a radio config — activating
+                  it as one would replace the radio's overlay.
+      'ignored' — nothing meshtasticd reads survives (e.g. `Serial:` only),
+                  or not YAML: activating it changes nothing.
+    Only 'ch341'/'spi' belong in a radio menu. First YAML document only, as
+    yaml-cpp's LoadFile reads. Twins: MeshForge core/meshtasticd_templates.py,
+    MeshAnchor utils/meshtasticd_overlay.py — same body.
+    """
+    import yaml
+    try:
+        doc = next(yaml.safe_load_all(content), None)
+    except yaml.YAMLError:
+        return 'ignored'
+    if not isinstance(doc, dict):
+        return 'ignored'
+    keys = (set(doc) - HAT_OVERLAY_FORBIDDEN_KEYS) & MESHTASTICD_TOP_LEVEL_KEYS
+    lora = doc.get('Lora')
+    if 'Lora' in keys and isinstance(lora, dict):
+        return 'ch341' if lora.get('spidev') == 'ch341' else 'spi'
+    return 'aux' if keys - {'Lora'} else 'ignored'
+
+
 def sanitize_hat_overlay(content: str) -> Tuple[str, List[str]]:
     """Strip forbidden top-level blocks from an overlay before activation.
 

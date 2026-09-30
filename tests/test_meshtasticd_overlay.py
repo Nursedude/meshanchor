@@ -147,7 +147,9 @@ TCP:
 
 def test_shipped_templates_carry_only_hardware_keys():
     files = sorted((_REPO / "templates" / "available.d").glob("*.yaml"))
-    assert len(files) >= 30, "the glob is aimed wrong"
+    # 29 since the 7 `Serial:`-only USB templates were deleted (B7,
+    # 2026-09-30); a floor, so the glob cannot silently match nothing.
+    assert len(files) >= 25, "the glob is aimed wrong"
     carrying = {f.name: sorted(set(yaml.safe_load(f.read_text()) or {})
                                & mo.HAT_OVERLAY_FORBIDDEN_KEYS) for f in files}
     assert {k: v for k, v in carrying.items() if v} == {}

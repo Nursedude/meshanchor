@@ -30,18 +30,15 @@ FORBIDDEN = {"Webserver", "TCP", "Logging", "MQTT", "Bluetooth", "General"}
 EXAMPLES = Path(__file__).parent.parent / "examples" / "configs"
 
 
-def test_wizard_usb_overlay_carries_only_serial():
-    # meshanchor-server's config.d/usb-serial.yaml came from this wizard with
-    # `Webserver: Port: 443` (found by Config Doctor, stripped 2026-09-28).
-    from handlers.first_run import usb_overlay_content
-    loaded = yaml.safe_load(usb_overlay_content("/dev/ttyUSB0"))
-    assert loaded == {"Serial": {"Device": "/dev/ttyUSB0"}}
+# The wizard's `Serial:` overlay writer (usb_overlay_content) was REMOVED
+# 2026-09-30: meshtasticd has no `Serial:` key, so what it wrote configured
+# nothing — tests/test_wizard_usb_routes_by_kind.py pins what replaced it.
 
 
 def test_overlay_examples_carry_no_forbidden_keys():
     # Both examples say "Copy to: /etc/meshtasticd/config.d/".
     files = sorted(EXAMPLES.glob("meshtasticd-*.yaml"))
-    assert len(files) == 2, [f.name for f in files]
+    assert len(files) == 1, [f.name for f in files]   # the USB example was removed (B7)
     carrying = {f.name: sorted(FORBIDDEN & set(yaml.safe_load(f.read_text()) or {}))
                 for f in files}
     assert all(not keys for keys in carrying.values()), carrying
