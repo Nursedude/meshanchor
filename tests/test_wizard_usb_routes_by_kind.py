@@ -86,13 +86,13 @@ def _run(tmp_path, scan, menu=(), yesno=()):
 
 def test_standalone_node_writes_nothing_and_names_real_knobs(tmp_path):
     # MeshAnchor has no config.hardware: detection returns nothing, so the
-    # wizard ASKS the kind. Its Meshtastic message leg has no serial transport;
-    # RNS over Meshtastic (rns_transport) does — bridge_cli.py.
+    # wizard ASKS the kind. Its Meshtastic message leg has no serial
+    # transport, and the rns_transport leg was removed 2026-10-01.
     _seed(tmp_path)
     h, written, restarts = _run(tmp_path, NODE, menu=["node"], yesno=[True])
     assert written == [] and restarts == [], (written, restarts)
     text = h.ctx.dialog.last_msgbox_text or ""
-    assert "Nothing was written" in text and "rns_transport" in text, text
+    assert "Nothing was written" in text and "rns_transport" not in text, text
     assert "TCP/MQTT" in text and "mesh_bridge" not in text, text
 
 

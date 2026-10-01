@@ -23,6 +23,11 @@ VERSION_HISTORY = [
         "date": "2026-08-09",
         "status": "beta",
         "changes": [
+            "REMOVED (2026-10-01, port of MeshForge): gateway/rns_transport.py, the "
+            "RNS-over-Meshtastic transport. It never handed a packet to RNS. Also "
+            "removed its CLI commands, TUI bridge-mode entry, template and example. "
+            "bridge_cli now refuses bridge_mode=rns_transport with the reason; the "
+            "config section still parses. RNS over LoRa = an RNodeInterface in rnsd.",
             "ALPHA -> BETA: the 0.1.0-alpha tag was set at extraction (2026-04-01) "
             "and never revisited — 130 days and 616 commits. It described the age "
             "of the repo, not the maturity of the software.",

@@ -20,8 +20,16 @@ from gateway import (
     GatewayConfig,
     MeshtasticPresetBridge,
     create_mesh_bridge,
-    RNSMeshtasticTransport,
-    create_rns_transport,
+)
+
+#: The RNS-over-Meshtastic transport (gateway/rns_transport.py) was removed
+#: 2026-10-01 (MeshForge first, ported here). It started, held a meshtasticd
+#: TCP connection and counted fragments, but nothing ever handed a
+#: reassembled packet to RNS, so it carried nothing.
+RNS_TRANSPORT_REMOVED = (
+    "rns_transport was removed on 2026-10-01: it never delivered packets to "
+    "RNS. Set bridge_mode to another value in gateway.json. For RNS over "
+    "LoRa, add an RNodeInterface to rnsd's config instead."
 )
 from utils.service_check import check_service, check_port
 
@@ -58,7 +66,7 @@ def preflight_checks(config: GatewayConfig) -> bool:
 
     # Check RNS daemon (if RNS mode enabled)
     bridge_mode = config.bridge_mode if config else "message_bridge"
-    if bridge_mode in ("message_bridge", "rns_transport"):
+    if bridge_mode == "message_bridge":
         print("Checking rnsd...", end=" ")
         rns_status = check_service('rnsd')
         if rns_status.available:
@@ -168,9 +176,15 @@ def main():
                 print(f"         Falling back to 'message_bridge' mode.\n")
                 bridge_mode = "message_bridge"
 
+    # Refuse, never fall back: a config still asking for the removed
+    # transport must stop with the reason, not quietly run another bridge.
+    if bridge_mode == "rns_transport":
+        logger.error(RNS_TRANSPORT_REMOVED)
+        print(f"\nERROR: {RNS_TRANSPORT_REMOVED}")
+        sys.exit(1)
+
     mode_labels = {
         "message_bridge": "RNS <-> Meshtastic Message Bridge",
-        "rns_transport": "RNS Over Meshtastic Transport",
         "mesh_bridge": "Meshtastic Preset Bridge",
     }
     print(f"  Mode: {mode_labels.get(bridge_mode, bridge_mode)}")
@@ -187,9 +201,6 @@ def main():
     if bridge_mode == "mesh_bridge":
         bridge = create_mesh_bridge(config)
         logger.info("Created MeshtasticPresetBridge (mesh_bridge mode)")
-    elif bridge_mode == "rns_transport":
-        bridge = create_rns_transport(config.rns_transport)
-        logger.info("Created RNSMeshtasticTransport (rns_transport mode)")
     else:
         bridge = RNSMeshtasticBridge(config)
         logger.info("Created RNSMeshtasticBridge (message_bridge mode)")

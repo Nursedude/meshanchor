@@ -48,10 +48,8 @@ StartupChecker, _HAS_STARTUP_CHECKER = safe_import('startup_checks', 'StartupChe
 # serial transport — serial there is MeshCore's); MeshForge's has one.
 USB_NODE_GATEWAY_NOTE = (
     "  - Gateway: MeshAnchor's Meshtastic message leg reaches\n"
-    "    Meshtastic through meshtasticd (TCP/MQTT) only. RNS over\n"
-    "    Meshtastic CAN use a USB node — in\n"
-    "    ~/.config/meshanchor/gateway.json: bridge_mode \"rns_transport\",\n"
-    '      rns_transport: connection_type "serial", device_path "{tty}"'
+    "    Meshtastic through meshtasticd (TCP/MQTT) only; a USB\n"
+    "    node is not a gateway leg on MeshAnchor."
 )
 
 

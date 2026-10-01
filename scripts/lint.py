@@ -260,7 +260,7 @@ class MeshAnchorLinter:
             # Files that use the global lock correctly (tracked, not violations)
             lock_aware_files = (
                 'node_monitor.py', 'device_controller.py',
-                'rns_transport.py', 'mesh_bridge.py',
+                'mesh_bridge.py',
             )
             basename = os.path.basename(filepath)
             is_infra = any(f in filepath for f in conn_infrastructure)
