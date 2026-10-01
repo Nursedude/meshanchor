@@ -22,16 +22,8 @@ from gateway import (
     create_mesh_bridge,
 )
 
-#: The RNS-over-Meshtastic transport (gateway/rns_transport.py) was removed
-#: 2026-10-01 (MeshForge first, ported here). It started, held a meshtasticd
-#: TCP connection and counted fragments, but nothing ever handed a
-#: reassembled packet to RNS, so it carried nothing.
-RNS_TRANSPORT_REMOVED = (
-    "rns_transport was removed on 2026-10-01: it never delivered packets to "
-    "RNS. Set bridge_mode to another value in gateway.json. For RNS over "
-    "LoRa, add an RNodeInterface to rnsd's config instead."
-)
 from utils.service_check import check_service, check_port
+from gateway.config_validators import RNS_TRANSPORT_REMOVED  # shared with validate_bridge_mode
 
 # Setup logging — use canonical logging_config (avoids basicConfig conflicts)
 from utils.logging_config import setup_logging, get_logger
@@ -178,7 +170,7 @@ def main():
 
     # Refuse, never fall back: a config still asking for the removed
     # transport must stop with the reason, not quietly run another bridge.
-    if bridge_mode == "rns_transport":
+    if (bridge_mode or "").lower() == "rns_transport":
         logger.error(RNS_TRANSPORT_REMOVED)
         print(f"\nERROR: {RNS_TRANSPORT_REMOVED}")
         sys.exit(1)

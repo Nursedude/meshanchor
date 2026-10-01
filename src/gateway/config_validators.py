@@ -58,10 +58,24 @@ def validate_data_speed(speed: int, field_name: str) -> Optional[ConfigValidatio
     return None
 
 
+#: The RNS-over-Meshtastic transport (gateway/rns_transport.py) was removed
+#: 2026-10-01 (MeshForge first, ported here). It started, held a meshtasticd
+#: TCP connection and counted fragments, but nothing ever handed a
+#: reassembled packet to RNS, so it carried nothing.
+RNS_TRANSPORT_REMOVED = (
+    "rns_transport was removed on 2026-10-01: it never delivered packets to "
+    "RNS. Set bridge_mode to another value in gateway.json. For RNS over "
+    "LoRa, add an RNodeInterface to rnsd's config instead."
+)
+
+
 def validate_bridge_mode(mode: str, field_name: str) -> Optional[ConfigValidationError]:
-    """Validate bridge mode."""
+    """Validate bridge mode. ``rns_transport`` is named as REMOVED, not merely
+    invalid, with the same text gateway startup refuses with."""
+    if (mode or "").lower() == "rns_transport":
+        return ConfigValidationError(field_name, RNS_TRANSPORT_REMOVED)
     valid_modes = [
-        "mqtt_bridge", "message_bridge", "rns_transport", "mesh_bridge",
+        "mqtt_bridge", "message_bridge", "mesh_bridge",
         "meshcore_bridge", "tri_bridge",
     ]
     if mode not in valid_modes:
@@ -107,24 +121,6 @@ def validate_dedup_window(seconds: int, field_name: str) -> Optional[ConfigValid
         )
     return None
 
-
-def validate_speed_hop_combination(speed: int, hop_limit: int) -> Optional[ConfigValidationError]:
-    """Check for incompatible speed/hop combinations."""
-    # High speed + high hops = likely packet loss due to timing
-    if speed >= 7 and hop_limit >= 5:
-        return ConfigValidationError(
-            "rns_transport",
-            f"Speed {speed} with hop_limit {hop_limit} may cause reliability issues (fast speed + many hops)",
-            severity="warning"
-        )
-    # Low speed + low hops = underutilizing range
-    if speed <= 2 and hop_limit <= 2:
-        return ConfigValidationError(
-            "rns_transport",
-            f"Speed {speed} with hop_limit {hop_limit} may underutilize range capability",
-            severity="info"
-        )
-    return None
 
 
 def validate_log_level(level: str, field_name: str) -> Optional[ConfigValidationError]:

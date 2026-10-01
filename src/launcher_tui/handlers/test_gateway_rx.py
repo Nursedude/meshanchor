@@ -39,7 +39,7 @@ except ImportError:
     _HAS_GATEWAY_CONFIG = False
 
 # Bridge modes that subscribe to MQTT — RX probe is meaningful in these.
-# Any other mode (mesh_bridge, rns_transport, meshcore_bridge default) won't
+# Any other mode (mesh_bridge, meshcore_bridge default) won't
 # pick up the probe; we warn and let the user proceed anyway for diagnostics.
 _MQTT_AWARE_MODES = {"mqtt_bridge", "tri_bridge"}
 

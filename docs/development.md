@@ -35,7 +35,6 @@ coordinated across both projects.
 | `test_rns_bridge.py` | 250 | Core bridge: routing, circuit breaker, callbacks |
 | `test_rf.py` | 107 | RF calculations: haversine, FSPL, Fresnel, link budget |
 | `test_message_queue.py` | 104 | SQLite queue, retry policy, dead letter |
-| `test_rns_transport.py` | 97 | Packet fragmentation, reassembly, transport stats |
 | `test_lxmf_broadcast_bridge.py` | 88 | LXMF broadcast bridge: subscribe, fan-out, dedup |
 | `test_gateway_config.py` | 80 | Gateway config + validators |
 | `test_status_bar.py` | 70 | TUI status bar rendering |
