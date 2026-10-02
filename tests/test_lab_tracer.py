@@ -208,3 +208,23 @@ def test_load_peers_reads_from_explicit_path(tmp_path):
     peers = load_peers(peers_file)
     assert len(peers) == 1
     assert peers[0].name == "moc"
+
+
+def test_run_trace_labels_rns_init_failure_as_observer_side(monkeypatch):
+    """An RNS init failure (incl. the #69 join-only refusal) is about THIS
+    box, not the peers: every row says rns-init-error, never send-error.
+    Port of MeshForge's test (2026-10-01)."""
+    import sys
+    from unittest.mock import MagicMock
+    import utils.rns_init as rns_init
+    from lab import lxmf_tracer as t
+    monkeypatch.setitem(sys.modules, "RNS", MagicMock())
+    monkeypatch.setitem(sys.modules, "LXMF", MagicMock())
+
+    def boom(configdir, **kw):
+        raise RuntimeError("@rns/x disappeared ... (join-only, Issue #69)")
+    monkeypatch.setattr(rns_init, "init_reticulum_with_watchdog", boom)
+    peers = [t.Peer(name="moc1", hash_hex="00" * 16),
+             t.Peer(name="moc2", hash_hex="11" * 16)]
+    results = t.run_trace(peers)
+    assert [r.result for r in results] == ["rns-init-error"] * 2

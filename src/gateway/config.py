@@ -650,11 +650,12 @@ class GatewayConfig:
     enabled: bool = False
     auto_start: bool = False
 
-    # Bridge mode: "mqtt_bridge", "message_bridge", "rns_transport",
-    #              "mesh_bridge", "meshcore_bridge", or "tri_bridge"
+    # Bridge mode: "mqtt_bridge", "message_bridge", "mesh_bridge",
+    #              "meshcore_bridge", or "tri_bridge"
     # - mqtt_bridge: MQTT-based bridge (recommended - zero interference with web client)
     # - message_bridge: TCP-based message bridge (legacy - blocks web client)
-    # - rns_transport: RNS uses Meshtastic as network transport layer
+    # - rns_transport: REMOVED 2026-10-01 — refused at startup; RNS over LoRa
+    #   is an RNodeInterface in rnsd
     # - mesh_bridge: Bridges two Meshtastic networks with different presets
     # - meshcore_bridge: MeshCore ↔ Meshtastic/RNS bridge via companion radio
     # - tri_bridge: All three protocols (Meshtastic + MeshCore + RNS)
@@ -667,7 +668,9 @@ class GatewayConfig:
     # MQTT bridge transport (used when bridge_mode="mqtt_bridge")
     mqtt_bridge: MQTTBridgeConfig = field(default_factory=MQTTBridgeConfig)
 
-    # RNS Over Meshtastic transport (used when bridge_mode="rns_transport")
+    # Removed RNS-over-Meshtastic transport: the section still PARSES so old
+    # gateway.json files load. MA is mode-based: bridge_mode="rns_transport" is
+    # refused at startup (bridge_cli); this section's `enabled` is ignored.
     rns_transport: RNSOverMeshtasticConfig = field(default_factory=RNSOverMeshtasticConfig)
 
     # Meshtastic-to-Meshtastic bridge (used when bridge_mode="mesh_bridge")

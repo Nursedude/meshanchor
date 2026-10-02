@@ -154,8 +154,8 @@ journalctl -u meshanchor -f | grep gateway
 
 The `rns_transport` mode was removed (MF `55c5e0f1`, MA `e873d856`): it started,
 counted fragments, and never handed a packet to RNS. A `gateway.json` that still sets
-`bridge_mode: rns_transport` or `rns_transport.enabled: true` now refuses to start and
-names the real path: **RNS over LoRa = an `RNodeInterface` in rnsd** (see
+`bridge_mode: rns_transport` now refuses to start (MeshAnchor is mode-based, so an
+`rns_transport.enabled` flag on its own is ignored) and names the real path: **RNS over LoRa = an `RNodeInterface` in rnsd** (see
 `templates/reticulum.conf` for interface-mode guidance).
 
 ---

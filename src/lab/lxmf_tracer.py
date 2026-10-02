@@ -46,12 +46,18 @@ class Peer:
         return bytes.fromhex(self.hash_hex)
 
 
+#: Result for every peer when THIS box could not initialise RNS (incl. the
+#: #69 join-only refusal). Observer-side: it says nothing about any peer.
+#: Same value as MeshForge's lab.lxmf_tracer / watchdog_probes_tracer.
+RESULT_RNS_INIT_ERROR = "rns-init-error"
+
+
 @dataclass
 class TraceResult:
     """One outcome row from a tracer run."""
     seq: int
     peer: str
-    result: str  # "ok" | "timeout" | "no-route" | "send-error"
+    result: str  # "ok" | "timeout" | "no-route" | "send-error" | RESULT_RNS_INIT_ERROR
     rtt_ms: int  # 0 when result != "ok"
 
 
@@ -221,7 +227,8 @@ def run_trace(
         except Exception as exc:
             logger.error("tracer: RNS init failed: %s", exc)
             return [
-                TraceResult(seq=0, peer=p.name, result="send-error", rtt_ms=0)
+                TraceResult(seq=0, peer=p.name, result=RESULT_RNS_INIT_ERROR,
+                            rtt_ms=0)
                 for p in peers
             ]
 
