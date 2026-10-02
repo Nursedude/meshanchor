@@ -150,42 +150,13 @@ journalctl -u meshanchor -f | grep gateway
 
 ---
 
-## RNS Over Meshtastic Transport
+## RNS Over Meshtastic Transport — removed 2026-10-01
 
-For using Meshtastic as an RNS transport layer:
-
-### Configure Transport Mode
-```json
-{
-  "bridge_mode": "rns_transport",
-  "rns_transport": {
-    "enabled": true,
-    "connection_type": "tcp",
-    "device_path": "localhost:4403",
-    "data_speed": 8,
-    "hop_limit": 3
-  }
-}
-```
-
-### Speed Presets
-
-| Preset | Speed (B/s) | Range | Use Case |
-|--------|-------------|-------|----------|
-| 8 (SHORT_TURBO) | 500 | Short | Local testing |
-| 6 (SHORT_FAST) | 300 | Medium | Urban mesh |
-| 4 (MEDIUM_FAST) | 100 | Long | Suburban |
-| 0 (LONG_FAST) | 50 | Maximum | Rural/emergency |
-
-### Start Transport
-```bash
-curl -X POST http://localhost:5000/api/gateway/transport/start
-```
-
-### Monitor Statistics
-```bash
-curl http://localhost:5000/api/gateway/transport/stats
-```
+The `rns_transport` mode was removed (MF `55c5e0f1`, MA `e873d856`): it started,
+counted fragments, and never handed a packet to RNS. A `gateway.json` that still sets
+`bridge_mode: rns_transport` or `rns_transport.enabled: true` now refuses to start and
+names the real path: **RNS over LoRa = an `RNodeInterface` in rnsd** (see
+`templates/reticulum.conf` for interface-mode guidance).
 
 ---
 
