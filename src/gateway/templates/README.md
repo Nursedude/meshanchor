@@ -77,7 +77,7 @@ python3 -m src.commands.gateway start
 | Mode | Description |
 |------|-------------|
 | `message_bridge` | Translate messages between RNS and Meshtastic |
-| `rns_transport` | Removed 2026-10-01; startup refuses it |
+| `rns_transport` | Removed 2026-10-01. Not shipped; `bridge_mode: rns_transport` is refused at startup, an old section is ignored and dropped on the next save |
 | `mesh_bridge` | Bridge two Meshtastic presets |
 
 ### Common Settings
