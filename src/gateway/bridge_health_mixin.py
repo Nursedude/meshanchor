@@ -114,7 +114,7 @@ class BridgeHealthMixin:
             self._meshcore_handler.is_connected if self._meshcore_handler else False
         )
         meshcore_config = getattr(self.config, 'meshcore', None)
-        return {
+        status = {
             'running': self._running,
             'enabled': self.config.enabled,
             'meshtastic_connected': mesh_connected,
@@ -128,6 +128,17 @@ class BridgeHealthMixin:
             'subsystems': self.health.get_subsystem_states(),
             'bridge_status': self.bridge_status.value,
         }
+        # mqtt_bridge mode: meshtastic_connected is the BROKER session; the
+        # radio is read separately so a stopped meshtasticd is not reported
+        # as connected (MF 5440d021). Absent key = handler has no such read.
+        reach = getattr(self._mesh_handler, 'radio_reachability', None)
+        if callable(reach):
+            try:
+                status['meshtastic_radio'] = reach()
+            except Exception as e:
+                logger.debug(f"radio reachability read failed: {e}")
+                status['meshtastic_radio'] = {'reachable': None, 'endpoint': '?'}
+        return status
 
     def test_connection(self) -> dict:
         """Test connectivity to all configured networks"""
