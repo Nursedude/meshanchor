@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List
 
 from backend import clear_screen
 from handler_protocol import BaseHandler
+from utils.rf import grade_snr
 from utils.safe_import import safe_import
 
 logger = logging.getLogger(__name__)
@@ -484,21 +485,11 @@ class TopologyHandler(BaseHandler):
                 count = edge.get("announce_count", 0)
                 active = "●" if edge.get("is_active", False) else "○"
 
-                snr = edge.get("snr")
-                if snr is not None:
-                    if snr > 10:
-                        quality = "Excellent"
-                    elif snr > 5:
-                        quality = "Good"
-                    elif snr > 0:
-                        quality = "Marginal"
-                    elif snr > -5:
-                        quality = "Poor"
-                    else:
-                        quality = "Bad"
-                    snr_str = f"{snr:.1f}dB ({quality})"
-                else:
-                    snr_str = "N/A"
+                # The ONE shared grader (utils.rf.grade_snr). Edges carry no
+                # spreading factor yet, so below the reporting ceiling the
+                # margin is shown as unknown rather than guessed (port of
+                # MeshForge 1470c778, SNR stage 1).
+                snr_str = grade_snr(edge.get("snr"), edge.get("sf")).text()
 
                 lines.append(f"{active} {src} → {dst}")
                 lines.append(f"    Hops: {hops} | Announces: {count} | SNR: {snr_str}")
