@@ -41,7 +41,21 @@ def start_gateway_headless(config=None) -> bool:
         return True
 
     try:
+        from .config import GatewayConfig
         from .rns_bridge import RNSMeshtasticBridge
+
+        # Load HERE when the caller passed none, and check BOTH paths: a
+        # refused gateway.json (unparseable, or written by a newer MeshAnchor
+        # — 1.0 gate 2) loads as DEFAULTS marked load_error. The daemon also
+        # auto-enables those when meshtasticd runs; never start on them.
+        if config is None:
+            config = GatewayConfig.load()
+        if getattr(config, "load_error", None):
+            msg = (f"REFUSING to start the gateway: {config.get_config_path()} "
+                   f"was not loaded ({config.load_error})")
+            logger.error(msg)
+            print(msg)
+            return False
 
         _active_bridge = RNSMeshtasticBridge(config=config)
         success = _active_bridge.start()

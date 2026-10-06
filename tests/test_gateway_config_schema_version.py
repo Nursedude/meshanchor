@@ -82,3 +82,49 @@ def test_a_schema_version_that_is_not_a_plain_count_is_refused(home, bad):
     assert repr(bad) in cfg.load_error
     assert cfg.save() is False
     assert home.read_text() == original
+
+
+REFUSED = [
+    json.dumps({"schema_version": 2, "enabled": True}),   # newer MeshAnchor
+    "{not json",                                          # unreadable
+]
+
+
+@pytest.mark.parametrize("text", REFUSED)
+def test_bridge_cli_refuses_to_start_on_a_refused_load(home, text, capsys):
+    # bridge_cli printed "Config loaded" and ran a bridge on DEFAULTS
+    # whenever load() refused the file (twin of MF's gate-2 consumer fix).
+    from unittest.mock import MagicMock
+    from gateway import bridge_cli
+
+    home.write_text(text)
+    preflight = MagicMock(return_value=True)
+    with patch.object(bridge_cli, "preflight_checks", preflight):
+        with pytest.raises(SystemExit) as exc:
+            bridge_cli.main()
+
+    assert exc.value.code not in (0, None)
+    out = capsys.readouterr().out
+    assert "REFUSING" in out
+    assert str(home) in out
+    preflight.assert_not_called()
+    assert home.read_text() == text
+
+
+@pytest.mark.parametrize("daemon_passes_config", [False, True])
+def test_the_headless_gateway_refuses_to_start_on_a_refused_load(
+        home, daemon_passes_config):
+    # meshanchor-daemon loads, AUTO-ENABLES when meshtasticd runs, and hands
+    # the config here; the CLI passes none. Both must stop on a refused load.
+    from gateway import gateway_cli
+
+    text = json.dumps({"schema_version": 2, "enabled": True})
+    home.write_text(text)
+    config = None
+    if daemon_passes_config:
+        config = GatewayConfig.load()
+        config.enabled = True          # what the daemon does
+    with patch("gateway.rns_bridge.RNSMeshtasticBridge") as Bridge:
+        assert gateway_cli.start_gateway_headless(config) is False
+    Bridge.assert_not_called()
+    assert home.read_text() == text

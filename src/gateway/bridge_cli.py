@@ -167,6 +167,18 @@ def main():
         print(f"\nWarning: Could not load config, using defaults: {e}")
         config = GatewayConfig()  # Use default config, not None
 
+    # load() returns DEFAULTS marked with load_error when gateway.json exists
+    # but was refused (unparseable, or written by a newer MeshAnchor — 1.0
+    # gate 2). Starting on those runs a bridge the operator never configured.
+    # Twin of MeshForge's bridge_cli refusal.
+    if config.load_error:
+        msg = (f"REFUSING to start: {GatewayConfig.get_config_path()} was not "
+               f"loaded ({config.load_error}). Fix or restore the file, or "
+               f"reset it from the TUI: Gateway Bridge > Save Configuration.")
+        logger.error(msg)
+        print(f"\nCONFIG ERROR — gateway will not start:\n  {msg}")
+        sys.exit(1)
+
     bridge_mode = config.bridge_mode
 
     # Auto-fix: validate bridge_mode against available resources
