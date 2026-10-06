@@ -107,8 +107,42 @@ def test_bridge_cli_refuses_to_start_on_a_refused_load(home, text, capsys):
     out = capsys.readouterr().out
     assert "REFUSING" in out
     assert str(home) in out
+    # The journal must not claim the file loaded right before refusing it
+    # (seen live on MF moc3, 2026-10-06 drill — same line here).
+    assert "Config loaded" not in out
     preflight.assert_not_called()
     assert home.read_text() == text
+
+
+class _Stop(Exception):
+    pass
+
+
+def test_bridge_cli_still_reports_a_good_load(home, capsys):
+    # Control for the assertion above: deleting the line would pass it.
+    from gateway import bridge_cli
+
+    home.write_text(json.dumps({"schema_version": 1, "enabled": True}))
+    with patch.object(bridge_cli, "preflight_checks", side_effect=_Stop):
+        with pytest.raises(_Stop):
+            bridge_cli.main()
+
+    out = capsys.readouterr().out
+    assert f"Config loaded from: {home}" in out
+    assert "REFUSING" not in out
+
+
+def test_bridge_cli_a_load_that_raises_is_not_reported_as_loaded(home, capsys):
+    from gateway import bridge_cli
+
+    with patch.object(bridge_cli.GatewayConfig, "load", side_effect=OSError("boom")), \
+         patch.object(bridge_cli, "preflight_checks", side_effect=_Stop):
+        with pytest.raises(_Stop):
+            bridge_cli.main()
+
+    out = capsys.readouterr().out
+    assert "Could not load config" in out
+    assert "Config loaded" not in out
 
 
 @pytest.mark.parametrize("daemon_passes_config", [False, True])

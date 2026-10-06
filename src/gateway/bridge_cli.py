@@ -160,9 +160,10 @@ def main():
     print("="*50)
 
     # Load config
+    loaded = False
     try:
         config = GatewayConfig.load()
-        print(f"\nConfig loaded from: {GatewayConfig.get_config_path()}")
+        loaded = True
     except Exception as e:
         print(f"\nWarning: Could not load config, using defaults: {e}")
         config = GatewayConfig()  # Use default config, not None
@@ -178,6 +179,10 @@ def main():
         logger.error(msg)
         print(f"\nCONFIG ERROR — gateway will not start:\n  {msg}")
         sys.exit(1)
+    # Only now is "loaded" true — printed earlier, the journal claimed a
+    # refused file loaded one line before refusing it (2026-10-06 drill).
+    if loaded:
+        print(f"\nConfig loaded from: {GatewayConfig.get_config_path()}")
 
     bridge_mode = config.bridge_mode
 
