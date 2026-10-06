@@ -542,3 +542,35 @@ class TestAgeSuffix:
         assert "skew" in out
         assert "-" not in out.replace("—", "")
 
+
+
+class TestDeclaredPostureReason:
+    """Twin of MeshForge's posture-reason tests (fleet_truth.py is in the
+    byte-identical parity tier). MA's collector stamps no posture today, so
+    this path is exercised here only through build_fleet_truth directly."""
+
+    @staticmethod
+    def _dark(alias, posture):
+        return {"alias": alias, "resolution_method": "dns", "status": None, "slo": None,
+                "error": "no response", "answered_at": None, "posture": posture}
+
+    def _reach(self, posture):
+        t = ft.build_fleet_truth([self._dark("kit", posture)], now=NOW,
+                                 signal_classes=[], noc_host="kit")
+        return t["boxes"][0]["reachable"]
+
+    def test_reason_does_not_repeat_the_state_and_carries_until(self):
+        note = "declared dormant until 2026-10-07T02:49:26Z ([move] x)"
+        r = self._reach({"state": "dormant", "note": note, "until": 1791341366.0})
+        assert r["reason"] == note and r["until"] == 1791341366.0
+
+    @pytest.mark.parametrize("state,note", [
+        ("detached", "field"),
+        ("detached", "declared detached until X (trip)"),
+        ("dormant", ""),
+    ])
+    def test_reason_opens_with_the_state_exactly_once(self, state, note):
+        r = self._reach({"state": state, "note": note})
+        assert r["reason"].startswith(f"declared {state}")
+        assert r["reason"].count(f"declared {state}") == 1
+        assert "until" not in r
