@@ -433,7 +433,8 @@ class TestSynthAckLoopGuard:
 # ---------------------------------------------------------------------------
 
 
-def _fake_lxmf_message(*, source_hash: bytes, body: str):
+def _fake_lxmf_message(*, source_hash: bytes, body: str,
+                       signature_validated=True, unverified_reason=None):
     """Mock the LXMessage shape the bridge's delivery callback receives.
 
     The bridge's own LXMRouter only delivers messages addressed to its
@@ -443,10 +444,29 @@ def _fake_lxmf_message(*, source_hash: bytes, body: str):
     msg.source_hash = source_hash
     msg.content = body.encode("utf-8")
     msg.title = b"test"
+    # explicit: a MagicMock attribute is truthy but is NOT True
+    msg.signature_validated = signature_validated
+    msg.unverified_reason = unverified_reason
     return msg
 
 
 class TestSubscriptionProtocol:
+    def test_forged_unsubscribe_cannot_cut_a_subscriber(self, tmp_path,
+                                                        fake_rns_lxmf):
+        """LXMF delivers a message whose signature failed with the CLAIMED
+        source hash (parity port of MeshForge 2026-10-07)."""
+        b = _make_bridge(tmp_path, fake_rns_lxmf)
+        b.start()
+        b._subs.add("aaaa000000000003")
+        b._on_lxmf_delivery(_fake_lxmf_message(
+            source_hash=bytes.fromhex("aaaa000000000003"), body="unsubscribe",
+            signature_validated=False, unverified_reason=0x02))
+        b._on_lxmf_delivery(_fake_lxmf_message(
+            source_hash=bytes.fromhex("bbbb000000000004"), body="subscribe",
+            signature_validated=False, unverified_reason=0x01))
+        assert [x.lxmf_hash for x in b._subs.list_all()] == ["aaaa000000000003"]
+        assert b.stats.get("unverified_commands") == 2
+
     def test_subscribe_adds_subscriber(self, tmp_path, fake_rns_lxmf):
         b = _make_bridge(tmp_path, fake_rns_lxmf)
         b.start()
