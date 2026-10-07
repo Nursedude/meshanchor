@@ -126,7 +126,7 @@ Companion mode.
 - **RF engineering** — link budget, Fresnel, FSPL, space weather
 - **AI diagnostics** — offline knowledge base; optional AI assist with your own Claude API key (in-TUI assistant) or subscription (Claude Code in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
 
-~6,500 tests across <!--STAT:testfiles-->303<!--/STAT--> test files (run
+~6,500 tests across <!--STAT:testfiles-->304<!--/STAT--> test files (run
 `python3 -m pytest tests/ --co -q` for the live count).
 
 **Full inventory, with proven vs. unvalidated called out:
