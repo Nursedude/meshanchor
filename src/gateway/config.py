@@ -275,7 +275,8 @@ class MeshCoreConfig:
     # Message handling
     auto_fetch_messages: bool = True      # Start auto message fetching on connect
     bridge_channels: bool = True          # Bridge channel (broadcast) messages
-    bridge_dms: bool = True               # Bridge direct messages
+    bridge_dms: bool = True               # NOT READ: DMs stay DMs (declared
+                                          # 2026-10-07) — kept so old configs load
     # Inbound source-SLOT allowlist (2026-09-18): which MeshCore channel slots
     # may bridge INTO the other meshes. None = every slot except Public(0).
     # [] = bridge nothing (DM-only). Env MESHANCHOR_MESHCORE_BRIDGE_CHANNELS

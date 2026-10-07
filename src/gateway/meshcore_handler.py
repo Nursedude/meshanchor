@@ -595,23 +595,22 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 except Exception as e:
                     logger.debug(f"meshcore oracle handle error: {e}")
 
-            # Check routing rules
-            if self._should_bridge and not self._should_bridge(msg):
-                logger.debug(f"MeshCore message blocked by routing rules")
-                return
-
-            # Queue for bridge
-            if self._message_queue is not None:
-                try:
-                    self._message_queue.put_nowait(msg)
-                    with self._stats_lock:
-                        self.stats.setdefault('meshcore_rx', 0)
-                        self.stats['meshcore_rx'] += 1
-                except Full:
-                    logger.warning("MeshCore→bridge queue full, dropping message")
-                    with self._stats_lock:
-                        self.stats.setdefault('errors', 0)
-                        self.stats['errors'] += 1
+            # A DM STAYS A DM (operator declaration 2026-10-07; parity port of
+            # MeshForge's ingress-enumeration row 3). It is never queued for
+            # the bridge: no egress preserves DM-ness across meshes, so
+            # bridging it meant re-broadcasting it on the Meshtastic channel
+            # and fanning it out over LXMF (the 09-20 drill's `[MC:7eb0fa28]
+            # ?status` on Meshtastic/RNS was exactly this). Not the router's
+            # call, not ORACLE_CONSUME=0's, and not `bridge_dms`' — that key
+            # was never read. The oracle above still answers DIRECTED; the
+            # chat buffer and callback are local, not a bridge.
+            with self._stats_lock:
+                self.stats['meshcore_rx'] = self.stats.get('meshcore_rx', 0) + 1
+                self.stats['meshcore_dm_kept'] = (
+                    self.stats.get('meshcore_dm_kept', 0) + 1)
+            logger.info(
+                f"MeshCore DM from {str(msg.source_address or '?')[:12]} kept "
+                f"as a DM — not bridged (DMs stay DMs, declared 2026-10-07)")
 
             # Notify callback
             if self._message_callback:
