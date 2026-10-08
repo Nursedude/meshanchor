@@ -362,10 +362,17 @@ class RNSConnectionMixin:
             except (ValueError, TypeError) as e:
                 logger.error("Invalid propagation_node hash '%s': %s", prop_node, e)
 
-        # Announce presence
+        # Announce presence and SAY our own address (parity with MeshForge,
+        # 2026-10-07): without this line 58cecbd0 — this gateway — sat in
+        # peer configs as an unowned "lone hash" for months, found only by
+        # hashing the key file.
         assert_rns_tx_allowed(kind="rns_announce",
                               detail="gateway LXMF presence announce")
         self._lxmf_router.announce(self._lxmf_source.hash)
+        logger.info(
+            "Gateway LXMF destination: %s (%s)",
+            self._lxmf_source.hash.hex(), "MeshAnchor Gateway",
+        )
 
         # Register announce handler for node discovery
         class AnnounceHandler:
