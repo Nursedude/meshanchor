@@ -449,8 +449,8 @@ class RNSConnectionMixin:
         now = time.monotonic() if now is None else now
         try:
             interval = max(60, int(self.config.rns.announce_interval))
-        except (AttributeError, TypeError, ValueError):
-            interval = 300
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            interval = 300   # OverflowError: json reads 1e999 as inf
         if now - last < interval:
             return False
         self._last_lxmf_announce = now

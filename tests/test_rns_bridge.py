@@ -3338,6 +3338,10 @@ class TestPeriodicReannounce:
         router.announce.assert_not_called()
         assert bridge._last_lxmf_announce == 300.0   # retry at the interval
 
+    def test_an_infinite_interval_falls_back_instead_of_raising(self, bridge, egress_ok):
+        self._arm(bridge, interval=float("inf"), last=0.0)     # json: 1e999
+        assert bridge._maybe_reannounce(now=300.0) is True
+
     def test_router_error_never_kills_the_loop(self, bridge, egress_ok):
         router = self._arm(bridge, last=0.0)
         router.announce.side_effect = RuntimeError("transport gone")
