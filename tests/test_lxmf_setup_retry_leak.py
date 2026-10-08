@@ -102,6 +102,15 @@ class TestSetupLxmfRetryLeak(unittest.TestCase):
                             "58cecbd0ab5e17750c3d45411c913b75" in m
                             for m in cm.output), cm.output)
 
+    def test_setup_arms_the_periodic_reannounce(self):
+        """The startup announce must stamp ``_last_lxmf_announce`` — without
+        it ``_maybe_reannounce`` never fires and announce_interval is dead
+        config again (the pre-2026-10-08 bug; non-author review)."""
+        mock_rns, mock_lxmf, router = self._mocks()
+        host = _Host()
+        _run_setup_n_times(host, 1, mock_rns, mock_lxmf)
+        self.assertIsNotNone(getattr(host, "_last_lxmf_announce", None))
+
     def test_single_run_still_wires_everything(self):
         mock_rns, mock_lxmf, router = self._mocks()
         host = _Host()

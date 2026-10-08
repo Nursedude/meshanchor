@@ -9,13 +9,14 @@ import os
 import signal as _signal_mod
 import threading
 import time
+from typing import Optional
 from contextlib import contextmanager
 
 from utils.paths import get_real_user_home, ReticulumPaths
 from utils.rns_init import open_reticulum
 from utils.safe_import import safe_import
 from utils.service_check import check_service
-from utils.tx_guard import assert_rns_tx_allowed
+from utils.tx_guard import TransmitBlocked, assert_rns_tx_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,7 @@ class RNSConnectionMixin:
         assert_rns_tx_allowed(kind="rns_announce",
                               detail="gateway LXMF presence announce")
         self._lxmf_router.announce(self._lxmf_source.hash)
+        self._last_lxmf_announce = time.monotonic()
         logger.info(
             "Gateway LXMF destination: %s (%s)",
             self._lxmf_source.hash.hex(), "MeshAnchor Gateway",
@@ -427,3 +429,38 @@ class RNSConnectionMixin:
         self._identity = None
         self._reticulum = None
         self._connected_rns = False
+
+    def _maybe_reannounce(self, now: Optional[float] = None) -> bool:
+        """Periodic LXMF re-announce on ``rns.announce_interval`` (floor 60 s).
+
+        MF b387b985 parity (2026-10-08): until now the gateway announced ONCE
+        at startup while the TUI claimed "every 300s", so a peer gateway that
+        restarted after that announce could never verify this identity
+        (MeshForge moc3: ``source unknown (never announced)``) and an
+        enforcing RNS→RF allowlist refused it. Returns True when an attempt
+        was due; never raises — a refusal or transport error stamps the clock
+        so it retries at the interval instead of killing the RNS loop."""
+        last = getattr(self, "_last_lxmf_announce", None)
+        # Bind once: stop() on another thread may None these mid-call.
+        router = getattr(self, "_lxmf_router", None)
+        source = getattr(self, "_lxmf_source", None)
+        if last is None or router is None or source is None:
+            return False
+        now = time.monotonic() if now is None else now
+        try:
+            interval = max(60, int(self.config.rns.announce_interval))
+        except (AttributeError, TypeError, ValueError):
+            interval = 300
+        if now - last < interval:
+            return False
+        self._last_lxmf_announce = now
+        try:
+            assert_rns_tx_allowed(kind="rns_announce",
+                                  detail="periodic LXMF re-announce")
+            router.announce(source.hash)
+            logger.info("LXMF re-announce sent (dest=%s)", source.hash.hex())
+        except TransmitBlocked as e:
+            logger.warning("LXMF re-announce refused by tx_guard — %s", e)
+        except Exception as e:  # noqa: BLE001 — the RNS loop must survive
+            logger.warning("LXMF re-announce failed: %s", e)
+        return True

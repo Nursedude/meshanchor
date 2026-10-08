@@ -3281,3 +3281,71 @@ class TestRetentionPinsWired20260803:
                             "default_lxmf_destination": ""})
         assert call.called
         assert list(call.call_args[0][0]) == []
+
+
+# ---------------------------------------------------------------------------
+# Periodic LXMF re-announce (MF b387b985 parity, 2026-10-08)
+# ---------------------------------------------------------------------------
+
+class TestPeriodicReannounce:
+    """``rns.announce_interval`` was configured, shown in the TUI ("every
+    300s") and read by NOTHING: the gateway announced once at startup. A
+    MeshForge peer whose gateway restarted after that one announce could not
+    verify this identity's signature (``source unknown (never announced)``,
+    moc3 2026-10-08) and, under an enforcing RNS→RF allowlist, refuses it."""
+
+    def _arm(self, bridge, interval=300, last=0.0):
+        bridge._lxmf_router = MagicMock()
+        bridge._lxmf_source = MagicMock(hash=bytes.fromhex("58" * 16))
+        bridge.config.rns.announce_interval = interval
+        bridge._last_lxmf_announce = last
+        return bridge._lxmf_router
+
+    def test_no_reannounce_before_the_first_announce(self, bridge):
+        router = self._arm(bridge, last=None)
+        assert bridge._maybe_reannounce(now=10_000.0) is False
+        router.announce.assert_not_called()
+
+    @pytest.fixture(autouse=False)
+    def egress_ok(self):
+        # The suite arms tx_guard (no RNS egress from tests); allow it here
+        # the way a production gateway's allowlist does.
+        with patch("gateway._rns_bridge_connection.assert_rns_tx_allowed"):
+            yield
+
+    def test_reannounces_on_the_configured_interval(self, bridge, egress_ok):
+        router = self._arm(bridge, interval=300, last=0.0)
+        assert bridge._maybe_reannounce(now=299.0) is False
+        router.announce.assert_not_called()
+        assert bridge._maybe_reannounce(now=300.0) is True
+        router.announce.assert_called_once_with(bytes.fromhex("58" * 16))
+        assert bridge._last_lxmf_announce == 300.0
+        assert bridge._maybe_reannounce(now=301.0) is False
+        assert router.announce.call_count == 1
+
+    def test_interval_has_a_60s_floor(self, bridge, egress_ok):
+        router = self._arm(bridge, interval=5, last=0.0)
+        assert bridge._maybe_reannounce(now=59.0) is False
+        assert bridge._maybe_reannounce(now=60.0) is True
+        assert router.announce.call_count == 1
+
+    def test_tx_guard_refusal_never_kills_the_loop(self, bridge):
+        from utils.tx_guard import TransmitBlocked
+        router = self._arm(bridge, last=0.0)
+        with patch("gateway._rns_bridge_connection.assert_rns_tx_allowed",
+                   side_effect=TransmitBlocked("armed")):
+            assert bridge._maybe_reannounce(now=300.0) is True
+        router.announce.assert_not_called()
+        assert bridge._last_lxmf_announce == 300.0   # retry at the interval
+
+    def test_router_error_never_kills_the_loop(self, bridge, egress_ok):
+        router = self._arm(bridge, last=0.0)
+        router.announce.side_effect = RuntimeError("transport gone")
+        assert bridge._maybe_reannounce(now=300.0) is True
+        assert bridge._last_lxmf_announce == 300.0
+
+    def test_the_rns_loop_calls_it(self):
+        import inspect
+        from gateway.rns_bridge import RNSMeshtasticBridge
+        assert "_maybe_reannounce" in inspect.getsource(
+            RNSMeshtasticBridge._rns_loop)

@@ -814,7 +814,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                         continue
 
                 if self._connected_rns:
-                    # RNS handles its own event loop
+                    # RNS handles its own event loop; we only re-announce so
+                    # peers that restarted since the last announce can verify
+                    # us (MF b387b985 parity).
+                    self._maybe_reannounce()
                     self._stop_event.wait(1)
 
             except Exception as e:
