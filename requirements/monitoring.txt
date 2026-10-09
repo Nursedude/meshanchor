@@ -4,7 +4,7 @@
 psutil>=7.2.2
 
 # WebSocket support (real-time message broadcast)
-websockets>=17.1
+websockets>=17.2
 
 # Prometheus client — feeds the HTTP-side /metrics histogram + counters.
 # Optional; map_metrics.py no-ops if missing, /metrics still serves the
