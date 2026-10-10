@@ -249,3 +249,15 @@ with MeshCoreConnection(device_path, respect_persistent=False) as conn:
 | 4 (TUI) | 1, 3 | Status panels read via `run_in_radio_loop`; preset switch needs the config-doctor surface. |
 
 Independent of ordering, the regression-prevention system (MF014 + `TestMeshCoreConnectionContract`) is the durable artifact — even if a future session lands code that violates the contract, lint + tests catch it before it merges. That's the same insurance Issue #29's prevention system provides for the Meshtastic side, and it's why Session 1's lint+test investment was disproportionate to the LoC: the rules outlive the code.
+
+## R4 decision — who owns the radio when RNS rides MeshCore (2026-10-10)
+
+**Decided: (a) a DEDICATED MeshCore companion for SMCI** (operator, 2026-10-10; spare radio available). SMCI (RNS-over-MeshCore, adopted 2026-10-09 — "rns over meshcore is the same thing diff radio") gets its own companion on its own port. The daemon keeps the existing RAK4631. No shared session, no code in this repo for the canary.
+
+Measured at decision time (meshanchor-server): `meshcore-radio.service` is **not installed** (`not-found`); `/dev/ttyACM0` (RAK4631) is held **in-process by `daemon.py`**. The supervisor protocol is this repo's NDJSON over a Unix socket (6 methods), **not** the MeshCore companion protocol SMCI speaks.
+
+Rejected for the canary, revisit with canary numbers:
+- **(b) supervisor multiplexes the companion protocol over TCP** — install + switch to the supervisor, then build a companion-protocol server. BELIEVED (library pull model, not drilled): message RX is pulled off the radio's queue per session, so two clients of one session would steal each other's messages; correct (b) needs one queue consumer + fan-out. A supervisor bug would drop the MA and RNS legs together.
+- **(c) the daemon carries the RNS leg** — rnsd gets a local pipe/TCP interface to the daemon, which frames over MeshCore with SMCI's framing verbatim. One radio, no stealing; cost: this repo hosts SMCI's code, and an SMCI crash moves into the daemon. Leaning (c) over (b) — an assertion, settle it with canary data.
+
+Still owed before any canary, whichever option: R5 (an interface import failure must not kill rnsd; deploy-time manifest of what rnsd auto-loads from `interfaces/`). Dense-site doctrine applies to the second transmitter: low TX power, mind placement. Ledger: `smci-gates-r4-r5`.
