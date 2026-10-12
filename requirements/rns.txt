@@ -54,24 +54,14 @@
 #                     (RNS_DETACH_TIMEOUT), CRITICAL witness; a plugin cannot
 #                     swallow the panic. Five fresh non-author passes before the
 #                     tag; 3.11 proven on the canary. lxmf unchanged (mf.6).
-# 1.3.8 base, +mf.6 (2026-10-10) / +mf.7 (2026-10-12): a PipeInterface child that
-#                     stops draining or falls BEHIND costs that interface, not
-#                     rnsd and not the forwarding reader — writer thread, bounded
-#                     queue, honest `online`, 0.5 s congestion gate, rnstatus
-#                     `Dropped` line (MeshForge lead; six fresh non-author passes,
-#                     the final cut TAG-READY). No box runs a PipeInterface today:
-#                     substrate parity for the SMCI-as-child canary. lxmf
-#                     1.0.1+mf.9/mf.10 = pin-only follows (mf.9 never pinned).
-# MF-FORK-PIN rns 1.3.8+mf.7
+# MF-FORK-PIN rns 1.3.8+mf.5
 # lxmf 1.0.1+mf.8 (2026-10-10): pin-only follow of rns +mf.5 (exact pin
 #                     rns==1.3.8+mf.5; mf.6's rns==mf.4 made a fresh install
 #                     ResolutionImpossible, CI run 38116130221). Carries mf.7's
 #                     backchannel kick (tagged 10-09, canaried once, now rolled).
-# lxmf 1.0.1+mf.10 (2026-10-12): pin-only follow of rns +mf.7 (exact pin
-#                     rns==1.3.8+mf.7). No LXMF code change since mf.8.
-# MF-FORK-PIN lxmf 1.0.1+mf.10
-rns @ git+https://github.com/Nursedude/reticulum.git@e7c89573daa4a20df42343f46e4b7a9d81473d6b
-lxmf @ git+https://github.com/Nursedude/lxmf.git@29f992d63d657a4968d211d22c173a7d85ab7d64
+# MF-FORK-PIN lxmf 1.0.1+mf.8
+rns @ git+https://github.com/Nursedude/reticulum.git@3f91b93bdb1b7e994a84561f784c67ef4ad14fd3
+lxmf @ git+https://github.com/Nursedude/lxmf.git@d5a2c851d478c579f658d30c412f166c57226041
 
 # Cryptography / PyOpenSSL version alignment — BOTH bounds are load-bearing,
 # and the two packages MOVE TOGETHER. RNS's own constraint is only
