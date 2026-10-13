@@ -162,7 +162,9 @@ Companion mode.
 
 ## License
 
-GPL-3.0 — See [LICENSE](LICENSE)
+GPL-3.0 — See [LICENSE](LICENSE), with an additional permission under GPL §7 for the
+Reticulum (RNS) and LXMF libraries, which use the Reticulum License — see
+[LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md) and [ATTRIBUTION.md](ATTRIBUTION.md).
 
 ---
 
