@@ -284,6 +284,11 @@ class StatusEndpointsMixin:
         # the collector-gated blocks so a warming/degraded server still
         # self-identifies.
         status["app"] = _build_app_block()
+        # BIC-3 operator gate: refusal count = its witness (counts only).
+        try:
+            status["auth"] = self.auth_status_block()
+        except Exception as e:  # unobservable != zero refusals
+            status["auth"] = {"state": "unobservable", "error": e.__class__.__name__}
 
         # Read-gate coherence — ported from MeshForge (lead repo). Found on
         # THIS box 2026-09-20: meshanchor-map's cors.conf drop-in hardcodes a

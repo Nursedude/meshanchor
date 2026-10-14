@@ -1906,6 +1906,10 @@
                     body: JSON.stringify({ test: test.id }),
                 });
                 result = await resp.json();
+                // BIC-3: a fire needs an operator session ON THAT BOX; say how
+                if (resp.status === 401 && result.how) {
+                    result = { ok: false, error: `${result.error} on ${host} — ${result.how}` };
+                }
             } catch (e) {
                 result = { ok: false, error: String(e) };
             }

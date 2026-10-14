@@ -90,6 +90,7 @@ mimetypes.add_type('image/avif', '.avif')
 
 from utils._map_meshtastic_proxy import MeshtasticProxyMixin
 from utils._map_radio_endpoints import RadioEndpointsMixin
+from utils._map_auth_endpoints import AuthEndpointsMixin
 from utils._map_fleet import FleetEndpointsMixin
 from utils._map_node_endpoints import NodeDataEndpointsMixin
 from utils._map_status_endpoints import StatusEndpointsMixin
@@ -287,6 +288,7 @@ def read_gate_self_coverage(allowed: Optional[List[str]]) -> Dict[str, Any]:
 
 
 class MapRequestHandler(
+    AuthEndpointsMixin,
     FleetEndpointsMixin,
     RadioEndpointsMixin,
     MeshtasticProxyMixin,
@@ -392,18 +394,9 @@ class MapRequestHandler(
         origin = self.headers.get('Origin')
         if origin is None:
             return False
-        origins = (self.allowed_origins if self.allowed_origins
-                   else self._DEFAULT_ORIGINS + ['http://127.0.0.1'])
-        try:
-            page_port = self.server.server_address[1]
-        except (AttributeError, IndexError, TypeError):
-            page_port = None
-        # Same-origin by a local NAME too (MF's browser_origin_allowed): the
-        # dashboard opened as http://meshanchor-server:5000 fires its own
-        # run-test with that Origin — refused by the IP list alone (Fable
-        # re-review 2026-09-28 #1, the 09-25 MF "hostname origin 403" shape).
-        if (_origin_allowed(origin, origins)
-                or _same_local_host(origin, self.headers.get('Host'), page_port)):
+        # One rule, shared with the BIC-3 operator gate (_origin_is_this_map):
+        # configured origins, or this page by a local NAME (Fable 2026-09-28 #1).
+        if self._origin_is_this_map(origin):
             return False
         self._serve_json(
             {"error": "forbidden",
@@ -530,7 +523,8 @@ class MapRequestHandler(
         self._last_status = 0  # send_response will overwrite
 
         try:
-            if not self._refuse_untrusted_host(path_only):
+            if not (self._refuse_untrusted_host(path_only)
+                    or self._refuse_without_operator('GET', path_only)):
                 self._dispatch_get()
         finally:
             try:
@@ -551,6 +545,12 @@ class MapRequestHandler(
         # must short-circuit before any heavier work.
         if self.path == '/healthz' or self.path == '/healthz/':
             self._serve_healthz()
+            return
+        if self.path.split('?', 1)[0].rstrip('/') == '/login':
+            self._serve_login_page()
+            return
+        if self.path.split('?', 1)[0].rstrip('/') == '/api/auth/status':
+            self._serve_auth_status()
             return
         if self.path == '/api/nodes/geojson' or self.path == '/api/nodes/geojson/':
             self._serve_geojson()
@@ -685,7 +685,15 @@ class MapRequestHandler(
 
         GET endpoints remain open for LAN/AREDN access.
         """
-        if self._refuse_untrusted_host():
+        path_only = self.path.split('?', 1)[0].rstrip('/')
+        if (self._refuse_untrusted_host()
+                or self._refuse_without_operator('POST', path_only)):
+            return
+        if path_only == '/login':
+            self._handle_login()
+            return
+        if path_only == '/logout':
+            self._handle_logout()
             return
         # Fleet test runner is allowlist-protected — open to LAN so the
         # dashboard (which may be loaded from any /24 host) can fire the
@@ -723,7 +731,8 @@ class MapRequestHandler(
 
         All PUT endpoints are mutating (radio TX) — restricted to localhost.
         """
-        if self._refuse_untrusted_host():
+        if (self._refuse_untrusted_host()
+                or self._refuse_without_operator('PUT', self.path.split('?', 1)[0].rstrip('/'))):
             return
         if not self._is_localhost():
             self.send_error(403, "Radio control only allowed from localhost")
