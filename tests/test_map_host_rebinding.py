@@ -8,6 +8,10 @@ so the gate also requires it to be an IP literal or a local-only name.
 Pinned through a real HTTP server on ``/fleet/logs`` WITHOUT a unit: past the
 gate it answers 400 "unit not allowlisted" before any journal read, refused it
 answers 403 — so no test path reads this box's journals.
+
+Since BIC-3 (2026-10-13) ``/fleet/logs`` is an operator read, so every probe
+carries a real operator session: the Host rule runs FIRST (403 for a rebinding
+name even with a session), then the login, then the unit allowlist.
 """
 import http.client
 import threading
@@ -16,9 +20,20 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from utils import _map_trust_gate as tg
+from utils import web_auth
 from utils.map_http_handler import MapRequestHandler
 
 LAN = ["http://localhost", "http://127.0.0.1", "http://192.0.2."]
+
+
+_TOKEN = {}
+
+
+@pytest.fixture(autouse=True)
+def operator_session(monkeypatch, tmp_path):
+    store = web_auth.SessionStore(tmp_path / "web_sessions.json")
+    monkeypatch.setattr(MapRequestHandler, "auth_store", store)
+    _TOKEN["v"] = store.redeem(store.start_pairing())
 
 
 @pytest.fixture
@@ -37,6 +52,7 @@ def _get(srv, path, host):
         c.putrequest("GET", path, skip_host=True)
         if host is not None:
             c.putheader("Host", host)
+        c.putheader("Cookie", f"{web_auth.COOKIE_NAME}={_TOKEN['v']}")
         c.endheaders()
         r = c.getresponse()
         return r.status, r.read()
