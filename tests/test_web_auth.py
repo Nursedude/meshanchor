@@ -304,3 +304,15 @@ def test_auth_status_tells_the_page_which_mode_it_is_in(server, store):
     out = json.loads(_req(srv, "GET", "/api/auth/status", headers={"Cookie": cookie})[1])
     assert out["operator"] is True
 
+
+
+def test_printed_commands_work_from_any_directory(server):
+    """The 401, login page and TUI print the CLI for the operator to paste into
+    whatever shell is open; repo-relative failed from $HOME (2026-10-13)."""
+    from pathlib import Path
+    cli = Path(web_auth.PAIR_COMMAND.split()[1])
+    assert cli.is_absolute() and cli.is_file(), cli
+    srv, _ = server
+    assert web_auth.PAIR_COMMAND.encode() in _req(srv, "GET", "/login")[1]
+    status, body, _ = _req(srv, "POST", "/api/radio/message", MSG, JSON)
+    assert status == 401 and str(cli).encode() in body
