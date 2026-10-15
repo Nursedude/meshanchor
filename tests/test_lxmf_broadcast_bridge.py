@@ -22,6 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _fake_rns_identity import make_identity_class  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from gateway.canonical_message import CanonicalMessage, MessageType, Protocol
@@ -201,9 +204,7 @@ def _make_fake_lxmf(*, register_returns_source: bool = True,
 def fake_rns_lxmf():
     """Mock RNS / LXMF modules with the surface the bridge uses."""
     rns = MagicMock(name="RNS")
-    rns.Identity = MagicMock()
-    rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-    rns.Identity.return_value = MagicMock(name="identity")
+    rns.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
 
     rns.Transport = MagicMock()
     rns.Transport.has_path = MagicMock(return_value=True)
@@ -263,8 +264,7 @@ class TestBridgeLifecycle:
         is already registered on the router. Make sure start() reports
         failure instead of silently coming up with no usable hash."""
         rns = MagicMock()
-        rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-        rns.Identity.return_value = MagicMock()
+        rns.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
         lxmf, _router = _make_fake_lxmf(register_returns_source=False)
         cfg = LXMFBroadcastConfig(enabled=True, announce_interval_sec=0)
         b = LXMFBroadcastBridge(
@@ -566,8 +566,7 @@ class TestActiveBridgeAccessor:
         # Simulate a second bridge taking over (e.g., daemon restart on
         # the same process — unusual but the lock must handle it).
         rns2 = MagicMock()
-        rns2.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-        rns2.Identity.return_value = MagicMock()
+        rns2.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
         rns2.Transport = MagicMock()
         rns2.Transport.has_path = MagicMock(return_value=True)
         rns2.Identity.recall = MagicMock(return_value=MagicMock())

@@ -29,6 +29,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _fake_rns_identity import make_identity_class  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from gateway.canonical_message import CanonicalMessage, MessageType, Protocol
@@ -70,9 +73,7 @@ def _make_canonical(*, text="hello", channel=1, sender="p3pubkeyhex",
 
 def _fake_rns_lxmf():
     rns = MagicMock(name="RNS")
-    rns.Identity = MagicMock()
-    rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-    rns.Identity.return_value = MagicMock(name="identity")
+    rns.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
     rns.Transport = MagicMock()
     rns.Transport.has_path = MagicMock(return_value=True)
     rns.Transport.request_path = MagicMock()
@@ -260,9 +261,7 @@ class TestAckRequiredOn:
             return inst
 
         rns = MagicMock()
-        rns.Identity = MagicMock()
-        rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-        rns.Identity.return_value = MagicMock()
+        rns.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
         rns.Transport = MagicMock()
         rns.Transport.has_path = MagicMock(return_value=True)
         rns.Transport.request_path = MagicMock()
@@ -315,9 +314,7 @@ class TestAckRequiredOn:
             return inst
 
         rns = MagicMock()
-        rns.Identity = MagicMock()
-        rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-        rns.Identity.return_value = MagicMock()
+        rns.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
         rns.Transport = MagicMock()
         rns.Transport.has_path = MagicMock(return_value=True)
         rns.Identity.recall = MagicMock(return_value=MagicMock())
@@ -373,9 +370,7 @@ class TestAckRequiredOn:
             return inst
 
         rns = MagicMock()
-        rns.Identity = MagicMock()
-        rns.Identity.from_file = MagicMock(side_effect=Exception("no file"))
-        rns.Identity.return_value = MagicMock()
+        rns.Identity = make_identity_class()  # library-faithful (BIC-15 F1)
         rns.Transport = MagicMock()
         rns.Transport.has_path = MagicMock(return_value=True)
         rns.Identity.recall = MagicMock(return_value=MagicMock())

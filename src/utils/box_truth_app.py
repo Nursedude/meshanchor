@@ -60,6 +60,32 @@ ROLE_CATALOG = Path(INSTALL_DIR) / "docs" / "fleet_roles.yaml"
 PROVISIONER = Path(INSTALL_DIR) / "scripts" / "provision_role.py"
 
 
+#: How an operator pins a target's host key in THIS app's identity source —
+#: quoted by the shared reader/center when a target has none. MeshAnchor has
+#: no fleet_naming registry: the pin lives in the operator's fleet.json.
+HOSTKEY_FIX = ("add it to fleet.json: peers[].ssh.expect_hostkey "
+               "(ssh-keyscan -t ed25519 <host> | ssh-keygen -lf -)")
+
+
+def expect_hostkey_of(alias: str):
+    """(expected host-key fingerprint, why-not) for a target ``alias`` from
+    THIS app's identity source — MeshAnchor: the ``fleet.json`` peer whose
+    ``ssh.alias`` (else ``name``) is ``alias``, field ``ssh.expect_hostkey``.
+    The OPERATOR writes it; tooling only reads it (spec Q11 identity half;
+    registration stays in the shared targets file — a CLI rewriting the
+    hand-edited fleet.json is the concurrent-editor hazard, N6). A fleet.json
+    that does not parse is NAMED, never "no key"."""
+    from monitoring.fleet_config import load_fleet_config
+    cfg = load_fleet_config()
+    if cfg.parse_error:
+        return None, (f"fleet.json unreadable ({cfg.source_path}): "
+                      f"{cfg.parse_error} — fix it before reading targets")
+    for peer in cfg.peers:
+        if (peer.ssh_alias or peer.name) == alias:
+            return peer.ssh_expect_hostkey, None
+    return None, None
+
+
 def app_version() -> str:
     try:
         from __version__ import __version__

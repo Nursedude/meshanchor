@@ -49,6 +49,8 @@ stale entries on a quiet network."""
 
 
 # ── Positive self-identity check (2026-07-19 non_self_peers fix) ─────────
+#: An ed25519/any OpenSSH host-key fingerprint as ``ssh-keygen -lf`` prints it.
+_HOSTKEY_FP_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 _IPV4_LITERAL_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
 # Memoized per-host verdicts — resolution can be slow on dead DNS and
@@ -118,6 +120,15 @@ class PeerConfig:
     """Operator-defined classifier — typical values "noc", "dev",
     "field". Surfaces in the dashboard so the operator can sort their
     own boxes vs. peer NOCs at a glance."""
+
+    ssh_alias: Optional[str] = None
+    """``ssh.alias`` — the ssh name a NOC read grant uses for this peer
+    (defaults to ``name``). Read by the spool writer / grant CLI only."""
+
+    ssh_expect_hostkey: Optional[str] = None
+    """``ssh.expect_hostkey`` — the peer's pinned ed25519 host-key
+    fingerprint (``SHA256:…``). No pin = the box is never read over ssh
+    (``identity_unpinned``), never trusted on first use."""
 
     def base_url(self) -> str:
         return f"http://{self.host}:{self.port}"
@@ -220,7 +231,16 @@ def _parse_peer(raw: Dict[str, Any]) -> Optional[PeerConfig]:
     kind = raw.get("kind", "noc")
     if not isinstance(kind, str):
         kind = "noc"
-    return PeerConfig(name=name.strip(), host=host.strip(), port=port, kind=kind)
+    ssh_alias = ssh_key = None
+    ssh = raw.get("ssh")
+    if isinstance(ssh, dict):
+        a = ssh.get("alias")
+        k = ssh.get("expect_hostkey")
+        ssh_alias = a.strip() if isinstance(a, str) and a.strip() else None
+        # only a real fingerprint pins; anything else is no pin (refused)
+        ssh_key = k.strip() if isinstance(k, str) and _HOSTKEY_FP_RE.match(k.strip()) else None
+    return PeerConfig(name=name.strip(), host=host.strip(), port=port, kind=kind,
+                      ssh_alias=ssh_alias, ssh_expect_hostkey=ssh_key)
 
 
 def _parse_federation(raw: Any) -> FederationConfig:

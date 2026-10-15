@@ -36,6 +36,8 @@ from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
+from utils.box_truth_center import read_spool  # noqa: E402  (shared spool reader)
+
 logger = get_logger(__name__)
 
 PEER_TIMEOUT_S = 3.0     # same budget as the MF twin; Pi-class /fleet/slo fits
@@ -105,22 +107,51 @@ def _http_get_json(url: str, timeout: float) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _fetch_box(alias: str, base_url: str, method: str) -> Dict[str, Any]:
+def _fetch_box(alias: str, base_url: str, method: str,
+               spool_alias: Optional[str] = None) -> Dict[str, Any]:
     """Fetch one box's /fleet/slo + /api/status. Returns a snapshot dict
     shaped for ``fleet_truth.build_box_truth``. ``base_url`` is used only to
-    build the fetch URLs — never surfaced (it may contain a raw IP)."""
+    build the fetch URLs — never surfaced (it may contain a raw IP).
+
+    When the direct fetch fails, the NOC read-grant spool answers (session 3
+    step 3, 2026-10-15): fresh-only (the SHARED reader), so a dead spool cron
+    reads dark, never last-known-healthy. An empty-handed spool carries HOW
+    the read ended (S1) — a refused grant, a wrong host key and a dead box
+    are three different fixes and must not share one "no response". The
+    box's own role verdicts ride through as True/False/None, never coerced."""
     slo = _http_get_json(f"{base_url}/fleet/slo", PEER_TIMEOUT_S)
     status = _http_get_json(f"{base_url}/api/status", PEER_TIMEOUT_S)
     error = None
+    answered_at = time.time() if (slo or status) else None
+    snap: Dict[str, Any] = {}
     if slo is None and status is None:
         error = f"no response from {alias} ({method})"
+        spool = read_spool(spool_alias or alias) if method != "self" else None
+        if spool is not None:
+            sp_status = spool.get("status") if isinstance(spool.get("status"), dict) else None
+            sp_slo = spool.get("slo") if isinstance(spool.get("slo"), dict) else None
+            for k in ("http_surface_expected", "watchdog_expected"):
+                if isinstance(spool.get(k), bool):
+                    snap[k] = spool[k]
+            if sp_status is not None or sp_slo is not None:
+                status, slo, error = sp_status, sp_slo, None
+                method = "ssh_spool"
+                answered_at = float(spool["fetched_at"])
+            else:
+                t = spool.get("transport")
+                reason = (t.get("reason") if isinstance(t, dict)
+                          and t.get("outcome") not in (None, "ok") else None)
+                error = (str(reason) if reason else
+                         f"no response from {alias} ({method}); "
+                         "ssh spool fresh but empty-handed")
     return {
         "alias": alias,
         "resolution_method": method,
         "status": status,
         "slo": slo,
         "error": error,
-        "answered_at": time.time() if (slo or status) else None,
+        "answered_at": answered_at,
+        **snap,
     }
 
 
@@ -133,16 +164,16 @@ def collect_snapshots(*, self_port: int) -> "tuple[List[Dict[str, Any]], int]":
     peers = cfg.non_self_peers(hostname=self_host)
     declared = len(peers) + 1  # + self
 
-    jobs = [(self_host, f"http://127.0.0.1:{self_port}", "self")] + [
+    jobs = [(self_host, f"http://127.0.0.1:{self_port}", "self", None)] + [
         # MF014/MF015: an IP-shaped peer NAME must not become the served alias.
         (_mask_ip_alias(p.name) if _IPV4_RE.match(p.name) else p.name,
-         p.base_url(), "config")
+         p.base_url(), "config", getattr(p, "ssh_alias", None) or p.name)
         for p in peers
     ]
     snapshots: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as ex:
-        futs = {ex.submit(_fetch_box, alias, base, method): alias
-                for alias, base, method in jobs}
+        futs = {ex.submit(_fetch_box, alias, base, method, sp): alias
+                for alias, base, method, sp in jobs}
         for fut in as_completed(futs):
             try:
                 snapshots.append(fut.result())
