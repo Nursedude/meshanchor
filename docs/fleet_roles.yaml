@@ -50,6 +50,14 @@ roles:
       meshanchor-map: enabled        # NOC web map (:5000)
       meshanchor-fleet-collector: enabled  # always-on /fleet/* writer
       meshanchor-fleet-watchdog: enabled   # silence + role-drift watchdog
+      meshforge-watchdog: enabled    # the BOX-health watchdog is MeshForge's
+                                     # organ and this host runs it (NRestarts=0,
+                                     # measured 2026-09-19 + 2026-10-14). Declared
+                                     # here because the box_truth export judges
+                                     # `expected.watchdog` from THIS catalog
+                                     # (session 3 step 2): a MeshAnchor-only role
+                                     # says `absent` so its missing watchdog.json
+                                     # reads inert, never dark.
       meshtasticd: disabled          # MeshCore-primary; meshtasticd egress-only/off
       meshanchor-gateway: disabled   # RF bridge deliberately off on the NOC
     # `systemd --user` timers (see the note below the roles). DECLARE-AND-OBSERVE:

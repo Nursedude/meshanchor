@@ -43,6 +43,21 @@ MINI_STATE_RELPATH = ".local/share/meshanchor/mini/state.json"
 NOC_KEY_BASENAME = "meshanchor_noc_ed25519"
 #: Where a center looks for the TARGET's grant CLI, in order.
 GRANT_CLI_SEARCH = ("/opt/meshanchor", "/opt/meshforge")
+#: The box judges its OWN role (session 3 step 2, 2026-10-14): the export's
+#: ``role`` section resolves this app's declared role through this app's
+#: provisioner + catalog and reports whether these two units are expected.
+#: The unit whose absence removes this app's whole HTTP truth surface
+#: (``/api/status`` + ``/fleet/slo``).
+HTTP_SURFACE_UNIT = "meshanchor-map"
+#: The box-health watchdog unit a role declares enabled / disabled / absent.
+#: ONE box organ for both apps (see WATCHDOG_PATH) — MeshForge's — so this
+#: seam names MeshForge's unit, and MeshAnchor's catalog declares it per
+#: role (``enabled`` where the box runs it, ``absent`` on a MeshAnchor-only
+#: box, so its absence reads inert there instead of dark).
+WATCHDOG_UNIT = "meshforge-watchdog"
+#: This app's role catalog, and the provisioner that resolves a role in it.
+ROLE_CATALOG = Path(INSTALL_DIR) / "docs" / "fleet_roles.yaml"
+PROVISIONER = Path(INSTALL_DIR) / "scripts" / "provision_role.py"
 
 
 def app_version() -> str:
