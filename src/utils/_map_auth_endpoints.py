@@ -51,7 +51,9 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     const j = await r.json();
     if (r.ok) { m.textContent = 'Logged in as operator.';
       const back = new URLSearchParams(location.search).get('next');
-      location.href = (back && back.startsWith('/') && !back.startsWith('//')) ? back : '/'; }
+      let dest = '/';
+      try { const u = new URL(back || '/', location.origin); if (u.origin === location.origin) dest = u.href; } catch (e) {}
+      location.href = dest; }
     else { m.textContent = j.detail || j.error || ('Refused (' + r.status + ')'); }
   } catch (err) { m.textContent = 'Could not reach the box: ' + err; }
 });
@@ -65,6 +67,8 @@ class AuthEndpointsMixin:
 
     auth_store: Optional[web_auth.SessionStore] = None
     auth_refusals = web_auth.RefusalLog()
+    #: F4: per-client budget of wrong pairing codes, ahead of the shared burn.
+    login_tries = web_auth.TryBudget()
 
     SESSIONLESS_WRITES = frozenset({"/login", "/logout"})
     OPERATOR_GETS = frozenset({"/fleet/logs", "/api/v1/fromradio", "/json/blink"})
@@ -98,8 +102,11 @@ class AuthEndpointsMixin:
                 or _same_local_host(origin, self.headers.get('Host'), page_port))
 
     def _origin_ok(self) -> bool:
-        """A PRESENT Origin that the map trusts. Absent = not a browser on this
-        page (a copied cookie in curl), so it does not pass here."""
+        """A PRESENT Origin that the map trusts — CSRF defence: a browser on
+        a hostile page cannot forge Origin. It is NOT cookie-theft defence: a
+        cookie sniffed off plain HTTP replays from curl with two forged
+        headers (Host + Origin naming any single-label host), accepted until
+        BIC-13b puts TLS under the cookie (adversarial pass 2026-10-14, F2)."""
         origin = self.headers.get("Origin")
         return bool(origin) and self._origin_is_this_map(origin)
 
@@ -113,7 +120,10 @@ class AuthEndpointsMixin:
 
     def _refuse_without_operator(self, method: str, path: str) -> bool:
         """Send 401 + return True unless this request carries a live operator
-        session from a trusted LAN browser on this page."""
+        session from a trusted LAN browser on this page. On success
+        ``_operator_ok`` is set for THIS request so a consumer-side re-check
+        (``_refuse_side_effect_get``) costs no second store read."""
+        self._operator_ok = False
         if method == "GET" and path not in self.OPERATOR_GETS:
             return False
         if method != "GET" and path in self.SESSIONLESS_WRITES:
@@ -134,7 +144,19 @@ class AuthEndpointsMixin:
             self._refuse_operator(method, path,
                                   "a session cookie without this page's Origin is not this browser")
             return True
+        self._operator_ok = True
         return False
+
+    def _refuse_side_effect_get(self, canonical: str) -> bool:
+        """The gate at the CONSUMER (adversarial pass 2026-10-14, F1): a
+        side-effect GET handler calls this with its canonical path, so every
+        spelling that dispatches to it — the ``/mesh/`` alias, a percent-
+        encoded slash, a dot or extra segment the exact-path list never saw —
+        meets the same gate. ``OPERATOR_GETS`` stays as the outer layer; a
+        request it already admitted is not re-validated."""
+        if getattr(self, "_operator_ok", False):
+            return False
+        return self._refuse_without_operator("GET", canonical)
 
     # ── routes ──────────────────────────────────────────────────────────
 
@@ -192,12 +214,21 @@ class AuthEndpointsMixin:
         data = self._read_json_body()
         if data is None:
             return
+        client = self._client_addr()
+        wait = self.login_tries.wait_s(client)
+        if wait > 0:
+            self.auth_refusals.note(client, "POST", "/login", "wrong-code budget spent")
+            self._serve_json({"error": "too many wrong codes from this client",
+                              "detail": f"wait {int(wait) + 1} s, then try again"},
+                             status=429)
+            return
         try:
             token = self._auth().redeem(str(data.get("code", "")))
         except web_auth.StoreUnavailable as e:
             self._refuse_operator("POST", "/login", str(e))
             return
         if not token:
+            self.login_tries.wrong(client)
             self._refuse_operator("POST", "/login",
                                   "that code is wrong, used, expired or burned — run pair again")
             return
