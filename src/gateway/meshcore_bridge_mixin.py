@@ -175,8 +175,10 @@ class MeshCoreBridgeMixin:
                 is_broadcast = msg.is_broadcast
                 via_internet = getattr(msg, 'via_internet', False)
             else:
-                # BridgedMessage
+                # BridgedMessage — an unverified LXMF source is a claim
                 src_label = msg.source_id[:8] if msg.source_id else 'unknown'
+                if (getattr(msg, 'metadata', None) or {}).get('source_verified') is False:
+                    src_label = '?' + src_label
                 content = msg.content
                 is_broadcast = msg.is_broadcast
                 via_internet = getattr(msg, 'via_internet', False)
@@ -283,6 +285,8 @@ class MeshCoreBridgeMixin:
             else:
                 src_net = msg.source_network
                 src_label = msg.source_id[:8] if msg.source_id else 'unknown'
+                if (getattr(msg, 'metadata', None) or {}).get('source_verified') is False:
+                    src_label = '?' + src_label   # an unverified LXMF claim
                 content = msg.content
 
             net_prefix = "Mesh" if src_net == "meshtastic" else "RNS"

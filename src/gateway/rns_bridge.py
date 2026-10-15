@@ -1142,8 +1142,13 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                     str(msg.content)[:48])
                 return
 
-            prefix = f"[RNS:{msg.source_id[:4]}] "
-            content = prefix + msg.content
+            # an unverified LXMF source is a CLAIM: tag it [RNS:?xxxx]
+            _q = "?" if (msg.metadata or {}).get("source_verified") is False else ""
+            prefix = f"[RNS:{_q}{msg.source_id[:4]}] "
+            _body = msg.content
+            if _q and _body.startswith("[unverified] "):
+                _body = _body[len("[unverified] "):]   # the tag carries the mark
+            content = prefix + _body
 
             # Dual-path dedup (gated, default off; mirror of MeshForge
             # 1494e8f). On a box whose LOCAL mesh_bridge also carries this

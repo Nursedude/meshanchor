@@ -82,3 +82,23 @@ def test_a_genuine_sender_is_reemitted_and_tracked(world, monkeypatch):
     h._on_lxmf_receive(LXMessage.unpack_from_bytes(_genuine(world, "hi")))
     assert len(h.reemitted) == 1 and len(h.nodes) == 1
     assert not stored[0]["content"].startswith("[unverified")
+
+
+def test_a_forgery_that_bridges_travels_marked(world, monkeypatch):
+    stored = []
+    h = _host(monkeypatch, stored)
+    h._router = types.SimpleNamespace(should_bridge=lambda m: True)
+    raw = _genuine(world, "hello RF")
+    forged = LXMessage.unpack_from_bytes(raw[:DL] + world.b.hash + raw[2 * DL:])
+    h._on_lxmf_receive(forged)
+    msg = h._rns_to_mesh_queue.get_nowait()
+    assert msg.metadata["source_verified"] is False
+    assert msg.content.startswith("[unverified] ")
+
+
+def test_the_rf_copy_of_a_claim_is_marked_once():
+    import inspect
+    from gateway import rns_bridge
+    src = inspect.getsource(rns_bridge)
+    # the in-app "[unverified] " mark is replaced by the RF tag's "?"
+    assert '_body[len("[unverified] "):]' in src
