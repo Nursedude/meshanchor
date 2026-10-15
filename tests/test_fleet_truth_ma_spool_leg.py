@@ -28,10 +28,11 @@ def spool(tmp_path, monkeypatch):
     d.mkdir(parents=True)
     monkeypatch.setattr(ftc, "PEER_TIMEOUT_S", 0.5)
 
-    def write(alias, **doc):
+    def write(name, **doc):
+        doc.setdefault("alias", name)           # the real writer always sets it
         doc.setdefault("schema", bc.SPOOL_SCHEMA)
         doc.setdefault("fetched_at", time.time())
-        (d / f"{alias}.json").write_text(json.dumps(doc))
+        (d / f"{name}.json").write_text(json.dumps(doc))
     return write
 
 
@@ -63,3 +64,53 @@ def test_self_never_reads_a_spool(spool):
     spool("me", status={"x": 1})
     snap = ftc._fetch_box("me", _closed_base(), "self", "me")
     assert snap["status"] is None and snap["resolution_method"] == "self"
+
+
+# ── the deferred move (2026-10-15): blocks from a map-less box's raw state ──
+
+def test_a_map_less_peer_gets_its_blocks_from_raw_state(spool):
+    now = time.time()
+    spool("moc3",
+          raw_watchdog={"ts": now - 10, "ok": True, "probe_count": 40, "signals": []},
+          raw_mini={"last_tick_ts": now - 5, "rules": {}, "rule_count": 72},
+          radio_probe={"tcp_listening": True, "usb_present": False},
+          deployment={"role": "gateway-only"}, box_truth={"app": "meshforge"})
+    snap = ftc._fetch_box("moc3", _closed_base(), "config", "moc3")
+    assert snap["resolution_method"] == "ssh_spool" and snap["error"] is None
+    assert snap["status"]["watchdog"]["ok"] is True
+    assert snap["status"]["mini_dudeai"]["ok"] is True
+    assert snap["status"]["app"] == {"name": "meshforge", "role": "gateway-only"}
+    assert snap["slo"] == {"radio": {"connected": True, "mode": "tcp"}}
+
+
+def test_a_stale_raw_watchdog_reads_not_ok(spool):
+    spool("moc3", raw_watchdog={"ts": time.time() - 3600, "ok": True})
+    snap = ftc._fetch_box("moc3", _closed_base(), "config", "moc3")
+    assert snap["status"]["watchdog"]["ok"] is False
+    assert snap["status"]["watchdog"]["reason"].startswith("stale:")
+
+
+def test_mini_state_without_a_tick_timestamp_is_not_ok():
+    # MA's private copy had drifted: no last_tick_ts read ok=True forever
+    from utils._map_status_endpoints import mini_block_from_payload
+    assert mini_block_from_payload({"rules": {}})["ok"] is False
+
+
+# ── step-8 non-author pass (2026-10-15, F1/F5) ───────────────────────────
+
+def test_a_spool_doc_for_another_alias_is_refused(spool):
+    spool("moc3", alias="moc3", status={"app": {"name": "meshforge"}})
+    # kiai's fleet.json entry typo'd ssh.alias="moc3": moc3's truth must not be kiai's
+    snap = ftc._fetch_box("kiai", _closed_base(), "config", "moc3", duplicate=True)
+    assert snap["status"] is None and "more than once" in snap["error"]
+
+
+def test_the_spool_doc_must_name_the_alias_asked_for(spool):
+    spool("moc3", alias="kiai", status={"x": 1})
+    snap = ftc._fetch_box("moc3", _closed_base(), "config", "moc3")
+    assert snap["status"] is None and "names kiai" in snap["error"]
+
+
+def test_an_invalid_spool_alias_is_never_read(spool):
+    snap = ftc._fetch_box("x", _closed_base(), "config", "../../x")
+    assert snap["status"] is None and "not a valid alias" in snap["error"]

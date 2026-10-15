@@ -254,6 +254,10 @@ def get_all_handlers() -> List[Type]:
     from handlers.fleet_health import FleetHealthHandler
     handlers.append(FleetHealthHandler)
 
+    # NOC Read Grants (twin of MeshForge's; 2nd acting carve-out — box_truth_grant.py, typed confirm)
+    from handlers.noc_grants import NocGrantsHandler
+    handlers.append(NocGrantsHandler)
+
     # Batch 24 — LXMF Broadcast Bridge diagnostic + Subscribe Local
     # Client. Closes the gap where local NomadNet never landed in the
     # bridge's SQLite subscriber DB (so MeshCore broadcasts reached

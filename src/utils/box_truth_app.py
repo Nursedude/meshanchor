@@ -80,6 +80,9 @@ def expect_hostkey_of(alias: str):
     if cfg.parse_error:
         return None, (f"fleet.json unreadable ({cfg.source_path}): "
                       f"{cfg.parse_error} — fix it before reading targets")
+    if alias in cfg.duplicate_aliases:
+        return None, (f"fleet.json names {alias} more than once (a name or an "
+                      "ssh.alias) — make each unique before reading it")
     for peer in cfg.peers:
         if (peer.ssh_alias or peer.name) == alias:
             return peer.ssh_expect_hostkey, None

@@ -37,67 +37,11 @@ _get_connection_manager, _ConnectionMode, _HAS_MESHTASTIC_CONN = safe_import(
     'utils.meshtastic_connection', 'get_connection_manager', 'ConnectionMode'
 )
 
-MINI_STALE_S = 300.0  # 5 min — 10x mini-dudeai's 30s tick (SSOT for the block)
-
-
-def mini_block_from_payload(
-    payload: Any,
-    *,
-    now: Optional[float] = None,
-    stale_after_s: float = MINI_STALE_S,
-) -> Dict[str, Any]:
-    """Shape a raw mini ``state.json`` payload into the
-    ``/api/status.mini_dudeai`` block, re-deriving staleness at read time.
-
-    Ported from MeshForge's ``mini_block_from_payload`` so the MF fleet-truth
-    classifier (which reads THIS box's ``/api/status.mini_dudeai``) sees an
-    identical shape: a stale payload reads ``ok=False`` with a ``stale:``
-    reason, which the classifier maps to DARK — never green-with-old-numbers.
-    """
-    if not isinstance(payload, dict):
-        return {"installed": True, "ok": False,
-                "reason": "malformed_json: not an object"}
-
-    ts = payload.get("last_tick_ts")
-    age_s: Optional[float] = None
-    if isinstance(ts, (int, float)):
-        age_s = max(0.0, (now if now is not None else time.time()) - float(ts))
-    stale = bool(age_s is not None and age_s > stale_after_s)
-
-    rules = payload.get("rules") or {}
-    active = [
-        {"rule_id": rs.get("rule_id"), "subject": rs.get("subject"),
-         "detail": rs.get("last_detail", "")}
-        for rs in rules.values()
-        if isinstance(rs, dict) and rs.get("currently_active")
-    ]
-    top = sorted(
-        ({"rule_id": rs.get("rule_id"), "subject": rs.get("subject"),
-          "fire_count_24h": rs.get("fire_count_24h", 0)}
-         for rs in rules.values()
-         if isinstance(rs, dict) and rs.get("fire_count_24h")),
-        key=lambda r: r["fire_count_24h"], reverse=True,
-    )[:5]
-
-    block = {
-        "installed": True,
-        "ok": not stale,
-        "ts": ts,
-        "last_tick_iso": payload.get("last_tick_iso"),
-        "age_s": age_s,
-        "host": payload.get("host"),
-        "rule_count": payload.get("rule_count"),
-        "error_count": payload.get("error_count"),
-        "active_rules": active,
-        "top_rules_24h": top,
-    }
-    if stale:
-        block["reason"] = (
-            f"stale: last tick {age_s:.0f}s ago "
-            f"(threshold {stale_after_s:.0f}s) — mini-dudeai "
-            f"daemon may have crashed"
-        )
-    return block
+# The mini transform + its threshold are the SHARED utils.status_blocks
+# (byte-identical with MeshForge, 2026-10-15). This module's private copy had
+# drifted: a state file without last_tick_ts, or stamped in the future, read
+# ok=True — green forever.
+from utils.status_blocks import MINI_STALE_S, mini_block_from_payload  # noqa: E402,F401
 
 
 def read_ma_mini_state_block() -> Dict[str, Any]:

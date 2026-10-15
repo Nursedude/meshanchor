@@ -36,7 +36,35 @@ from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
+from utils.box_truth_center import _ALIAS_RE as _SPOOL_ALIAS_RE  # noqa: E402
 from utils.box_truth_center import read_spool  # noqa: E402  (shared spool reader)
+from utils.status_blocks import (  # noqa: E402  (shared with MeshForge)
+    mini_block_from_payload, radio_connection_from_probe,
+    watchdog_block_from_payload)
+
+
+def _blocks_from_raw(spool: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """``/api/status``-shaped blocks for a map-less box, from the raw state its
+    export carried, through the shared transforms. The box's OWN account of a
+    section it could not send (section_errors) becomes that block's reason —
+    never "absent" for a source that exists. None when there is nothing."""
+    errs = ((spool.get("box_truth") or {}).get("section_errors") or {})
+    status: Dict[str, Any] = {}
+    for raw_key, block_key, fn in (("raw_watchdog", "watchdog", watchdog_block_from_payload),
+                                   ("raw_mini", "mini_dudeai", mini_block_from_payload)):
+        raw = spool.get(raw_key)
+        if isinstance(raw, dict):
+            status[block_key] = fn(raw)
+        elif isinstance(errs.get(raw_key), str):
+            status[block_key] = {"reason": f"read_error: box export — {errs[raw_key]}"}
+    if not status:
+        return None
+    deploy = spool.get("deployment")
+    if isinstance(deploy, dict) and isinstance(deploy.get("role"), str):
+        bt_app = (spool.get("box_truth") or {}).get("app")
+        status["app"] = {"name": bt_app if isinstance(bt_app, str) else "unknown",
+                         "role": deploy["role"]}
+    return status
 
 logger = get_logger(__name__)
 
@@ -108,7 +136,8 @@ def _http_get_json(url: str, timeout: float) -> Optional[Dict[str, Any]]:
 
 
 def _fetch_box(alias: str, base_url: str, method: str,
-               spool_alias: Optional[str] = None) -> Dict[str, Any]:
+               spool_alias: Optional[str] = None,
+               duplicate: bool = False) -> Dict[str, Any]:
     """Fetch one box's /fleet/slo + /api/status. Returns a snapshot dict
     shaped for ``fleet_truth.build_box_truth``. ``base_url`` is used only to
     build the fetch URLs — never surfaced (it may contain a raw IP).
@@ -126,13 +155,39 @@ def _fetch_box(alias: str, base_url: str, method: str,
     snap: Dict[str, Any] = {}
     if slo is None and status is None:
         error = f"no response from {alias} ({method})"
-        spool = read_spool(spool_alias or alias) if method != "self" else None
+        sp_alias = spool_alias or alias
+        spool = None
+        if method == "self":
+            pass
+        elif duplicate:
+            # step-8 pass F1: an ambiguous alias reads DARK, never either box
+            error = (f"no response from {alias}; fleet.json names {sp_alias} more "
+                     "than once — its spool is not read until each is unique")
+        elif not _SPOOL_ALIAS_RE.match(sp_alias):
+            error = f"no response from {alias}; {sp_alias!r} is not a valid alias (spool not read)"
+        else:
+            spool = read_spool(sp_alias)
+            if spool is not None and spool.get("alias") != sp_alias:
+                error = (f"no response from {alias}; spool file for {sp_alias} "
+                         f"names {spool.get('alias')} — not used")
+                spool = None
         if spool is not None:
             sp_status = spool.get("status") if isinstance(spool.get("status"), dict) else None
             sp_slo = spool.get("slo") if isinstance(spool.get("slo"), dict) else None
             for k in ("http_surface_expected", "watchdog_expected"):
                 if isinstance(spool.get(k), bool):
                     snap[k] = spool[k]
+            # A map-less box (no /api/status, no /fleet/slo) is described by
+            # the SAME shared transforms its own map would run, from the raw
+            # state it exported (the deferred move, 2026-10-15): a stale raw
+            # file reads not-ok, never green-with-old-numbers.
+            if sp_status is None:
+                sp_status = _blocks_from_raw(spool)
+            if sp_slo is None and isinstance(spool.get("radio_probe"), dict):
+                rp = spool["radio_probe"]
+                connected, mode = radio_connection_from_probe(
+                    bool(rp.get("tcp_listening")), bool(rp.get("usb_present")))
+                sp_slo = {"radio": {"connected": connected, "mode": mode}}
             if sp_status is not None or sp_slo is not None:
                 status, slo, error = sp_status, sp_slo, None
                 method = "ssh_spool"
@@ -172,7 +227,8 @@ def collect_snapshots(*, self_port: int) -> "tuple[List[Dict[str, Any]], int]":
     ]
     snapshots: List[Dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as ex:
-        futs = {ex.submit(_fetch_box, alias, base, method, sp): alias
+        futs = {ex.submit(_fetch_box, alias, base, method, sp,
+                          bool(sp) and sp in getattr(cfg, "duplicate_aliases", ())): alias
                 for alias, base, method, sp in jobs}
         for fut in as_completed(futs):
             try:

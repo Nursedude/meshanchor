@@ -50,3 +50,21 @@ def test_an_unparseable_fleet_json_is_named(tmp_path, monkeypatch):
 def test_a_peer_without_ssh_has_no_pin(tmp_path, monkeypatch):
     _fleet(tmp_path, monkeypatch, {"peers": [{"name": "moc3", "host": "h"}]})
     assert app.expect_hostkey_of("moc3") == (None, None)
+
+
+# ── step-8 non-author pass (2026-10-15, F1) ──────────────────────────────
+
+def test_a_duplicated_alias_pins_nothing_and_says_why(tmp_path, monkeypatch):
+    _fleet(tmp_path, monkeypatch, {"peers": [
+        {"name": "moc3", "host": "a", "ssh": {"expect_hostkey": FP}},
+        {"name": "kiai", "host": "b", "ssh": {"alias": "moc3",
+                                              "expect_hostkey": "SHA256:" + "B" * 43}}]})
+    expect, why = app.expect_hostkey_of("moc3")
+    assert expect is None and "moc3" in why and "more than once" in why
+
+
+def test_the_loader_reports_duplicate_aliases(tmp_path, monkeypatch):
+    from monitoring.fleet_config import load_fleet_config
+    _fleet(tmp_path, monkeypatch, {"peers": [
+        {"name": "moc3", "host": "a"}, {"name": "x", "host": "b", "ssh": {"alias": "moc3"}}]})
+    assert load_fleet_config().duplicate_aliases == {"moc3"}

@@ -162,6 +162,12 @@ class FleetConfig:
     the dashboard can display it (helps debug "why isn't peer X
     showing up?")."""
 
+    duplicate_aliases: set = field(default_factory=set)
+    """Aliases (``ssh.alias`` else ``name``) more than one peer claims. An
+    ambiguous alias is never resolved to either box — its pin and its spool
+    are refused (step-8 non-author pass 2026-10-15, F1: a typo rendered box
+    A's truth under box B's name)."""
+
     parse_error: Optional[str] = None
     """Set when the config file existed but couldn't be parsed.
     Surfaces in /fleet/rollup `errors[]` so a bad edit is immediately
@@ -284,6 +290,8 @@ def load_fleet_config(path: Optional[Path] = None) -> FleetConfig:
             if peer is not None:
                 cfg.peers.append(peer)
 
+    keys = [p.ssh_alias or p.name for p in cfg.peers]
+    cfg.duplicate_aliases = {k for k in keys if keys.count(k) > 1}
     cfg.federation = _parse_federation(raw.get("federation"))
     return cfg
 
