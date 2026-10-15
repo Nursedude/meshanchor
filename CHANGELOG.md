@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-beta] - 2026-10-15
+
+### Added
+- **NOC read grant**: MeshAnchor can be a CENTER — the same grant CLI and spool writer as MeshForge (one file each), a target's host key pinned from fleet.json peers[].ssh.expect_hostkey (an alias two peers claim pins nothing), and a fleet-truth spool leg that builds watchdog / mini / radio blocks for a map-less box from its exported raw state. TUI: Dashboard > NOC Read Grants.
+
+### Security
+- an unverified LXMF sender is never treated as an identity (no node, re-emit hook only on a validated signature, RF tag [RNS:?xxxx]); the LXMF broadcast bridge REFUSES an unreadable identity instead of starting with none (a corrupt file started it with identity None); rnsd's private key is never widened by the storage permission walk; web fixes shared with MeshForge (GET-with-body radio write, concurrent pairing burn).
+
+### Fixed
+- the mini status block now reads not-ok on a missing or future tick timestamp (this repo's private copy had drifted; now the shared utils.status_blocks).
+
 ## [0.2.0-beta] - 2026-08-09
 
 **alpha → beta.** The `0.1.0-alpha` tag was set at extraction (2026-04-01) and

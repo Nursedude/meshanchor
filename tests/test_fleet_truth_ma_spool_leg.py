@@ -108,9 +108,30 @@ def test_a_spool_doc_for_another_alias_is_refused(spool):
 def test_the_spool_doc_must_name_the_alias_asked_for(spool):
     spool("moc3", alias="kiai", status={"x": 1})
     snap = ftc._fetch_box("moc3", _closed_base(), "config", "moc3")
-    assert snap["status"] is None and "names kiai" in snap["error"]
+    # refused in the SHARED read_spool (one rule for both apps): reads dark
+    assert snap["status"] is None and snap["error"].startswith("no response from moc3")
 
 
 def test_an_invalid_spool_alias_is_never_read(spool):
     snap = ftc._fetch_box("x", _closed_base(), "config", "../../x")
     assert snap["status"] is None and "not a valid alias" in snap["error"]
+
+
+def test_collect_snapshots_wires_the_duplicate_flag(spool, tmp_path, monkeypatch):
+    # delta read 2026-10-15: only _fetch_box(duplicate=True) was tested; a
+    # dropped flag in collect_snapshots would still have passed
+    import json as _json
+    fleet = tmp_path / "fleet.json"
+    base = _closed_base().rsplit(":", 1)
+    # TEST-NET-1 (unroutable): 127.0.0.1 peers are dropped as SELF, which made
+    # the first version of this test vacuous (all() over zero peers)
+    fleet.write_text(_json.dumps({"peers": [
+        {"name": "moc3", "host": "192.0.2.1", "port": 9},
+        {"name": "kiai", "host": "192.0.2.2", "port": 9, "ssh": {"alias": "moc3"}}]}))
+    monkeypatch.setenv("MESHANCHOR_FLEET_CONFIG", str(fleet))
+    spool("moc3", status={"app": {"name": "meshforge"}})
+    snaps, _ = ftc.collect_snapshots(self_port=int(base[1]))
+    peers = {s["alias"]: s for s in snaps if s["resolution_method"] != "self"}
+    assert set(peers) == {"moc3", "kiai"}, peers
+    assert all(s["status"] is None and "more than once" in (s["error"] or "")
+               for s in peers.values()), peers

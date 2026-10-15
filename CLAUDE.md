@@ -52,7 +52,7 @@ Forked from MeshForge main on 2026-04-01. Shares the same TUI framework, gateway
 
 | Branch | Version | Status |
 |--------|---------|--------|
-| `main` | `0.2.0-beta` | MeshCore-primary NOC. Field-deployed continuously since 2026-05-02 (`meshanchor-server`). Coverage maps w/ live GPS and full 3-way concurrent traffic remain unvalidated. (Check `src/__version__.py` — this table goes stale.) |
+| `main` | `0.3.0-beta` | MeshCore-primary NOC. Field-deployed continuously since 2026-05-02 (`meshanchor-server`). Coverage maps w/ live GPS and full 3-way concurrent traffic remain unvalidated. (Check `src/__version__.py` — this table goes stale.) |
 
 - **Trunk only (operator, 2026-09-23 — applies to MeshForge AND MeshAnchor):** commit direct to `main`, push right after every hook-passing commit, fleet boxes only ever pull. The gates (pre-commit/pre-push hooks, CI, `honest_status` fleet-SHA drift, non-author review) do the job PRs used to. A branch exists only as short-lived isolation (e.g. a reviewer subagent's worktree): it returns a PATCH that is applied to `main`, is never merged, and is deleted the same session. The pre-2026-09-23 branches were archived to `~/.local/share/meshforge/branch-archive/<repo>-branches-2026-09-23.bundle` (`git bundle list-heads`) and pruned; open Dependabot PR branches are left to Dependabot.
 - **Sister project**: [MeshForge](https://github.com/Nursedude/meshforge) (Meshtastic-primary)

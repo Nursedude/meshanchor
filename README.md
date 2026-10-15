@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.2.0--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.3.0--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-passing-blue.svg" alt="Tests"></a>
@@ -115,7 +115,7 @@ Companion mode.
 
 ---
 
-## What Works (v0.2.0-beta)
+## What Works (v0.3.0-beta)
 
 - **MeshCore integration** — radio management, config, CLI passthrough
 - **Gateway bridge** — MeshCore ⇄ Meshtastic / RNS via `CanonicalMessage`
