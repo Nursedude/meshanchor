@@ -14,6 +14,7 @@ must name the same exact version or CI measures a library no box runs.
 """
 
 import re
+import shlex
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,11 +30,24 @@ def _requirement_lines():
     ]
 
 
+def _canon(name):
+    # PEP 503: pip treats MeshCore_CLI, meshcore.cli and meshcore-cli as ONE
+    # project, so a case/separator spelling must not slip past the guard.
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def _is_meshcore(name):
+    return _canon(name) in ("meshcore", "meshcore-cli")
+
+
 def _exact_pin(name):
     for ln in _requirement_lines():
-        m = re.fullmatch(rf"{re.escape(name)}\s*==\s*([0-9][0-9A-Za-z.+-]*)", ln)
-        if m:
-            return m.group(1)
+        m = re.fullmatch(r"([A-Za-z0-9._-]+)\s*==\s*([0-9][0-9A-Za-z.+-]*)", ln)
+        if m and _canon(m.group(1)) == _canon(name):
+            return m.group(2)
     return None
 
 
@@ -55,7 +69,8 @@ def test_meshcore_cli_is_exactly_pinned():
 
 def test_no_unpinned_meshcore_requirement_remains():
     for ln in _requirement_lines():
-        if re.match(r"meshcore(-cli)?\b", ln):
+        m = _NAME.match(ln)
+        if m and _is_meshcore(m.group(1)):
             assert "==" in ln, f"unpinned meshcore requirement: {ln!r}"
 
 
@@ -67,3 +82,28 @@ def test_ci_installs_the_same_meshcore_as_the_requirements_file():
         f"ci.yml installs meshcore {sorted(set(ci_pins))} but "
         f"requirements/meshcore.txt pins {pinned}"
     )
+
+
+def test_every_ci_install_of_meshcore_is_pinned():
+    # A second, bare `pip install meshcore-cli` anywhere in ci.yml would drag
+    # meshcore to PyPI's newest while the pin test above still read green —
+    # the 2026-10-14 failure shape. Every meshcore requirement on a pip
+    # install command must carry `==` (only the install's own arguments are
+    # read: an `|| echo "meshcore optional"` tail is not a requirement).
+    for ln in CI.read_text().splitlines():
+        code = ln.split("#", 1)[0]
+        for cmd in re.split(r"\|\||&&|;|\|", code):
+            if "pip" not in cmd:
+                continue
+            try:
+                words = shlex.split(cmd)
+            except ValueError:  # a `\` continuation or odd quoting elsewhere
+                words = [w.strip("\"'") for w in cmd.split()]
+            if len(words) < 2 or not words[0].startswith("pip") or "install" not in words:
+                continue
+            for req in words[words.index("install") + 1:]:
+                if req.startswith("-"):
+                    continue
+                name = re.split(r"[\[=<>~!; ]", req, 1)[0]
+                if _is_meshcore(name):
+                    assert "==" in req, f"ci.yml installs meshcore unpinned: {ln.strip()!r}"
