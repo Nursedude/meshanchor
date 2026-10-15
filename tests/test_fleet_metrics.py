@@ -224,10 +224,13 @@ class TestGzip:
         # Below _GZIP_MIN_BYTES — compression skipped even if advertised.
         tiny = "# tiny\nmeshanchor_up 1\n"
         h = _make_handler(accept_encoding="gzip")
+        # Pin BOTH halves of the body: map_metrics.render() is the
+        # process-wide HTTP registry, which any earlier test that made a real
+        # request has grown past the gzip floor (order-dependent red, 2026-10-15).
         with patch(
             "utils.prometheus_exporter.PrometheusExporter.export",
             return_value=tiny,
-        ):
+        ), patch("utils.map_metrics.render", return_value=(b"", "text/plain")):
             h._serve_fleet_metrics()
         assert "Content-Encoding" not in _headers_dict(h)
 

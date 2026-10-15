@@ -19,10 +19,17 @@ class BridgeRnsEventsMixin:
         (BridgedMessage, Full, HAS_RNS_SNIFFER, RNSPacketInfo, RNSPacketType, UnifiedNode, get_rns_sniffer, logger) = (
             getattr(_h, "BridgedMessage", None), getattr(_h, "Full", None), getattr(_h, "HAS_RNS_SNIFFER", None), getattr(_h, "RNSPacketInfo", None), getattr(_h, "RNSPacketType", None), getattr(_h, "UnifiedNode", None), getattr(_h, "get_rns_sniffer", None), getattr(_h, "logger", None))
         try:
-            # Update node info
             source_hash = message.source_hash
-            node = UnifiedNode.from_rns(source_hash)
-            self.node_tracker.add_node(node)
+            # The source hash is a CLAIM until LXMF validated its signature
+            # (forged → SIGNATURE_INVALID, never-announced → SOURCE_UNKNOWN).
+            # Consumers that act on WHO sent this read `verified`, never the
+            # field (non-author pass on the MF 10-07 arc, 2026-10-15).
+            verified = getattr(message, "signature_validated", False) is True
+
+            # Update node info — a forged claim is not evidence the node exists
+            if verified:
+                node = UnifiedNode.from_rns(source_hash)
+                self.node_tracker.add_node(node)
 
             # Capture LXMF message for traffic inspection
             if HAS_RNS_SNIFFER:
@@ -83,6 +90,8 @@ class BridgeRnsEventsMixin:
                 content = content_str
                 if title_str:
                     content = f"[{title_str}] {content}"
+                if not verified:
+                    content = f"[unverified sender] {content}"
                 messaging.store_incoming(
                     from_id=source_hash.hex(),
                     content=content,
@@ -110,7 +119,10 @@ class BridgeRnsEventsMixin:
             # MeshtasticBroadcastBridge identities. Cheap no-op
             # otherwise. Wrapped so a bridge bug can't take down the
             # gateway's LXMF RX path.
-            if self._meshtastic_reemit:
+            # Its allowlist keys on the hash, so only a VALIDATED signature
+            # may reach it: a forged claim of the broadcast-bridge identity
+            # was re-emitted onto MeshCore RF.
+            if self._meshtastic_reemit and verified:
                 try:
                     self._meshtastic_reemit.on_lxmf_message(
                         source_hash, content_str,
