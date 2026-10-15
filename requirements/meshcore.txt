@@ -1,13 +1,24 @@
 # MeshAnchor MeshCore Dependencies (meshcore, gateway, full profiles)
 #
 # MeshAnchor is MeshCore-primary — these install by default for any
-# profile that touches the companion radio. The pyproject metadata for
-# meshcore-cli depends on meshcore>=2.3.7, so installing the CLI also
-# pulls in the meshcore_py library used by the gateway handler.
+# profile that touches the companion radio.
+
+# meshcore_py — the library the gateway handler speaks the wire through.
+# PINNED, not ranged (2026-10-14). The old `meshcore-cli>=1.6.4` floated
+# it: CLI 1.6.4 needs meshcore>=2.3.11 and 1.6.6 needs >=2.3.16, whose
+# PEP 701 f-strings are a SyntaxError below Python 3.12 — a fresh install
+# on the 3.10/3.11 floor got a library that cannot import. 2.3.7 is the
+# release the channel_idx wire fix was verified against, and what the
+# radio-facing daemon on meshanchor-server imports. CI pins the same
+# version (.github/workflows/ci.yml); tests/test_meshcore_requirements_pin.py
+# fails if the two drift or either one floats again.
+meshcore==2.3.7
 
 # meshcore-cli — operator passthrough, driven by the
 # `MeshCore CLI` TUI handler (src/launcher_tui/handlers/meshcore_cli.py)
 # and reachable directly on the shell once installed. The CLI lands in
 # the active venv's bin (or ~/.local/bin under some site-packages
 # layouts); find_meshcore_cli() in utils/cli.py searches both.
-meshcore-cli>=1.6.4
+# 1.5.7 is the NEWEST CLI whose own floor (meshcore>=2.3.7) admits the
+# pin above — every 1.6.x would make the pair ResolutionImpossible.
+meshcore-cli==1.5.7
