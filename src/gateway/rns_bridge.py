@@ -812,6 +812,14 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                         self._maybe_start_lxmf_broadcast()
                         # Start LXMF→MeshCore re-emit bridge (idempotent)
                         self._maybe_start_meshtastic_reemit()
+                        # Make the re-emit sources (+ listed) recallable NOW,
+                        # not at each one's next announce (≤10 min of bot
+                        # replies missing MeshCore after every restart —
+                        # 2026-10-16). Own thread: rnsd calls must never
+                        # stall this loop.
+                        threading.Thread(target=self.rns_identity_warmup,
+                                         name="rns-identity-warmup",
+                                         daemon=True).start()
                     else:
                         self._rns_reconnect.record_failure()
                         self._rns_reconnect.wait(self._stop_event)

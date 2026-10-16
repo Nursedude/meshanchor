@@ -9,6 +9,7 @@ patch("gateway.rns_bridge.<name>") test seams still apply.
 
 import logging
 import threading
+import time
 from pathlib import Path
 
 from utils.paths import get_real_user_home
@@ -16,6 +17,28 @@ from utils.paths import get_real_user_home
 from .base_handler import UNVERIFIED_MARK
 
 logger = logging.getLogger(__name__)
+
+#: Monotonic clock for the path-nudge rate limit — a module name so a test
+#: can pin it without patching the SHARED ``time`` module.
+_monotonic = time.monotonic
+#: At most one source-unknown path request per member hash per this many
+#: seconds: a forger spamming claims for a member hash must not make us storm.
+IDENTITY_PATH_NUDGE_S = 60.0
+#: LXMF's unverified_reason for "source never announced" — the ONLY reason a
+#: path request can cure (an invalid signature is a forgery, not a stale cache).
+_SOURCE_UNKNOWN = 0x01
+#: Seconds the warm-up waits for rnsd's path responses before re-measuring.
+IDENTITY_WARMUP_SETTLE_S = 5.0
+#: Single-flight: one warm-up at a time however often RNS reconnects.
+_WARMUP_LOCK = threading.Lock()
+
+
+def _spawn(fn, *args) -> None:
+    """Daemon thread seam (tests run it inline). A path request is an rnsd
+    call with no bounded wrapper here, so it must never run on the LXMF
+    delivery thread (#72: a wedged rnsd would stall ingress)."""
+    threading.Thread(target=fn, args=args, name="rns-identity-nudge",
+                     daemon=True).start()
 
 #: One ledger object per process: get_status() and the LXMF delivery thread
 #: may race to the first construction (MF twin, non-author review 2026-10-07).
@@ -52,6 +75,12 @@ class BridgeRnsEventsMixin:
             # Consumers that act on WHO sent this read `verified`, never the
             # field (non-author pass on the MF 10-07 arc, 2026-10-15).
             verified = getattr(message, "signature_validated", False) is True
+            if (not verified and getattr(message, "unverified_reason", None)
+                    == _SOURCE_UNKNOWN):
+                try:
+                    self._rns_identity_path_nudge(source_hash.hex())
+                except Exception as e:  # noqa: BLE001 — witness, never decisive
+                    logger.debug(f"rns identity path nudge failed: {e}")
 
             # Update node info — a forged claim is not evidence the node exists
             if verified:
@@ -188,6 +217,113 @@ class BridgeRnsEventsMixin:
                     led = IngressLedger(path or default_ma_ledger_path())
                     self._rns_ingress_ledger_obj = led
         return led
+
+    # ── identity warm-up (2026-10-16; MF 2026-10-08 port, review I4) ──
+    # After a daemon restart this process cannot recall its LXMF sources
+    # until each re-announces (≤10 min), so LXMF delivers them UNVERIFIED and
+    # the re-emit (verified-only) drops them: live 01:13:36→01:17:26, every bot
+    # reply missed the MeshCore channel. Ask rnsd now, then RE-MEASURE.
+
+    def _rns_identity_warmup_members(self) -> list:
+        """Re-emit sources ∪ listed identities — ALWAYS, whatever the ingress
+        policy: the re-emit needs a VERIFIED source even while ingress is
+        OPEN (MF's warm-up returns early on open; MA's posture is open)."""
+        members = set()
+        reemit = getattr(self, "_meshtastic_reemit", None)
+        if reemit is not None:
+            members |= {h.lower() for h in
+                        (getattr(reemit, "_allowed_identities", None) or ())}
+        try:
+            members |= {h.lower() for h in
+                        (self.rns_ingress_posture().get("identities") or ())}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"rns identity warm-up posture: {e}")
+        return sorted(members)
+
+    def _rns_recall_identity(self, dest: bytes):
+        """The question LXMF itself asks (``Identity.recall(h, _no_use=True)``):
+        a local dict read, no RPC to rnsd."""
+        import RNS
+        return RNS.Identity.recall(dest, _no_use=True)
+
+    def _rns_request_path(self, dest: bytes) -> str:
+        """``sent`` | ``blocked`` (tx_guard armed — deliberate, not a fault)."""
+        import RNS
+        from utils.tx_guard import TransmitBlocked, assert_rns_tx_allowed
+        try:
+            assert_rns_tx_allowed(kind="rns_path_request",
+                                  detail="LXMF source identity warm-up")
+        except TransmitBlocked:
+            return "blocked"
+        RNS.Transport.request_path(dest)
+        return "sent"
+
+    def rns_identity_warmup(self, *, settle_s: float = IDENTITY_WARMUP_SETTLE_S) -> dict:
+        """At RNS connect: a path request for every member this process cannot
+        recall, wait ``settle_s``, then RE-MEASURE — "request sent" is not the
+        END (rnsd ignores a request whose announce cache entry is gone).
+        Single-flight; never raises; {} when there is nothing to warm."""
+        if not _WARMUP_LOCK.acquire(blocking=False):
+            return {}
+        try:
+            return self._rns_identity_warmup_once(settle_s)
+        finally:
+            _WARMUP_LOCK.release()
+
+    def _rns_identity_warmup_once(self, settle_s: float) -> dict:
+        members = self._rns_identity_warmup_members()
+        if not members:
+            return {}
+
+        def recallable(h: str) -> bool:
+            try:
+                return self._rns_recall_identity(bytes.fromhex(h)) is not None
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"rns identity recall {h[:8]}: {e}")
+                return False
+
+        missing = [h for h in members if not recallable(h)]
+        requested = blocked = failed = 0
+        for h in missing:
+            try:
+                r = self._rns_request_path(bytes.fromhex(h))
+                requested += r == "sent"
+                blocked += r == "blocked"
+            except Exception as e:  # noqa: BLE001 — counted, never raised
+                failed += 1
+                logger.debug(f"rns identity warm-up {h[:8]}: {e}")
+        if requested and settle_s > 0:
+            ev = getattr(self, "_stop_event", None)
+            if ev is not None:
+                ev.wait(settle_s)
+        still = [h for h in missing if not recallable(h)] if requested else missing
+        after = len(members) - len(still)
+        logger.info(
+            "RNS identity warm-up (re-emit sources + listed): %d/%d "
+            "recallable in-process before, %d/%d after %d path request(s)"
+            "%s%s%s", len(members) - len(missing), len(members), after,
+            len(members), requested,
+            f"; {blocked} blocked by tx_guard" if blocked else "",
+            f"; {failed} FAILED" if failed else "",
+            f"; still unknown: {','.join(h[:8] for h in still)}" if still else "")
+        return {"members": len(members), "known": len(members) - len(missing),
+                "requested": requested, "blocked": blocked, "failed": failed,
+                "after": after}
+
+    def _rns_identity_path_nudge(self, source_hex: str) -> None:
+        """One path request per MEMBER hash per IDENTITY_PATH_NUDGE_S, off the
+        delivery thread. A stranger is never nudged (no storm on forgeries)."""
+        h = source_hex.lower()
+        if h not in set(self._rns_identity_warmup_members()):
+            return
+        last = getattr(self, "_rns_identity_nudged", None)
+        if last is None:
+            last = self._rns_identity_nudged = {}
+        now = _monotonic()
+        if h in last and now - last[h] < IDENTITY_PATH_NUDGE_S:
+            return
+        last[h] = now
+        _spawn(self._rns_request_path, bytes.fromhex(h))
 
     def rns_ingress_posture(self) -> dict:
         """The declared list + the policy in force, for status surfaces."""
