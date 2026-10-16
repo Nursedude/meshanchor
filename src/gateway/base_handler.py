@@ -164,6 +164,18 @@ def dual_path_dedup_window_s(config: Any) -> float:
         return 60.0
 
 
+#: The in-app mark for an UNVERIFIED LXMF source (aca37676). ONE constant:
+#: the stamper writes it and the echo guard sees past it — a re-spelled copy
+#: is how the two drifted apart on 2026-10-16 (the guard read the mark as
+#: "not a bridge tag" and a looped broadcast-bridge copy re-radiated).
+UNVERIFIED_MARK = "[unverified] "
+
+
+def strip_unverified_mark(text: str) -> str:
+    """``text`` without OUR leading unverified mark (sender text unchanged)."""
+    return text[len(UNVERIFIED_MARK):] if text.startswith(UNVERIFIED_MARK) else text
+
+
 def is_rns_to_mesh_echo(text) -> bool:
     """True if ``text`` has ALREADY been on the Meshtastic side.
 
@@ -202,11 +214,19 @@ def is_rns_to_mesh_echo(text) -> bool:
 
     Untagged content — a bot reply, a NomadNet message, operator text — has
     no bridge prefix and is unaffected.
+
+    Judged on what the SENDER put on the wire: our own ``UNVERIFIED_MARK``
+    is stripped first. Without that, "[unverified] [meshtastic ch2:…] Sun"
+    did not START with a tag, and every MF broadcast-bridge copy received in
+    the <=10 min after a daemon restart (before the bridges re-announce)
+    went back onto moc's LongFast — a bot answered each command twice
+    (2026-10-16, 00:21–00:28). The mark is a label, not content.
     """
     from .config import RNS_TO_MESH_ECHO_PREFIXES
     if not isinstance(text, str):
         return False
-    return text.lstrip().startswith(RNS_TO_MESH_ECHO_PREFIXES)
+    return strip_unverified_mark(text.lstrip()).lstrip().startswith(
+        RNS_TO_MESH_ECHO_PREFIXES)
 
 
 def chunk_for_mesh(message: str,

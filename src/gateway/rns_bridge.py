@@ -17,7 +17,7 @@ from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
 from .base_handler import (chunk_for_mesh, get_rf_tx_registry,
-                           is_rns_to_mesh_echo)
+                           is_rns_to_mesh_echo, strip_unverified_mark)
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode, get_node_tracker
 from .reconnect import ReconnectStrategy
@@ -1150,8 +1150,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             _q = "?" if (msg.metadata or {}).get("source_verified") is False else ""
             prefix = f"[RNS:{_q}{msg.source_id[:4]}] "
             _body = msg.content
-            if _q and _body.startswith("[unverified] "):
-                _body = _body[len("[unverified] "):]   # the tag carries the mark
+            if _q:
+                _body = strip_unverified_mark(_body)  # the tag carries the mark
             content = prefix + _body
 
             # Dual-path dedup (gated, default off; mirror of MeshForge
@@ -1163,7 +1163,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             # and this copy still delivers (the relay's fallback value).
             if (self._dual_path_dedup_on()
                     and get_rf_tx_registry().seen_within(
-                        msg.content, self._dual_path_dedup_window())):
+                        _body, self._dual_path_dedup_window())):
                 with self._stats_lock:
                     self.stats['rns_to_mesh_dual_path_suppressed'] = (
                         self.stats.get('rns_to_mesh_dual_path_suppressed', 0) + 1)
@@ -1176,7 +1176,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             # bytes; mirror of MeshForge f02ad82) — the tag is the echo-loop
             # invariant, and the chunk-0-only shape leaked untagged tail
             # chunks through the loop guards on every gateway.
-            chunks = chunk_for_mesh(msg.content, prefix=prefix)
+            # _body, never msg.content: the "?" in the tag IS the mark, so
+            # the wire must not carry UNVERIFIED_MARK a second time (review
+            # of the echo fix, 2026-10-16 — the strip fed only the log line).
+            chunks = chunk_for_mesh(_body, prefix=prefix)
             multi = f" [{len(chunks)} chunks]" if len(chunks) > 1 else ""
 
             # In mqtt_bridge mode, enqueue each chunk as its own queue item

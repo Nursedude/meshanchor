@@ -101,5 +101,9 @@ def test_the_rf_copy_of_a_claim_is_marked_once():
     import inspect
     from gateway import rns_bridge
     src = inspect.getsource(rns_bridge)
-    # the in-app "[unverified] " mark is replaced by the RF tag's "?"
-    assert '_body[len("[unverified] "):]' in src
+    # the in-app mark is replaced by the RF tag's "?" — via the ONE shared
+    # helper since 2026-10-16 (a re-spelled copy disarmed the echo guard)
+    from gateway.base_handler import UNVERIFIED_MARK, strip_unverified_mark
+    assert "strip_unverified_mark(_body)" in src
+    assert strip_unverified_mark(UNVERIFIED_MARK + "x") == "x"
+    assert strip_unverified_mark("x") == "x"

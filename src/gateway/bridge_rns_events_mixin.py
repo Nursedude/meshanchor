@@ -13,6 +13,8 @@ from pathlib import Path
 
 from utils.paths import get_real_user_home
 
+from .base_handler import UNVERIFIED_MARK
+
 logger = logging.getLogger(__name__)
 
 #: One ledger object per process: get_status() and the LXMF delivery thread
@@ -103,7 +105,8 @@ class BridgeRnsEventsMixin:
                 destination_id=None,
                 # an unverified source travels MARKED to RF, the event bus
                 # and the TUI (non-author read of MF 11388546, 2026-10-15)
-                content=(content_str if verified else "[unverified] " + content_str),
+                content=(content_str if verified
+                         else UNVERIFIED_MARK + content_str),
                 title=title_str,
                 metadata={
                     'lxmf_stamp': message.stamp,
