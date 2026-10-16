@@ -128,6 +128,22 @@ class BridgeHealthMixin:
             'subsystems': self.health.get_subsystem_states(),
             'bridge_status': self.bridge_status.value,
         }
+        # RNS→MeshCore ingress policy + the unlisted-sender ledger (MF port
+        # 2026-10-15): the tripwire's diff, where a status surface can read it.
+        try:
+            posture = self.rns_ingress_posture()
+            snap = self._rns_ingress_ledger().snapshot()
+            status['rns_ingress'] = {
+                'policy': posture['policy'],
+                'listed': posture['listed'],
+                'unlisted_recent': snap['unlisted_recent'],
+                'unlisted_total': snap['unlisted_total'],
+                'refused_total': snap['refused_total'],
+                'window_s': snap['window_s'],
+            }
+        except Exception as e:  # noqa: BLE001 — status must not break
+            logger.debug(f"rns ingress status read failed: {e}")
+            status['rns_ingress'] = {'policy': None, 'error': str(e)[:120]}
         # mqtt_bridge mode: meshtastic_connected is the BROKER session; the
         # radio is read separately so a stopped meshtasticd is not reported
         # as connected (MF 5440d021). Absent key = handler has no such read.

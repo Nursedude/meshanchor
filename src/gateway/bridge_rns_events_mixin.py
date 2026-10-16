@@ -7,9 +7,34 @@ names are bound from gateway.rns_bridge at call time so the existing
 patch("gateway.rns_bridge.<name>") test seams still apply.
 """
 
+import logging
+import threading
+from pathlib import Path
+
+from utils.paths import get_real_user_home
+
+logger = logging.getLogger(__name__)
+
+#: One ledger object per process: get_status() and the LXMF delivery thread
+#: may race to the first construction (MF twin, non-author review 2026-10-07).
+_RNS_INGRESS_INIT_LOCK = threading.Lock()
+
+
+def default_ma_ledger_path() -> Path:
+    """MeshAnchor's data dir — writable by the daemon unit (ReadWritePaths
+    covers /home). The shared policy module's own default names MeshForge's
+    dir, so MeshAnchor always passes this one."""
+    from .rns_ingress_policy import LEDGER_FILENAME
+    return get_real_user_home() / ".local" / "share" / "meshanchor" / LEDGER_FILENAME
+
+
 
 class BridgeRnsEventsMixin:
     """Mixin: _on_lxmf_receive / _on_rns_announce for RNSMeshtasticBridge."""
+
+    #: The RNS→MeshCore ingress methods a host must carry (tests bind these).
+    INGRESS_METHODS = ("_rns_ingress_ledger", "rns_ingress_posture",
+                       "rns_ingress_stamp", "_rns_ingress_admits")
 
     def _on_lxmf_receive(self, message):
         """Handle incoming LXMF message"""
@@ -104,6 +129,17 @@ class BridgeRnsEventsMixin:
             except Exception as e:
                 logger.debug(f"Could not store incoming RNS message: {e}")
 
+            # RNS→MeshCore ingress policy (MF port, 2026-10-15): WHO may reach
+            # our radios through the bridge. BEFORE the queue AND the re-emit
+            # hook — a refused sender has no other way onto RF. Still
+            # notified, so the TUI shows it. See gateway/rns_ingress_policy.py.
+            if not self._rns_ingress_admits(
+                    source_hash.hex(),
+                    signature_validated=getattr(message, 'signature_validated', None),
+                    unverified_reason=getattr(message, 'unverified_reason', None)):
+                self._notify_message(msg)
+                return
+
             # Queue for bridging if enabled (non-blocking to prevent deadlock)
             if self._router.should_bridge(msg):
                 try:
@@ -135,6 +171,101 @@ class BridgeRnsEventsMixin:
 
         except Exception as e:
             logger.error(f"Error processing LXMF message: {e}")
+
+    # ── RNS→MeshCore ingress policy (MeshForge port) ─────────────────────
+    def _rns_ingress_ledger(self):
+        """Lazily-built, process-wide ledger of unlisted senders."""
+        led = getattr(self, "_rns_ingress_ledger_obj", None)
+        if led is None:
+            with _RNS_INGRESS_INIT_LOCK:
+                led = getattr(self, "_rns_ingress_ledger_obj", None)
+                if led is None:
+                    from .rns_ingress_policy import IngressLedger
+                    path = getattr(self, "_rns_ingress_ledger_path", None)
+                    led = IngressLedger(path or default_ma_ledger_path())
+                    self._rns_ingress_ledger_obj = led
+        return led
+
+    def rns_ingress_posture(self) -> dict:
+        """The declared list + the policy in force, for status surfaces."""
+        from .rns_ingress_policy import effective_policy
+        rns_cfg = getattr(getattr(self, "config", None), "rns", None)
+        try:
+            identities = list(rns_cfg.get_bridge_source_identities())
+        except Exception:  # noqa: BLE001 — a mocked/absent section is OPEN
+            identities = []
+        declared = getattr(rns_cfg, "bridge_source_policy", None)
+        policy = effective_policy(identities, declared if isinstance(declared, str) else None)
+        return {"policy": policy, "listed": len(identities), "identities": identities}
+
+    def rns_ingress_stamp(self) -> None:
+        """Write the posture into the ledger at start, so a declared gateway
+        with ZERO unlisted senders is distinguishable from no gateway. Only
+        when a list is declared (or a ledger exists). Never raises."""
+        try:
+            posture = self.rns_ingress_posture()
+            led = self._rns_ingress_ledger()
+            if posture["policy"] != "open" or led.path.exists():
+                led.stamp(policy=posture["policy"], listed=posture["listed"],
+                          identities=posture["identities"])
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"rns ingress stamp skipped: {e}")
+
+    def _rns_ingress_admits(self, source_hex: str, *, signature_validated=None,
+                            unverified_reason=None) -> bool:
+        """True when ``source_hex`` may be bridged onto RF. Never raises.
+
+        Membership counts only with ``signature_validated is True`` — a
+        claimed hash is not an identity. A broken POLICY admits as OPEN and
+        says so; broken STATE (ledger) can never open the bridge (MF twin)."""
+        try:
+            from .rns_ingress_policy import (
+                POLICY_ENFORCE, POLICY_OPEN, VERDICT_LISTED, VERDICT_UNVERIFIED, verdict)
+            posture = self.rns_ingress_posture()
+            policy = posture["policy"]
+            if policy == POLICY_OPEN:
+                return True
+            v = verdict(source_hex, posture["identities"], (),
+                        signature_validated=signature_validated)
+            if v == VERDICT_LISTED:
+                try:
+                    self._rns_ingress_ledger().note_listed(source_hex)
+                except Exception as e:  # noqa: BLE001 — witness, never decisive
+                    logger.debug(f"rns ingress use note failed: {e}")
+                return True
+            unverified = v == VERDICT_UNVERIFIED
+            refused = policy == POLICY_ENFORCE
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"rns ingress policy error ({e}); admitting "
+                           f"{source_hex[:8]} as if OPEN")
+            return True
+        # The DECISION is made; everything below is witness-keeping.
+        with self._stats_lock:
+            self.stats['rns_ingress_unlisted'] = self.stats.get('rns_ingress_unlisted', 0) + 1
+            if refused:
+                self.stats['rns_to_mesh_refused_unlisted'] = (
+                    self.stats.get('rns_to_mesh_refused_unlisted', 0) + 1)
+        ent: dict = {}
+        try:
+            ent = self._rns_ingress_ledger().record(
+                source_hex, policy=policy, refused=refused, label="",
+                unverified=unverified)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"rns ingress ledger record failed ({e}); the "
+                           f"journal line below is the only witness")
+        if unverified:
+            from .rns_ingress_policy import unverified_words
+            why = (f"CLAIMS a listed identity but {unverified_words(unverified_reason)}"
+                   f" — treated as unlisted")
+        else:
+            why = "is not in bridge_source_identities"
+        logger.info(
+            "RNS ingress %s: sender %s %s (policy=%s, seen %d×%s) — %s",
+            "REFUSED" if refused else "unlisted", source_hex.lower(), why, policy,
+            ent.get("seen", 1), f", refused {ent.get('refused', 0)}×" if refused else "",
+            "not bridged onto MeshCore RF" if refused else
+            "bridged anyway (observe); add it to the list or enforce")
+        return not refused
 
     def _on_rns_announce(self, dest_hash, announced_identity, app_data):
         """Handle RNS announce for node discovery"""

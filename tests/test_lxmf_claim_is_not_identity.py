@@ -60,7 +60,8 @@ def _host(monkeypatch, stored):
     h._notify_message = lambda m: None
     h._meshtastic_reemit = types.SimpleNamespace(
         on_lxmf_message=lambda src, text: h.reemitted.append(src) or True)
-    h._on_lxmf_receive = BridgeRnsEventsMixin._on_lxmf_receive.__get__(h)
+    for name in BridgeRnsEventsMixin.INGRESS_METHODS + ("_on_lxmf_receive",):
+        setattr(h, name, getattr(BridgeRnsEventsMixin, name).__get__(h))
     return h
 
 

@@ -576,6 +576,10 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
 
         logger.info("Starting RNS-Meshtastic bridge...")
         self._running = True
+        # RNS→MeshCore ingress posture into the ledger (MF port 2026-10-15):
+        # a declared list with nothing unlisted reads as "declared", not as
+        # "no gateway here". Never raises.
+        self.rns_ingress_stamp()
         self.stats['start_time'] = datetime.now()
 
         # Start WebSocket server for real-time message broadcast to web UI

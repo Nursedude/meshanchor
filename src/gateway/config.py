@@ -406,6 +406,23 @@ class RNSConfig:
     meshtastic_ack_consumption_enabled: bool = False
     ack_pending_ttl_sec: int = 600          # forget an un-acked DM after ~10 min
     ack_pending_max: int = 1024             # in-flight DM cap, oldest-evicted
+    # RNS→MeshCore ingress policy (port of MeshForge's RNS→RF policy,
+    # 2026-10-15). LXMF source hashes (str | list, 32 hex) allowed to be
+    # bridged onto our radios. Empty = OPEN (every sender bridged — today's
+    # behaviour). With a list, `bridge_source_policy` decides what an UNLISTED
+    # sender gets: "observe" (bridged, but witnessed + ledgered — the soak that
+    # proves the list is complete) or "enforce" (refused: not bridged, not
+    # re-emitted). MeshAnchor has no peer_gateway_destinations: a MeshForge
+    # gateway relaying here is listed like any sender. See
+    # gateway/rns_ingress_policy.py (byte-identical with MeshForge).
+    bridge_source_identities: Any = ""
+    bridge_source_policy: str = "observe"
+
+    def get_bridge_source_identities(self) -> List[str]:
+        """``bridge_source_identities`` normalized to lowercase 32-hex list;
+        malformed entries are dropped (validate() names them)."""
+        from .rns_ingress_policy import normalize_hashes
+        return normalize_hashes(self.bridge_source_identities)
 
     def get_lxmf_destinations(self) -> List[str]:
         """Return default_lxmf_destination normalized to a list of non-empty hex strings."""
@@ -1168,6 +1185,41 @@ class GatewayConfig:
                     f"Duplicate rule name: '{name}'"
                 ))
             seen.add(name)
+
+        # RNS→MeshCore ingress policy: a typo in the one list that guards the
+        # radios must be NAMED, never silently dropped into "open" (MF twin).
+        try:
+            from .rns_ingress_policy import (
+                DECLARABLE_POLICIES, malformed_hashes, normalize_hashes)
+            raw_ids = self.rns.bridge_source_identities
+            if raw_ids not in ("", None) and not isinstance(raw_ids, (str, list, tuple)):
+                errors.append(ConfigValidationError(
+                    "rns.bridge_source_identities",
+                    f"must be a list of 32-hex LXMF hashes (or one string), "
+                    f"got {type(raw_ids).__name__} — treated as EMPTY, i.e. "
+                    f"RNS→MeshCore ingress is OPEN", severity="warning"))
+            for bad in malformed_hashes(raw_ids):
+                errors.append(ConfigValidationError(
+                    "rns.bridge_source_identities",
+                    f"{bad} is not a 32-hex LXMF hash — dropped from the list",
+                    severity="warning"))
+            pol = (self.rns.bridge_source_policy or "").strip().lower()
+            if pol == "enforce" and not normalize_hashes(raw_ids):
+                errors.append(ConfigValidationError(
+                    "rns.bridge_source_policy",
+                    "'enforce' declared but bridge_source_identities is empty "
+                    "— the effective policy is OPEN (every RNS sender bridged)",
+                    severity="warning"))
+            if normalize_hashes(raw_ids) and pol not in DECLARABLE_POLICIES:
+                errors.append(ConfigValidationError(
+                    "rns.bridge_source_policy",
+                    f"{self.rns.bridge_source_policy!r} is not one of "
+                    f"{', '.join(DECLARABLE_POLICIES)} — 'observe' is in force",
+                    severity="warning"))
+        except Exception as e:  # noqa: BLE001 — validation must not crash load
+            errors.append(ConfigValidationError(
+                "rns.bridge_source_identities", f"could not be checked: {e}",
+                severity="warning"))
 
         # Config drift detection: check if gateway's RNS config path
         # matches what rnsd is actually using
