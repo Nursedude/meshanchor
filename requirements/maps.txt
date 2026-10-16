@@ -7,4 +7,4 @@ folium>=0.20.0
 # (12MB / ~42k positioned MeshCore nodes) consumed by
 # utils/_map_collector_meshcore_public.py. Without msgpack the public
 # fetcher silently returns 0 features.
-msgpack>=1.2.2
+msgpack>=1.2.3
