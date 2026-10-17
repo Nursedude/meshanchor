@@ -158,6 +158,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin):
         # message fired ~45ms apart lost chunks 2-3 silently (MeshForge,
         # 2026-06-04). Pacing the dispatch loop cures the whole burst class.
         self._send_spacing: Dict[str, float] = {}
+        self._send_ready: Dict[str, Callable[[], bool]] = {}
         self._last_dispatch_ts: Dict[str, float] = {}  # destination -> time.monotonic()
         self._success_callbacks: List[Callable] = []
         self._failure_callbacks: List[Callable] = []
@@ -931,7 +932,8 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin):
 
     def register_sender(self, destination: str,
                         send_fn: Callable[[Dict], bool],
-                        min_spacing_s: float = 0.0) -> None:
+                        min_spacing_s: float = 0.0,
+                        ready_fn: Optional[Callable[[], bool]] = None) -> None:
         """
         Register a send function for a destination.
 
@@ -945,9 +947,18 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin):
                 the HTTP hand-off still returns 200 — silent data loss).
                 Not-yet-due messages simply stay 'pending' for a later
                 process_once pass; FIFO order within a priority is preserved.
+            ready_fn: Optional "can this destination send at all right
+                now?" check (MF lead, F4 review R2). While it returns False
+                (or raises) the destination's rows are left untouched — no
+                attempt, no retry_count bump — so an outage longer than the
+                retry budget cannot dead-letter them.
         """
         self._send_callbacks[destination] = send_fn
         self._send_spacing[destination] = max(0.0, float(min_spacing_s))
+        if ready_fn is None:
+            self._send_ready.pop(destination, None)
+        else:
+            self._send_ready[destination] = ready_fn
         # If we've been dropping for this destination and a sender just
         # showed up (e.g. handler reconnected mid-run), clear the rate-
         # limit state so the next drop (if any) logs immediately again.
@@ -980,6 +991,15 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin):
         processed = 0
 
         for destination, send_fn in self._send_callbacks.items():
+            ready_fn = self._send_ready.get(destination)
+            if ready_fn is not None:
+                try:
+                    ready = bool(ready_fn())
+                except Exception as e:
+                    logger.debug(f"ready_fn for {destination} raised: {e}")
+                    ready = False
+                if not ready:
+                    continue
             messages = self.get_pending(destination=destination, limit=batch_size)
             spacing = self._send_spacing.get(destination, 0.0)
 

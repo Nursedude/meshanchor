@@ -279,16 +279,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
         if HAS_PERSISTENT_QUEUE:
             try:
                 self._persistent_queue = PersistentMessageQueue()
-                # RNS sender registered here, Meshtastic sender after handler init
-                self._persistent_queue.register_sender(
-                    "rns", self._queue_send_rns
-                )
-                # F4 (MF lead): an M→R message with no resolved hash (RNS
-                # down / raised before send) replays whole through
-                # _process_mesh_to_rns, so F14 decides again at retry.
-                self._persistent_queue.register_sender(
-                    "rns_xform", self._dispatch_rns_xform_spill
-                )
+                # RNS senders registered here, Meshtastic sender after handler init
+                self._register_rns_queue_senders(self._persistent_queue)
                 logger.info("Persistent message queue initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize persistent queue: {e}")
@@ -1134,9 +1126,19 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                         logger.warning(f"Invalid default_lxmf_destination hex: {hex_str!r}")
 
             sent_count = 0
+            failed_legs = []
             for dest_hash in destinations:
                 if self.send_to_rns(content, dest_hash):
                     sent_count += 1
+                else:
+                    failed_legs.append(dest_hash)
+
+            if sent_count and failed_legs:
+                # F4 review R5: one leg landing must not erase a sibling's
+                # retry — requeue only the legs that failed.
+                self._requeue_failed_message(
+                    msg, "rns", rns_destinations=failed_legs,
+                    rns_message=content)
 
             if sent_count:
                 if len(destinations) > 1:

@@ -327,6 +327,16 @@ class BridgeSendMixin:
                 )
             return False
 
+    def _register_rns_queue_senders(self, queue) -> None:
+        """Register the two M→R queue senders (MF lead). Both are gated on
+        RNS being connected, so rows wait out an outage instead of burning
+        the queue's 3-try budget on it (F4 review R2). "rns_xform" is F4's
+        whole-message replay through _process_mesh_to_rns."""
+        ready = lambda: bool(self._connected_rns)  # noqa: E731
+        queue.register_sender("rns", self._queue_send_rns, ready_fn=ready)
+        queue.register_sender("rns_xform", self._dispatch_rns_xform_spill,
+                              ready_fn=ready)
+
     def _queue_send_rns(self, payload: Dict) -> bool:
         """Send handler for persistent queue - RNS destination."""
         message = payload.get('message', '')
@@ -667,7 +677,9 @@ class BridgeSendMixin:
                             rns_destinations, rns_message) -> bool:
         """F4 body of _requeue_failed_message for destination "rns"."""
         persisted = 0
-        if rns_destinations:
+        if rns_destinations is not None:
+            # Resolved legs, possibly none — an empty list has nothing to
+            # retry at, and replaying it would only loop (review R3).
             for dest_hash in rns_destinations:
                 dest_hex = dest_hash.hex()
                 if self._persistent_queue.enqueue(

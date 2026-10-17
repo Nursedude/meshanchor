@@ -34,10 +34,7 @@ def _isolated_delivery_counters(tmp_path, monkeypatch):
 def queue(tmp_path, bridge):  # noqa: F811
     from gateway.message_queue import PersistentMessageQueue
     q = PersistentMessageQueue(db_path=str(tmp_path / "queue.db"))
-    q.register_sender("rns", bridge._queue_send_rns)
-    replay = getattr(bridge, "_dispatch_rns_xform_spill", None)
-    if replay is not None:  # absent before the fix: fail on the assert, not here
-        q.register_sender("rns_xform", replay)
+    bridge._register_rns_queue_senders(q)  # the production wiring
     bridge._persistent_queue = q
     return q
 
@@ -185,3 +182,94 @@ class TestExceptionPath:
                 "SELECT COUNT(*) FROM messages WHERE status = 'pending'"
             ).fetchone()[0]
         assert pending == 0, "a raising replay re-enqueued itself"
+
+
+# --- non-author review of 1307beb6 (2026-10-17) ----------------------------
+
+def _dead(q):
+    with q._get_connection() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE status = 'dead_letter'"
+        ).fetchone()[0]
+
+
+class TestReviewFollowups:
+
+    @pytest.mark.parametrize("dest", ["rns", "rns_xform"])
+    def test_rows_wait_out_an_outage_longer_than_three_retries(
+            self, bridge, queue, dest):  # noqa: F811
+        # R2: no RetryPolicy → 3 False returns dead-letter in ~20 s, shorter
+        # than an rnsd restart. While RNS is down the row must not be tried.
+        bridge.config.rns.get_lxmf_destinations.return_value = [DEST.hex()]
+        bridge._connected_rns = False
+        if dest == "rns":
+            bridge._requeue_failed_message(_dm(), "rns",
+                                           rns_destinations=[DEST],
+                                           rns_message="[Mesh:0042] x")
+        else:
+            bridge._requeue_failed_message(_broadcast(), "rns")
+        for _ in range(5):
+            _make_due(queue)
+            queue.process_once()
+        assert _dead(queue) == 0, "row dead-lettered while RNS was down"
+        assert len(_rows(queue, dest)) == 1
+
+    def test_replay_with_nowhere_to_send_does_not_reenqueue(
+            self, bridge, queue):  # noqa: F811
+        # R3: no destination + NO default list = no leg to retry.
+        bridge.config.rns.get_lxmf_destinations.return_value = []
+        queue.DEDUP_WINDOW = 0
+        _connect(bridge)
+        assert bridge._requeue_failed_message(
+            _dm(dest_id=None), "rns", rns_destinations=[]) is False
+        bridge._connected_rns = False
+        bridge._requeue_failed_message(_dm(dest_id=None), "rns")
+        _connect(bridge)
+        for _ in range(3):
+            _make_due(queue)
+            queue.process_once()
+        with queue._get_connection() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        assert total == 1, "a replay with no destination re-enqueued itself"
+
+    def test_requeue_reports_false_when_dedup_dropped_every_row(
+            self, bridge, queue):  # noqa: F811
+        # R4 (correct on MA, but untested: review mutant M1 survived).
+        bridge._connected_rns = False
+        assert bridge._requeue_failed_message(_broadcast(), "rns") is True
+        assert bridge._requeue_failed_message(_broadcast(), "rns") is False
+        assert bridge._requeue_failed_message(
+            _dm(), "rns", rns_destinations=[DEST], rns_message="m") is True
+        assert bridge._requeue_failed_message(
+            _dm(), "rns", rns_destinations=[DEST], rns_message="m") is False
+
+    def test_partial_fanout_requeues_only_the_failed_leg(
+            self, bridge, queue):  # noqa: F811
+        # R5: one sibling succeeding must not erase the other's retry.
+        bridge.config.rns.get_lxmf_destinations.return_value = [
+            DEST.hex(), DEST_B.hex()]
+        bridge.node_tracker.get_node_by_mesh_id.return_value = None
+        _connect(bridge)
+        with patch.object(bridge, "send_to_rns",
+                          side_effect=lambda c, d, **k: d == DEST):
+            bridge._process_mesh_to_rns(_broadcast())
+        with queue._get_connection() as conn:
+            rows = [r[0] for r in conn.execute(
+                "SELECT payload FROM messages WHERE destination = 'rns'")]
+        assert len(rows) == 1 and DEST_B.hex() in rows[0]
+
+    def test_replay_keeps_the_original_metadata(
+            self, bridge, queue):  # noqa: F811
+        from gateway.rns_bridge import BridgedMessage
+        bridge.config.rns.get_lxmf_destinations.return_value = [DEST.hex()]
+        bridge._connected_rns = False
+        bridge._requeue_failed_message(BridgedMessage(
+            source_network="meshtastic", source_id="!aabb0042",
+            destination_id="!ffffffff", content="on ch3", is_broadcast=True,
+            metadata={"channel": 3}), "rns")
+        seen = []
+        _connect(bridge)
+        with patch.object(bridge, "_process_mesh_to_rns",
+                          side_effect=lambda m: seen.append(m)):
+            queue.process_once()
+        assert seen and seen[0].metadata.get("channel") == 3
