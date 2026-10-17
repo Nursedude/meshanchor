@@ -283,6 +283,12 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 self._persistent_queue.register_sender(
                     "rns", self._queue_send_rns
                 )
+                # F4 (MF lead): an M→R message with no resolved hash (RNS
+                # down / raised before send) replays whole through
+                # _process_mesh_to_rns, so F14 decides again at retry.
+                self._persistent_queue.register_sender(
+                    "rns_xform", self._dispatch_rns_xform_spill
+                )
                 logger.info("Persistent message queue initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize persistent queue: {e}")
@@ -1089,6 +1095,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
         On send failure for non-broadcast messages, attempts to persist
         to the persistent queue for later retry.
         """
+        sent_count = 0  # read by the except path: never requeue a sent copy
         try:
             prefix = f"[Mesh:{msg.source_id[-4:]}] " if msg.source_id else "[Mesh] "
             content = prefix + msg.content
@@ -1147,7 +1154,11 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 logger.warning(f"Failed to bridge Mesh→RNS: {content[:30]}...")
                 with self._stats_lock:
                     self.stats['errors'] += 1
-                requeued = self._requeue_failed_message(msg, "rns")
+                # F4: retry each failed leg at the hash it already resolved
+                # to — never re-resolve, which could widen a DM's audience.
+                requeued = self._requeue_failed_message(
+                    msg, "rns", rns_destinations=destinations,
+                    rns_message=content)
                 self.health.record_message_failed("mesh_to_rns", requeued=requeued)
 
         except Exception as e:
@@ -1155,8 +1166,15 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             with self._stats_lock:
                 self.stats['errors'] += 1
             self.health.record_error("rns", e)
-            self._requeue_failed_message(msg, "rns")
-            self.health.record_message_failed("mesh_to_rns", requeued=True)
+            requeued = False
+            if sent_count:
+                # Already on the wire: a retry would be a duplicate.
+                logger.warning("Mesh→RNS: raised after a send — not requeued")
+            elif (msg.metadata or {}).get('m2r_replay'):
+                logger.warning("Mesh→RNS: replay raised again — not requeued")
+            else:
+                requeued = self._requeue_failed_message(msg, "rns")
+            self.health.record_message_failed("mesh_to_rns", requeued=requeued)
 
     def _process_rns_to_mesh(self, msg: BridgedMessage):
         """Process message from RNS to Meshtastic.

@@ -567,7 +567,9 @@ class BridgeSendMixin:
         return None
 
     def _requeue_failed_message(self, msg, destination: str,
-                                *, channel_override: Optional[int] = None) -> bool:
+                                *, channel_override: Optional[int] = None,
+                                rns_destinations=None,
+                                rns_message: Optional[str] = None) -> bool:
         """Persist a failed message to the persistent queue for later retry.
 
         Args:
@@ -582,6 +584,13 @@ class BridgeSendMixin:
                 Without this override, Issue #37's privacy class was
                 still live via the replay path even after the resolver
                 fix — bug discovered live 2026-05-20.
+            rns_destinations: for "rns", the LXMF hashes the send already
+                resolved — one "rns" row each, in the shape _queue_send_rns
+                reads (bridge matrix F4, MF lead). Without them an "rns"
+                message replays whole through _process_mesh_to_rns
+                ("rns_xform"), so F14 + the broadcast fan-out decide again.
+            rns_message: the exact text the live send carried (with the
+                ``[Mesh:xxxx]`` prefix) for those rows.
 
         Returns:
             True if message was successfully persisted, False otherwise.
@@ -604,6 +613,10 @@ class BridgeSendMixin:
             elif not isinstance(content, str):
                 content = ""
             metadata = _coerce_metadata_for_json(msg.metadata or {})
+            if destination == "rns":
+                return self._requeue_failed_rns(
+                    msg, source_id, dest_id, content, metadata,
+                    rns_destinations, rns_message)
             # Lift channel into the top-level payload — channel-0 Public
             # leak follow-up (2026-05-20). The persistent queue's MeshCore
             # sender (meshcore_handler.queue_send → _process_outbound)
@@ -648,6 +661,77 @@ class BridgeSendMixin:
             return True
         except Exception as e:
             logger.error(f"Failed to persist message for retry: {e}")
+            return False
+
+    def _requeue_failed_rns(self, msg, source_id, dest_id, content, metadata,
+                            rns_destinations, rns_message) -> bool:
+        """F4 body of _requeue_failed_message for destination "rns"."""
+        persisted = 0
+        if rns_destinations:
+            for dest_hash in rns_destinations:
+                dest_hex = dest_hash.hex()
+                if self._persistent_queue.enqueue(
+                    payload={
+                        'message': rns_message if rns_message is not None
+                        else content,
+                        # 'destination' keys the queue's dedup hash — without
+                        # it every leg of a fan-out collapses into the first.
+                        'destination': dest_hex,
+                        'destination_hash': dest_hex,
+                        'source_id': source_id,
+                    },
+                    destination="rns",
+                    priority=MessagePriority.HIGH,
+                ):
+                    persisted += 1
+        elif self._persistent_queue.enqueue(
+            payload={
+                'source_id': source_id,
+                'destination_id': dest_id or "",
+                'content': content,
+                'title': getattr(msg, 'title', None),
+                'is_broadcast': bool(getattr(msg, 'is_broadcast', False)),
+                'content_id': getattr(msg, 'content_id', '') or '',
+                'metadata': metadata,
+            },
+            destination="rns_xform",
+            priority=MessagePriority.HIGH,
+        ):
+            persisted += 1
+        if persisted:
+            logger.debug(f"Failed Mesh→RNS message re-queued ({persisted} row(s))")
+        return persisted > 0
+
+    def _dispatch_rns_xform_spill(self, payload: Dict) -> bool:
+        """Persistent-queue sender for a whole-message M→R replay (F4).
+
+        Rebuilds the BridgedMessage and runs _process_mesh_to_rns, so the
+        retry gets the same F14 refusal / fan-out / accounting as a live
+        message. Returns False while RNS is disconnected so the row waits
+        out the queue's backoff instead of replaying into a dead pipeline.
+        """
+        if not self._connected_rns:
+            return False
+        from . import rns_bridge as _rns_bridge_module
+        BridgedMessage = _rns_bridge_module.BridgedMessage
+        try:
+            metadata = dict(payload.get('metadata') or {})
+            # A replay that raises again must not requeue itself forever.
+            metadata['m2r_replay'] = True
+            msg = BridgedMessage(
+                source_network="meshtastic",
+                source_id=payload.get('source_id', '') or '',
+                destination_id=payload.get('destination_id') or None,
+                content=payload.get('content', '') or '',
+                title=payload.get('title'),
+                is_broadcast=bool(payload.get('is_broadcast', False)),
+                content_id=payload.get('content_id', '') or '',
+                metadata=metadata,
+            )
+            self._process_mesh_to_rns(msg)
+            return True
+        except Exception as e:
+            logger.error(f"rns_xform replay dispatch failed: {e}")
             return False
 
     def _requeue_failed_chunks(self, chunks, target: str = "meshtastic") -> bool:
