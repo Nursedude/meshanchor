@@ -1093,9 +1093,11 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             prefix = f"[Mesh:{msg.source_id[-4:]}] " if msg.source_id else "[Mesh] "
             content = prefix + msg.content
 
-            # Build destination list. Direct DM → single recipient; broadcast (or a
-            # DM whose peer didn't resolve) fans out to every default_lxmf_destination
-            # configured — str OR list, via get_lxmf_destinations(). Ported from
+            # Build destination list. Direct DM → single recipient; broadcast
+            # fans out to every default_lxmf_destination configured. A DM whose
+            # peer didn't resolve is REFUSED (bridge matrix F14, operator
+            # 2026-10-16, MF lead): the default list includes peer gateways
+            # that re-emit on RF. — str OR list, via get_lxmf_destinations(). Ported from
             # MeshForge (lead repo): the str-only path silently ignored a list config,
             # dropping every broadcast despite default_lxmf_destination being set.
             destinations = []
@@ -1103,6 +1105,19 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 direct = self._get_rns_destination(msg.destination_id)
                 if direct:
                     destinations.append(direct)
+
+            if not destinations and msg.destination_id and not msg.is_broadcast:
+                with self._stats_lock:
+                    self.stats['mesh_to_rns_private_refused'] = (
+                        self.stats.get('mesh_to_rns_private_refused', 0) + 1)
+                    self.stats['mesh_to_rns_dropped'] = (
+                        self.stats.get('mesh_to_rns_dropped', 0) + 1)
+                logger.warning(
+                    f"Mesh→RNS: refusing DM from {msg.source_id} to "
+                    f"{msg.destination_id} — no single RNS recipient; a DM is "
+                    f"never fanned to the default list (F14)")
+                self.health.record_message_failed("mesh_to_rns", requeued=False)
+                return
 
             if not destinations:
                 for hex_str in self.config.rns.get_lxmf_destinations():

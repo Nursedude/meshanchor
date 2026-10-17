@@ -3388,3 +3388,43 @@ class TestPeriodicReannounce:
         from gateway.rns_bridge import RNSMeshtasticBridge
         assert "_maybe_reannounce" in inspect.getsource(
             RNSMeshtasticBridge._rns_loop)
+
+
+class TestMeshDmNeverFannedToDefaults:
+    """Bridge matrix F14 (operator 2026-10-16; parity with MeshForge, the
+    lead repo): a Meshtastic DM that resolves to no single RNS recipient is
+    REFUSED — the default LXMF list includes peer gateways that re-emit on
+    RF, so a fan-out publishes it. MeshCore DMs are already kept at ingress
+    ("A DM STAYS A DM", 2026-10-07); this is the Meshtastic side."""
+
+    DEST = "6b1a0120941444587d7d1dc1bf6d64d7"
+
+    def _dm(self, destination_id="!0000beef", is_broadcast=False):
+        from gateway.rns_bridge import BridgedMessage
+        return BridgedMessage(source_network="meshtastic", source_id="!aabb0042",
+                              destination_id=destination_id, content="private",
+                              is_broadcast=is_broadcast)
+
+    def test_unresolved_dm_refused_with_witness(self, bridge):
+        bridge.config.rns.get_lxmf_destinations.return_value = [self.DEST]
+        with patch.object(bridge, '_get_rns_destination', return_value=None), \
+             patch.object(bridge, 'send_to_rns', return_value=True) as rns, \
+             patch.object(bridge, '_requeue_failed_message') as rq:
+            bridge._process_mesh_to_rns(self._dm())
+        rns.assert_not_called()
+        rq.assert_not_called()
+        assert bridge.stats['mesh_to_rns_private_refused'] == 1
+
+    def test_resolved_dm_still_goes_direct(self, bridge):
+        direct = bytes.fromhex("11851af8e6d95c6f4735727e513d15d8")
+        bridge.config.rns.get_lxmf_destinations.return_value = [self.DEST]
+        with patch.object(bridge, '_get_rns_destination', return_value=direct), \
+             patch.object(bridge, 'send_to_rns', return_value=True) as rns:
+            bridge._process_mesh_to_rns(self._dm())
+        assert [c.args[1] for c in rns.call_args_list] == [direct]
+
+    def test_broadcast_still_fans_out(self, bridge):
+        bridge.config.rns.get_lxmf_destinations.return_value = [self.DEST]
+        with patch.object(bridge, 'send_to_rns', return_value=True) as rns:
+            bridge._process_mesh_to_rns(self._dm(destination_id=None, is_broadcast=True))
+        assert rns.call_count == 1
