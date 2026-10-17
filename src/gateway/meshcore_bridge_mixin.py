@@ -36,6 +36,28 @@ _LAB_WIRE_RE = _re.compile(
     r'^(?:\[[^\[\]]{1,60}\]\s+){0,4}(?:PING|ACK)\s+seq=\d+\s+(?:from|orig)=')
 
 
+def private_to_channel(msg, directed_replies: bool = True) -> bool:
+    """True when ``msg`` is PRIVATE content that a MeshCore channel send
+    would publish (bridge matrix F2, 2026-10-16).
+
+    Private = a Meshtastic-origin DM (``is_broadcast`` False), or a
+    ``@contact`` directed reply from any origin while that leg is enabled
+    (``directed_replies`` = ``meshcore.dm_replies_enabled``; with the leg
+    off, ``@x`` is ordinary channel text — the kill switch). RNS-origin chatter is NOT
+    private here: its BridgedMessage defaults ``is_broadcast=False`` and the
+    RNS→MC channel leg is the bridge's purpose. Consumers: the healthy path
+    (after the directed-DM leg, which carries private→private correctly) and
+    the disconnect branch, which persists for CHANNEL replay.
+    """
+    # is_broadcast absent reads as private: fail CLOSED (a dropped broadcast
+    # is a counter; a published DM cannot be recalled).
+    if (getattr(msg, 'source_network', None) == "meshtastic"
+            and not getattr(msg, 'is_broadcast', False)):
+        return True
+    return (directed_replies
+            and parse_directed_reply(getattr(msg, 'content', None)) is not None)
+
+
 def parse_meshcore_channel_header(content: str):
     """Split a MeshCore channel broadcast's baked-in header from its body.
 
@@ -331,6 +353,24 @@ class MeshCoreBridgeMixin:
                 if parsed is not None:
                     self._bridge_dm_reply(parsed, net_prefix, src_label, src_net)
                     return
+
+            # Private never leaves on a channel (bridge matrix F2,
+            # 2026-10-16). A Meshtastic DM reaches here because the Mesh→RNS
+            # dequeue fans EVERY message onto the MeshCore queue; the
+            # directed-DM leg above carries private→private, and anything
+            # private still here would be published on the bridge channel.
+            if private_to_channel(msg, getattr(meshcore_cfg, 'dm_replies_enabled', True)):
+                with self._stats_lock:
+                    self.stats.setdefault('meshcore_bridge_private_drop', 0)
+                    self.stats['meshcore_bridge_private_drop'] += 1
+                logger.warning(
+                    "Bridge %s→MC: refusing a PRIVATE message (DM) — it would "
+                    "go out on MeshCore channel; not sent", net_prefix)
+                self.health.record_message_failed(
+                    "mesh_to_meshcore" if src_net == "meshtastic" else "rns_to_meshcore",
+                    requeued=False,
+                )
+                return
 
             # Reply-doubling guard (2026-05-26). Meshtastic-origin content
             # (carries the "[meshtastic ch..]" wire tag) whose source identity

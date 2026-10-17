@@ -1200,7 +1200,7 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge.config.meshcore.bridge_target_channel = 1
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="x",
             metadata={"channel": 2},  # source channel ignored
         )
@@ -1212,7 +1212,7 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge.config.meshcore.bridge_target_channel = -1
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="x",
             metadata={"channel": 5},
         )
@@ -1225,7 +1225,7 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge.config.meshcore.bridge_target_channel = 1
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="leaky on ch0",
             metadata={"channel": 0, "snr": -120.0},
         )
@@ -1236,7 +1236,7 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge.config.meshcore.bridge_target_channel = "garbage"
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="x",
             metadata={},
         )
@@ -1249,7 +1249,7 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge.config.meshcore.bridge_target_channel = 0
         from gateway.rns_bridge import BridgedMessage
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="x",
             metadata={"channel": 7},
         )
@@ -1301,7 +1301,7 @@ class TestBridgeToMeshcoreChannelLeak:
         )
 
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="hello",
             metadata={"channel": 2},  # source channel; must NOT route to slot 2
         )
@@ -1329,7 +1329,7 @@ class TestBridgeToMeshcoreChannelLeak:
         )
 
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="HawaiiNet broadcast",
             metadata={"channel": 0, "snr": -100.0},
         )
@@ -1352,7 +1352,7 @@ class TestBridgeToMeshcoreChannelLeak:
         )
 
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="leaky",
             metadata={},
         )
@@ -1373,7 +1373,7 @@ class TestBridgeToMeshcoreChannelLeak:
         )
 
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="via-config",
             metadata={},
         )
@@ -1533,7 +1533,7 @@ class TestBridgeToMeshcoreChannelLeak:
             return True
 
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="should not leak on replay",
             metadata={"channel": 0},  # source Meshtastic ch0
         )
@@ -1572,7 +1572,7 @@ class TestBridgeToMeshcoreChannelLeak:
             return -1
 
         msg = BridgedMessage(
-            source_network="meshtastic", source_id="!abc",
+            source_network="meshtastic", source_id="!abc", is_broadcast=True,
             destination_id=None, content="must be dropped",
             metadata={},  # no channel info — resolver returns -1
         )
@@ -1591,6 +1591,41 @@ class TestBridgeToMeshcoreChannelLeak:
         # signal whether the leak attempted to fire from `_process_bridge_to_meshcore`
         # or from this disconnect-window code.
         assert bridge.stats.get('meshcore_bridge_default_channel_drop') == 1
+
+    def test_bridge_loop_disconnect_refuses_private_dm(self, bridge):
+        """Bridge matrix F2: the disconnect branch persists for CHANNEL
+        replay, so a Meshtastic DM must be refused there too — not queued
+        to publish on the bridge channel when MeshCore comes back."""
+        from gateway.bridge_health import SubsystemState
+        from gateway.rns_bridge import BridgedMessage
+
+        bridge.config.meshcore.bridge_target_channel = 1
+        bridge._meshcore_handler = MagicMock()
+        bridge.health.get_subsystem_state = MagicMock(
+            return_value=SubsystemState.DISCONNECTED
+        )
+
+        def fake_resolve(m):
+            bridge._running = False
+            return 1
+
+        msg = BridgedMessage(
+            source_network="meshtastic", source_id="!abc",
+            destination_id="!0000beef", content="my private note",
+            is_broadcast=False,
+        )
+        bridge._bridge_to_meshcore_queue.put(msg)
+        bridge._running = True
+
+        with patch.object(bridge, '_process_mesh_to_rns'), \
+             patch.object(bridge, '_process_rns_to_mesh'), \
+             patch.object(bridge, '_resolve_bridge_target_channel', side_effect=fake_resolve), \
+             patch.object(bridge, '_requeue_failed_message') as mock_requeue:
+            bridge._bridge_loop()
+
+        mock_requeue.assert_not_called()
+        assert bridge.stats.get('meshcore_bridge_private_drop') == 1
+
 
 
 # ---------------------------------------------------------------------------

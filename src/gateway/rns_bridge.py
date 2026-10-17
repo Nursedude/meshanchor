@@ -67,7 +67,7 @@ PersistentMessageQueue, MessagePriority, HAS_PERSISTENT_QUEUE = safe_import(
 )
 
 from .message_routing import MessageRouter
-from .meshcore_bridge_mixin import MeshCoreBridgeMixin
+from .meshcore_bridge_mixin import MeshCoreBridgeMixin, private_to_channel
 from ._rns_bridge_connection import RNSConnectionMixin
 from .bridge_ack_mixin import BridgeAckMixin
 from .bridge_health_mixin import BridgeHealthMixin
@@ -935,7 +935,23 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                         # operators can monitor both paths from one
                         # signal on `/api/stats`.
                         target_channel = self._resolve_bridge_target_channel(msg)
-                        if target_channel < 0:
+                        if private_to_channel(msg, getattr(
+                                getattr(self.config, 'meshcore', None),
+                                'dm_replies_enabled', True)):
+                            # Replay is a CHANNEL send — a DM or "@contact"
+                            # reply persisted here would publish it (F2).
+                            with self._stats_lock:
+                                self.stats.setdefault(
+                                    'meshcore_bridge_private_drop', 0)
+                                self.stats['meshcore_bridge_private_drop'] += 1
+                            logger.warning(
+                                "Bridge →MC (replay): refusing a PRIVATE "
+                                "message while MeshCore is down — replay "
+                                "would send it on a channel; not queued")
+                            self.health.record_message_failed(
+                                "mesh_to_meshcore", requeued=False,
+                            )
+                        elif target_channel < 0:
                             with self._stats_lock:
                                 self.stats.setdefault(
                                     'meshcore_bridge_default_channel_drop', 0)
