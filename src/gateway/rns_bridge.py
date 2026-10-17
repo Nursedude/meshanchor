@@ -1136,9 +1136,18 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             if sent_count and failed_legs:
                 # F4 review R5: one leg landing must not erase a sibling's
                 # retry — requeue only the legs that failed.
-                self._requeue_failed_message(
-                    msg, "rns", rns_destinations=failed_legs,
-                    rns_message=content)
+                if not self._requeue_failed_message(
+                        msg, "rns", rns_destinations=failed_legs,
+                        rns_message=content):
+                    # Dedup/queue-full drop: partly delivered, so no health
+                    # failure — but never silent (review F3, MF lead).
+                    with self._stats_lock:
+                        self.stats['mesh_to_rns_requeue_dropped'] = (
+                            self.stats.get('mesh_to_rns_requeue_dropped', 0) + 1)
+                    logger.warning(
+                        "Mesh→RNS: retry of failed leg(s) "
+                        f"{[d.hex()[:8] for d in failed_legs]} NOT queued "
+                        "(dedup/queue)")
 
             if sent_count:
                 if len(destinations) > 1:
