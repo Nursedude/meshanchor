@@ -11,19 +11,20 @@ of them stops working, CI says so.
 """
 from __future__ import annotations
 
+import glob
 import os
 import subprocess
 
 import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_HARNESSES = [
-    "test_honest_status_preserve.sh",    # suite-failure log preservation
-    "test_honest_status_suite_leg.sh",   # suite verdict vs. an untrustworthy rc
-    "test_honest_status_boxes.sh",       # fleet-leg classification (SHA/watchdog)
-    "test_fleet_hosts_lib.sh",           # THE fleet_hosts resolver (both consumers)
-    "test_pytest_tmp_prune.sh",          # temp-tree pruner (tmpfs = RAM)
-]
+# Every tests/test_*.sh is a harness by naming convention — no allowlist to
+# forget to update (MF twin's fix, ported 2026-10-18: the list here had left
+# test_honest_status_interrupt.sh unrun since 09-07, and would have done the
+# same to test_ensure_prune_cron.sh).
+_HARNESSES = sorted(
+    os.path.basename(p) for p in glob.glob(os.path.join(_HERE, "test_*.sh"))
+)
 
 
 @pytest.mark.parametrize("script", _HARNESSES)

@@ -216,6 +216,12 @@ if [ "$(id -u)" != 0 ]; then
     "$([ "$rc" = 0 ] && echo ok)"
   check "newest verdict line stays the informative FAIL, never wrapper_crashed" \
     "$(grep 'pytest_tmp_prune' "$VERDICTS" | tail -1 | grep -q 'could NOT be removed' && echo ok)"
+  # The FAIL names the blocker, its owner, and the command that clears it
+  # (MF lead 2026-10-18: a root-owned leftover made the count alone useless).
+  check "the FAIL names the stuck dir" \
+    "$(echo "$out" | grep -q "pytest-1/some_test0" && echo ok)"
+  check "the FAIL names its owner and the clearing command" \
+    "$(echo "$out" | grep -q "owner $(id -un)" && echo "$out" | grep -q 'chmod -R u+w' && echo ok)"
 
   # …but when the verdict CANNOT be recorded, exit 1 so the guard speaks:
   # wrapper_crashed is then the closest available truth, not a lie over a

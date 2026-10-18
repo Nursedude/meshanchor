@@ -74,6 +74,24 @@ say() {  # $1 = status, $2 = message
   echo "pytest_tmp_prune: $1 — $2"
 }
 
+# A failed rm must say WHICH dir and WHY, not only a count (MF lead 2026-10-18: a
+# reviewer's sudo drill left root-owned dirs in its scratchpad; the verdict
+# said only "1 could NOT be removed"). rm -rf fails when a dir it must empty is
+# not writable, so the first non-writable dir left behind IS the blocker.
+STUCK=""   # first blocker seen this run, with its cure
+_note_stuck() {  # $1 = the dir rm -rf failed on
+  [ -n "$STUCK" ] && return
+  local b owner
+  b="$(find "$1" -type d ! -writable -print -quit 2>/dev/null)"
+  if [ -z "$b" ]; then STUCK="$1 (no non-writable dir found — re-run rm by hand to see the error)"; return; fi
+  owner="$(stat -c %U "$b" 2>/dev/null || echo '?')"
+  if [ "$owner" = "$(id -un)" ]; then
+    STUCK="$b (owner $owner, mode $(stat -c %A "$b" 2>/dev/null)) — clear: chmod -R u+w '$1' && rm -rf '$1'"
+  else
+    STUCK="$b (owner $owner, mode $(stat -c %A "$b" 2>/dev/null)) — clear: sudo rm -rf '$1'"
+  fi
+}
+
 # A box that never runs the suite has no tree. That is not an error and not a
 # silence to explain — it is nothing to do.
 if [ ! -d "$BASE" ]; then
@@ -143,7 +161,7 @@ for d in "${dirs[@]}"; do
       stranded=$((stranded + 1))
     fi
   fi
-  if rm -rf "$d" 2>/dev/null; then pruned=$((pruned + 1)); else failed=$((failed + 1)); fi
+  if rm -rf "$d" 2>/dev/null; then pruned=$((pruned + 1)); else failed=$((failed + 1)); _note_stuck "$d"; fi
 done
 
 after_kb=$(du -sk "$BASE" 2>/dev/null | cut -f1); after_kb=${after_kb:-0}
@@ -154,7 +172,7 @@ detail="pruned $pruned of $total dir(s), freed ${freed_mb} MB, $remain remain"
 [ "$stranded" -gt 0 ] && detail="$detail, $stranded stranded (fresh lock, no live pytest — shutdown left it behind)"
 
 if [ "$failed" -gt 0 ]; then
-  say FAIL "$detail, $failed could NOT be removed"
+  say FAIL "$detail, $failed could NOT be removed; first: $STUCK"
   # The verdict line above IS the failure report. Exit 0 so the crontab's
   # `|| ... wrapper_crashed` guard — reserved for dying before speaking —
   # does not append a second, FALSE verdict over it (the newest line is what
