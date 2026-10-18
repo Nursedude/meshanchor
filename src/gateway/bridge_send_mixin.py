@@ -719,6 +719,15 @@ class BridgeSendMixin:
     def _requeue_failed_rns(self, msg, source_id, dest_id, content, metadata,
                             rns_destinations, rns_message) -> bool:
         """F4 body of _requeue_failed_message for destination "rns"."""
+        # ROADMAP 6f: NORMAL so a long single-peer outage sheds its OWN
+        # oldest rows under pressure, never fresh traffic (Q16); a row
+        # continuing an older wait keeps its first enqueue time (Q17).
+        from datetime import datetime
+        try:
+            first_enqueued = datetime.fromisoformat(
+                (metadata or {}).get('m2r_first_enqueued_at'))
+        except (TypeError, ValueError):
+            first_enqueued = None
         persisted = 0
         if rns_destinations is not None:
             # Resolved legs, possibly none — an empty list has nothing to
@@ -736,7 +745,8 @@ class BridgeSendMixin:
                         'source_id': source_id,
                     },
                     destination="rns",
-                    priority=MessagePriority.HIGH,
+                    priority=MessagePriority.NORMAL,
+                    created_at=first_enqueued,
                 ):
                     persisted += 1
         elif self._persistent_queue.enqueue(
@@ -750,7 +760,8 @@ class BridgeSendMixin:
                 'metadata': metadata,
             },
             destination="rns_xform",
-            priority=MessagePriority.HIGH,
+            priority=MessagePriority.NORMAL,
+            created_at=first_enqueued,
         ):
             persisted += 1
         if persisted:
@@ -773,6 +784,10 @@ class BridgeSendMixin:
             metadata = dict(payload.get('metadata') or {})
             # A replay that raises again must not requeue itself forever.
             metadata['m2r_replay'] = True
+            # Q17: a failed replay's retry rows keep the FIRST enqueue time.
+            if payload.get('_queue_created_at'):
+                metadata.setdefault('m2r_first_enqueued_at',
+                                    payload['_queue_created_at'])
             msg = BridgedMessage(
                 source_network="meshtastic",
                 source_id=payload.get('source_id', '') or '',

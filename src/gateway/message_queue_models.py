@@ -24,10 +24,18 @@ def _env_seconds(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _m2r_max_age_from_env() -> int:
+    """One knob for both bridges on a box (operator Q18): the shared
+    MESHFORGE_M2R_MAX_AGE_S wins; MESHANCHOR_M2R_MAX_AGE_S is the fallback."""
+    if os.environ.get("MESHFORGE_M2R_MAX_AGE_S"):
+        return _env_seconds("MESHFORGE_M2R_MAX_AGE_S", 86400)
+    return _env_seconds("MESHANCHOR_M2R_MAX_AGE_S", 86400)
+
+
 #: ROADMAP 6f (MF lead, operator grilling 2026-10-17): a Mesh→RNS row —
-#: deferred or gated — expires after this long, witnessed. Same default as
-#: MeshForge's M2R_MAX_AGE_S; knob MESHANCHOR_M2R_MAX_AGE_S.
-M2R_MAX_AGE_S = _env_seconds("MESHANCHOR_M2R_MAX_AGE_S", 86400)
+#: deferred or gated — expires after this long, witnessed. Same default and
+#: same primary knob as MeshForge's M2R_MAX_AGE_S.
+M2R_MAX_AGE_S = _m2r_max_age_from_env()
 
 #: An age below 0 or above this is a wall-clock jump on an RTC-less Pi, not a
 #: real age: the row is re-stamped once instead of expired.
