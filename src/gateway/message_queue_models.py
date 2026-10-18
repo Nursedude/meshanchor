@@ -9,10 +9,43 @@ module re-exports every public name so external import paths are unchanged.
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional, Any
+
+
+def _env_seconds(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+#: ROADMAP 6f (MF lead, operator grilling 2026-10-17): a Mesh→RNS row —
+#: deferred or gated — expires after this long, witnessed. Same default as
+#: MeshForge's M2R_MAX_AGE_S; knob MESHANCHOR_M2R_MAX_AGE_S.
+M2R_MAX_AGE_S = _env_seconds("MESHANCHOR_M2R_MAX_AGE_S", 86400)
+
+#: An age below 0 or above this is a wall-clock jump on an RTC-less Pi, not a
+#: real age: the row is re-stamped once instead of expired.
+AGE_SANITY_CAP_S = 7 * 86400
+
+
+class SendDeferred(Exception):
+    """Raised by a queue sender: "not now, try again in delay_s".
+
+    The row returns to pending with retry_after set and its retry_count
+    UNTOUCHED — only transient conditions (circuit open, no path yet) defer;
+    every other failure still counts against max_retries.
+    """
+
+    def __init__(self, delay_s: float, reason: str = ""):
+        super().__init__(f"deferred {delay_s:.0f}s: {reason}")
+        self.delay_s = max(1.0, float(delay_s))
+        self.reason = reason
 
 
 class MessagePriority(Enum):

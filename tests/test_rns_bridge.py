@@ -3122,16 +3122,18 @@ class TestCircuitBreakerWiringIssue74:
             (b"\xab" * 16).hex()[:8], "no path"
         )
 
-    def test_queue_send_rns_raises_retriable_when_circuit_open(self, bridge):
-        """Queue path RAISES with a retriable-pattern message so
-        RetryPolicy classifies it transient (backoff + retry after the
-        recovery window) instead of the unknown-error one-shot retry a
-        bare `return False` would get."""
+    def test_queue_send_rns_defers_when_circuit_open(self, bridge):
+        """ROADMAP 6f (MF lead, 2026-10-17): the queue path DEFERS for the
+        circuit's recovery window — not an attempt. The #74 version raised a
+        retriable RuntimeError for a RetryPolicy the bridge queue never had."""
         self._prime(bridge)
         bridge._circuit_breaker.can_send.return_value = False
         payload = {"message": "hi", "destination_hash": b"\xab" * 16}
-        with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        from gateway.message_queue import SendDeferred
+        bridge._circuit_breaker.recovery_timeout = 60.0
+        with pytest.raises(SendDeferred) as exc:
             bridge._queue_send_rns(payload)
+        assert exc.value.delay_s == 60.0
 
     def test_queue_send_rns_records_success(self, bridge):
         import sys

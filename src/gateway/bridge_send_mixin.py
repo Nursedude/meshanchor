@@ -23,6 +23,11 @@ import logging
 import time
 from typing import Dict, Optional
 
+from gateway.message_queue_models import (
+    AGE_SANITY_CAP_S,
+    M2R_MAX_AGE_S,
+    SendDeferred,
+)
 from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
 from utils.tx_guard import assert_rns_tx_allowed
@@ -333,9 +338,41 @@ class BridgeSendMixin:
         the queue's 3-try budget on it (F4 review R2). "rns_xform" is F4's
         whole-message replay through _process_mesh_to_rns."""
         ready = lambda: bool(self._connected_rns)  # noqa: E731
-        queue.register_sender("rns", self._queue_send_rns, ready_fn=ready)
+        # ROADMAP 6f: deferred or gated M→R rows expire after M2R_MAX_AGE_S.
+        queue.register_sender("rns", self._queue_send_rns, ready_fn=ready,
+                              max_age_s=M2R_MAX_AGE_S)
         queue.register_sender("rns_xform", self._dispatch_rns_xform_spill,
-                              ready_fn=ready)
+                              ready_fn=ready, max_age_s=M2R_MAX_AGE_S)
+
+    @staticmethod
+    def _m2r_defer_delay(payload: Dict) -> float:
+        """No-path backoff (ROADMAP 6f): 15 s doubling per deferral, 5 min cap."""
+        try:
+            n = max(0, int(payload.get('_deferrals', 0) or 0))
+        except (TypeError, ValueError):
+            n = 0
+        return float(min(15 * (2 ** min(n, 10)), 300))
+
+    def _circuit_recovery_s(self) -> float:
+        value = getattr(self._circuit_breaker, 'recovery_timeout', None)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and value > 0:
+            return float(value)
+        return 60.0
+
+    @staticmethod
+    def _queued_seconds(payload: Dict) -> Optional[int]:
+        """How long this row waited (from the queue's _queue_created_at), or
+        None when unknowable — a clock jump is never reported as a wait."""
+        from datetime import datetime
+        try:
+            created = datetime.fromisoformat(payload['_queue_created_at'])
+        except (KeyError, TypeError, ValueError):
+            return None
+        waited = (datetime.now() - created).total_seconds()
+        if waited < 0 or waited > AGE_SANITY_CAP_S:
+            return None
+        return int(waited)
 
     def _queue_send_rns(self, payload: Dict) -> bool:
         """Send handler for persistent queue - RNS destination."""
@@ -358,10 +395,11 @@ class BridgeSendMixin:
                 else str(destination_hash).lower()[:8]
             )
             if not self.can_send_to(_gate_key):
-                raise RuntimeError(
-                    f"circuit open for {_gate_key}: "
-                    f"destination temporarily unavailable"
-                )
+                # ROADMAP 6f (MF lead): defer to the circuit's recovery
+                # window — not an attempt. The #74 retriable raise assumed a
+                # RetryPolicy the bridge queue never had.
+                raise SendDeferred(self._circuit_recovery_s(),
+                                   f"circuit open for {_gate_key}")
 
         try:
             import RNS
@@ -380,15 +418,10 @@ class BridgeSendMixin:
                 call_boundary("rnsd.request_path",
                               RNS.Transport.request_path, destination_hash,
                               target=hash_short)
-                for _ in range(30):
-                    if RNS.Transport.has_path(destination_hash):
-                        break
-                    if self._stop_event.wait(0.1):
-                        return False
-
-            if not RNS.Transport.has_path(destination_hash):
+                # ROADMAP 6f: no in-worker busy-wait — the path request is
+                # out; come back later.
                 self.record_send_failure(hash_short, "no path")
-                return False
+                raise SendDeferred(self._m2r_defer_delay(payload), "no path")
 
             dest_identity = call_boundary("rnsd.identity_recall",
                                           RNS.Identity.recall, destination_hash,
@@ -398,7 +431,15 @@ class BridgeSendMixin:
                 RNS.Destination.SINGLE, "lxmf", "delivery"
             )
 
-            lxm = LXMF.LXMessage(destination, self._lxmf_source, message, "MeshAnchor Gateway")
+            queued_s = self._queued_seconds(payload)
+            if queued_s is not None:
+                # Late delivery is still delivery; say how late (6f, Q3).
+                lxm = LXMF.LXMessage(destination, self._lxmf_source, message,
+                                     "MeshAnchor Gateway",
+                                     fields={'meshforge_queued_s': queued_s})
+            else:
+                lxm = LXMF.LXMessage(destination, self._lxmf_source, message,
+                                     "MeshAnchor Gateway")
 
             # MF Issue #74 port (Fork C syn/ack): pin the LXMF delivery
             # callbacks to the queue row's id (injected at dispatch by
@@ -449,6 +490,8 @@ class BridgeSendMixin:
             self.record_send_success(hash_short)
             return True
 
+        except SendDeferred:
+            raise
         except Exception as e:
             logger.error(f"Queue send to RNS failed: {e}")
             if destination_hash:
