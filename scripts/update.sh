@@ -233,9 +233,24 @@ SVC_UPDATED=false
 # files if present so a unit-file change (e.g. ExecStart) actually lands.
 for _unit in meshanchor-daemon.service meshanchor.service; do
     if [[ -f "/etc/systemd/system/$_unit" ]] && [[ -f "$INSTALL_DIR/scripts/$_unit" ]]; then
-        cp "$INSTALL_DIR/scripts/$_unit" "/etc/systemd/system/$_unit"
-        echo -e "  ${GREEN}✓ $_unit updated${NC}"
-        SVC_UPDATED=true
+        if grep -q "__MESHANCHOR_" "$INSTALL_DIR/scripts/$_unit"; then
+            # Placeholder unit (#151 item 1): render for the box's operator —
+            # the installed pin is kept when that user exists here. Refusal
+            # leaves the installed unit as it was, loudly.
+            # shellcheck source=lib/unit_render.sh
+            . "$INSTALL_DIR/scripts/lib/unit_render.sh"
+            if _u="$(ma_resolve_unit_user "/etc/systemd/system/$_unit")" \
+                    && ma_render_unit "$INSTALL_DIR/scripts/$_unit" "/etc/systemd/system/$_unit" "$_u"; then
+                echo -e "  ${GREEN}✓ $_unit updated (operator: $_u)${NC}"
+                SVC_UPDATED=true
+            else
+                echo -e "  ${YELLOW}⚠ $_unit NOT updated — no operator resolved; installed unit kept. Set MESHANCHOR_OPERATOR=<user> and re-run${NC}"
+            fi
+        else
+            cp "$INSTALL_DIR/scripts/$_unit" "/etc/systemd/system/$_unit"
+            echo -e "  ${GREEN}✓ $_unit updated${NC}"
+            SVC_UPDATED=true
+        fi
     fi
 done
 
@@ -322,7 +337,10 @@ fi
 # Fall back to the real uid, which is the thing rather than a claim about it.
 # When even that yields no operator — root with no sudo context — there IS no
 # right answer, so SKIP the block loudly instead of deploying somewhere.
-REAL_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || true)}}"
+# One resolver for user AND system units (unit_render.sh; #151 review F6).
+# shellcheck source=lib/unit_render.sh
+. "$INSTALL_DIR/scripts/lib/unit_render.sh"
+REAL_USER="$(ma_resolve_unit_user "" 2>/dev/null || true)"
 if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
     echo -e "  ${YELLOW}⚠ No operator login resolved (SUDO_USER='$SUDO_USER' USER='$USER' id -un='$(id -un 2>/dev/null || true)')${NC}"
     echo -e "  ${YELLOW}  Skipping user-service deployment — re-run as: sudo bash scripts/update.sh${NC}"

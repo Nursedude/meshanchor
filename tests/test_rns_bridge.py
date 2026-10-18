@@ -2918,9 +2918,8 @@ class TestDispatchTimeDedupRecheck:
 
     The enqueue-side check races the other TX path's registration; by
     dispatch time (past TX pacing) the registry is settled. Applied to all
-    three dispatch callbacks: MQTTBridgeHandler.queue_send,
-    MQTTBridgeHandler.publish_to_mqtt (MA's live R→M path), and
-    MeshtasticHandler.queue_send. Flag-gated strict-True; DMs exempt.
+    dispatch callbacks: MQTTBridgeHandler.queue_send (the R→M path in
+    mqtt_bridge mode since #151 item 5) and MeshtasticHandler.queue_send. Flag-gated strict-True; DMs exempt.
     """
 
     def _fresh_registry(self, monkeypatch):
@@ -2970,27 +2969,66 @@ class TestDispatchTimeDedupRecheck:
                              "destination": "!b03bb70c", "channel": 2}) is True
         h.send_text.assert_called_once()
 
-    def test_publish_to_mqtt_suppresses_on_hit(self, monkeypatch):
-        """MA's live R→M dispatch path (destination='mqtt')."""
-        reg = self._fresh_registry(monkeypatch)
-        h = self._mqtt_handler(dedup_on=True)
-        reg.register("race content")
-        assert h.publish_to_mqtt({"message": "[ch0:p4] race content",
-                                  "channel": 0}) is True
-        h._client.publish.assert_not_called()
-        assert h.stats["dispatch_dedup_suppressed"] == 1
+    def test_publish_to_mqtt_is_gone(self):
+        """#151 item 5 / MeshForge Hardening E: the JSON publish R→M path
+        never reached RF (wrong-shape downlink topic, MF Issue #40) and its
+        own subscription echoed it back to RNS. queue_send (HTTP toradio)
+        is the one R→M dispatch path; its dedup pins are above."""
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        assert not hasattr(MQTTBridgeHandler, "publish_to_mqtt")
 
-    def test_publish_to_mqtt_flag_off_publishes(self, monkeypatch):
-        reg = self._fresh_registry(monkeypatch)
-        h = self._mqtt_handler(dedup_on=False)
-        h._mqtt_lock = __import__("threading").Lock()
-        h.config.mqtt_bridge = MagicMock(
-            root_topic="msh", region="US", channel="meshanchor")
-        h._client.publish.return_value = MagicMock(rc=0)
-        reg.register("race content")
-        assert h.publish_to_mqtt({"message": "[ch0:p4] race content",
-                                  "channel": 0}) is True
-        h._client.publish.assert_called_once()
+
+class TestRnsToMeshQueuedOverHttp:
+    """#151 item 5 (KN4YDL): mqtt_bridge mode queued R→M under
+    destination="mqtt" -> publish_to_mqtt, which a WiFi node with downlink
+    off never transmits and the bridge's own subscription echoed back.
+    Port of MeshForge Hardening E: queue under "meshtastic" (queue_send ->
+    HTTP toradio), the same path every other mode uses."""
+
+    def test_mqtt_bridge_mode_enqueues_meshtastic(self, bridge):
+        from gateway.rns_bridge import BridgedMessage
+        bridge.config.bridge_mode = "mqtt_bridge"
+        q = MagicMock()
+        q.enqueue.return_value = True
+        bridge._persistent_queue = q
+        msg = BridgedMessage(source_network="rns", source_id="abcdef01",
+                             destination_id=None, content="hello mesh")
+        with patch('gateway.rns_bridge.HAS_PERSISTENT_QUEUE', True), \
+             patch.object(bridge, 'send_to_meshtastic', return_value=True):
+            bridge._process_rns_to_mesh(msg)
+        dests = {c.kwargs["destination"] for c in q.enqueue.call_args_list}
+        assert dests == {"meshtastic"}, dests
+
+    def test_legacy_mqtt_rows_drain_through_queue_send(self):
+        """Rows queued under "mqtt" by an older build must still have a
+        consumer — the HTTP sender, never the deleted JSON publish."""
+        cfg = _mock_gateway_config()
+        cfg.bridge_mode = "mqtt_bridge"
+        queue = MagicMock()
+        handler = MagicMock()
+        with patch("gateway.rns_bridge.GatewayConfig"), \
+             patch("gateway.rns_bridge.get_node_tracker"), \
+             patch("gateway.rns_bridge.BridgeHealthMonitor"), \
+             patch("gateway.rns_bridge.DeliveryTracker"), \
+             patch("gateway.rns_bridge.MeshtasticHandler"), \
+             patch("gateway.rns_bridge.ReconnectStrategy"), \
+             patch("gateway.rns_bridge.HAS_CIRCUIT_BREAKER", False), \
+             patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", True), \
+             patch("gateway.rns_bridge.PersistentMessageQueue",
+                   return_value=queue), \
+             patch("gateway.rns_bridge.HAS_MQTT_BRIDGE", True), \
+             patch("gateway.rns_bridge.MQTTBridgeHandler",
+                   return_value=handler), \
+             patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
+             patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
+             patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
+             patch("gateway.rns_bridge.HAS_RNS_SNIFFER", False):
+            from gateway.rns_bridge import RNSMeshtasticBridge
+            RNSMeshtasticBridge(config=cfg)
+        senders = {c.args[0]: c.args[1]
+                   for c in queue.register_sender.call_args_list}
+        assert senders.get("meshtastic") is handler.queue_send, senders
+        assert senders.get("mqtt") is handler.queue_send, senders
 
 
 class TestSeenOnRfRegistration:

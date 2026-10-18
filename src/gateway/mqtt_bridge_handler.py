@@ -392,18 +392,22 @@ class MQTTBridgeHandler(BaseMessageHandler):
             self._connected = True
             mqtt_cfg = self.config.mqtt_bridge
 
-            # Subscribe to JSON topics (human-readable, recommended)
-            # Topic format: msh/{REGION}/2/json/{CHANNEL}/{NODE_ID}
+            # meshtasticd/firmware publish in two topic shapes depending on
+            # build: region-ful msh/{REGION}/2/json/{CHANNEL}/{NODE} and
+            # region-less msh/2/json/{CHANNEL}/{NODE}. Subscribe to BOTH so the
+            # bridge works whatever the radio does — an empty region used to
+            # build msh//2/json/... and match nothing, silently (#151 item 4;
+            # port of MeshForge's subscription).
+            root = mqtt_cfg.root_topic
+            chan = mqtt_cfg.channel
             if mqtt_cfg.json_enabled:
-                json_topic = f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/json/{mqtt_cfg.channel}/#"
-                client.subscribe(json_topic)
-                logger.debug(f"Subscribed to JSON topic: {json_topic}")
+                for t in (f"{root}/+/2/json/{chan}/#", f"{root}/2/json/{chan}/#"):
+                    client.subscribe(t)
+                    logger.debug(f"Subscribed to JSON topic: {t}")
 
-            # Also subscribe to protobuf topics for completeness
-            # Topic format: msh/{REGION}/2/e/{CHANNEL}/{NODE_ID}
-            proto_topic = f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/e/{mqtt_cfg.channel}/#"
-            client.subscribe(proto_topic)
-            logger.debug(f"Subscribed to protobuf topic: {proto_topic}")
+            for t in (f"{root}/+/2/e/{chan}/#", f"{root}/2/e/{chan}/#"):
+                client.subscribe(t)
+                logger.debug(f"Subscribed to protobuf topic: {t}")
 
             logger.info(f"MQTT bridge connected to {mqtt_cfg.broker}:{mqtt_cfg.port}")
         else:
@@ -791,6 +795,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
             # rides /e/) can confirm it (Thread-2 step 4 / #74).
             pkt_id = send_text_direct_with_id(
                 text=message, host=host, port=http_port,
+                tls=self.config.meshtastic.tls_for_port(http_port),
                 destination=dest_num, channel_index=channel)
             if pkt_id is not None:
                 self._maybe_register_ack(pkt_id, dest_num, msg_id, record_sent)
@@ -944,80 +949,6 @@ class MQTTBridgeHandler(BaseMessageHandler):
         return self.send_text(message, destination, channel,
                               msg_id=payload.get('_queue_msg_id'),
                               record_sent=False)
-
-    def publish_to_mqtt(self, payload: Dict) -> bool:
-        """
-        Publish a message to the MQTT broker.
-
-        Used as persistent queue sender callback for destination="mqtt".
-        Publishes bridged messages (from RNS) to the Meshtastic MQTT
-        topic so meshtasticd picks them up for radio transmission.
-
-        Args:
-            payload: Dictionary with 'message', 'channel', 'source_id' keys
-
-        Returns:
-            True if published successfully, False otherwise.
-        """
-        if not self._connected or not self._client:
-            return False
-
-        message = payload.get('message', '')
-        channel = payload.get('channel', 0)
-        source_id = payload.get('source_id', 'meshanchor')
-
-        if not message:
-            return False
-
-        # Dispatch-time dual-path dedup re-check (gated) — mirror of
-        # MeshForge 2d205b7, applied to MA's live R→M dispatch path
-        # (destination="mqtt"; all sends here are broadcast). The
-        # enqueue-side check races the mesh_bridge registration; by
-        # dispatch time the registry is settled. Suppress-only-on-hit.
-        if (dual_path_dedup_enabled(self.config)
-                and get_rf_tx_registry().seen_within(
-                    message, dual_path_dedup_window_s(self.config))):
-            with self._stats_lock:
-                self.stats['dispatch_dedup_suppressed'] = (
-                    self.stats.get('dispatch_dedup_suppressed', 0) + 1)
-            logger.info(
-                f"MQTT dispatch suppressed (dual-path dedup — already on "
-                f"RF): {message[:50]}...")
-            return True
-
-        mqtt_cfg = self.config.mqtt_bridge
-
-        # Build JSON payload matching meshtasticd format
-        mqtt_payload = json.dumps({
-            "from": 0,
-            "payload": {"text": message},
-            "sender": source_id,
-            "type": "text",
-            "channel": channel,
-        })
-
-        # Publish to the JSON topic
-        topic = (f"{mqtt_cfg.root_topic}/{mqtt_cfg.region}/2/json/"
-                 f"{mqtt_cfg.channel}/meshanchor")
-
-        try:
-            with self._mqtt_lock:
-                result = self._client.publish(topic, mqtt_payload, qos=1)
-            if result.rc == 0:
-                logger.info(f"Published to MQTT: {message[:50]}...")
-                # Dual-path dedup (mirror of MeshForge f02ad82): this is the
-                # live R→M TX path in mqtt_bridge mode (destination="mqtt"
-                # queue items end here) and it terminates at the same radio —
-                # register so the mesh_bridge forward of the same content
-                # can suppress its duplicate. All sends here are broadcast.
-                get_rf_tx_registry().register(message)
-                return True
-            else:
-                logger.warning(f"MQTT publish failed with rc={result.rc}")
-                return False
-        except Exception as e:
-            logger.error(f"MQTT publish error: {e}")
-            return False
 
     def test_connection(self) -> bool:
         """Test MQTT broker connectivity."""

@@ -1314,7 +1314,10 @@ RNSD_SERVICE
     # land under the wrong account while this still prints "✓ deployed".
     # Fall back to the real uid; when that yields no operator (root with no
     # sudo context) SKIP the block loudly rather than deploy somewhere.
-    REAL_USER="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || true)}}"
+    # One resolver for user AND system units (unit_render.sh; #151 review F6).
+    # shellcheck source=lib/unit_render.sh
+    . "$INSTALL_DIR/scripts/lib/unit_render.sh"
+    REAL_USER="$(ma_resolve_unit_user "" 2>/dev/null || true)"
     if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
         echo -e "  ${YELLOW}⚠ No operator login resolved (SUDO_USER='$SUDO_USER' USER='$USER') — skipping user-service deployment${NC}"
         REAL_USER=""
@@ -1492,8 +1495,16 @@ ln -sfn /opt/meshanchor/scripts/meshanchor-launcher.sh /usr/local/bin/meshanchor
 
 # Install MeshAnchor Map Server systemd service
 if [[ -f "$INSTALL_DIR/scripts/meshanchor-map.service" ]]; then
-    cp "$INSTALL_DIR/scripts/meshanchor-map.service" /etc/systemd/system/
-    echo -e "  ${GREEN}✓ meshanchor-map.service installed${NC}"
+    # Rendered for THIS host's operator — the shipped unit carries
+    # __MESHANCHOR_USER__/__MESHANCHOR_HOME__ placeholders (#151 item 1).
+    # shellcheck source=lib/unit_render.sh
+    . "$INSTALL_DIR/scripts/lib/unit_render.sh"
+    if _u="$(ma_resolve_unit_user /etc/systemd/system/meshanchor-map.service)" \
+            && ma_render_unit "$INSTALL_DIR/scripts/meshanchor-map.service" /etc/systemd/system/meshanchor-map.service "$_u"; then
+        echo -e "  ${GREEN}✓ meshanchor-map.service installed (operator: $_u)${NC}"
+    else
+        echo -e "  ${RED}✗ meshanchor-map.service NOT installed — no operator login resolved; re-run as: sudo bash scripts/install_noc.sh (or set MESHANCHOR_OPERATOR=<user>)${NC}"
+    fi
 else
     # Inline service definition (fallback)
     cat > /etc/systemd/system/meshanchor-map.service << 'MAP_SERVICE'
@@ -1531,8 +1542,16 @@ fi
 # (User=root + ProtectHome=read-only otherwise blocks first-run dir creation).
 mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor /root/.cache/meshanchor
 if [[ -f "$INSTALL_DIR/scripts/meshanchor-daemon.service" ]]; then
-    cp "$INSTALL_DIR/scripts/meshanchor-daemon.service" /etc/systemd/system/
-    echo -e "  ${GREEN}✓ meshanchor-daemon.service installed${NC}"
+    # Rendered for THIS host's operator — the shipped unit carries
+    # __MESHANCHOR_USER__/__MESHANCHOR_HOME__ placeholders (#151 item 1).
+    # shellcheck source=lib/unit_render.sh
+    . "$INSTALL_DIR/scripts/lib/unit_render.sh"
+    if _u="$(ma_resolve_unit_user /etc/systemd/system/meshanchor-daemon.service)" \
+            && ma_render_unit "$INSTALL_DIR/scripts/meshanchor-daemon.service" /etc/systemd/system/meshanchor-daemon.service "$_u"; then
+        echo -e "  ${GREEN}✓ meshanchor-daemon.service installed (operator: $_u)${NC}"
+    else
+        echo -e "  ${RED}✗ meshanchor-daemon.service NOT installed — no operator login resolved; re-run as: sudo bash scripts/install_noc.sh (or set MESHANCHOR_OPERATOR=<user>)${NC}"
+    fi
 else
     # Inline service definition (fallback)
     cat > /etc/systemd/system/meshanchor-daemon.service << 'DAEMON_SERVICE'

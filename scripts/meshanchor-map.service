@@ -62,8 +62,8 @@ RestartSec=5
 # Environment
 # SUDO_USER closes deploy drift #6 (see meshanchor-daemon.service for the
 # full reasoning). User=root + no SUDO_USER → get_real_user_home() == /root,
-# which hides operator state living under /home/wh6gxz.
-Environment=SUDO_USER=wh6gxz
+# which hides operator state living under __MESHANCHOR_HOME__.
+Environment=SUDO_USER=__MESHANCHOR_USER__
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 

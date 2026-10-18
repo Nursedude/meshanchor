@@ -37,11 +37,18 @@ if [[ "${1:-}" == "--dry-run" ]]; then
 fi
 
 # Operator account that owns the soak reports + receives cron mail.
-# Edit if you deploy under a different user.
-OPERATOR="${MESHANCHOR_OPERATOR:-wh6gxz}"
-
+# Resolved below (no hardcoded login); override with MESHANCHOR_OPERATOR=<user>.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UNIT_DIR="/etc/systemd/system"
+# Operator = MESHANCHOR_OPERATOR, else the installed daemon unit's pin (if
+# that user exists here), else SUDO_USER/USER/uid — never a hardcoded login
+# (#151 item 1: the default used to be the developer's).
+# shellcheck source=lib/unit_render.sh
+. "${REPO_ROOT}/scripts/lib/unit_render.sh"
+OPERATOR="$(ma_resolve_unit_user "${UNIT_DIR}/meshanchor-daemon.service")" || {
+    echo "error: no operator login resolved — set MESHANCHOR_OPERATOR=<user>" >&2
+    exit 1
+}
 CRON_PATH="/etc/cron.d/meshanchor-soak"
 
 UNITS=(
@@ -174,7 +181,15 @@ log "installing systemd units"
 for u in "${UNITS[@]}"; do
     src="${REPO_ROOT}/scripts/${u}"
     dst="${UNIT_DIR}/${u}"
-    run install -m 0644 -o root -g root "${src}" "${dst}"
+    if grep -q "__MESHANCHOR_" "${src}"; then
+        if [[ ${DRY_RUN} -eq 1 ]]; then
+            printf '  would render %s for %s -> %s\n' "${u}" "${OPERATOR}" "${dst}"
+        else
+            ma_render_unit "${src}" "${dst}" "${OPERATOR}"
+        fi
+    else
+        run install -m 0644 -o root -g root "${src}" "${dst}"
+    fi
 done
 
 log "systemctl daemon-reload"

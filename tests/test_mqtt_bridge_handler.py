@@ -164,3 +164,31 @@ class TestEServiceEnvelopeAckIngestion:
         assert keys[0] == DEFAULT_KEY_B64
         assert "Zm9vYmFy" in keys and "YmF6cXV4" in keys
         assert keys.count("Zm9vYmFy") == 1
+
+
+class TestRegionlessTopics:
+    """#151 item 4 (KN4YDL): firmware publishing ``msh/2/json/...`` needs an
+    empty region, and ``f"{root}/{region}/2/..."`` then subscribed
+    ``msh//2/json/...`` — never matched, nothing logged. Port of MeshForge's
+    both-shapes subscription: works whatever the firmware build does."""
+
+    def _subs(self, region):
+        h = _build(ack_enabled=False)
+        h.config.mqtt_bridge.root_topic = "msh"
+        h.config.mqtt_bridge.region = region
+        h.config.mqtt_bridge.channel = "Priv"
+        client = MagicMock()
+        h._on_connect(client, None, None, 0)
+        return [c.args[0] for c in client.subscribe.call_args_list]
+
+    def test_no_double_slash_with_empty_region(self):
+        subs = self._subs("")
+        assert subs and not [t for t in subs if "//" in t], subs
+        assert "msh/2/json/Priv/#" in subs
+        assert "msh/2/e/Priv/#" in subs
+
+    def test_regionful_firmware_still_matched(self):
+        subs = self._subs("US")
+        assert not [t for t in subs if "//" in t], subs
+        assert any(t in ("msh/US/2/json/Priv/#", "msh/+/2/json/Priv/#")
+                   for t in subs), subs

@@ -41,7 +41,7 @@ RestartSec=10
 
 # Environment — same SUDO_USER pin so the watchdog reads the same
 # fleet_history.db the collector writes.
-Environment=SUDO_USER=wh6gxz
+Environment=SUDO_USER=__MESHANCHOR_USER__
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPATH=/opt/meshanchor/src
@@ -54,7 +54,7 @@ StandardError=journal
 SyslogIdentifier=meshanchor-fleet-watchdog
 
 # Security hardening — same posture as the collector. Both processes
-# read/write the same DB under /home/wh6gxz/.local/share/meshanchor/.
+# read/write the same DB under __MESHANCHOR_HOME__/.local/share/meshanchor/.
 ProtectSystem=false
 PrivateTmp=false
 NoNewPrivileges=false

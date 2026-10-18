@@ -46,8 +46,8 @@ RestartSec=10
 # SUDO_USER closes deploy drift #6 — User=root + no SUDO_USER causes
 # get_real_user_home() to return /root, which on meshanchor-server
 # would steer fleet_history.db away from the canonical
-# /home/wh6gxz/.local/share/meshanchor/ path the dashboard reads.
-Environment=SUDO_USER=wh6gxz
+# __MESHANCHOR_HOME__/.local/share/meshanchor/ path the dashboard reads.
+Environment=SUDO_USER=__MESHANCHOR_USER__
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPATH=/opt/meshanchor/src
@@ -59,7 +59,7 @@ StandardError=journal
 SyslogIdentifier=meshanchor-fleet-collector
 
 # Security hardening (relaxed; matches meshanchor-map.service since
-# both write to /home/wh6gxz/.local/share/meshanchor/).
+# both write to __MESHANCHOR_HOME__/.local/share/meshanchor/).
 ProtectSystem=false
 PrivateTmp=false
 NoNewPrivileges=false

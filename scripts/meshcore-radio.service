@@ -7,15 +7,15 @@ After=local-fs.target
 
 [Service]
 Type=simple
-# wh6gxz, not root: /dev/ttyMeshCore is mode 0666 from the udev rule so an
+# The operator (__MESHANCHOR_USER__), not root: /dev/ttyMeshCore is mode 0666 from the udev rule so an
 # unprivileged user can open it. Avoiding root removes the deploy drift #6
 # class entirely for this service — get_real_user_home() resolves correctly
 # without an Environment= override because LOGNAME is set by systemd.
-User=wh6gxz
-Group=wh6gxz
+User=__MESHANCHOR_USER__
+Group=__MESHANCHOR_GROUP__
 WorkingDirectory=/opt/meshanchor
 # Belt + suspenders for get_real_user_home() — see deploy drift #6.
-Environment=SUDO_USER=wh6gxz
+Environment=SUDO_USER=__MESHANCHOR_USER__
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/meshanchor/src
 
@@ -33,7 +33,7 @@ RuntimeDirectoryMode=0750
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-# Read /home/wh6gxz/.config/meshanchor for gateway.json. ProtectHome=read-only
+# Read __MESHANCHOR_HOME__/.config/meshanchor for gateway.json. ProtectHome=read-only
 # blocks writes; that's the intent — the supervisor never writes config.
 # MA017 audit-skip: supervisor wraps the serial port and exposes a Unix
 # socket; runtime writes go to /run/meshcore-radio (socket dir) + /var/log,

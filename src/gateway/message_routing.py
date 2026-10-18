@@ -104,6 +104,17 @@ class MessageRouter:
                 fixes_path=fixes_path
             )
             logger.info("Routing classifier initialized with confidence scoring")
+        # Disabled = refuses everything: say it at WARNING so it is not
+        # mistaken for a quiet healthy gateway (#151 item 2; MF twin is
+        # describe_ingress_policy's CLOSED verdict).
+        self._disabled_refusal_seen = False
+        if not self.config.enabled:
+            logger.warning(
+                'Routing ingress policy: CLOSED - gateway.json top-level '
+                '"enabled" is false, so every message on every network is '
+                'refused (the Meshtastic/RNS bridge threads do not start; '
+                'a MeshCore handler still receives and refuses); set '
+                '"enabled": true to bridge')
 
     def should_bridge(self, msg) -> bool:
         """
@@ -115,7 +126,16 @@ class MessageRouter:
         - Medium confidence: Route with logging
         """
         if not self.config.enabled:
-            logger.debug("Routing: bridge disabled, dropping message")
+            # First refusal at INFO, the rest at DEBUG: the handlers word
+            # this drop "blocked by routing rules" (#151 item 3), so the
+            # router names the real cause once where an operator reads.
+            if not getattr(self, '_disabled_refusal_seen', False):
+                self._disabled_refusal_seen = True
+                logger.info('Routing: refusing every message - gateway.json '
+                            'top-level "enabled" is false (set "enabled": '
+                            'true to bridge); further refusals at DEBUG')
+            else:
+                logger.debug("Routing: bridge disabled, dropping message")
             return False
 
         # Use classifier if available

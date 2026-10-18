@@ -24,14 +24,13 @@ sudo install -m 0440 -o root -g root \
   /etc/sudoers.d/011_meshanchor-fleet
 sudo visudo -c   # must report "parsed OK"
 
-# 2. Drop the unit files
-sudo install -m 0644 -o root -g root \
-  /opt/meshanchor/scripts/meshanchor-fleet-collector.service \
-  /etc/systemd/system/
-
-sudo install -m 0644 -o root -g root \
-  /opt/meshanchor/scripts/meshanchor-fleet-watchdog.service \
-  /etc/systemd/system/
+# 2. Render + drop the unit files. They carry __MESHANCHOR_USER__ /
+#    __MESHANCHOR_HOME__ placeholders — never `install`/`cp` them verbatim
+#    (a literal placeholder makes the service read a home that does not exist).
+sudo bash /opt/meshanchor/scripts/lib/unit_render.sh \
+  /opt/meshanchor/scripts/meshanchor-fleet-collector.service
+sudo bash /opt/meshanchor/scripts/lib/unit_render.sh \
+  /opt/meshanchor/scripts/meshanchor-fleet-watchdog.service
 
 # 3. Reload systemd so it sees the new units
 sudo systemctl daemon-reload

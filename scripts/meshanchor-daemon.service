@@ -10,15 +10,15 @@ Type=simple
 User=root
 WorkingDirectory=/opt/meshanchor
 # ExecStartPre: pre-create the daemon's XDG paths under both /root and
-# /home/wh6gxz. The `+` prefix runs the command with full privileges
+# __MESHANCHOR_HOME__. The `+` prefix runs the command with full privileges
 # OUTSIDE the service mount namespace — necessary because the namespace
 # is set up read-only and a non-prefixed mkdir would EROFS. The dirs
 # then exist when ReadWritePaths bind-mounts them RW for ExecStart.
 # Both prefixes are kept for cross-host compat: hosts without a
 # SUDO_USER pin (e.g. VolcanoAI) resolve to /root, while hosts with the
-# pin below resolve to /home/wh6gxz/. Both are idempotent.
+# pin below resolve to __MESHANCHOR_HOME__/. Both are idempotent.
 ExecStartPre=+/bin/mkdir -p /root/.config/meshanchor /root/.local/share/meshanchor /root/.cache/meshanchor
-ExecStartPre=+/bin/mkdir -p /home/wh6gxz/.config/meshanchor /home/wh6gxz/.local/share/meshanchor /home/wh6gxz/.cache/meshanchor
+ExecStartPre=+/bin/mkdir -p __MESHANCHOR_HOME__/.config/meshanchor __MESHANCHOR_HOME__/.local/share/meshanchor __MESHANCHOR_HOME__/.cache/meshanchor
 # Use venv if available, fall back to system Python (mirrors meshanchor-map.service)
 ExecStart=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py start --foreground; else exec python3 /opt/meshanchor/src/daemon.py start --foreground; fi'
 ExecStop=/bin/bash -c 'if [ -x /opt/meshanchor/venv/bin/python ]; then exec /opt/meshanchor/venv/bin/python /opt/meshanchor/src/daemon.py stop; else exec python3 /opt/meshanchor/src/daemon.py stop; fi'
@@ -49,7 +49,7 @@ ProtectSystem=strict
 # ProtectSystem=strict still keeps everything else read-only.
 # /root XDG subpaths kept (with `-` prefix so they're optional) for hosts
 # where SUDO_USER is unset and get_real_user_home() resolves to /root.
-ReadWritePaths=/var/log /run/meshanchor /home -/root/.config/meshanchor -/root/.local/share/meshanchor -/root/.cache/meshanchor
+ReadWritePaths=/var/log /run/meshanchor /home -/root/.config/meshanchor -/root/.local/share/meshanchor -/root/.cache/meshanchor -__MESHANCHOR_HOME__/.config/meshanchor -__MESHANCHOR_HOME__/.local/share/meshanchor -__MESHANCHOR_HOME__/.cache/meshanchor
 # The daemon is an RNS shared-instance CLIENT, but its embedded LXMF router
 # still assembles inbound resources and manages ratchets under the SHARED
 # configdir's storage tree (/etc/reticulum/storage — host dirs are 0777 for
@@ -64,9 +64,9 @@ PrivateTmp=true
 # Environment
 # SUDO_USER closes deploy drift #6: User=root + no SUDO_USER caused
 # get_real_user_home() to return /root, hiding the operator's gateway.json
-# at /home/wh6gxz/.config/meshanchor/. With the pin, clean systemd restarts
+# at __MESHANCHOR_HOME__/.config/meshanchor/. With the pin, clean systemd restarts
 # resolve the real user's home without requiring an /etc override file.
-Environment=SUDO_USER=wh6gxz
+Environment=SUDO_USER=__MESHANCHOR_USER__
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/meshanchor/src
 

@@ -449,19 +449,16 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                 min_spacing_s=MESHTASTIC_TX_MIN_SPACING_S,
             )
 
-            # Register MQTT sender for persistent queue (mqtt_bridge mode).
-            # Paced too: R→M chunks enqueue under destination="mqtt" in
-            # mqtt_bridge mode (unlike MeshForge, which routes them under
-            # "meshtastic"), and the broker hand-off ends at the same radio
-            # TX queue — a burst published back-to-back hits the same
-            # firmware rate limiter as a toradio burst.
-            if (self.config.bridge_mode == "mqtt_bridge"
-                    and hasattr(self._mesh_handler, 'publish_to_mqtt')):
+            # Legacy drain: older builds queued R→M under destination="mqtt"
+            # (a JSON broker publish that never reached RF and echoed back
+            # through our own subscription — #151 item 5, MeshForge
+            # Hardening E). New rows queue under "meshtastic"; rows already
+            # queued as "mqtt" go out the same HTTP toradio path, paced.
+            if self.config.bridge_mode == "mqtt_bridge":
                 self._persistent_queue.register_sender(
-                    "mqtt", self._mesh_handler.publish_to_mqtt,
+                    "mqtt", self._mesh_handler.queue_send,
                     min_spacing_s=MESHTASTIC_TX_MIN_SPACING_S,
                 )
-                logger.info("Registered 'mqtt' sender for persistent queue")
 
         elif self._persistent_queue and self._meshtastic_egress_configured():
             # Radio-less gateway (no local meshtasticd) with a remote egress:
@@ -1251,7 +1248,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             multi = f" [{len(chunks)} chunks]" if len(chunks) > 1 else ""
 
             # In mqtt_bridge mode, enqueue each chunk as its own queue item
-            # (independent retry). NOTE: meshanchor-server runs
+            # (independent retry) under "meshtastic": queue_send -> HTTP
+            # toradio, never a broker publish (#151 item 5). NOTE: meshanchor-server runs
             # bridge_mode="meshcore_bridge", so this branch is inactive there;
             # the direct path below is the live one.
             if (self._persistent_queue
@@ -1266,7 +1264,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                     }
                     if self._persistent_queue.enqueue(
                         payload=payload,
-                        destination="mqtt",
+                        destination="meshtastic",
                         priority=MessagePriority.NORMAL,
                     ):
                         enqueued += 1
