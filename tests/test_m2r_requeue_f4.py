@@ -305,6 +305,9 @@ class TestPartialRequeueWitness:
         with patch.object(bridge, "send_to_rns",
                           side_effect=lambda c, d, **k: d == DEST):
             bridge._process_mesh_to_rns(_broadcast())
+            # a requeue that PERSISTED is not a drop (review: inverted-
+            # condition mutant survived a count-only assert)
+            assert bridge.stats.get("mesh_to_rns_requeue_dropped") is None
             bridge._process_mesh_to_rns(_broadcast())
         assert len(_rows(queue, "rns")) == 1
         assert bridge.stats.get("mesh_to_rns_requeue_dropped") == 1
@@ -335,6 +338,17 @@ class TestQueueReadyGate:
         stats = q.get_stats()
         assert stats["gated_skips"] == 2
         assert stats["gated_destinations"] == ["a"]
+
+    def test_gated_destinations_clears_when_the_destination_recovers(
+            self, tmp_path):
+        q = self._q(tmp_path)
+        up = {"v": False}
+        q.register_sender("a", lambda p: True, ready_fn=lambda: up["v"])
+        q.process_once()
+        assert q.get_stats()["gated_destinations"] == ["a"]
+        up["v"] = True
+        q.process_once()
+        assert q.get_stats()["gated_destinations"] == []
 
     def test_a_raising_ready_fn_counts_as_not_ready(self, tmp_path):
         q = self._q(tmp_path)
