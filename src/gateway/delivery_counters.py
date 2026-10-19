@@ -184,7 +184,8 @@ class DeliveryEvent:
 # those messages never reached a delivery attempt, so counting them would
 # read as delivery failure. PORT of MeshForge's #74 display cure (twin file,
 # UNTRACKED-diverged tier — keep the reason set aligned when either side
-# grows a DropReason).
+# grows a DropReason). Consumers import it rather than re-listing it
+# (honest_failure_modes #5 — two independent hardcodes WILL drift).
 DELIVERY_FAILURE_REASONS = frozenset({
     DropReason.RNS_DELIVERY_FAILED.value,
     DropReason.RETRIES_EXHAUSTED.value,
@@ -271,22 +272,6 @@ def compute_confirmation_view(
         "unconfirmable_sent": unconfirmable_sent,
     }
 
-
-#: Drop reasons meaning ATTEMPTED-and-FAILED — the denominator-mates of
-#: ``CONFIRMED`` when judging a confirmation rate. Benign dedup/capacity drops
-#: are NOT delivery failures. Lives here because this module owns the
-#: ``DropReason`` vocabulary; consumers import it rather than re-listing it
-#: (honest_failure_modes #5 — two independent hardcodes WILL drift).
-DELIVERY_FAILURE_REASONS = frozenset({
-    DropReason.RNS_DELIVERY_FAILED.value,
-    DropReason.RETRIES_EXHAUSTED.value,
-    DropReason.DESTINATION_UNREACHABLE.value,
-    DropReason.DELIVERY_TIMEOUT.value,
-    DropReason.NON_RETRIABLE_ERROR.value,
-    DropReason.CIRCUIT_OPEN.value,
-    DropReason.WEDGED.value,
-    DropReason.EXPIRED.value,
-})
 
 RING_BUFFER_CAP = 500
 """Maximum rows retained in the events table. Sized for ~1 hour of
