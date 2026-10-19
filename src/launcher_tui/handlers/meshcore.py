@@ -569,6 +569,9 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
                          f"{stats.get('meshcore_to_rns_dropped', 0)}")
         lines += [f"    Meshtastic -> MeshCore:  {mesh_to_mc}",
                   f"    RNS -> MeshCore:         {rns_to_mc}"]
+        q_full = stats.get('meshcore_ingress_dropped_queue_full', 0)
+        if q_full:
+            lines.append(f"    Ingress dropped (queue full): {q_full}")
         return lines
 
     def _meshcore_stats(self):

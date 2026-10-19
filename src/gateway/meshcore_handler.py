@@ -42,6 +42,7 @@ from datetime import datetime
 from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional
 
+from ._meshcore_ingress import note_ingress_queue_full
 from .base_handler import BaseMessageHandler
 from .canonical_message import CanonicalMessage, Protocol
 from .config import GatewayConfig
@@ -706,7 +707,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                         self.stats.setdefault('meshcore_rx', 0)
                         self.stats['meshcore_rx'] += 1
                 except Full:
-                    logger.warning("MeshCore→bridge queue full, dropping channel message")
+                    note_ingress_queue_full(self, "event")
 
             if self._message_callback:
                 try:
@@ -877,7 +878,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                                 self.stats.setdefault('meshcore_rx', 0)
                                 self.stats['meshcore_rx'] += 1
                         except Full:
-                            logger.warning("MeshCore→bridge queue full (poll)")
+                            note_ingress_queue_full(self, "poll")
 
                     if self._message_callback:
                         try:

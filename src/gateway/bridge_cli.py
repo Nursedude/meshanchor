@@ -128,6 +128,9 @@ def print_status(status: dict):
         mesh_to_rns = stats.get('messages_mesh_to_rns', 0)
         rns_to_mesh = stats.get('messages_rns_to_mesh', 0)
         print(f"Messages bridged: {mesh_to_rns + rns_to_mesh} (M->R: {mesh_to_rns}, R->M: {rns_to_mesh})")
+        q_full = stats.get('meshcore_ingress_dropped_queue_full', 0)
+        if q_full:
+            print(f"  MeshCore ingress dropped (queue full): {q_full}")
         mc_a = stats.get('meshcore_to_rns_attempted', 0)
         if mc_a:
             reasons = " ".join(

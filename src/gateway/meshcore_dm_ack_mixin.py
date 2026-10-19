@@ -16,6 +16,7 @@ import logging
 from queue import Full
 from typing import Any, Dict, Optional
 
+from ._meshcore_ingress import warn_ingress_full
 from .canonical_message import CanonicalMessage, Protocol
 from .meshcore_dm_reply import ack_code_hex
 
@@ -129,6 +130,7 @@ class MeshCoreDmAckMixin:
             with self._stats_lock:
                 self.stats.setdefault('meshcore_dm_notice_dropped_full', 0)
                 self.stats['meshcore_dm_notice_dropped_full'] += 1
-            logger.warning("MeshCore→bridge queue full — DM notice dropped")
+            # a notice, not an operator's message: own counter, shared voice
+            warn_ingress_full(self, "DM notice dropped")
         except Exception as e:
             logger.debug(f"DM notice emit failed: {e}")
