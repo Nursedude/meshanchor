@@ -13,7 +13,7 @@ Hardware, install, and first run. The short version lives in the [README](../REA
 curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh | sudo bash
 
 # Or manually
-git clone https://github.com/Nursedude/meshanchor.git /opt/meshanchor
+sudo git clone https://github.com/Nursedude/meshanchor.git /opt/meshanchor
 cd /opt/meshanchor
 sudo bash scripts/install_noc.sh    # Full NOC stack install
 ```

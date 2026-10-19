@@ -101,8 +101,8 @@ whose home radio matches yours; they interoperate.
 ## Quick start
 
 ```bash
-git clone https://github.com/Nursedude/meshanchor.git
-cd meshanchor
+sudo git clone https://github.com/Nursedude/meshanchor.git /opt/meshanchor
+cd /opt/meshanchor
 sudo bash scripts/install_noc.sh       # guided install
 scripts/meshanchor-launcher.sh  # the NOC
 ```
@@ -111,23 +111,48 @@ Runs on a Raspberry Pi with a MeshCore companion radio (RAK4631, Heltec V3,
 T-Deck, or T-Echo). The reference box is a Pi 4B with a RAK Heltec V3 in Serial
 Companion mode.
 
+Clone into `/opt/meshanchor`: the installer and every service run from there,
+so a checkout anywhere else is not the code that gets installed.
+
+**A fresh gateway needs three settings** in `~/.config/meshanchor/gateway.json`
+(MeshAnchor [#151](https://github.com/Nursedude/meshanchor/issues/151)):
+
+- `"enabled": true` — off by default; while off, the gateway logs
+  `Routing ingress policy: CLOSED` and bridges nothing.
+- `"meshtastic": {"http_tls": false}` — only if your radio serves plain HTTP on
+  a port other than 80; unset, port 80 is plain HTTP and every other port TLS.
+- `"mqtt_bridge": {"region": ""}` — leave empty if your firmware publishes
+  `msh/2/json/...` with no region; both topic shapes are subscribed either way.
+
 **Full instructions — hardware, install, first run: [docs/install.md](docs/install.md)**
 
 ---
 
 ## What Works (v0.3.0-beta)
 
-- **MeshCore integration** — radio management, config, CLI passthrough
-- **Gateway bridge** — MeshCore ⇄ Meshtastic / RNS via `CanonicalMessage`
-- **Directed DM replies** — `@<contact>` from Meshtastic/RNS → MeshCore DM, live-proven 2026-08-29
-- **LXMF reliability tiers** — subscriber engine with Prometheus metrics
-- **Fleet observability** — collector + watchdog, 24h clean-soak passed
-- **Maps** — MeshCore map population, operator pins, meshforge-maps fusion
-- **RF engineering** — link budget, Fresnel, FSPL, space weather
-- **AI diagnostics** — offline knowledge base; optional AI assist with your own Claude API key (in-TUI assistant) or subscription (Claude Code in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
+Each line carries its status from [docs/capabilities.md](docs/capabilities.md)
+(**Field-Validated** = run on real hardware; **Inherited** = field-tested in
+MeshForge, untested here; **Code-Ready** = implemented, awaiting hardware).
 
-~6,500 tests across <!--STAT:testfiles-->334<!--/STAT--> test files (run
-`python3 -m pytest tests/ --co -q` for the live count).
+- **MeshCore integration** *(Field-Validated, MeshCore-only path, 2026-05-02)* —
+  radio management, config, CLI passthrough
+- **Directed DM replies** *(Field-Validated 2026-08-29)* — `@<contact>` from
+  Meshtastic/RNS → MeshCore DM
+- **LXMF broadcast bridge + subscriber reliability** *(Field-Validated
+  2026-05-09 / 05-12)* — subscribe/fan-out, tier engine, Prometheus metrics
+- **Fleet observability** *(Field-Validated)* — collector + watchdog, 24h
+  clean-soak passed
+- **Gateway bridge** *(Inherited + Code-Ready)* — MeshCore ⇄ Meshtastic / RNS
+  via `CanonicalMessage`; an outside install bridged all six directions after
+  the #151 fixes (with local patches)
+- **Maps** *(Inherited + MeshCore population)* — MeshCore map population,
+  operator pins, meshforge-maps fusion
+- **RF engineering** *(Inherited)* — link budget, Fresnel, FSPL, space weather
+- **AI diagnostics** *(Inherited)* — offline knowledge base; optional AI assist
+  with your own Claude API key (in-TUI assistant) or subscription (Claude Code
+  in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
+
+The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->334<!--/STAT--> test files.
 
 **Full inventory, with proven vs. unvalidated called out:
 [docs/capabilities.md](docs/capabilities.md)**
