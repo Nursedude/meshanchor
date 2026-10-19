@@ -128,6 +128,15 @@ def print_status(status: dict):
         mesh_to_rns = stats.get('messages_mesh_to_rns', 0)
         rns_to_mesh = stats.get('messages_rns_to_mesh', 0)
         print(f"Messages bridged: {mesh_to_rns + rns_to_mesh} (M->R: {mesh_to_rns}, R->M: {rns_to_mesh})")
+        m2r_a = stats.get('mesh_to_rns_attempted', 0)
+        if m2r_a:
+            # A requeued M->R message is PENDING until the queue reports its
+            # outcome (_m2r_accounting) — name the gap, never leave it bare.
+            m2r_d = stats.get('mesh_to_rns_delivered', mesh_to_rns)
+            m2r_x = stats.get('mesh_to_rns_dropped', 0)
+            pending = max(0, m2r_a - m2r_d - m2r_x)
+            print(f"  M->R attempted/delivered/dropped: {m2r_a}/{m2r_d}/{m2r_x}"
+                  + (f"  (pending: {pending})" if pending else ""))
 
     node_stats = status.get('node_stats', {})
     if node_stats:

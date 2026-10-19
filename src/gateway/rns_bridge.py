@@ -72,6 +72,7 @@ from ._rns_bridge_connection import RNSConnectionMixin
 from .bridge_ack_mixin import BridgeAckMixin
 from .bridge_health_mixin import BridgeHealthMixin
 from .bridge_send_mixin import BridgeSendMixin
+from ._m2r_accounting import M2RAccountingMixin
 from .bridge_rns_events_mixin import BridgeRnsEventsMixin
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ class BridgedMessage:
 
 
 class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
+                          M2RAccountingMixin,
                           BridgeAckMixin, BridgeHealthMixin,
                           BridgeSendMixin, BridgeRnsEventsMixin):
     """
@@ -263,7 +265,12 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
 
         # Statistics
         self.stats = {
-            'messages_mesh_to_rns': 0,
+            'messages_mesh_to_rns': 0,    # legacy alias for mesh_to_rns_delivered
+            # Mesh→RNS triplet (_m2r_accounting): attempted counts a message
+            # once; delivered / dropped then counts it once; between = pending.
+            'mesh_to_rns_attempted': 0,
+            'mesh_to_rns_delivered': 0,
+            'mesh_to_rns_dropped': 0,
             'messages_rns_to_mesh': 0,
             # Dual-path dedup (gated): broadcast copies suppressed because
             # the local mesh_bridge already put the same content on RF.
@@ -861,11 +868,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                     msg = self._mesh_to_rns_queue.get(timeout=0.1)
                     rns_state = self.health.get_subsystem_state("rns")
                     if rns_state in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
-                        # RNS is down — queue for later delivery
-                        requeued = self._requeue_failed_message(msg, "rns")
-                        if requeued:
-                            self.health.record_message_queued_degraded()
-                            logger.debug("Mesh→RNS: RNS subsystem down, message queued")
+                        self._m2r_rns_down(msg)  # queue for later delivery
                     else:
                         self._process_mesh_to_rns(msg)
                     # Also route Meshtastic → MeshCore if handler active
@@ -1084,6 +1087,16 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
         On send failure for non-broadcast messages, attempts to persist
         to the persistent queue for later retry.
         """
+        # Every message ends in exactly ONE of delivered / dropped (see
+        # _m2r_accounting). A replay of an attempted message claims its
+        # origin: the attempt was already counted.
+        meta0 = msg.metadata if isinstance(msg.metadata, dict) else {}
+        attempt_counted = self._m2r_claim_replay(meta0.get('m2r_origin'))
+        if not attempt_counted:
+            with self._stats_lock:
+                self.stats['mesh_to_rns_attempted'] = (
+                    self.stats.get('mesh_to_rns_attempted', 0) + 1)
+        outcome_counted = False
         sent_count = 0  # read by the except path: never requeue a sent copy
         try:
             prefix = f"[Mesh:{msg.source_id[-4:]}] " if msg.source_id else "[Mesh] "
@@ -1108,6 +1121,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                         self.stats.get('mesh_to_rns_private_refused', 0) + 1)
                     self.stats['mesh_to_rns_dropped'] = (
                         self.stats.get('mesh_to_rns_dropped', 0) + 1)
+                outcome_counted = True
                 logger.warning(
                     f"Mesh→RNS: refusing DM from {msg.source_id} to "
                     f"{msg.destination_id} — no single RNS recipient; a DM is "
@@ -1133,6 +1147,8 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
             if sent_count and failed_legs:
                 # F4 review R5: one leg landing must not erase a sibling's
                 # retry — requeue only the legs that failed.
+                # No origin: the message is delivered (counted below); these
+                # rows' outcomes must not count it again.
                 if not self._requeue_failed_message(
                         msg, "rns", rns_destinations=failed_legs,
                         rns_message=content):
@@ -1151,38 +1167,61 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                     logger.info(f"Bridge Mesh→RNS: {sent_count}/{len(destinations)} dest(s) — {content[:50]}...")
                 else:
                     logger.info(f"Bridge Mesh→RNS: {content[:50]}...")
-                with self._stats_lock:
-                    self.stats['messages_mesh_to_rns'] += 1
+                self._m2r_count('delivered')
+                outcome_counted = True
                 self.health.record_message_sent("mesh_to_rns")
             elif msg.is_broadcast:
                 # No default_lxmf_destination configured, or all peers unreachable —
                 # broadcast best-effort, debug-only (LXMF is point-to-point).
+                # Still a message that did not arrive: counted dropped.
                 logger.debug(f"Mesh→RNS broadcast not delivered: {content[:30]}...")
+                self._m2r_count('dropped')
+                outcome_counted = True
             else:
                 logger.warning(f"Failed to bridge Mesh→RNS: {content[:30]}...")
                 with self._stats_lock:
                     self.stats['errors'] += 1
                 # F4: retry each failed leg at the hash it already resolved
                 # to — never re-resolve, which could widen a DM's audience.
+                # Requeued = PENDING (the queue reports the outcome); only an
+                # un-queueable failure is dropped now.
                 requeued = self._requeue_failed_message(
                     msg, "rns", rns_destinations=destinations,
-                    rns_message=content)
+                    rns_message=content, origin=self._m2r_new_origin())
+                if not requeued:
+                    self._m2r_count('dropped')
+                outcome_counted = True
                 self.health.record_message_failed("mesh_to_rns", requeued=requeued)
 
         except Exception as e:
             logger.error(f"Error bridging Mesh→RNS: {e}")
             with self._stats_lock:
                 self.stats['errors'] += 1
-            self.health.record_error("rns", e)
+            try:
+                self.health.record_error("rns", e)
+            except Exception:  # noqa: BLE001 — the outcome below must land
+                logger.exception("Mesh→RNS: health.record_error raised")
             requeued = False
             if sent_count:
                 # Already on the wire: a retry would be a duplicate.
                 logger.warning("Mesh→RNS: raised after a send — not requeued")
+                if not outcome_counted:
+                    self._m2r_count('delivered')
+            elif outcome_counted:
+                pass
             elif (msg.metadata or {}).get('m2r_replay'):
                 logger.warning("Mesh→RNS: replay raised again — not requeued")
+                self._m2r_count('dropped')
             else:
-                requeued = self._requeue_failed_message(msg, "rns")
-            self.health.record_message_failed("mesh_to_rns", requeued=requeued)
+                requeued = self._requeue_failed_message(
+                    msg, "rns", origin=self._m2r_new_origin())
+                if not requeued:
+                    self._m2r_count('dropped')
+            try:
+                self.health.record_message_failed("mesh_to_rns",
+                                                  requeued=requeued)
+            except Exception:  # noqa: BLE001 — never escape after claiming
+                logger.exception("Mesh→RNS: health.record_message_failed raised")
 
     def _process_rns_to_mesh(self, msg: BridgedMessage):
         """Process message from RNS to Meshtastic.

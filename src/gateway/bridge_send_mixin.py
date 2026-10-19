@@ -339,10 +339,14 @@ class BridgeSendMixin:
         whole-message replay through _process_mesh_to_rns."""
         ready = lambda: bool(self._connected_rns)  # noqa: E731
         # ROADMAP 6f: deferred or gated M→R rows expire after M2R_MAX_AGE_S.
+        # on_terminal: each row's final outcome resolves the message it
+        # carries — delivered / dropped counted exactly once (_m2r_accounting).
         queue.register_sender("rns", self._queue_send_rns, ready_fn=ready,
-                              max_age_s=M2R_MAX_AGE_S)
+                              max_age_s=M2R_MAX_AGE_S,
+                              on_terminal=self._m2r_on_terminal)
         queue.register_sender("rns_xform", self._dispatch_rns_xform_spill,
-                              ready_fn=ready, max_age_s=M2R_MAX_AGE_S)
+                              ready_fn=ready, max_age_s=M2R_MAX_AGE_S,
+                              on_terminal=self._m2r_on_xform_terminal)
 
     @staticmethod
     def _m2r_defer_delay(payload: Dict) -> float:
@@ -622,7 +626,8 @@ class BridgeSendMixin:
     def _requeue_failed_message(self, msg, destination: str,
                                 *, channel_override: Optional[int] = None,
                                 rns_destinations=None,
-                                rns_message: Optional[str] = None) -> bool:
+                                rns_message: Optional[str] = None,
+                                origin: Optional[str] = None) -> bool:
         """Persist a failed message to the persistent queue for later retry.
 
         Args:
@@ -644,6 +649,9 @@ class BridgeSendMixin:
                 ("rns_xform"), so F14 + the broadcast fan-out decide again.
             rns_message: the exact text the live send carried (with the
                 ``[Mesh:xxxx]`` prefix) for those rows.
+            origin: M→R outcome accounting (_m2r_accounting) — the rows
+                carry it and the message is tracked PENDING on as many rows
+                as were actually persisted.
 
         Returns:
             True if message was successfully persisted, False otherwise.
@@ -669,7 +677,7 @@ class BridgeSendMixin:
             if destination == "rns":
                 return self._requeue_failed_rns(
                     msg, source_id, dest_id, content, metadata,
-                    rns_destinations, rns_message)
+                    rns_destinations, rns_message, origin)
             # Lift channel into the top-level payload — channel-0 Public
             # leak follow-up (2026-05-20). The persistent queue's MeshCore
             # sender (meshcore_handler.queue_send → _process_outbound)
@@ -717,7 +725,8 @@ class BridgeSendMixin:
             return False
 
     def _requeue_failed_rns(self, msg, source_id, dest_id, content, metadata,
-                            rns_destinations, rns_message) -> bool:
+                            rns_destinations, rns_message,
+                            origin: Optional[str] = None) -> bool:
         """F4 body of _requeue_failed_message for destination "rns"."""
         # ROADMAP 6f: NORMAL so a long single-peer outage sheds its OWN
         # oldest rows under pressure, never fresh traffic (Q16); a row
@@ -729,41 +738,60 @@ class BridgeSendMixin:
         except (TypeError, ValueError):
             first_enqueued = None
         persisted = 0
-        if rns_destinations is not None:
-            # Resolved legs, possibly none — an empty list has nothing to
-            # retry at, and replaying it would only loop (review R3).
-            for dest_hash in rns_destinations:
-                dest_hex = dest_hash.hex()
-                if self._persistent_queue.enqueue(
-                    payload={
-                        'message': rns_message if rns_message is not None
-                        else content,
-                        # 'destination' keys the queue's dedup hash — without
-                        # it every leg of a fan-out collapses into the first.
-                        'destination': dest_hex,
-                        'destination_hash': dest_hex,
-                        'source_id': source_id,
-                    },
-                    destination="rns",
-                    priority=MessagePriority.NORMAL,
-                    created_at=first_enqueued,
-                ):
-                    persisted += 1
-        elif self._persistent_queue.enqueue(
-            payload={
-                'source_id': source_id,
-                'destination_id': dest_id or "",
-                'content': content,
-                'title': getattr(msg, 'title', None),
-                'is_broadcast': bool(getattr(msg, 'is_broadcast', False)),
-                'content_id': getattr(msg, 'content_id', '') or '',
-                'metadata': metadata,
-            },
-            destination="rns_xform",
-            priority=MessagePriority.NORMAL,
-            created_at=first_enqueued,
-        ):
-            persisted += 1
+        if origin:  # BEFORE the first row can reach a terminal (MF review R1)
+            legs = len(rns_destinations) if rns_destinations else 1
+            self._m2r_track(origin, legs)
+            if rns_destinations is None:
+                metadata = {**(metadata or {}), 'm2r_origin': origin}
+        try:
+            if rns_destinations is not None:
+                # Resolved legs, possibly none — an empty list has nothing to
+                # retry at, and replaying it would only loop (review R3).
+                for dest_hash in rns_destinations:
+                    dest_hex = dest_hash.hex()
+                    try:
+                        if self._persistent_queue.enqueue(
+                            payload={
+                                'message': rns_message if rns_message is not None
+                                else content,
+                                # 'destination' keys the queue's dedup hash —
+                                # without it every leg of a fan-out collapses.
+                                'destination': dest_hex,
+                                'destination_hash': dest_hex,
+                                'source_id': source_id,
+                                **({'m2r_origin': origin} if origin else {}),
+                            },
+                            destination="rns",
+                            priority=MessagePriority.NORMAL,
+                            created_at=first_enqueued,
+                        ):
+                            persisted += 1
+                    except Exception as e:  # noqa: BLE001
+                        # A raising enqueue (sqlite locked / disk I/O) is THIS
+                        # leg not persisted; written legs keep it pending.
+                        with self._stats_lock:
+                            self.stats['m2r_requeue_enqueue_errors'] = (
+                                self.stats.get('m2r_requeue_enqueue_errors', 0) + 1)
+                        logger.error(f"Mesh→RNS requeue: enqueue for "
+                                     f"{dest_hex[:8]} raised: {e}")
+            elif self._persistent_queue.enqueue(
+                payload={
+                    'source_id': source_id,
+                    'destination_id': dest_id or "",
+                    'content': content,
+                    'title': getattr(msg, 'title', None),
+                    'is_broadcast': bool(getattr(msg, 'is_broadcast', False)),
+                    'content_id': getattr(msg, 'content_id', '') or '',
+                    'metadata': metadata,
+                },
+                destination="rns_xform",
+                priority=MessagePriority.NORMAL,
+                created_at=first_enqueued,
+            ):
+                persisted += 1
+        finally:
+            if origin:
+                self._m2r_settle(origin, persisted)
         if persisted:
             logger.debug(f"Failed Mesh→RNS message re-queued ({persisted} row(s))")
         return persisted > 0
@@ -798,11 +826,19 @@ class BridgeSendMixin:
                 content_id=payload.get('content_id', '') or '',
                 metadata=metadata,
             )
-            self._process_mesh_to_rns(msg)
-            return True
         except Exception as e:
             logger.error(f"rns_xform replay dispatch failed: {e}")
             return False
+        try:
+            self._process_mesh_to_rns(msg)
+        except Exception as e:  # noqa: BLE001
+            # The replay already claimed its origin: a retry of this row would
+            # count the message a second time. Done — with a witness.
+            with self._stats_lock:
+                self.stats['m2r_replay_raised'] = (
+                    self.stats.get('m2r_replay_raised', 0) + 1)
+            logger.error(f"rns_xform replay raised (not retried): {e}")
+        return True
 
     def _requeue_failed_chunks(self, chunks, target: str = "meshtastic") -> bool:
         """Persist already-chunked, byte-bounded RNS→Mesh content for retry.
