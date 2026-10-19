@@ -15,7 +15,12 @@
 #   sudo bash scripts/install_noc.sh
 #
 # Options:
-#   --skip-meshtasticd    Don't install meshtasticd
+#   --with-meshtasticd    Install/manage meshtasticd (Meshtastic radio).
+#   --skip-meshtasticd    Never touch meshtasticd.
+#                         Neither flag: "auto" — a box that ALREADY has meshtasticd
+#                         keeps the ownership prompt (a re-run never demotes it);
+#                         a fresh box skips it (MeshAnchor is MeshCore-primary).
+#                         With several meshtasticd flags, the LAST one wins.
 #   --skip-rns            Don't install Reticulum
 #   --client-only         Only install MeshAnchor as client (no daemons)
 #   --force-native        Force native meshtasticd (for SPI radios)
@@ -33,7 +38,11 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Defaults
-INSTALL_MESHTASTICD=true
+# MeshCore-primary: meshtasticd is opt-in on a FRESH box (domain audit
+# 2026-10-18). "auto" is resolved after [1/8] detection: an existing
+# meshtasticd keeps today's ownership path — a re-run must never silently
+# demote a box that uses it to unmanaged (review 2026-10-18 F1).
+INSTALL_MESHTASTICD=auto
 INSTALL_RNS=true
 INSTALL_DIR="/opt/meshanchor"
 VENV_DIR="$INSTALL_DIR/venv"
@@ -56,6 +65,10 @@ OBS_BASE_URL="https://download.opensuse.org/repositories/network:/Meshtastic:/be
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --with-meshtasticd)
+            INSTALL_MESHTASTICD=true
+            shift
+            ;;
         --skip-meshtasticd)
             INSTALL_MESHTASTICD=false
             shift
@@ -71,10 +84,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force-native)
             FORCE_NATIVE=true
+            INSTALL_MESHTASTICD=true  # a meshtasticd mode implies meshtasticd
             shift
             ;;
         --force-python)
             FORCE_PYTHON=true
+            INSTALL_MESHTASTICD=true  # a meshtasticd mode implies meshtasticd
             shift
             ;;
         *)
@@ -105,6 +120,22 @@ MF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/install_common.sh
 source "$MF_SCRIPT_DIR/lib/install_common.sh"
 mf_log_init
+
+# The installer installs $INSTALL_DIR (cloned/updated from GitHub below), not
+# the checkout it was run from — say so when those differ, or local edits
+# silently never run (domain audit 2026-10-18).
+ma_warn_foreign_checkout() {
+    local ran_from install_dir
+    ran_from="$(cd "$1" 2>/dev/null && pwd -P)"
+    install_dir="$(cd "$2" 2>/dev/null && pwd -P || echo "$2")"
+    if [[ -n "$ran_from" && "$ran_from" != "$install_dir" ]]; then
+        echo -e "  ${YELLOW}⚠ Running from ${ran_from} — that checkout is NOT the code that gets installed.${NC}"
+        echo -e "  ${YELLOW}  This installer installs ${2} (synced from GitHub). To install your own${NC}"
+        echo -e "  ${YELLOW}  checkout, clone it there: sudo git clone <repo> ${2}${NC}"
+    fi
+}
+ma_warn_foreign_checkout "$MF_SCRIPT_DIR/.." "$INSTALL_DIR"
+
 
 # ─────────────────────────────────────────────────────────────────
 # Radio Type Detection Functions
@@ -452,9 +483,17 @@ MESHTASTICD_EXISTS=false
 RNS_EXISTS=false
 MESHANCHOR_EXISTS=false
 
-if systemctl list-unit-files | grep -q meshtasticd; then
+# EXACT unit or the binary — not any unit NAME containing the substring
+# (meshtasticd-restart.timer / -mudp-guard stay after an apt remove; review R2).
+MESHTASTICD_EVIDENCE=""
+if systemctl list-unit-files --no-legend meshtasticd.service 2>/dev/null | grep -q .; then
+    MESHTASTICD_EVIDENCE="meshtasticd.service"
+elif command -v meshtasticd &>/dev/null; then
+    MESHTASTICD_EVIDENCE="$(command -v meshtasticd)"
+fi
+if [[ -n "$MESHTASTICD_EVIDENCE" ]]; then
     MESHTASTICD_EXISTS=true
-    echo -e "  ${YELLOW}⚡ meshtasticd already installed${NC}"
+    echo -e "  ${YELLOW}⚡ meshtasticd already installed (${MESHTASTICD_EVIDENCE})${NC}"
 fi
 
 if command -v rnsd &> /dev/null; then
@@ -469,6 +508,35 @@ fi
 
 if ! $MESHTASTICD_EXISTS && ! $RNS_EXISTS && ! $MESHANCHOR_EXISTS; then
     echo -e "  ${GREEN}✓ Fresh installation${NC}"
+fi
+
+# Resolve the meshtasticd default now that we know what the box has.
+# $3 = meshtasticd's `systemctl is-enabled` state. A meshtasticd someone
+# stopped+disabled (or masked) is a human decision: auto leaves it alone
+# (review R2) — --with-meshtasticd still manages it.
+ma_resolve_meshtasticd() {
+    local choice="$1" exists="$2" enabled="${3:-}"
+    if [[ "$choice" == "auto" ]]; then
+        if [[ "$exists" == "true" && "$enabled" != "disabled" && "$enabled" != "masked" ]]; then
+            echo true
+        else
+            echo false
+        fi
+    else
+        echo "$choice"
+    fi
+}
+_mtd_choice="$INSTALL_MESHTASTICD"
+_mtd_enabled="$(systemctl is-enabled meshtasticd 2>/dev/null || true)"
+INSTALL_MESHTASTICD="$(ma_resolve_meshtasticd "$INSTALL_MESHTASTICD" "$MESHTASTICD_EXISTS" "$_mtd_enabled")"
+if [[ "$_mtd_choice" == "auto" ]]; then
+    if $INSTALL_MESHTASTICD; then
+        echo -e "  ${CYAN}→ meshtasticd already on this box (${MESHTASTICD_EVIDENCE}) — keeping it in scope (--skip-meshtasticd to leave it alone)${NC}"
+    elif $MESHTASTICD_EXISTS; then
+        echo -e "  ${CYAN}→ meshtasticd is ${_mtd_enabled} here — leaving it alone (--with-meshtasticd to manage it)${NC}"
+    else
+        echo -e "  ${CYAN}→ meshtasticd not installed — skipping it (MeshCore-primary; --with-meshtasticd to add it)${NC}"
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────────────
@@ -1369,6 +1437,11 @@ fi
 cd "$INSTALL_DIR"
 
 echo -e "  ${GREEN}✓ MeshAnchor source ready${NC}"
+# The MeshCore udev rule (scripts/99-meshcore.rules) is NOT installed by
+# default: it matches generic CP210x/CH340/ESP32-S3 USB serial chips, so on a
+# box with a Meshtastic node or an RNode it would claim the wrong device
+# (review 2026-10-18 F2). Pin it to your radio's serial before installing.
+echo -e "  ${CYAN}ℹ /dev/ttyMeshCore is optional — scripts/99-meshcore.rules explains how to pin it to your radio${NC}"
 
 # ─────────────────────────────────────────────────────────────────
 # Python dependencies
@@ -1669,9 +1742,11 @@ fi
 echo ""
 echo -e "${CYAN}Config Files:${NC}"
 echo "  /etc/meshanchor/noc.yaml           - MeshAnchor NOC config"
-echo "  /etc/meshtasticd/config.yaml      - Meshtasticd config"
-echo "  /etc/meshtasticd/available.d/     - Radio templates"
-echo "  /etc/meshtasticd/config.d/        - Active configs"
+if $INSTALL_MESHTASTICD; then
+    echo "  /etc/meshtasticd/config.yaml      - Meshtasticd config"
+    echo "  /etc/meshtasticd/available.d/     - Radio templates"
+    echo "  /etc/meshtasticd/config.d/        - Active configs"
+fi
 echo ""
 echo -e "${CYAN}Commands:${NC}"
 echo -e "  ${GREEN}meshanchor-status${NC}             - Quick system status (no sudo needed)"
@@ -1687,7 +1762,9 @@ echo -e "${CYAN}Systemd Services:${NC}"
 echo -e "  ${GREEN}sudo systemctl enable meshanchor${NC}       - Enable NOC on boot"
 echo -e "  ${GREEN}sudo systemctl enable meshanchor-map${NC}   - Enable Map Server on boot"
 echo -e "  ${GREEN}sudo systemctl start meshanchor-map${NC}    - Start Map Server now"
-echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC}     - Check meshtasticd"
+if $INSTALL_MESHTASTICD; then
+    echo -e "  ${GREEN}sudo systemctl status meshtasticd${NC}     - Check meshtasticd"
+fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────────

@@ -36,7 +36,10 @@ curl -sSL https://raw.githubusercontent.com/Nursedude/meshanchor/main/install.sh
 
 **NOC installer options** (`scripts/install_noc.sh`):
 ```bash
-sudo bash scripts/install_noc.sh --skip-meshtasticd   # Don't install meshtasticd
+sudo bash scripts/install_noc.sh --with-meshtasticd   # install/manage meshtasticd (a Meshtastic radio)
+sudo bash scripts/install_noc.sh --skip-meshtasticd   # never touch meshtasticd
+# Neither flag: a box that ALREADY has meshtasticd keeps it in scope; a fresh
+# box skips it — MeshAnchor is MeshCore-primary.
 sudo bash scripts/install_noc.sh --skip-rns            # Don't install Reticulum
 sudo bash scripts/install_noc.sh --client-only         # MeshAnchor only (no daemons)
 sudo bash scripts/install_noc.sh --force-native        # Force SPI mode (native meshtasticd)

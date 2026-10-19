@@ -50,11 +50,23 @@ log() {
     fi
 }
 
+# JSON string escape for the --json report: a fix hint containing a double
+# quote (e.g. `python3 -c "..."`) made the whole report unparseable.
+_json_esc() {
+    local v="$1"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    v="${v//$'\n'/\\n}"
+    v="${v//$'\t'/\\t}"
+    v="${v//$'\r'/\\r}"
+    printf '%s' "$v" | tr -d '\000-\010\013\014\016-\037\177'
+}
+
 check_pass() {
     local name="$1"
     local detail="$2"
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
-    RESULTS+=("{\"check\":\"$name\",\"status\":\"pass\",\"detail\":\"$detail\"}")
+    RESULTS+=("{\"check\":\"$(_json_esc "$name")\",\"status\":\"pass\",\"detail\":\"$(_json_esc "$detail")\"}")
     log "  ${GREEN}[PASS]${NC} $name"
     if [[ -n "$detail" ]]; then
         log "        ${CYAN}$detail${NC}"
@@ -66,7 +78,7 @@ check_fail() {
     local detail="$2"
     local fix="$3"
     CRITICAL_FAILS=$((CRITICAL_FAILS + 1))
-    RESULTS+=("{\"check\":\"$name\",\"status\":\"fail\",\"detail\":\"$detail\",\"fix\":\"$fix\"}")
+    RESULTS+=("{\"check\":\"$(_json_esc "$name")\",\"status\":\"fail\",\"detail\":\"$(_json_esc "$detail")\",\"fix\":\"$(_json_esc "$fix")\"}")
     log "  ${RED}[FAIL]${NC} $name"
     if [[ -n "$detail" ]]; then
         log "        ${RED}$detail${NC}"
@@ -81,7 +93,7 @@ check_warn() {
     local detail="$2"
     local fix="$3"
     WARNINGS=$((WARNINGS + 1))
-    RESULTS+=("{\"check\":\"$name\",\"status\":\"warn\",\"detail\":\"$detail\",\"fix\":\"$fix\"}")
+    RESULTS+=("{\"check\":\"$(_json_esc "$name")\",\"status\":\"warn\",\"detail\":\"$(_json_esc "$detail")\",\"fix\":\"$(_json_esc "$fix")\"}")
     log "  ${YELLOW}[WARN]${NC} $name"
     if [[ -n "$detail" ]]; then
         log "        ${YELLOW}$detail${NC}"
@@ -94,7 +106,7 @@ check_warn() {
 check_skip() {
     local name="$1"
     local reason="$2"
-    RESULTS+=("{\"check\":\"$name\",\"status\":\"skip\",\"detail\":\"$reason\"}")
+    RESULTS+=("{\"check\":\"$(_json_esc "$name")\",\"status\":\"skip\",\"detail\":\"$(_json_esc "$reason")\"}")
     log "  ${CYAN}[SKIP]${NC} $name - $reason"
 }
 
@@ -102,7 +114,7 @@ check_info() {
     local name="$1"
     local detail="$2"
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
-    RESULTS+=("{\"check\":\"$name\",\"status\":\"info\",\"detail\":\"$detail\"}")
+    RESULTS+=("{\"check\":\"$(_json_esc "$name")\",\"status\":\"info\",\"detail\":\"$(_json_esc "$detail")\"}")
     log "  ${CYAN}[INFO]${NC} $name"
     if [[ -n "$detail" ]]; then
         log "        ${CYAN}$detail${NC}"
@@ -256,6 +268,31 @@ log "${BOLD}[2/6] meshtasticd Installation${NC}"
 
 MESHTASTICD_INSTALLED=false
 
+# meshtasticd is OPT-IN on MeshAnchor (install_noc.sh --with-meshtasticd).
+# A box with none of it is the default, not a fault: measured here, never
+# assumed — any binary, unit, config dir or CLI means it was installed and
+# every check below applies. Probe paths are overridable for tests.
+MTD_PROBE_BIN="${MTD_PROBE_BIN:-meshtasticd}"
+MTD_PROBE_CLI="${MTD_PROBE_CLI:-meshtastic}"
+MTD_PROBE_UNIT="${MTD_PROBE_UNIT:-/etc/systemd/system/meshtasticd.service}"
+MTD_PROBE_CONFIG_DIR="${MTD_PROBE_CONFIG_DIR:-/etc/meshtasticd}"
+meshtasticd_present() {
+    # The pip `meshtastic` CLI alone is a CLIENT tool (rnsd's
+    # Meshtastic_Interface, the bridge) — not meshtasticd (review F5).
+    command -v "$MTD_PROBE_BIN" &>/dev/null \
+        || [[ -f "$MTD_PROBE_UNIT" || -d "$MTD_PROBE_CONFIG_DIR" ]]
+}
+MESHTASTICD_PRESENT=false
+if meshtasticd_present; then
+    MESHTASTICD_PRESENT=true
+fi
+
+if ! $MESHTASTICD_PRESENT; then
+    check_skip "meshtasticd" "Not installed — the MeshCore-primary default; add it with: sudo bash scripts/install_noc.sh --with-meshtasticd"
+    if command -v "$MTD_PROBE_CLI" &>/dev/null; then
+        check_info "meshtastic CLI" "Client tool present; meshtasticd itself is not installed"
+    fi
+else
 # Check for native meshtasticd binary
 if command -v meshtasticd &>/dev/null; then
     VERSION=$(meshtasticd --version 2>/dev/null || echo "unknown")
@@ -278,6 +315,7 @@ if [[ -f "/etc/systemd/system/meshtasticd.service" ]]; then
 else
     check_warn "meshtasticd service file" "Service file not created" "Will be created when selecting radio type"
 fi
+fi  # MESHTASTICD_PRESENT (section 2)
 
 log ""
 
@@ -285,6 +323,8 @@ log ""
 # Section 3: meshtasticd Configuration
 # ─────────────────────────────────────────────────────────────────
 log "${BOLD}[3/6] meshtasticd Configuration${NC}"
+
+if $MESHTASTICD_PRESENT; then
 
 CONFIG_DIR="/etc/meshtasticd"
 # The checkout this script belongs to (its overlay_kind.py helper).
@@ -412,6 +452,9 @@ else
         check_skip "Active HAT config" "USB radio doesn't require HAT config"
     fi
 fi
+else
+    check_skip "meshtasticd configuration" "meshtasticd not installed (MeshCore-primary default)"
+fi  # MESHTASTICD_PRESENT (section 3)
 
 log ""
 
@@ -422,6 +465,7 @@ log "${BOLD}[4/6] Service Status${NC}"
 
 MESHTASTICD_RUNNING=false
 
+if $MESHTASTICD_PRESENT; then
 # Check meshtasticd service
 if systemctl is-active --quiet meshtasticd 2>/dev/null; then
     check_pass "meshtasticd service" "Running"
@@ -456,6 +500,10 @@ else
     check_warn "Port 4403 (TCP)" "Not listening" \
         "meshtasticd is not running. Start: sudo systemctl start meshtasticd"
 fi
+
+else
+    check_skip "meshtasticd service" "meshtasticd not installed (MeshCore-primary default)"
+fi  # MESHTASTICD_PRESENT (section 4)
 
 # Web client is on port 9443 (HTTPS, checked in Section 6)
 
@@ -543,12 +591,19 @@ if ! $RADIO_FOUND; then
     fi
 fi
 
-# Check udev rules
+# Check udev rules. The Meshtastic rule is installed with meshtasticd, so its
+# absence on a MeshCore-only box is the default, not a fault (review F3).
+MC_PROBE_UDEV_RULE="${MC_PROBE_UDEV_RULE:-/etc/udev/rules.d/99-meshcore.rules}"
 if [[ -f /etc/udev/rules.d/99-meshtastic.rules ]]; then
     check_pass "udev rules" "/etc/udev/rules.d/99-meshtastic.rules"
-else
+elif $MESHTASTICD_PRESENT; then
     check_warn "udev rules" "Meshtastic udev rules not installed" \
         "May cause permission issues with USB radios"
+fi
+if [[ -f "$MC_PROBE_UDEV_RULE" ]]; then
+    check_pass "MeshCore udev rule" "$MC_PROBE_UDEV_RULE (/dev/ttyMeshCore)"
+else
+    check_info "MeshCore udev rule" "Not installed (optional) — pin scripts/99-meshcore.rules to your radio's serial first"
 fi
 
 # Check ALSA udev rules for broken GOTO labels (RPi OS packaging bug)
