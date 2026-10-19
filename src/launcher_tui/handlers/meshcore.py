@@ -549,6 +549,28 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
             return None, "response was not a JSON object"
         return payload, None
 
+    @staticmethod
+    def _bridged_lines(stats: dict) -> list:
+        """The "Bridged" block. Shown when ANY leg was attempted — a box
+        whose every MeshCore->RNS message dropped has all delivered counters
+        at 0 and must still say so (review 2026-10-18)."""
+        mc_to_mesh = stats.get('messages_meshcore_to_mesh', 0)
+        mc_to_rns = stats.get('messages_meshcore_to_rns', 0)
+        mesh_to_mc = stats.get('messages_mesh_to_meshcore', 0)
+        rns_to_mc = stats.get('messages_rns_to_meshcore', 0)
+        mc_a = stats.get('meshcore_to_rns_attempted', 0)
+        if not any([mc_to_mesh, mc_to_rns, mesh_to_mc, rns_to_mc, mc_a]):
+            return []
+        lines = ["", "  Bridged:",
+                 f"    MeshCore -> Meshtastic:  {mc_to_mesh}",
+                 f"    MeshCore -> RNS:         {mc_to_rns}"]
+        if mc_a:
+            lines.append(f"      attempted/delivered/dropped: {mc_a}/{mc_to_rns}/"
+                         f"{stats.get('meshcore_to_rns_dropped', 0)}")
+        lines += [f"    Meshtastic -> MeshCore:  {mesh_to_mc}",
+                  f"    RNS -> MeshCore:         {rns_to_mc}"]
+        return lines
+
     def _meshcore_stats(self):
         """Show MeshCore statistics from the live bridge."""
         clear_screen()
@@ -593,16 +615,8 @@ class MeshCoreHandler(MeshCoreRadioMixin, MeshCoreRadioOpsMixin,
         print(f"  Messages TX:    {stats.get('meshcore_tx', 0)}")
         print(f"  Delivery ACKs:  {stats.get('meshcore_acks', 0)}")
 
-        mc_to_mesh = stats.get('messages_meshcore_to_mesh', 0)
-        mc_to_rns = stats.get('messages_meshcore_to_rns', 0)
-        mesh_to_mc = stats.get('messages_mesh_to_meshcore', 0)
-        rns_to_mc = stats.get('messages_rns_to_meshcore', 0)
-        if any([mc_to_mesh, mc_to_rns, mesh_to_mc, rns_to_mc]):
-            print(f"\n  Bridged:")
-            print(f"    MeshCore -> Meshtastic:  {mc_to_mesh}")
-            print(f"    MeshCore -> RNS:         {mc_to_rns}")
-            print(f"    Meshtastic -> MeshCore:  {mesh_to_mc}")
-            print(f"    RNS -> MeshCore:         {rns_to_mc}")
+        for line in self._bridged_lines(stats):
+            print(line)
 
         errors = stats.get('errors', 0)
         bounced = stats.get('bounced', 0)

@@ -860,6 +860,10 @@ class TestProcessMeshToRNS:
             source_network="meshcore", source_id="!mc01",
             destination_id=None, content="mc broadcast", is_broadcast=True,
         )
+        # RNS must be connected: send_to_rns refuses otherwise, and the MC->RNS
+        # leg now names that refusal up front as rns_down (2026-10-18).
+        bridge._connected_rns = True
+        bridge._lxmf_source = MagicMock(name="lxmf_source")
         sent_to = []
 
         def capture(content, dest_hash=None):

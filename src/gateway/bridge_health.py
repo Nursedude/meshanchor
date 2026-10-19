@@ -480,6 +480,8 @@ class BridgeHealthMonitor:
                     "rns_to_mesh": self._messages_sent.get("rns_to_mesh", 0),
                     "failed_mesh_to_rns": self._messages_failed.get("mesh_to_rns", 0),
                     "failed_rns_to_mesh": self._messages_failed.get("rns_to_mesh", 0),
+                    "meshcore_to_rns": self._messages_sent.get("meshcore_to_rns", 0),
+                    "failed_meshcore_to_rns": self._messages_failed.get("meshcore_to_rns", 0),
                     "requeued": self._messages_requeued,
                     "rate_per_min": self.get_message_rate(),
                 },

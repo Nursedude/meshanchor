@@ -128,6 +128,16 @@ def print_status(status: dict):
         mesh_to_rns = stats.get('messages_mesh_to_rns', 0)
         rns_to_mesh = stats.get('messages_rns_to_mesh', 0)
         print(f"Messages bridged: {mesh_to_rns + rns_to_mesh} (M->R: {mesh_to_rns}, R->M: {rns_to_mesh})")
+        mc_a = stats.get('meshcore_to_rns_attempted', 0)
+        if mc_a:
+            reasons = " ".join(
+                f"{k[len('meshcore_to_rns_dropped_'):]}={v}"
+                for k, v in sorted(stats.items())
+                if k.startswith('meshcore_to_rns_dropped_') and v)
+            print(f"  MC->R attempted/delivered/dropped: {mc_a}/"
+                  f"{stats.get('messages_meshcore_to_rns', 0)}/"
+                  f"{stats.get('meshcore_to_rns_dropped', 0)}"
+                  + (f"  ({reasons})" if reasons else ""))
         m2r_a = stats.get('mesh_to_rns_attempted', 0)
         if m2r_a:
             # A requeued M->R message is PENDING until the queue reports its

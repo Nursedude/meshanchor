@@ -7,6 +7,7 @@ that route messages between MeshCore and other networks (Meshtastic, RNS).
 """
 
 import logging
+import time
 from typing import Optional
 
 from .bridge_health import SubsystemState, MessageOrigin
@@ -258,10 +259,36 @@ class MeshCoreBridgeMixin:
             # so a bare send_to_rns(content) with no destination always dropped; mirror
             # the Meshtastic Mesh→RNS fan-out (get_lxmf_destinations(), str|list).
             # Ported from MeshForge (lead repo).
+            # Single-shot leg (no retry queue): every message that does not go
+            # out is COUNTED and said once at WARNING per reason (operator
+            # acceptance 2026-10-18) — it used to be a DEBUG line, and an RNS
+            # outage skipped the leg with no line at all. For RNS, DISABLED
+            # means init FAILED permanently (bridge_health_mixin) — a failure,
+            # not an off switch. No configured destination is a deliberate
+            # MeshCore-only setup: counted, said once at INFO, not a drop.
             rns_state = self.health.get_subsystem_state("rns")
-            if rns_state not in (SubsystemState.DISCONNECTED, SubsystemState.DISABLED):
+            dest_list = self.config.rns.get_lxmf_destinations()
+            if not dest_list and getattr(self.config, 'load_error', None):
+                # Defaults after a FAILED gateway.json load: the destinations
+                # are unknown, not absent — never "not configured" (review R2).
+                self._mc2r_attempted()
+                self._mc2r_drop("config_unreadable",
+                                f"gateway.json failed to load "
+                                f"({self.config.load_error}); destinations unknown")
+            elif not dest_list:
+                self._mc2r_not_configured()
+            elif rns_state == SubsystemState.DISABLED:
+                self._mc2r_attempted()
+                self._mc2r_drop("rns_failed", "RNS failed to initialize (permanent)")
+            elif (rns_state == SubsystemState.DISCONNECTED
+                    or not getattr(self, '_connected_rns', False)
+                    or getattr(self, '_lxmf_source', None) is None):
+                self._mc2r_attempted()
+                self._mc2r_drop("rns_down", "RNS is not connected")
+            else:
+                self._mc2r_attempted()
                 dests = []
-                for hex_str in self.config.rns.get_lxmf_destinations():
+                for hex_str in dest_list:
                     try:
                         dests.append(bytes.fromhex(hex_str))
                     except ValueError:
@@ -275,14 +302,69 @@ class MeshCoreBridgeMixin:
                     with self._stats_lock:
                         self.stats.setdefault('messages_meshcore_to_rns', 0)
                         self.stats['messages_meshcore_to_rns'] += 1
+                    self._mc2r_in_flight = False  # delivered: a later raise is not a drop
                     self.health.record_message_sent("meshcore_to_rns")
+                elif not dests:
+                    self._mc2r_drop("bad_destinations",
+                                    "every default_lxmf_destination is invalid hex")
                 else:
-                    logger.debug("MC→RNS: not delivered (no default_lxmf_destination or unreachable)")
+                    self._mc2r_drop("unreachable",
+                                    f"all {len(dests)} RNS destination(s) refused the send")
 
         except Exception as e:
             logger.error(f"Error bridging MeshCore→Bridge: {e}")
             with self._stats_lock:
                 self.stats['errors'] += 1
+            if getattr(self, '_mc2r_in_flight', False):
+                self._mc2r_drop("error", str(e))
+        finally:
+            self._mc2r_in_flight = False
+
+    # MC→RNS warning rate limit: one WARNING per reason per window.
+    _MC2R_WARN_WINDOW_S = 300.0
+
+    def _mc2r_attempted(self) -> None:
+        self._mc2r_in_flight = True
+        with self._stats_lock:
+            self.stats['meshcore_to_rns_attempted'] = (
+                self.stats.get('meshcore_to_rns_attempted', 0) + 1)
+
+    def _mc2r_not_configured(self) -> None:
+        with self._stats_lock:
+            self.stats['meshcore_to_rns_not_configured'] = (
+                self.stats.get('meshcore_to_rns_not_configured', 0) + 1)
+        if not getattr(self, '_mc2r_not_configured_said', False):
+            self._mc2r_not_configured_said = True
+            logger.info("MC→RNS: no default_lxmf_destination configured — "
+                        "MeshCore messages are not bridged to RNS (counted in "
+                        "meshcore_to_rns_not_configured)")
+
+    def _mc2r_drop(self, reason: str, detail: str) -> None:
+        """Count one MeshCore->RNS message that did not go out, by reason;
+        WARNING the first time per reason per window, DEBUG after; the health
+        monitor's own failed counter is told too (one fact, two consumers)."""
+        self._mc2r_in_flight = False
+        key = f'meshcore_to_rns_dropped_{reason}'
+        with self._stats_lock:
+            self.stats['meshcore_to_rns_dropped'] = (
+                self.stats.get('meshcore_to_rns_dropped', 0) + 1)
+            self.stats[key] = self.stats.get(key, 0) + 1
+            total = self.stats[key]
+        last = getattr(self, '_mc2r_warned_at', None)
+        if last is None:
+            last = self._mc2r_warned_at = {}
+        now = time.monotonic()
+        if now - last.get(reason, -1e18) >= self._MC2R_WARN_WINDOW_S:
+            last[reason] = now
+            logger.warning(f"MC→RNS: message NOT bridged — {detail} "
+                           f"({reason}; {total} so far; further ones at DEBUG "
+                           f"for {self._MC2R_WARN_WINDOW_S:.0f}s)")
+        else:
+            logger.debug(f"MC→RNS: not bridged — {reason}")
+        try:
+            self.health.record_message_failed("meshcore_to_rns", requeued=False)
+        except Exception as e:  # noqa: BLE001 — the count above already landed
+            logger.debug(f"MC→RNS: health record failed: {e}")
 
     def _process_bridge_to_meshcore(self, msg) -> None:
         """Process message from other networks → MeshCore.
