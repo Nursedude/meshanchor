@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://nursedude.substack.com">Development Blog</a> |
+  <a href="https://wh6gxznursedude.substack.com">Development Blog</a> |
   <a href="https://github.com/Nursedude/meshanchor/issues">Report Issues</a> |
   <a href="docs/development.md">Contribute</a> |
   <a href="https://github.com/Nursedude/meshforge">Sister Project: MeshForge</a>
@@ -181,7 +181,7 @@ The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:t
 | Reticulum Network | [reticulum.network](https://reticulum.network/) | Bridge target (encrypted transport) |
 | Meshtastic Docs | [meshtastic.org/docs](https://meshtastic.org/docs/) | Optional gateway |
 | MeshForge | [github.com/Nursedude/meshforge](https://github.com/Nursedude/meshforge) | Sister project, Meshtastic-primary |
-| Development Blog | [nursedude.substack.com](https://nursedude.substack.com) | Project updates |
+| Development Blog | [wh6gxznursedude.substack.com](https://wh6gxznursedude.substack.com) | Project updates |
 
 ---
 
