@@ -137,6 +137,15 @@ class TestCache:
         assert "boom" in t["fanout"].get("error", "")
         assert t["schema"] == "fleet_truth/v1"
 
+    def test_build_error_still_lists_the_known_blind_spots(self):
+        """2026-10-20 (MF review port): the dark fallback set structural_dark:
+        [], blanking every live blind spot exactly when the page was degraded.
+        The registry is static data; it needs no build."""
+        from utils.fleet_blind_spots import STRUCTURAL_DARK
+        with patch.object(c, "collect_snapshots", side_effect=RuntimeError("boom")):
+            t = c.get_fleet_truth(self_port=5001, force=True)
+        assert t["structural_dark"] == STRUCTURAL_DARK
+
     def test_signal_classes_are_blackout_kinds_and_blockless_status_reads_dark(self):
         """MA's closed enum = its blackout kinds (2026-07-19 enrichment). A
         box whose status carries NO watchdog block gets every kind dark —
