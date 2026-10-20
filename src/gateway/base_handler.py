@@ -176,6 +176,22 @@ def strip_unverified_mark(text: str) -> str:
     return text[len(UNVERIFIED_MARK):] if text.startswith(UNVERIFIED_MARK) else text
 
 
+def is_already_bridged(text) -> bool:
+    """True if mesh ``text`` leads with a bridge tag — the Mesh→RNS loop guard.
+
+    Such content was put on the mesh BY a bridge, so it is already in RNS;
+    bridging it back is a duplicate. MeshAnchor #151 (2026-10-19): a WiFi
+    radio uplinks the gateway's own "[MC:…]"/"[RNS:…]" transmission as MQTT
+    JSON and every bridged message reached MeshChatX twice. Port of
+    MeshForge's ``is_already_bridged`` (b01d8af); vocabulary is the shared
+    ``ECHO_LOOP_INVARIANT_PREFIXES``, never re-spelled.
+    """
+    from .config import ECHO_LOOP_INVARIANT_PREFIXES
+    if not isinstance(text, str):
+        return False
+    return text.lstrip().startswith(tuple(ECHO_LOOP_INVARIANT_PREFIXES))
+
+
 def is_rns_to_mesh_echo(text) -> bool:
     """True if ``text`` has ALREADY been on the Meshtastic side.
 

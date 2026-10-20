@@ -71,6 +71,57 @@ ma_render_unit() {
     chmod 0644 "$tmp" && mv -f "$tmp" "$dst"
 }
 
+# Refresh each unit ALREADY installed in <dst-dir> from <src-dir> — never
+# installs a new one (a deploy must not change WHICH services run). Placeholder
+# units render for this host's operator; a refused render keeps the installed
+# unit, loudly. Returns 0 if any unit was updated, 1 if none.
+#   ma_refresh_installed_units <src-dir> <dst-dir> <unit>...
+ma_refresh_installed_units() {
+    local src_dir="$1" dst_dir="$2" unit u updated=1
+    shift 2
+    for unit in "$@"; do
+        [[ -f "$dst_dir/$unit" && -f "$src_dir/$unit" ]] || continue
+        if grep -q "__MESHANCHOR_" "$src_dir/$unit"; then
+            if u="$(ma_resolve_unit_user "$dst_dir/$unit")" \
+                    && ma_render_unit "$src_dir/$unit" "$dst_dir/$unit" "$u"; then
+                echo -e "  ${GREEN:-}✓ $unit updated (operator: $u)${NC:-}"
+                updated=0
+            else
+                echo -e "  ${YELLOW:-}⚠ $unit NOT updated — no operator resolved; installed unit kept. Set MESHANCHOR_OPERATOR=<user> and re-run${NC:-}"
+            fi
+        else
+            cp "$src_dir/$unit" "$dst_dir/$unit"
+            echo -e "  ${GREEN:-}✓ $unit updated${NC:-}"
+            updated=0
+        fi
+    done
+    return "$updated"
+}
+
+# True if an INSTALLED unit is in a #151-broken shape: a leftover placeholder,
+# or a SUDO_USER pin naming a login that does not exist on this host.
+ma_unit_is_broken() {
+    local installed="$1" pin
+    grep -q "__MESHANCHOR_" "$installed" && return 0
+    pin="$(sed -n 's/^Environment=SUDO_USER=\([^[:space:]]*\).*/\1/p' "$installed" | tail -1)"
+    [[ -n "$pin" ]] && ! _ma_valid_login "$pin"
+}
+
+# Like ma_refresh_installed_units, but only for units in a broken shape. For
+# units whose shipped file differs from a working install on purpose (the map:
+# shipped on the coexist :5002, meshanchor-server serves :5000) — a blanket
+# refresh would move a live service. Returns 0 if any unit was repaired.
+#   ma_repair_installed_units <src-dir> <dst-dir> <unit>...
+ma_repair_installed_units() {
+    local src_dir="$1" dst_dir="$2" unit broken=()
+    shift 2
+    for unit in "$@"; do
+        [[ -f "$dst_dir/$unit" ]] && ma_unit_is_broken "$dst_dir/$unit" && broken+=("$unit")
+    done
+    [[ ${#broken[@]} -gt 0 ]] || return 1
+    ma_refresh_installed_units "$src_dir" "$dst_dir" "${broken[@]}"
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     set -u
     src="${1:?usage: unit_render.sh <unit-file> [dest-dir]}"

@@ -38,6 +38,9 @@ BRANCH=""
 SKIP_DESKTOP=false
 SKIP_DEPS=false
 
+# Kept for the post-pull self re-exec (lib/update_reexec.sh).
+_MA_ORIG_ARGS=("$@")
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -113,6 +116,12 @@ echo -e "Installation: ${GREEN}$INSTALL_DIR${NC}"
 # Get current state
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# Re-executed after updating itself: count changes from where the FIRST run
+# started, or the pull reads as a no-op and the daemons never restart.
+if [[ -n "${MESHANCHOR_UPDATE_FROM:-}" ]] \
+        && git cat-file -e "${MESHANCHOR_UPDATE_FROM}^{commit}" 2>/dev/null; then
+    CURRENT_COMMIT="$MESHANCHOR_UPDATE_FROM"
+fi
 echo -e "Current branch: ${CYAN}$CURRENT_BRANCH${NC} ($CURRENT_COMMIT)"
 
 # ─────────────────────────────────────────────────────────────────
@@ -169,6 +178,13 @@ if git pull origin "$CURRENT_BRANCH" 2>&1; then
 else
     echo -e "${YELLOW}Warning: Pull failed, continuing with current code${NC}"
 fi
+
+# The pull may have replaced THIS script; bash would keep running the old text
+# (#151 re-test). Re-run the new one, once.
+# shellcheck source=lib/update_reexec.sh
+. "$INSTALL_DIR/scripts/lib/update_reexec.sh"
+ma_reexec_if_self_changed "$CURRENT_COMMIT" "$(git rev-parse --short HEAD)" \
+    "$INSTALL_DIR" scripts/update.sh "${_MA_ORIG_ARGS[@]}"
 
 # ─────────────────────────────────────────────────────────────────
 # Step 2: Update Python dependencies
@@ -231,28 +247,19 @@ SVC_UPDATED=false
 # in /etc/systemd/system/). meshanchor-daemon.service is the headless NOC daemon
 # enabled at boot; meshanchor.service is the on-demand TUI launcher — refresh both
 # files if present so a unit-file change (e.g. ExecStart) actually lands.
-for _unit in meshanchor-daemon.service meshanchor.service; do
-    if [[ -f "/etc/systemd/system/$_unit" ]] && [[ -f "$INSTALL_DIR/scripts/$_unit" ]]; then
-        if grep -q "__MESHANCHOR_" "$INSTALL_DIR/scripts/$_unit"; then
-            # Placeholder unit (#151 item 1): render for the box's operator —
-            # the installed pin is kept when that user exists here. Refusal
-            # leaves the installed unit as it was, loudly.
-            # shellcheck source=lib/unit_render.sh
-            . "$INSTALL_DIR/scripts/lib/unit_render.sh"
-            if _u="$(ma_resolve_unit_user "/etc/systemd/system/$_unit")" \
-                    && ma_render_unit "$INSTALL_DIR/scripts/$_unit" "/etc/systemd/system/$_unit" "$_u"; then
-                echo -e "  ${GREEN}✓ $_unit updated (operator: $_u)${NC}"
-                SVC_UPDATED=true
-            else
-                echo -e "  ${YELLOW}⚠ $_unit NOT updated — no operator resolved; installed unit kept. Set MESHANCHOR_OPERATOR=<user> and re-run${NC}"
-            fi
-        else
-            cp "$INSTALL_DIR/scripts/$_unit" "/etc/systemd/system/$_unit"
-            echo -e "  ${GREEN}✓ $_unit updated${NC}"
-            SVC_UPDATED=true
-        fi
-    fi
-done
+_MA_REFRESH_UNITS=(meshanchor-daemon.service meshanchor.service)
+# shellcheck source=lib/unit_render.sh
+. "$INSTALL_DIR/scripts/lib/unit_render.sh"
+if ma_refresh_installed_units "$INSTALL_DIR/scripts" /etc/systemd/system "${_MA_REFRESH_UNITS[@]}"; then
+    SVC_UPDATED=true
+fi
+# meshanchor-map.service is REPAIR-only (#151 re-test): only install_noc.sh
+# ever rendered it, so a box kept the developer's login. Re-rendered only when
+# broken (placeholder / SUDO_USER not a user here) — a working map may serve a
+# different port than the shipped coexist :5002, and a refresh would move it.
+if ma_repair_installed_units "$INSTALL_DIR/scripts" /etc/systemd/system meshanchor-map.service; then
+    SVC_UPDATED=true
+fi
 
 # Update rnsd.service (system-level) if it exists
 if [[ -f /etc/systemd/system/rnsd.service ]]; then

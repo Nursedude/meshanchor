@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
-from .base_handler import (chunk_for_mesh, get_rf_tx_registry,
+from .base_handler import (chunk_for_mesh, get_rf_tx_registry, is_already_bridged,
                            is_rns_to_mesh_echo, strip_unverified_mark)
 from .config import GatewayConfig
 from .node_tracker import UnifiedNodeTracker, UnifiedNode, get_node_tracker
@@ -1087,6 +1087,17 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
         On send failure for non-broadcast messages, attempts to persist
         to the persistent queue for later retry.
         """
+        # Echo guard — is_already_bridged() carries the why (#151). Before the
+        # accounting: an echo was never an attempt. Witness, never silent.
+        if is_already_bridged(msg.content):
+            with self._stats_lock:
+                self.stats['mesh_to_rns_echo_suppressed'] = (
+                    self.stats.get('mesh_to_rns_echo_suppressed', 0) + 1)
+            logger.info(
+                "Mesh→RNS echo suppressed — already bridge-tagged "
+                "(from %s): %r", msg.source_id or "?", str(msg.content)[:48])
+            return
+
         # Every message ends in exactly ONE of delivered / dropped (see
         # _m2r_accounting). A replay of an attempted message claims its
         # origin: the attempt was already counted.
