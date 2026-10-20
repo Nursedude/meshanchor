@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any
 from utils.safe_import import safe_import
 
 from .bridge_health import MessageOrigin
+from .routing_vocab import DEFAULT_ROUTE_OPEN, DEFAULT_ROUTE_SOURCE
 
 # Import routing classifier with confidence scoring
 (_RoutingClassifier, _RoutingCategory, _create_routing_system,
@@ -61,7 +62,17 @@ class MessageRouter:
         'rns_to_meshcore': ('rns', 'meshcore'),
         'meshcore_to_rns': ('meshcore', 'rns'),
         'all_to_all': None,  # Any direction
+        # A refusing rule applies to any source; its FILTERS pick the
+        # messages it refuses (port of MF 2223d2c1 — before this entry the
+        # legacy decider read 'drop' as an unknown direction and ALLOWED).
+        'drop': None,
     }
+
+    #: ``default_route`` values under which a message no rule matched is
+    #: bridged. A direction name (``mesh_to_rns``) opens that SOURCE only;
+    #: anything else makes rules an allow-list. Both deciders read this
+    #: through ``_default_open()`` (MeshAnchor #151).
+    _OPEN_DEFAULT_ROUTES = DEFAULT_ROUTE_OPEN
 
     # Maximum input length for regex matching to bound execution time
     _REGEX_INPUT_LIMIT = 512
@@ -101,20 +112,116 @@ class MessageRouter:
             self._classifier = create_routing_system(
                 rules=rules,
                 bounce_threshold=0.3,
-                fixes_path=fixes_path
+                fixes_path=fixes_path,
+                # One default_route contract for both deciders (#151): a
+                # callable, read per message, so a snapshot cannot disagree
+                # with the legacy decider.
+                default_open=self._default_open,
             )
             logger.info("Routing classifier initialized with confidence scoring")
         # Disabled = refuses everything: say it at WARNING so it is not
         # mistaken for a quiet healthy gateway (#151 item 2; MF twin is
         # describe_ingress_policy's CLOSED verdict).
         self._disabled_refusal_seen = False
+        self._no_rule_refusal_seen = False
+        # Say the EFFECTIVE policy once, where the operator reads (port of
+        # MF 2223d2c1). WARNING when it refuses everything: disabled (#151
+        # item 2), or closed with zero allow rules (a typo'd default_route).
+        (logger.warning if (not self.config.enabled or self._bridges_nothing())
+         else logger.info)(self.describe_ingress_policy())
+
+    def _default_open(self):
+        """``default_route`` as the deciders read it: True (open), False
+        (allow-list), or a frozenset of source networks open by default —
+        a direction name opens its source, as a rule's direction does."""
+        route = self.config.default_route
+        if route in self._OPEN_DEFAULT_ROUTES:
+            return True
+        if route in DEFAULT_ROUTE_SOURCE:
+            return frozenset({DEFAULT_ROUTE_SOURCE[route]})
+        return False
+
+    def _bridges_nothing(self) -> bool:
+        """Closed default_route and no enabled allow rule: every message on
+        every network is refused."""
+        return (self._default_open() is False and not any(
+            r.enabled and r.direction != "drop"
+            for r in self.config.routing_rules))
+
+    def _default_bridges(self, source_network: str) -> bool:
+        d = self._default_open()
+        return d if isinstance(d, bool) else source_network in d
+
+    def _note_refused_no_rule(self, msg) -> None:
+        """Witness for an allow-list refusal: a counter always, INFO once
+        (the reason an operator needs), DEBUG after (honest_failure_modes #9).
+        """
+        with self._stats_lock:
+            self.stats['routing_refused_no_rule'] = (
+                self.stats.get('routing_refused_no_rule', 0) + 1)
+        source_id = (getattr(msg, 'source_address', '')
+                     or getattr(msg, 'source_id', '') or '?')
+        text = (f"Routing: refused {getattr(msg, 'source_network', '?')} "
+                f"message from {source_id[:16]} - no enabled rule matched and "
+                f"default_route={self.config.default_route} makes the rules an "
+                f"allow-list")
+        if not self._no_rule_refusal_seen:
+            self._no_rule_refusal_seen = True
+            logger.info(text + "; further refusals at DEBUG")
+        else:
+            logger.debug(text)
+
+    def describe_ingress_policy(self) -> str:
+        """One sentence naming who this gateway bridges, derived from the
+        config and the decider actually in use — never from a hope. Port of
+        MeshForge's (minus its RNS identity-allowlist clauses, which
+        MeshAnchor does not carry).
+
+        * both deciders — a matching ``drop`` rule refuses. With
+          ``default_route`` bidirectional/all_to_all a message no rule
+          matches is bridged; a direction name opens that source; any other
+          value makes the enabled rules an allow-list.
+        * classifier, open default — ALLOW rules only add confidence, so
+          they restrict nothing; the line says so.
+        """
         if not self.config.enabled:
-            logger.warning(
-                'Routing ingress policy: CLOSED - gateway.json top-level '
-                '"enabled" is false, so every message on every network is '
-                'refused (the Meshtastic/RNS bridge threads do not start; '
-                'a MeshCore handler still receives and refuses); set '
-                '"enabled": true to bridge')
+            return ('Routing ingress policy: CLOSED - gateway.json top-level '
+                    '"enabled" is false, so every message on every network is '
+                    'refused (the Meshtastic/RNS bridge threads do not start; '
+                    'a MeshCore handler still receives and refuses); set '
+                    '"enabled": true to bridge')
+        rules = [r for r in self.config.routing_rules if r.enabled]
+        drop = [r for r in rules if r.direction == "drop"]
+        allow = [r for r in rules if r.direction != "drop"]
+        decider = "classifier" if self._classifier is not None else "legacy"
+        head = (f"Routing ingress policy: decider={decider} rules={len(rules)} "
+                f"default_route={self.config.default_route} — ")
+        knob = ("a rule with direction 'drop' (source_filter/dest_filter/"
+                "message_filter pick what it refuses) is the knob that "
+                "closes a path")
+        drop_clause = (f" except what {len(drop)} drop rule(s) refuse "
+                       f"({', '.join(r.name for r in drop)})" if drop else "")
+        if self.config.default_route in self._OPEN_DEFAULT_ROUTES:
+            tail = (f"; {len(allow)} allow rule(s) do not restrict while "
+                    f"default_route is open"
+                    if allow and decider == "classifier" else "")
+            return (head + "OPEN on every source network: any sender whose "
+                    "message reaches this gateway is bridged onward (RNS→RF "
+                    "included)" + drop_clause + tail + "; " + knob)
+        if self._bridges_nothing():
+            return (head + f"ALLOW-LISTED with 0 enabled allow rules: this "
+                    f"gateway bridges NOTHING (default_route="
+                    f"{self.config.default_route!r} is not open). Set "
+                    f"default_route to 'bidirectional', or add allow rules")
+        d_open = self._default_open()
+        also = (f" plus every {'/'.join(sorted(d_open))}-sourced message "
+                f"(default_route={self.config.default_route} names that source)"
+                if isinstance(d_open, frozenset) else "")
+        return (head + f"ALLOW-LISTED: only messages matching "
+                f"{len(allow)} enabled allow rule(s) are bridged" + also
+                + (f", minus {len(drop)} drop rule(s) "
+                   f"({', '.join(r.name for r in drop)})" if drop else "")
+                + "; a sender no rule names is refused")
 
     def should_bridge(self, msg) -> bool:
         """
@@ -165,6 +272,8 @@ class MessageRouter:
 
         # Handle bounced messages
         if result.bounced:
+            if result.metadata.get('refused_no_rule'):
+                self._note_refused_no_rule(msg)
             with self._stats_lock:
                 self.stats['bounced'] += 1
             logger.info(
@@ -187,6 +296,8 @@ class MessageRouter:
 
         # Determine if we should bridge based on category
         if result.category == RoutingCategory.DROP.value:
+            if result.metadata.get('refused_no_rule'):
+                self._note_refused_no_rule(msg)
             return False
         elif result.category in (
             RoutingCategory.BRIDGE_RNS.value,
@@ -233,7 +344,12 @@ class MessageRouter:
         # Determine source network (handle both BridgedMessage and CanonicalMessage)
         source = getattr(msg, 'source_network', '')
 
-        for rule in self.config.routing_rules:
+        # A refusing rule wins regardless of config order (port of MF
+        # 2026-10-07: an allow rule listed first returned True before the
+        # drop rule was ever consulted). Walk drop rules first.
+        ordered = ([r for r in self.config.routing_rules if r.direction == 'drop']
+                   + [r for r in self.config.routing_rules if r.direction != 'drop'])
+        for rule in ordered:
             if not rule.enabled:
                 continue
 
@@ -278,17 +394,25 @@ class MessageRouter:
 
             # All filters passed - this rule matches
             source_id = getattr(msg, 'source_id', '') or getattr(msg, 'source_address', '')
+            if rule.direction == 'drop':
+                logger.info(
+                    "Routing legacy: drop rule '%s' refused %s from %s",
+                    rule.name, source_id[:16], source
+                )
+                return False
             logger.debug(
                 "Routing legacy: rule '%s' matched for %s from %s",
                 rule.name, source_id[:16], source
             )
             return True
 
-        default_bridge = self.config.default_route in ("bidirectional", "all_to_all")
+        default_bridge = self._default_bridges(source)
         logger.debug(
             "Routing legacy: no rule matched, default_route=%s -> bridge=%s",
             self.config.default_route, default_bridge
         )
+        if not default_bridge:
+            self._note_refused_no_rule(msg)
         return default_bridge
 
     def _direction_allows(self, direction: str, source_network: str) -> bool:
@@ -347,7 +471,7 @@ class MessageRouter:
             # Check if any routing rule allows this direction
             if self._has_matching_rule(source, dest):
                 destinations.append(dest)
-            elif self.config.default_route in ('bidirectional', 'all_to_all'):
+            elif self._default_bridges(source):
                 destinations.append(dest)
 
         return destinations

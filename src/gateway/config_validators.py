@@ -99,6 +99,11 @@ def validate_direction(direction: str, field_name: str) -> Optional[ConfigValida
         "mesh_to_meshcore", "meshcore_to_mesh",
         "rns_to_meshcore", "meshcore_to_rns",
         "all_to_all",
+        # A REFUSING rule: a message matching its filters is never bridged.
+        # The classifier has honoured it since it shipped; this list rejected
+        # it, so the one knob that could express a source policy was invalid
+        # config (port of MeshForge 2223d2c1, MeshAnchor #151).
+        "drop",
     ]
     if direction not in valid:
         return ConfigValidationError(field_name, f"Invalid direction '{direction}'. Valid: {valid}")
