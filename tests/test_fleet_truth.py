@@ -476,9 +476,11 @@ class TestFleetTruth:
                     return base / name
             return None
 
+        named_here = 0
         for row in ft.STRUCTURAL_DARK:
             if app not in (row.get("watched_in") or []):
                 continue
+            named_here += 1
             witnesses = 0
             for seg in (s.strip() for s in row["ref"].split(" + ")):
                 if "::" in seg:
@@ -496,6 +498,23 @@ class TestFleetTruth:
                         assert locate(seg), (row["id"], seg)
                         witnesses += 1
             assert witnesses, (row["id"], "cites no code witness", row["ref"])
+        if named_here:
+            return
+        # No row names this app (MeshAnchor today), so the loop above compared
+        # nothing (2026-10-20 review round 6). Check the other half instead:
+        # a probe the rows cite that IS defined here means `watched_in`
+        # understates this NOC — measure it and list the app.
+        cited = {p for row in ft.STRUCTURAL_DARK
+                 for p in re.findall(r"::\s*(probe_\w+)", row["ref"])}
+        assert cited, "no row cites a probe — this test would compare nothing"
+        here = set()
+        for base in (root / "src", root / "scripts"):
+            for path in base.rglob("*.py"):
+                here.update(re.findall(r"^(?:async )?def (probe_\w+)\(",
+                                       path.read_text(encoding="utf-8", errors="replace"),
+                                       re.M))
+        assert not (cited & here), (app, "defines cited probes but no row lists it",
+                                    sorted(cited & here))
 
     def test_structural_dark_ids_are_snake_case(self):
         """Row ids key the page's open-state across polls, beside the fold's
