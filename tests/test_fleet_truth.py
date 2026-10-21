@@ -390,8 +390,26 @@ class TestFleetTruth:
         assert t["schema"] == "fleet_truth/v1"
 
 
-# ── 2026-07-21 re-review of the 07-19 fix (ported from the MF twin) ────
     # ── Known Blind Spots registry invariants (MF wt-blind-spots port, 2026-10-20) ──
+
+    def test_structural_dark_always_present(self):
+        """The Known Blind Spots registry is always emitted, non-trivial, and
+        every row is fully formed.
+
+        Pin the SHAPE, not a catalogue of ids: the registry is a work-list, so
+        narrowing a row RENAMES it by design (2026-07-19 renamed four in one
+        day — mesh_rf_ota_leg_unwatched -> mesh_rf_ota_egress_unproven among
+        them). An id-list assertion turns every legitimate closure into a red
+        test that says nothing about correctness. One still-open row stays
+        pinned so this cannot pass vacuously; when THAT row closes, update it
+        here deliberately."""
+        t = ft.build_fleet_truth([], now=NOW, signal_classes=[], noc_host="noc-a")
+        assert len(t["structural_dark"]) >= 5
+        for row in t["structural_dark"]:
+            assert row.get("id") and row.get("detail") and row.get("ref"), (
+                f"malformed structural-dark row: {row}")
+        ids = {d["id"] for d in t["structural_dark"]}
+        assert "oracle_rns_send_blind" in ids   # still live (narrowed, row 2)
 
     def test_structural_dark_rows_carry_status_since_and_one_line_residual(self):
         """10-20 compaction: every row says, in ONE line, what is STILL dark
@@ -429,6 +447,32 @@ class TestFleetTruth:
                 if r["status"] in ("open", "narrowed")]
         assert len(live) >= 3
 
+    def test_structural_dark_status_names_the_app_that_earned_it(self):
+        """2026-10-20 review round 3: the registry is served by BOTH NOCs, and
+        every narrowed/closed status rests on MeshForge probes MeshAnchor does
+        not run. A row that claims coverage must say WHERE it is watched."""
+        apps = {"meshforge", "meshanchor"}
+        for row in ft.STRUCTURAL_DARK:
+            if row["status"] in ("narrowed", "closed"):
+                assert row.get("watched_in") and set(row["watched_in"]) <= apps, row["id"]
+
+    def test_blind_spot_scope_is_per_noc_and_default_dark(self):
+        row = {"status": "narrowed", "watched_in": ["meshforge"]}
+        assert ft.blind_spot_scope(row, "meshforge") == "here"
+        assert ft.blind_spot_scope(row, "meshanchor") == "elsewhere"
+        assert ft.blind_spot_scope(row, None) == "unknown"
+        assert ft.blind_spot_scope({"status": "closed"}, "meshforge") == "unknown"
+        assert ft.blind_spot_scope({"status": "open"}, "meshanchor") == "n/a"
+        assert ft.blind_spot_scope({"status": "accepted"}, None) == "n/a"
+
+    def test_served_rows_carry_a_scope_for_this_noc(self):
+        rows = ft.structural_dark_rows("meshanchor")
+        assert [r["id"] for r in rows] == [r["id"] for r in ft.STRUCTURAL_DARK]
+        assert {r["scope"] for r in rows if r["status"] in ("narrowed", "closed")} == {"elsewhere"}
+        tagged = next(i for i, r in enumerate(rows) if "watched_in" in r)
+        rows[tagged]["watched_in"].append("x")      # the inner list is a copy too
+        assert "x" not in ft.STRUCTURAL_DARK[tagged]["watched_in"]
+
     def test_structural_dark_is_a_copy_not_the_registry(self):
         """2026-10-20 review: the cached, served document held the registry
         list itself — a consumer annotating a row edited the SSOT for the
@@ -442,6 +486,7 @@ class TestFleetTruth:
                                         noc_host="noc-a")["structural_dark"]) == len(ft.STRUCTURAL_DARK)
 
 
+# ── 2026-07-21 re-review of the 07-19 fix (ported from the MF twin) ────
 class TestStaleCoverageAndCiConclusions:
     def test_stale_block_coverage_not_presented_as_current(self):
         """The 07-19 staleness gate covered signals[] but NOT coverage{} — a

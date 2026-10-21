@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
-from utils.fleet_blind_spots import STRUCTURAL_DARK
+from utils.fleet_blind_spots import resolve_self_app, structural_dark_rows
 
 from utils.box_truth_center import _ALIAS_RE as _SPOOL_ALIAS_RE  # noqa: E402
 from utils.box_truth_center import read_spool  # noqa: E402  (shared spool reader)
@@ -288,7 +288,7 @@ def get_fleet_truth(*, self_port: int, ttl_s: float = CACHE_TTL_S,
                 "counts": {"healthy": 0, "failed": 0, "dark": 0},
                 # The registry is static data, not a build product: a failed
                 # build must not blank the blind spots when the page is dark.
-                "boxes": [], "structural_dark": [dict(row) for row in STRUCTURAL_DARK],
+                "boxes": [], "structural_dark": structural_dark_rows(resolve_self_app()),
             }
         _cache["truth"] = truth
         _cache["built_at"] = time.monotonic()
