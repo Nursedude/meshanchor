@@ -1,5 +1,6 @@
 # MeshAnchor — NomadNet User Service (consolidated, tmux-detached)
 # MF-DEPLOY: rendered NOMADNET_EXEC by TUI: NomadNet Client > Service (tmux) > Install user unit
+# MF-DEPLOY-AS: nomadnet.service
 # ==================================================================
 #
 # Single NomadNet per box, wrapped in a detached tmux session so the

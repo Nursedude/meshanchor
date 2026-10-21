@@ -924,12 +924,20 @@ class UpdatesHandler(BaseHandler):
         """Software Updates > User Unit Templates — read-only."""
         ok, verdict, lines = self._user_unit_verdict()
         body = [verdict, ""] + lines
-        if not ok:
-            body += ["", "RAW = the installed unit still carries its install-time",
-                     "placeholder and cannot start. STALE = a template fix has",
-                     "not reached this box. Each line names the command that",
-                     "fixes it; nothing here changes the box."]
-        self.ctx.dialog.msgbox("User Unit Templates", "\n".join(body), width=78)
+        body += ["", "RAW = the installed unit still carries its install-time",
+                 "placeholder and CANNOT START. DIFFERS (advisory) = it matches",
+                 "no template in this checkout: an older render, or a unit the",
+                 "other app (MeshForge/MeshAnchor) installed on this shared box.",
+                 "Each line names its fix; this screen never changes the box."]
+        # This backend has no scrolling textbox: WRAP to the box (never cut —
+        # the fixing command is at the end of each line) and size the box.
+        import textwrap
+        fit = []
+        for ln in body:
+            fit.extend(textwrap.wrap(ln, 74, subsequent_indent="    ",
+                                     break_long_words=False) or [""])
+        self.ctx.dialog.msgbox("User Unit Templates", "\n".join(fit),
+                               height=min(len(fit) + 7, 40), width=78)
 
     def _show_update_report(self, steps, aborted: bool = False):
         """Per-step honest completion report — never a blanket 'Complete'."""
