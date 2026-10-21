@@ -288,7 +288,7 @@ def get_fleet_truth(*, self_port: int, ttl_s: float = CACHE_TTL_S,
                 "counts": {"healthy": 0, "failed": 0, "dark": 0},
                 # The registry is static data, not a build product: a failed
                 # build must not blank the blind spots when the page is dark.
-                "boxes": [], "structural_dark": STRUCTURAL_DARK,
+                "boxes": [], "structural_dark": [dict(row) for row in STRUCTURAL_DARK],
             }
         _cache["truth"] = truth
         _cache["built_at"] = time.monotonic()

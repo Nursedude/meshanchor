@@ -391,6 +391,57 @@ class TestFleetTruth:
 
 
 # ── 2026-07-21 re-review of the 07-19 fix (ported from the MF twin) ────
+    # ── Known Blind Spots registry invariants (MF wt-blind-spots port, 2026-10-20) ──
+
+    def test_structural_dark_rows_carry_status_since_and_one_line_residual(self):
+        """10-20 compaction: every row says, in ONE line, what is STILL dark
+        (`dark`), with a status from a closed set and the date it last moved.
+        The long `detail` stays for the record. A `closed` row is kept only
+        so a closure is never a silent deletion; its line names who owns
+        what remains."""
+        import datetime
+        t = ft.build_fleet_truth([], now=NOW, signal_classes=[], noc_host="noc-a")
+        for row in t["structural_dark"]:
+            assert row.get("status") in ft.STRUCTURAL_DARK_STATUSES, row["id"]
+            datetime.date.fromisoformat(row.get("since", ""))
+            line = row.get("dark", "")
+            assert line and "\n" not in line and len(line) <= 200, row["id"]
+        assert set(ft.STRUCTURAL_DARK_STATUSES) == {
+            "open", "narrowed", "accepted", "closed"}
+
+    def test_structural_dark_record_opens_with_its_own_status(self):
+        """2026-10-20 review: a NARROWED chip over a record whose first word
+        was CLOSED. A record that opens with a status word must open with
+        the row's own status (REOPENED BY CHOICE is an accepted gap)."""
+        words = {"OPENED": "open", "NARROWED": "narrowed", "CLOSED": "closed",
+                 "ACCEPTED": "accepted", "REOPENED": "accepted"}
+        t = ft.build_fleet_truth([], now=NOW, signal_classes=[], noc_host="noc-a")
+        for row in t["structural_dark"]:
+            first = row["detail"].split()[0].rstrip(":").split("-")[0]
+            if first in words:
+                assert words[first] == row["status"], (row["id"], first)
+
+    def test_structural_dark_is_not_all_folded(self):
+        """A registry where every row is accepted/closed would render an
+        empty visible pane — this domain HAS live blind spots."""
+        t = ft.build_fleet_truth([], now=NOW, signal_classes=[], noc_host="noc-a")
+        live = [r for r in t["structural_dark"]
+                if r["status"] in ("open", "narrowed")]
+        assert len(live) >= 3
+
+    def test_structural_dark_is_a_copy_not_the_registry(self):
+        """2026-10-20 review: the cached, served document held the registry
+        list itself — a consumer annotating a row edited the SSOT for the
+        life of the process."""
+        t = ft.build_fleet_truth([], now=NOW, signal_classes=[], noc_host="noc-a")
+        t["structural_dark"][0]["id"] = "edited"
+        t["structural_dark"].append({"id": "x"})
+        assert ft.STRUCTURAL_DARK[0]["id"] != "edited"
+        assert t["structural_dark"][:-1] != ft.STRUCTURAL_DARK
+        assert len(ft.build_fleet_truth([], now=NOW, signal_classes=[],
+                                        noc_host="noc-a")["structural_dark"]) == len(ft.STRUCTURAL_DARK)
+
+
 class TestStaleCoverageAndCiConclusions:
     def test_stale_block_coverage_not_presented_as_current(self):
         """The 07-19 staleness gate covered signals[] but NOT coverage{} — a

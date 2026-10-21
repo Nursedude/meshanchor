@@ -244,3 +244,72 @@ class TestFleetTruthPageLocalPanels:
             assert f"['{unit}'" in page_source, (
                 f"log-unit dropdown missing server-allowlisted unit {unit!r}"
             )
+
+
+# ── Known Blind Spots: one line per row (MF wt-blind-spots port, 2026-10-20) ──
+
+def _render_structural_dark_body() -> str:
+    m = re.search(r"function renderStructuralDark\(doc\) \{(.*?)\n    \}\n",
+                  TRUTH_HTML.read_text(encoding="utf-8"), re.S)
+    assert m, "renderStructuralDark missing"
+    return m.group(1)
+
+
+def test_blind_spot_fold_is_an_explicit_allowlist():
+    """10-20: the Known Blind Spots pane was ~12 KB of prose. Rows now fold
+    away by status — but ONLY the two deliberate ones (accepted gap, closed
+    kept for the record). The fold is a literal allowlist, so a status the
+    page has never heard of stays VISIBLE (default-dark, like stClass)."""
+    body = _render_structural_dark_body()
+    m = re.search(r"const FOLDED = new Set\(\[([^\]]*)\]\)", body)
+    assert m, "fold set must be a literal Set"
+    assert sorted(re.findall(r"'(\w+)'", m.group(1))) == ["accepted", "closed"]
+    assert "!FOLDED.has(" in body, "visible rows = everything NOT in the fold"
+
+
+def test_blind_spot_rows_are_one_line_with_prose_behind_details():
+    body = _render_structural_dark_body()
+    assert "esc(sd.dark)" in body, "the one-line residual is the visible text"
+    assert "<details" in body and "esc(sd.detail)" in body
+    assert "esc(sd.status" in body and "esc(sd.since" in body
+
+
+def test_closed_blind_spot_is_not_styled_dark():
+    """2026-10-20 review: inside the fold a closed row wore the same dark
+    span as a live blind spot. Status picks the class from a LITERAL map
+    (never string-built from data), and closed maps to its own class."""
+    body = _render_structural_dark_body()
+    m = re.search(r"const SD_CLASS = \{([^}]*)\}", body)
+    assert m, "status -> class must be a literal map"
+    assert re.search(r"closed:\s*'sd-closed'", m.group(1))
+    assert "SD_CLASS[sd.status]" in body
+
+
+def test_missing_one_liner_shows_a_marker_not_the_record():
+    """A row without `dark` (an older peer doc, a new row) must not pour its
+    whole record into the one-line summary."""
+    body = _render_structural_dark_body()
+    assert "sd.dark || sd.detail" not in body
+    assert "no one-line residual" in body
+
+
+#: The only places renderStructuralDark may read a row field WITHOUT esc():
+#: none of them puts the value into the HTML.
+_SD_UNESCAPED_OK = (
+    r"FOLDED\.has\(sd\.status\)",     # fold membership test
+    r"SD_CLASS\[sd\.status\]",         # literal-map lookup; the CLASS is ours
+    r"sd => sd\.dark\s*\?",            # truthiness test for the marker
+)
+
+
+def test_blind_spot_row_fields_are_escaped_in_the_renderer():
+    """2026-10-20 review round 2: S9's concatenation regex cannot see
+    `(live.map(line)…`, `oneLine(sd)` or `(SD_CLASS[...] || '')`, so it
+    could not catch a dropped esc() inside this renderer. Pin it here: every
+    sd.<field> is esc()d, or is one of the named non-rendering reads."""
+    body = _render_structural_dark_body()
+    rest = re.sub(r"esc\(sd\.\w+", "", body)
+    for ok in _SD_UNESCAPED_OK:
+        assert re.search(ok, rest), f"stale allowlist entry: {ok}"
+        rest = re.sub(ok, "", rest)
+    assert not re.findall(r"\bsd\.\w+", rest), re.findall(r"\bsd\.\w+", rest)

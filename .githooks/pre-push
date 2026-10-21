@@ -96,7 +96,7 @@ PARITY_STATE="UNOBSERVABLE (MeshForge repo not on this box)"
 MF_REPO="${MESHFORGE_REPO:-/opt/meshforge}"
 if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
     echo "Pre-push: byte-lock parity (via the lead repo's checker)..."
-    python3 "$MF_REPO/scripts/parity_check.py" --meshanchor "$REPO_ROOT" \
+    python3 "$MF_REPO/scripts/parity_check.py" --meshforge "$MF_REPO" --meshanchor "$REPO_ROOT" \
         >/tmp/.ma_prepush_parity.out 2>&1
     prc=$?
     if [ "$prc" -eq 1 ]; then
@@ -108,6 +108,16 @@ if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
         exit 1
     elif [ "$prc" -eq 0 ]; then
         PARITY_STATE="checked"
+    elif grep -q "^RESULT: MISSING" /tmp/.ma_prepush_parity.out; then
+        # Exit 2 is ALSO a present lead repo missing a twinned file or symbol
+        # (2026-10-20) — not unobservable. Commit the MeshForge half, push it,
+        # then push this one.
+        cat /tmp/.ma_prepush_parity.out
+        echo ""
+        echo "A twinned file or symbol is MISSING on one side. Land the MeshForge"
+        echo "half first, then push this repo."
+        rm -f /tmp/.ma_prepush_parity.out
+        exit 1
     else
         PARITY_STATE="UNOBSERVABLE (checker exit $prc)"
         echo "  WARN: parity unobservable — not a pass, not a failure."

@@ -54,6 +54,7 @@
             --card-head: #0f1622;
             --border: #2a3a4a;
             --muted: #6a7a8a;
+            --text-soft: #b0c0d0;     /* secondary text on cards */
         }
 
         /* ── Top bar ── */
@@ -195,6 +196,18 @@
         .item.escal .id { color: var(--failed); }
         .item.srcerr .detail { color: var(--amber); }
         .empty { color: var(--muted); font-size: 12px; font-style: italic; }
+        .sd-row summary, .sd-fold summary { cursor: pointer; list-style: none; }
+        .sd-row summary::-webkit-details-marker, .sd-fold summary::-webkit-details-marker { display: none; }
+        .sd-row > summary::before, .sd-fold > summary::before { content: '▸ '; color: var(--muted); }
+        .sd-row[open] > summary::before, .sd-fold[open] > summary::before { content: '▾ '; }
+        .sd-status { display: inline-block; min-width: 64px; font-size: 10px; text-transform: uppercase; color: var(--muted); }
+        .sd-dark { color: var(--text-soft); }
+        .sd-since { color: var(--muted); font-size: 10px; }
+        .sd-fold > summary { color: var(--muted); font-size: 11px; padding: 6px 0; }
+        /* a closed row is a record, not a blind spot: never the dark styling */
+        .sd-closed .id, .sd-closed .sd-dark { color: var(--muted); text-decoration: line-through; }
+        .sd-accepted .id { color: var(--muted); }
+        .sd-missing { color: var(--amber); font-style: italic; }
         .dns-table td { text-align: left; font-size: 12px; padding: 4px 8px; }
         .dns-method { font-weight: 700; color: var(--healthy); }
         .dns-method.warn { color: var(--amber); }
@@ -296,8 +309,8 @@
             <div class="card">
                 <h2>Known Blind Spots <span class="sub">the corners this NOC knows it is NOT watching</span></h2>
                 <div class="body" id="structural-dark"></div>
-                <div class="footnote">Permanent grey rows from the structural-dark registry — first-class data,
-                    so they can never quietly read healthy. Closing one is a deliberate code change.</div>
+                <div class="footnote">One line per row: what is STILL unwatched. Click a row for its record.
+                    Accepted gaps and closures fold below. Closing one is a deliberate code change.</div>
             </div>
 
             <div class="card">
@@ -601,13 +614,32 @@
 
     function renderStructuralDark(doc) {
         const rows = doc.structural_dark || [];
-        document.getElementById('structural-dark').innerHTML = rows.map(sd =>
-            '<div class="item">' +
-            '<div class="id">' + esc(sd.id) + '</div>' +
-            '<div class="detail">' + esc(sd.detail) + '</div>' +
-            '<div class="ref">' + esc(sd.ref) + '</div>' +
-            '</div>'
-        ).join('') || '<div class="empty">registry empty — suspicious: this domain HAS known blind spots</div>';
+        // One line per row: what is STILL dark. The fold is a literal
+        // allowlist (operator decisions + closures kept for the record), so
+        // a status this page has never heard of stays visible — default-dark.
+        const FOLDED = new Set(['accepted', 'closed']);
+        // Status -> class from a literal map, never built from data.
+        const SD_CLASS = { closed: 'sd-closed', accepted: 'sd-accepted' };
+        const oneLine = sd => sd.dark
+            ? '<span class="sd-dark">' + esc(sd.dark) + '</span>'
+            : '<span class="sd-missing">no one-line residual in this row — open its record</span>';
+        const line = sd =>
+            '<details class="item sd-row ' + (SD_CLASS[sd.status] || '') + '"><summary>' +
+            '<span class="sd-status">' + esc(sd.status || '?') + '</span> ' +
+            '<span class="id">' + esc(sd.id) + '</span> ' + oneLine(sd) +
+            ' <span class="sd-since">since ' + esc(sd.since || '?') + '</span>' +
+            '</summary><div class="detail">' + esc(sd.detail) + '</div>' +
+            '<div class="ref">' + esc(sd.ref) + '</div></details>';
+        const live = rows.filter(sd => !FOLDED.has(sd.status));
+        const folded = rows.filter(sd => FOLDED.has(sd.status));
+        const foldBlock = folded.length
+            ? '<details class="sd-fold"><summary>' + folded.length +
+              ' accepted / closed</summary>' + folded.map(line).join('') + '</details>'
+            : '';
+        document.getElementById('structural-dark').innerHTML = rows.length
+            ? (live.map(line).join('') ||
+               '<div class="empty">no live blind spot listed — suspicious: re-read the folded rows</div>') + foldBlock
+            : '<div class="empty">registry empty — suspicious: this domain HAS known blind spots</div>';
     }
 
     function renderEscalations(doc) {

@@ -145,6 +145,7 @@ class TestCache:
         with patch.object(c, "collect_snapshots", side_effect=RuntimeError("boom")):
             t = c.get_fleet_truth(self_port=5001, force=True)
         assert t["structural_dark"] == STRUCTURAL_DARK
+        assert t["structural_dark"] is not STRUCTURAL_DARK  # cached + served: a copy
 
     def test_signal_classes_are_blackout_kinds_and_blockless_status_reads_dark(self):
         """MA's closed enum = its blackout kinds (2026-07-19 enrichment). A
