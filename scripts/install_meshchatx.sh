@@ -89,7 +89,9 @@ MCX_BIN="${REAL_HOME}/.local/bin/meshchatx"
 STORAGE_DIR="${REAL_HOME}/.local/share/meshchatx"
 
 # Upstream release source (gitea API).
-RELEASES_API="https://git.quad4.io/api/v1/repos/RNS-Things/MeshChatX/releases/latest"
+# Moved 2026-10 from git.quad4.io (no DNS records since) to GitHub; the
+# GitHub releases API carries the same assets[].browser_download_url field.
+RELEASES_API="https://api.github.com/repos/Quad4-Software/MeshChatX/releases/latest"
 
 # --------------------------------------------------------------------
 # Argument parsing

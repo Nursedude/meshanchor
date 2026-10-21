@@ -1,7 +1,7 @@
 """MeshChatX Handler — third-party LXMF web client install + service.
 
 MeshChatX is an actively-maintained fork of Reticulum MeshChat shipped
-by RNS-Things on git.quad4.io. It coexists side-by-side with NomadNet:
+by Quad4-Software (github.com/Quad4-Software/MeshChatX; formerly git.quad4.io). It coexists side-by-side with NomadNet:
 both attach to the same shared rnsd instance, each owns a separate
 LXMF identity (NomadNet under ``~/.nomadnetwork/``, MeshChatX under
 ``~/.local/share/meshchatx/``).
