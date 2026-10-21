@@ -90,20 +90,27 @@ fi
 # lives only in MeshForge, the lead repo, so an edit made HERE to a byte-locked
 # file could drift and this repo's own hook could not see it — it would surface
 # only when MeshForge's suite next ran. Borrow the lead repo's checker when it is
-# on this box. Exit codes read WITH the RESULT line (2026-10-20):
+# on this box. Exit codes read WITH the output (2026-10-20):
 #   0 = in sync · 1 + "RESULT: DRIFT" = BLOCK · 2 + "RESULT: MISSING" = BLOCK ·
-#   anything else = UNOBSERVABLE from here (repo absent or the checker failed),
-#   never a pass and never a failure (honest_failure_modes #2).
+#   the lead repo absent = UNOBSERVABLE (never a pass, never a failure,
+#   honest_failure_modes #2) · anything else = the checker failed = BLOCK: it
+#   observed nothing, so it must not wave a push through.
 # LIMIT: it compares WORKING TREES — an uncommitted twin satisfies it.
 PARITY_STATE="UNOBSERVABLE (MeshForge repo not on this box)"
 MF_REPO="${MESHFORGE_REPO:-/opt/meshforge}"
 if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
     echo "Pre-push: byte-lock parity (via the lead repo's checker)..."
-    parity_out=$(mktemp "${TMPDIR:-/tmp}/ma_prepush_parity.XXXXXX")
+    if ! parity_out=$(mktemp "${TMPDIR:-/tmp}/ma_prepush_parity.XXXXXX"); then
+        echo "Pre-push: cannot create a temp file for the parity check — it did not run."
+        echo "Fix TMPDIR, or override (sparingly): git push --no-verify"
+        exit 1
+    fi
     python3 "$MF_REPO/scripts/parity_check.py" --meshforge "$MF_REPO" --meshanchor "$REPO_ROOT" \
         >"$parity_out" 2>&1
     prc=$?
-    if [ "$prc" -eq 1 ] && grep -q "^RESULT: DRIFT" "$parity_out"; then
+    if [ "$prc" -eq 0 ]; then
+        PARITY_STATE="checked"
+    elif [ "$prc" -eq 1 ] && grep -q "^RESULT: DRIFT" "$parity_out"; then
         cat "$parity_out"
         echo ""
         echo "Byte-locked file(s) DRIFTED. MeshForge is the LEAD repo: land the"
@@ -114,18 +121,22 @@ if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
     elif [ "$prc" -eq 2 ] && grep -q "^RESULT: MISSING" "$parity_out"; then
         cat "$parity_out"
         echo ""
-        echo "A twinned file is MISSING on the side marked '=absent' above (mf= is"
-        echo "MeshForge, ma= is this repo). Port it to that side, then push."
+        echo "A twinned file or symbol is MISSING. Byte-tier lines name the side"
+        echo "('=absent': mf= is MeshForge, ma= is this repo); shape/forkpin/probe"
+        echo "lines name the file to look in. Port it there, then push. Any DRIFT"
+        echo "listed above is owed as well."
         echo "Note: this compares working trees — an uncommitted twin also satisfies it."
         echo "Override (sparingly): git push --no-verify"
         rm -f "$parity_out"
         exit 1
-    elif [ "$prc" -eq 0 ]; then
-        PARITY_STATE="checked"
     else
-        PARITY_STATE="UNOBSERVABLE (checker exit $prc)"
-        echo "  WARN: parity unobservable — not a pass, not a failure:"
-        tail -n 3 "$parity_out" | sed 's/^/        /'
+        cat "$parity_out"
+        echo ""
+        echo "The lead repo's parity CHECKER failed (exit $prc, no RESULT line) — it"
+        echo "observed nothing, so this push is not checked. Fix it in MeshForge first."
+        echo "Override (sparingly): git push --no-verify"
+        rm -f "$parity_out"
+        exit 1
     fi
     rm -f "$parity_out"
 fi

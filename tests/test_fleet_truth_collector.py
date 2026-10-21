@@ -144,9 +144,16 @@ class TestCache:
         from utils.fleet_blind_spots import STRUCTURAL_DARK
         with patch.object(c, "collect_snapshots", side_effect=RuntimeError("boom")):
             t = c.get_fleet_truth(self_port=5001, force=True)
-        assert [r["id"] for r in t["structural_dark"]] == [r["id"] for r in STRUCTURAL_DARK]
-        assert t["structural_dark"] is not STRUCTURAL_DARK  # cached + served: a copy
-        assert all("scope" in r for r in t["structural_dark"]), "fallback keeps per-NOC scope"
+        served = t["structural_dark"]
+        assert served is not STRUCTURAL_DARK  # cached + served: a copy
+        # every registry field intact, plus the per-NOC scope
+        assert [{k: v for k, v in r.items() if k != "scope"} for r in served] == STRUCTURAL_DARK
+        # the RIGHT scope for this NOC, not merely a legal one (round-5 plant:
+        # a fallback stamping every row 'n/a' passed a vocabulary check)
+        from utils.fleet_blind_spots import blind_spot_scope, resolve_self_app
+        app = resolve_self_app()
+        assert [r["scope"] for r in served] == [blind_spot_scope(r, app) for r in STRUCTURAL_DARK]
+        assert app is not None and {r["scope"] for r in served} - {"n/a"} <= {"here", "elsewhere"}
 
     def test_signal_classes_are_blackout_kinds_and_blockless_status_reads_dark(self):
         """MA's closed enum = its blackout kinds (2026-07-19 enrichment). A
