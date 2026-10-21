@@ -887,13 +887,15 @@ class UpdatesHandler(BaseHandler):
                 # One rule with update.sh (utils.user_unit_templates): an
                 # installer-RENDERED template is never copied raw — a raw copy
                 # overwrote meshcore-chat's working unit (2026-10-21).
+                # Target-aware: never through a symlink (a masked unit is
+                # /dev/null), never switches a rendered variant.
                 from utils import user_unit_templates as uut
-                for cls in uut.templates(templates_dir):
-                    if cls.kind == uut.KIND_GLOB:
-                        shutil.copy2(str(cls.template), str(user_svc_dir / cls.unit))
-                        copied.append(cls.unit)
-                    elif cls.kind != uut.KIND_RENDERED or (user_svc_dir / cls.unit).exists():
-                        skipped.append(f"{cls.unit} not copied ({cls.kind}: {cls.detail})")
+                for st in uut.deploy_plan(templates_dir, user_svc_dir):
+                    if st.action == "copy":
+                        shutil.copyfile(str(st.cls.template), str(user_svc_dir / st.cls.unit))
+                        copied.append(st.cls.unit)
+                    elif st.say:
+                        skipped.append(f"{st.cls.unit} not copied ({st.cls.kind}: {st.reason})")
 
             if copied:
                 daemon_reload()
@@ -936,8 +938,13 @@ class UpdatesHandler(BaseHandler):
         for ln in body:
             fit.extend(textwrap.wrap(ln, 74, subsequent_indent="    ",
                                      break_long_words=False) or [""])
+        cap = 15  # fits a 24-row console with the box frame
+        if len(fit) > cap:
+            more = len(fit) - (cap - 2)
+            fit = fit[:cap - 2] + [f"… {more} more line(s) — full list:",
+                                   "python3 -m utils.user_unit_templates audit templates/systemd"]
         self.ctx.dialog.msgbox("User Unit Templates", "\n".join(fit),
-                               height=min(len(fit) + 7, 40), width=78)
+                               height=len(fit) + 7, width=78)
 
     def _show_update_report(self, steps, aborted: bool = False):
         """Per-step honest completion report — never a blanket 'Complete'."""
