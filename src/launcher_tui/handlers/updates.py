@@ -892,7 +892,9 @@ class UpdatesHandler(BaseHandler):
                 from utils import user_unit_templates as uut
                 for st in uut.deploy_plan(templates_dir, user_svc_dir):
                     if st.action == "copy":
-                        shutil.copyfile(str(st.cls.template), str(user_svc_dir / st.cls.unit))
+                        # copy2 keeps the template's mode; the plan never
+                        # returns a symlinked target, so nothing is written through
+                        shutil.copy2(str(st.cls.template), str(user_svc_dir / st.cls.unit))
                         copied.append(st.cls.unit)
                     elif st.say:
                         skipped.append(f"{st.cls.unit} not copied ({st.cls.kind}: {st.reason})")
@@ -942,7 +944,8 @@ class UpdatesHandler(BaseHandler):
         if len(fit) > cap:
             more = len(fit) - (cap - 2)
             fit = fit[:cap - 2] + [f"… {more} more line(s) — full list:",
-                                   "python3 -m utils.user_unit_templates audit templates/systemd"]
+                                   f"cd {repo_root()} && PYTHONPATH=src python3 -m",
+                                   "  utils.user_unit_templates audit templates/systemd"]
         self.ctx.dialog.msgbox("User Unit Templates", "\n".join(fit),
                                height=len(fit) + 7, width=78)
 
