@@ -1,4 +1,5 @@
 # MeshAnchor — MeshCore Chat Pane User Service (tmux-detached)
+# MF-DEPLOY: rendered CHAT_PANE_EXEC by TUI: MeshCore > Chat (tmux pane) > Service control > Install user unit
 # =============================================================
 #
 # A persistent operator chat console for the MeshCore radio. The unit

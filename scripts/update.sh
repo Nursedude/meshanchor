@@ -14,7 +14,11 @@
 #   1. Fetches latest code from GitHub
 #   2. Updates Python dependencies if changed
 #   3. Reinstalls desktop integration (icons/launchers)
-#   4. Updates systemd service files (rnsd, meshanchor, nomadnet)
+#   4. Updates systemd service files (rnsd, meshanchor, the *-user.service
+#      templates a copier may deploy). Templates their installer RENDERS
+#      (meshcore-chat, nomadnet-tmux, meshchatx: `# MF-DEPLOY: rendered`) are
+#      NOT refreshed here — Software Updates > User Unit Templates shows which
+#      are stale.
 #   5. Preserves: /etc/meshanchor/, ~/.config/meshanchor/, radio configs
 #
 # What it does NOT do:
@@ -381,20 +385,30 @@ USER_SVC_UPDATED=false
 # than not deploying. The warning above already said why.
 if [[ -n "$REAL_USER" && -d "$INSTALL_DIR/templates/systemd" ]]; then
     mkdir -p "$USER_SYSTEMD_DIR"
-    for tmpl in "$INSTALL_DIR/templates/systemd/"*-user.service; do
-        if [[ -f "$tmpl" ]]; then
-            svc_name=$(basename "$tmpl" | sed 's/-user\.service/.service/')
-            # A template with an install-time placeholder (__CHAT_PANE_EXEC__,
-            # __MESHCHATX_EXEC__, ...) is RENDERED by its installer; a raw copy
-            # overwrote meshcore-chat's working unit and the next restart ran
-            # the literal token (2026-10-21). Leave it to the installer.
-            if grep -qE '__[A-Z][A-Z0-9_]+__' "$tmpl"; then
-                echo -e "  ${YELLOW}↷ ${svc_name}: not copied (rendered by its installer; re-run that installer to refresh)${NC}"
-                continue
-            fi
-            cp "$tmpl" "$USER_SYSTEMD_DIR/$svc_name" 2>/dev/null || true
-        fi
-    done
+    # BEGIN user-template deploy (one rule: utils/user_unit_templates.py)
+    # A template that DECLARES `# MF-DEPLOY: rendered TOKEN by <installer>`
+    # is rendered by that installer and never copied raw here (2026-10-21: a raw
+    # copy overwrote meshcore-chat's working unit; the next restart ran the
+    # literal token). The plan is computed by the module the TUI uses too; if it
+    # cannot run, NOTHING is copied and that is said — never a raw fallback.
+    uut_rc=0
+    uut_plan="$(PYTHONPATH="$INSTALL_DIR/src" timeout 30 python3 -m utils.user_unit_templates plan "$INSTALL_DIR/templates/systemd" 2>&1)" || uut_rc=$?
+    if [[ $uut_rc -ne 0 ]]; then
+        echo -e "  ${YELLOW}⚠ user-unit plan failed (rc=$uut_rc) — no *-user.service template copied: ${uut_plan:0:200}${NC}"
+    else
+        while IFS=$'\t' read -r uut_act uut_a uut_b uut_c; do
+            case "$uut_act" in
+                copy) cp "$uut_a" "$USER_SYSTEMD_DIR/$uut_b" 2>/dev/null || true ;;
+                skip)
+                    # say it only where the unit is installed, or where the
+                    # template itself is wrong — not on every box every run
+                    if [[ "$uut_b" != "rendered" || -f "$USER_SYSTEMD_DIR/$uut_a" ]]; then
+                        echo -e "  ${YELLOW}↷ ${uut_a}: not copied (${uut_b}) — ${uut_c}${NC}"
+                    fi ;;
+            esac
+        done <<< "$uut_plan"
+    fi
+    # END user-template deploy
     chown -R "${REAL_USER}:" "$USER_SYSTEMD_DIR" 2>/dev/null || true
     USER_SVC_UPDATED=true
     echo -e "  ${GREEN}✓ User service templates deployed${NC}"
