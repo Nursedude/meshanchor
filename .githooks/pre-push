@@ -91,7 +91,7 @@ fi
 # file could drift and this repo's own hook could not see it — it would surface
 # only when MeshForge's suite next ran. Borrow the lead repo's checker when it is
 # on this box. Exit codes read WITH the output (2026-10-20):
-#   0 = in sync · 1 + "RESULT: DRIFT" = BLOCK · 2 + "RESULT: MISSING" = BLOCK ·
+#   0 + "RESULT: in sync" = pass · 1 + "RESULT: DRIFT" = BLOCK · 2 + "RESULT: MISSING" = BLOCK ·
 #   the lead repo absent = UNOBSERVABLE (never a pass, never a failure,
 #   honest_failure_modes #2) · anything else = the checker failed = BLOCK: it
 #   observed nothing, so it must not wave a push through.
@@ -108,7 +108,9 @@ if [ -f "$MF_REPO/scripts/parity_check.py" ]; then
     python3 "$MF_REPO/scripts/parity_check.py" --meshforge "$MF_REPO" --meshanchor "$REPO_ROOT" \
         >"$parity_out" 2>&1
     prc=$?
-    if [ "$prc" -eq 0 ]; then
+    # exit 0 must SAY so: a checker that returned early compared nothing
+    # (2026-10-20 review round 5 — a stub `pass` read as "checked").
+    if [ "$prc" -eq 0 ] && grep -q "^RESULT: in sync" "$parity_out"; then
         PARITY_STATE="checked"
     elif [ "$prc" -eq 1 ] && grep -q "^RESULT: DRIFT" "$parity_out"; then
         cat "$parity_out"
