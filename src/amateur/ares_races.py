@@ -1,5 +1,5 @@
 """
-ARES/RACES Tools for MeshAnchor Amateur Radio Edition
+ARES/RACES Tools for MeshAnchor (amateur radio module)
 
 Provides Amateur Radio Emergency Service (ARES) and
 Radio Amateur Civil Emergency Service (RACES) functionality.

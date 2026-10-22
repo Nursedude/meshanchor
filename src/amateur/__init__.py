@@ -1,5 +1,5 @@
 """
-MeshAnchor Amateur Radio Edition Module
+MeshAnchor Amateur Radio Module
 
 Provides ham radio specific functionality:
 - Callsign management and lookup

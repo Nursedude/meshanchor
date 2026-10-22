@@ -1,25 +1,19 @@
 """
 MeshAnchor Core Module
 
-Provides shared functionality across all MeshAnchor editions:
-- PRO: Full-featured desktop application
-- Amateur: Ham radio focused edition
-- .io: Lightweight web-based with plugins
-
 This module contains:
-- Edition detection and feature gating
 - Plugin system architecture
 - Shared utilities and base classes
+
+The edition system (PRO / Amateur / .io feature sets, ``core/edition.py``) was
+DELETED 2026-10-22 (BIC-5 credibility sweep, ported from MeshForge 641ea0eb):
+nothing consumed it, and it advertised editions and features (APRS gateway,
+Winlink, a plugin marketplace) that were never built.
 """
 
-from .edition import Edition, detect_edition, has_feature, get_edition_features
 from .plugin_base import Plugin, PluginManager, PluginManifest
 
 __all__ = [
-    'Edition',
-    'detect_edition',
-    'has_feature',
-    'get_edition_features',
     'Plugin',
     'PluginManager',
     'PluginManifest',

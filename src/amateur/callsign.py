@@ -1,5 +1,5 @@
 """
-Callsign Management for MeshAnchor Amateur Radio Edition
+Callsign Management for MeshAnchor (amateur radio module)
 
 Provides callsign lookup, validation, and management features.
 """

@@ -24,7 +24,6 @@
 | `MESHANCHOR_CHAT_API` | `chat_client.py`, `handlers/chat_pane.py` | Chat-pane API endpoint override. |
 | `MESHANCHOR_DELIVERY_COUNTERS_DB` | `gateway/delivery_counters.py` | Delivery-counters DB path override. |
 | `MESHANCHOR_FLEET_CONFIG` | `utils/fleet_config.py` | Fleet config path override. |
-| `MESHANCHOR_EDITION` | `core/edition.py` | Edition override; wins over config + marker files. |
 | `CALLSIGN` / `HAM_CALLSIGN` | `amateur/callsign.py`, `diagnostics/diagnose.py` | Operator callsign for amateur-radio features. |
 | `ENABLE_EMOJI` / `DISABLE_EMOJI` | `utils/emoji.py` | Force emoji rendering on/off (auto-detected otherwise). |
 

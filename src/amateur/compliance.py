@@ -1,5 +1,5 @@
 """
-Part 97 Compliance for MeshAnchor Amateur Radio Edition
+Part 97 Compliance for MeshAnchor (amateur radio module)
 
 Provides FCC Part 97 reference and compliance checking features.
 """
