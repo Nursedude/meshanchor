@@ -74,7 +74,7 @@ Quick navigation for AI assistants. Load only what you need.
 | File | Purpose | Status |
 |------|---------|--------|
 | `plans/TODO_PRIORITIES.md` | **Current task priorities & branch strategy** | Active — start here |
-| `plans/v1.0_roadmap.md` | v1.0 definition, criteria & phased roadmap | Active |
+| meshforge `.claude/ROADMAP.md` | the domain's one roadmap (this repo's copy `plans/v1.0_roadmap.md` deleted 2026-10-22) | Active |
 | `plans/strategic_improvements.md` | Tiered improvement roadmap (Sprints A-C done) | Active |
 | `plans/missing_features.md` | TUI features gap tracker (most now have mixins) | Needs QTH testing |
 | `plans/noc_test_plan.md` | Lab infrastructure & testing procedures | Reference |

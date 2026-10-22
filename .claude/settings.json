@@ -35,6 +35,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /opt/meshforge/scripts/roadmap.py --now 2>/dev/null || true"
+          }
+        ]
+      }
     ]
   },
   "permissions": {

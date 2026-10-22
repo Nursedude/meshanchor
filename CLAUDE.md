@@ -46,6 +46,8 @@ MeshAnchor is a **MeshCore-primary Network Operations Center (NOC)** — the sis
 
 Forked from MeshForge main on 2026-04-01. Shares the same TUI framework, gateway bridge architecture, and RF tools.
 
+**Domain roadmap SSOT: meshforge `.claude/ROADMAP.md`** — items tagged `[MA]` (and `twin→MA`) are this repo's. MeshAnchor keeps NO roadmap of its own (roadmap cohesion, decided 2026-10-19). Session start prints its NOW list; public view: meshforge `docs/roadmap.md`.
+
 ---
 
 ## Branch Strategy

@@ -198,7 +198,7 @@ Content removed from this file lives in canonical locations:
 - **UI/UX guidelines** -> `foundations/tui_architecture.md`
 - **HamClock/propagation** -> `research/hamclock_complete.md`, `commands/propagation.py`
 - **Security rules** -> `rules/security.md`, `foundations/persistent_issues.md`
-- **Roadmap** -> `plans/TODO_PRIORITIES.md`, `plans/v1.0_roadmap.md`
+- **Roadmap** -> meshforge `.claude/ROADMAP.md` (the domain's one roadmap; items tagged [MA] are this repo's)
 - **Testing** -> `rules/testing.md`
 
 ---
