@@ -81,6 +81,16 @@ ma_refresh_installed_units() {
     shift 2
     for unit in "$@"; do
         [[ -f "$dst_dir/$unit" && -f "$src_dir/$unit" ]] || continue
+        # Never replace a unit that runs a DIFFERENT PROGRAM under the same
+        # name (2026-10-21: the TUI launcher's unit overwrote the running NOC
+        # orchestrator's meshanchor.service; the next restart crash-looped it
+        # 2,172 times). utils.user_unit_templates is the one rule.
+        local sp_out sp_rc=0
+        sp_out="$(PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")/../../src" timeout 30 python3 -m utils.user_unit_templates same-program "$dst_dir/$unit" "$src_dir/$unit" 2>/dev/null)" || sp_rc=$?
+        if [[ $sp_rc -ne 0 ]]; then
+            echo -e "  ${YELLOW:-}⚠ $unit NOT replaced — installed vs template: ${sp_out:-same-program check could not run (rc=$sp_rc)}; decide which program owns the name, then install it by hand${NC:-}"
+            continue
+        fi
         if grep -q "__MESHANCHOR_" "$src_dir/$unit"; then
             if u="$(ma_resolve_unit_user "$dst_dir/$unit")" \
                     && ma_render_unit "$src_dir/$unit" "$dst_dir/$unit" "$u"; then

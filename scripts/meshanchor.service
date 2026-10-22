@@ -1,33 +1,24 @@
+# meshanchor.service — the NOC ORCHESTRATOR (core.orchestrator). ONE definition:
+# byte-identical to the unit scripts/install_noc.sh writes (test-pinned).
+# 2026-10-21: this file used to be the interactive TUI launcher under the
+# same name; update.sh/the TUI refresh copied it over a running orchestrator
+# and the next restart crash-looped meshanchor.service 2,172 times.
 [Unit]
 Description=MeshAnchor Mesh Network Operations Center
 Documentation=https://github.com/Nursedude/meshanchor
-After=network.target rnsd.service
-# meshtasticd is optional gateway — not a hard dependency
-After=meshtasticd.service
+After=network.target meshtasticd.service rnsd.service
+Wants=meshtasticd.service rnsd.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/meshanchor
-ExecStart=/usr/bin/python3 /opt/meshanchor/src/launcher.py --no-services
+WorkingDirectory=/opt/meshanchor/src
+# Orchestrator manages meshtasticd and rnsd (graceful: stay up even if services missing)
+ExecStart=/opt/meshanchor/venv/bin/python -m core.orchestrator --start --monitor --graceful
+ExecStop=/opt/meshanchor/venv/bin/python -m core.orchestrator --stop
 Restart=on-failure
 RestartSec=10
 
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-# MA017 audit-skip: launcher.py --no-services skips start_noc_services()
-# entirely; this entry path doesn't write to meshanchor data buckets.
-# Pattern-audit Finding #6 (2026-05-19) noted this unit's ProtectHome=
-# read-only + /home in ReadWritePaths is a known systemd no-op per the
-# companion meshanchor-daemon.service comment — investigating the real
-# /home / /root write behaviour is deferred until the next time this
-# unit is touched.
-ReadWritePaths=/var/log /tmp /home  # audit-skip: see comment above
-PrivateTmp=true
-
-# Environment
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
