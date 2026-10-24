@@ -99,8 +99,10 @@ def test_a_forgery_that_bridges_travels_marked(world, monkeypatch):
 
 def test_the_rf_copy_of_a_claim_is_marked_once():
     import inspect
-    from gateway import rns_bridge
-    src = inspect.getsource(rns_bridge)
+    from gateway.rns_bridge import RNSMeshtasticBridge
+    # The method, not a file: it moved to _rns_bridge_xform.py (MF025 split,
+    # 2026-10-23) and a file-scoped grep would go blind on the next move.
+    src = inspect.getsource(RNSMeshtasticBridge._process_rns_to_mesh)
     # the in-app mark is replaced by the RF tag's "?" — via the ONE shared
     # helper since 2026-10-16 (a re-spelled copy disarmed the echo guard)
     from gateway.base_handler import UNVERIFIED_MARK, strip_unverified_mark
