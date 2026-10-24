@@ -566,7 +566,11 @@ class MeshCoreBridgeMixin:
                 logger.warning(f"Failed to bridge {net_prefix}→MC")
                 with self._stats_lock:
                     self.stats['errors'] += 1
-                requeued = self._requeue_failed_message(msg, "meshcore")
+                # The slot resolved above, never metadata['channel'] (the
+                # SOURCE index: a Meshtastic primary-channel broadcast
+                # carries 0 = MeshCore Public). Issue #37 class, 2026-10-24.
+                requeued = self._requeue_failed_message(
+                    msg, "meshcore", channel_override=target_channel)
                 self.health.record_message_failed(
                     f"mesh_to_meshcore" if src_net == "meshtastic" else "rns_to_meshcore",
                     requeued=requeued,

@@ -762,11 +762,32 @@ class BridgeSendMixin:
                 'destination_id': dest_id or "",
                 'metadata': metadata,
             }
-            if channel_override is not None:
-                # Caller (cross-protocol bridge_to_meshcore path) already
-                # resolved the destination slot via the config-only
-                # resolver. Write it verbatim — do NOT fall through to
-                # metadata.channel, which would re-introduce the leak.
+            if destination == "meshcore":
+                # Chokepoint 1 of 2 (2026-10-24, Issue #37 class): a MeshCore
+                # row replays ONLY on the slot the caller resolved. Falling
+                # through to metadata.channel lifted the SOURCE protocol's
+                # index (Meshtastic ingress always sets it; the primary
+                # channel is 0 = MeshCore Public), and a row with no slot
+                # reached the worker's default of 0. Refuse, loudly: a lost
+                # message is recoverable, private cargo on Public is not.
+                try:
+                    slot = int(channel_override)
+                except (TypeError, ValueError):
+                    slot = -1
+                if slot < 0:
+                    with self._stats_lock:
+                        self.stats['meshcore_requeue_no_slot_refused'] = (
+                            self.stats.get('meshcore_requeue_no_slot_refused', 0)
+                            + 1)
+                    logger.warning(
+                        "→MeshCore requeue refused: no resolved MeshCore slot "
+                        f"(channel_override={channel_override!r}); not queued, "
+                        "never replayed on a source slot or slot 0 (Public)")
+                    return False
+                payload['channel'] = slot
+            elif channel_override is not None:
+                # Caller already resolved the destination slot. Write it
+                # verbatim — do NOT fall through to metadata.channel.
                 try:
                     payload['channel'] = int(channel_override)
                 except (TypeError, ValueError):

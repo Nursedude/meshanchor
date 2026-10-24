@@ -1011,7 +1011,7 @@ class TestSendPath:
         # The exact pre-fix shape: send_chan_msg(0, "[delivered: ...]"). Must NOT fire.
         fake_commands.send_chan_msg.assert_not_awaited()
 
-    def test_process_outbound_dict_falls_back_to_metadata_channel(self, handler):
+    def test_process_outbound_dict_never_falls_back_to_metadata_channel(self, handler):
         """Channel-0 Public leak follow-up (2026-05-20). The persistent
         queue's replay path hands ``_process_outbound`` a dict payload.
         Pre-fix lift in _requeue_failed_message left channel only in
@@ -1039,8 +1039,10 @@ class TestSendPath:
             loop.run_until_complete(handler._process_outbound())
         finally:
             loop.close()
-        # Slot 1, not slot 0 — the fallback found the channel in metadata.
-        fake_commands.send_chan_msg.assert_awaited_once_with(1, "private cargo")
+        # REVERSED 2026-10-24: metadata.channel is the SOURCE index, so a
+        # queued channel row with no top-level slot never airs
+        # (tests/test_meshcore_requeue_slot.py pins the refusal + witness).
+        fake_commands.send_chan_msg.assert_not_called()
 
     def test_process_outbound_dict_top_level_channel_wins(self, handler):
         """When both top-level and metadata channel are present, top-level

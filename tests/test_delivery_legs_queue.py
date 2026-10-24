@@ -339,8 +339,9 @@ def _msg(source_network, origin=None):
 
 
 def test_a_requeued_message_is_queued_on_its_ingress_leg(real_queue_bridge):
+    # A MeshCore row needs its resolved slot (refused without, 2026-10-24).
     assert real_queue_bridge._requeue_failed_message(
-        _msg("rns"), "meshcore") is True
+        _msg("rns"), "meshcore", channel_override=1) is True
 
     assert _legs()["rns>meshcore"]["15m"]["queued"] == 1
 

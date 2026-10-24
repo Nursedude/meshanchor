@@ -1074,13 +1074,9 @@ class TestRequeueFailedMessage:
         )
         assert bridge._requeue_failed_message(msg, "rns") is False
 
-    def test_channel_lifted_into_payload_top_level(self, bridge):
-        """Channel-0 Public leak follow-up (2026-05-20). The MeshCore
-        persistent-queue sender reads ``payload.get('channel')`` from the
-        OUTER dict; if we leave channel only in metadata, the replay path
-        falls through ``_resolve_channel(None)`` → slot 0 (Public). Lift
-        it into the payload at enqueue time so the slot survives a
-        disconnect/reconnect cycle."""
+    def test_a_metadata_channel_is_never_lifted_into_a_meshcore_row(self, bridge):
+        """Was test_channel_lifted_into_payload_top_level (2026-05-20).
+        REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted."""
         mock_queue = MagicMock()
         mock_queue.enqueue.return_value = "msg-123"
         bridge._persistent_queue = mock_queue
@@ -1091,21 +1087,13 @@ class TestRequeueFailedMessage:
             destination_id=None, content="private chat",
             metadata={"channel": 1, "other": "preserved"},
         )
-        ok = bridge._requeue_failed_message(msg, "meshcore")
-        assert ok is True
-        call_kwargs = mock_queue.enqueue.call_args.kwargs
-        payload = call_kwargs["payload"]
-        # Top-level channel set from metadata.channel — the replay path
-        # consults this BEFORE _resolve_channel can default to 0.
-        assert payload["channel"] == 1
-        # Metadata still intact (other consumers may need it).
-        assert payload["metadata"]["channel"] == 1
-        assert payload["metadata"]["other"] == "preserved"
+        assert bridge._requeue_failed_message(msg, "meshcore") is False
+        mock_queue.enqueue.assert_not_called()
 
-    def test_channel_lift_skipped_when_metadata_missing(self, bridge):
-        """No channel info → no top-level 'channel' key. Don't fabricate
-        one — the downstream _resolve_channel will still default to 0
-        and log at DEBUG, surfacing the missing-info caller."""
+    def test_a_meshcore_row_with_no_slot_is_refused(self, bridge):
+        """Was test_channel_lift_skipped_when_metadata_missing: the row used
+        to be queued with no slot and replayed on _resolve_channel's 0.
+        REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted."""
         mock_queue = MagicMock()
         mock_queue.enqueue.return_value = "msg-x"
         bridge._persistent_queue = mock_queue
@@ -1115,13 +1103,11 @@ class TestRequeueFailedMessage:
             source_network="meshtastic", source_id="!abc",
             destination_id=None, content="no-channel",
         )
-        bridge._requeue_failed_message(msg, "meshcore")
-        payload = mock_queue.enqueue.call_args.kwargs["payload"]
-        assert "channel" not in payload
+        assert bridge._requeue_failed_message(msg, "meshcore") is False
+        mock_queue.enqueue.assert_not_called()
 
-    def test_channel_lift_handles_unparsable_metadata(self, bridge):
-        """metadata['channel'] = 'oops' (non-int) → don't crash; skip the
-        lift. _resolve_channel handles the unparsable case downstream."""
+    def test_an_unparsable_metadata_channel_is_refused_without_crashing(self, bridge):
+        """Was test_channel_lift_handles_unparsable_metadata. REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted."""
         mock_queue = MagicMock()
         mock_queue.enqueue.return_value = "msg-y"
         bridge._persistent_queue = mock_queue
@@ -1132,10 +1118,8 @@ class TestRequeueFailedMessage:
             destination_id=None, content="bad-meta",
             metadata={"channel": "not-an-int"},
         )
-        ok = bridge._requeue_failed_message(msg, "meshcore")
-        assert ok is True
-        payload = mock_queue.enqueue.call_args.kwargs["payload"]
-        assert "channel" not in payload
+        assert bridge._requeue_failed_message(msg, "meshcore") is False
+        mock_queue.enqueue.assert_not_called()
 
     def test_channel_override_overrides_metadata_lift(self, bridge):
         """channel_override kwarg (used by the cross-protocol bridge_loop
@@ -1175,12 +1159,14 @@ class TestRequeueFailedMessage:
             destination_id=None, content="x",
             metadata={},
         )
+        # Was "skip writing the slot, queue anyway" — a slot-less row then
+        # replayed on 0 (Public). Now an unparsable override is no slot:
+        # refused (2026-10-24, tests/test_meshcore_requeue_slot.py).
         ok = bridge._requeue_failed_message(
             msg, "meshcore", channel_override="garbage"  # type: ignore[arg-type]
         )
-        assert ok is True
-        payload = mock_queue.enqueue.call_args.kwargs["payload"]
-        assert "channel" not in payload
+        assert ok is False
+        mock_queue.enqueue.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

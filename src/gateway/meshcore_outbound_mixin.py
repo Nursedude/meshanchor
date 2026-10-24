@@ -29,7 +29,10 @@ from .canonical_message import CanonicalMessage, Protocol
 from .meshcore_dm_reply import companion_error
 from .meshcore_simulator import MeshCoreSimulator
 
-logger = logging.getLogger(__name__)
+# The handler's name, not __name__: egress logs kept their identity when
+# this split out of meshcore_handler.py (2026-10-24) — the journal, caplog
+# filters and operators' greps all key on it. Same as _meshcore_ingress.
+logger = logging.getLogger("gateway.meshcore_handler")
 
 
 def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
@@ -104,22 +107,33 @@ class MeshCoreOutboundMixin:
                 meta = msg.get('metadata')
                 if isinstance(meta, dict):
                     reply_ctx = meta.get('dm_reply_ctx')
-                # Top-level 'channel' is the preferred carrier (set by
-                # send_text → CanonicalMessage path), but persistent
-                # queue replays from _requeue_failed_message lift channel
-                # from metadata into the outer dict at enqueue time. For
-                # any future call site that forgets to lift, fall back
-                # to metadata.channel before letting _resolve_channel
-                # default-to-zero. Channel-0 Public leak follow-up
-                # (2026-05-20).
+                # Chokepoint 2 of 2 (2026-10-24, Issue #37 class): a queued
+                # CHANNEL row airs only on its explicit top-level slot. This
+                # REVERSES the 2026-05-20 metadata.channel fallback: that
+                # value is the SOURCE protocol's index, and _resolve_channel's
+                # default is 0 = Public — both put private cargo on Public.
+                # Refused, with a witness on the row's own id and leg.
                 raw_channel = msg.get('channel')
-                if raw_channel is None or raw_channel == '':
-                    meta = msg.get('metadata') or {}
-                    if isinstance(meta, dict):
-                        raw_channel = meta.get('channel')
-                channel = self._resolve_channel(
-                    raw_channel, source=f"dict dest={dest!r}"
-                )
+                if not dest:
+                    try:
+                        channel = int(raw_channel)
+                    except (TypeError, ValueError):
+                        channel = -1
+                    if channel < 0:
+                        with self._stats_lock:
+                            self.stats['meshcore_queue_row_no_slot_refused'] = (
+                                self.stats.get(
+                                    'meshcore_queue_row_no_slot_refused', 0) + 1)
+                        logger.warning(
+                            f"MeshCore queue row {msg_id!r} refused: no "
+                            f"explicit slot (channel={raw_channel!r}); never "
+                            f"aired on a source slot or slot 0 (Public)")
+                        _record_tx("dropped", msg_id, "non_retriable_error",
+                                   "queue row: no explicit slot", source=source)
+                        return
+                else:
+                    channel = self._resolve_channel(
+                        raw_channel, source=f"dict dest={dest!r}")
             else:
                 text = str(msg)
                 dest = None
