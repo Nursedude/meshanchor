@@ -54,6 +54,25 @@ def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
         logger.warning(f"MeshCore delivery record failed ({state}): {e}")
 
 
+def queue_row_slot(row: Dict) -> int:
+    """The explicit MeshCore slot a queued CHANNEL row may air on, or -1.
+
+    ONE predicate for both refusal gates (``queue_send`` before the queue
+    marks the row delivered, and the async worker as backstop — hfm #5).
+    Only the top-level ``channel`` counts: ``metadata['channel']`` is the
+    SOURCE protocol's index (Issue #37 class). A bool is not a slot (True is
+    an int). Missing, empty, unparsable or negative → -1.
+    """
+    raw = row.get('channel')
+    if isinstance(raw, bool):
+        return -1
+    try:
+        slot = int(raw)
+    except (TypeError, ValueError):
+        return -1
+    return slot if slot >= 0 else -1
+
+
 def _companion_refused(err: str, msg_id: Optional[str], what: str,
                        source: Optional[str] = None) -> bool:
     """meshcore_py never raises on a failed send: the ERROR Event IS the
@@ -115,19 +134,9 @@ class MeshCoreOutboundMixin:
                 # Refused, with a witness on the row's own id and leg.
                 raw_channel = msg.get('channel')
                 if not dest:
-                    try:
-                        channel = int(raw_channel)
-                    except (TypeError, ValueError):
-                        channel = -1
+                    channel = queue_row_slot(msg)
                     if channel < 0:
-                        with self._stats_lock:
-                            self.stats['meshcore_queue_row_no_slot_refused'] = (
-                                self.stats.get(
-                                    'meshcore_queue_row_no_slot_refused', 0) + 1)
-                        logger.warning(
-                            f"MeshCore queue row {msg_id!r} refused: no "
-                            f"explicit slot (channel={raw_channel!r}); never "
-                            f"aired on a source slot or slot 0 (Public)")
+                        self._note_no_slot_refusal(msg_id, raw_channel)
                         _record_tx("dropped", msg_id, "non_retriable_error",
                                    "queue row: no explicit slot", source=source)
                         return
@@ -436,6 +445,16 @@ class MeshCoreOutboundMixin:
             logger.warning("MeshCore send queue full")
             return False
 
+    def _note_no_slot_refusal(self, msg_id, raw_channel) -> None:
+        """Witness for a queued channel row refused for want of a slot."""
+        with self._stats_lock:
+            self.stats['meshcore_queue_row_no_slot_refused'] = (
+                self.stats.get('meshcore_queue_row_no_slot_refused', 0) + 1)
+        logger.warning(
+            f"MeshCore queue row {msg_id!r} refused: no explicit slot "
+            f"(channel={raw_channel!r}); never aired on a source slot or "
+            f"slot 0 (Public)")
+
     def queue_send(self, payload: Dict) -> bool:
         """
         Send handler for persistent queue — MeshCore destination.
@@ -450,6 +469,15 @@ class MeshCoreOutboundMixin:
         destination = payload.get('destination')
 
         if not self._connected:
+            return False
+
+        # Refuse a slot-less CHANNEL row HERE, before the queue's
+        # mark_delivered records SENT on it (review of b0b57544, finding 1:
+        # the worker-only refusal read SENT + DROPPED + "delivered" for a row
+        # that never aired). False → the queue retries, then dead-letters it.
+        if not payload.get('destination') and queue_row_slot(payload) < 0:
+            self._note_no_slot_refusal(payload.get('_queue_msg_id'),
+                                       payload.get('channel'))
             return False
 
         try:

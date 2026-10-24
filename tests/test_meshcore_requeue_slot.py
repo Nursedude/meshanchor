@@ -173,15 +173,51 @@ def _drain(h):
 ], ids=["metadata-source-slot", "no-slot", "empty-slot", "unparsable-slot"])
 def test_a_queued_channel_row_without_an_explicit_slot_never_airs(row):
     h = _mc_handler()
-    assert h.queue_send(dict(row))
+    # queue_send refuses these up front now; this pins the WORKER backstop,
+    # for a row handed to the send queue by any other path.
+    assert h.queue_send(dict(row)) is False
+    h._send_queue.put_nowait(dict(row))
 
     cmds = _drain(h)
 
     cmds.send_chan_msg.assert_not_called()
-    assert h.stats["meshcore_queue_row_no_slot_refused"] == 1
+    assert h.stats["meshcore_queue_row_no_slot_refused"] == 2  # both gates
     states = [e.state.value for e in
               dc.get_singleton().history_for(row["_queue_msg_id"])]
     assert states == ["dropped"]          # a witness on the row's own id
+
+
+def test_a_slot_less_row_is_refused_before_the_queue_calls_it_delivered(
+        tmp_path):
+    # Review of b0b57544, finding 1: refusing only in the async worker came
+    # AFTER mark_delivered, so one row read SENT + DROPPED and "delivered".
+    # Driven through a REAL queue dispatch, not queue_send alone.
+    h = _mc_handler()
+    q = PersistentMessageQueue(db_path=str(tmp_path / "q.db"))
+    q.register_sender("meshcore", h.queue_send)
+    row = q.enqueue({"message": "x", "metadata": {"channel": 0}}, "meshcore",
+                    source="meshtastic")
+    q.process_once()
+    cmds = _drain(h)
+    q.stop_processing()
+
+    cmds.send_chan_msg.assert_not_called()
+    states = [e.state.value for e in dc.get_singleton().history_for(row)]
+    assert "sent" not in states
+    with q._get_connection() as conn:
+        status = conn.execute("SELECT status FROM messages WHERE id = ?",
+                              (row,)).fetchone()[0]
+    assert status != "delivered"
+    assert h.stats["meshcore_queue_row_no_slot_refused"] == 1
+
+
+@pytest.mark.parametrize("slot", [True, False])
+def test_a_bool_is_not_a_slot(slot):
+    # Review finding 6: True is an int; it must not become slot 1.
+    h = _mc_handler()
+
+    assert h.queue_send({"message": "x", "_queue_msg_id": "q-b",
+                         "channel": slot}) is False
 
 
 def test_a_queued_row_with_an_explicit_slot_airs_there():

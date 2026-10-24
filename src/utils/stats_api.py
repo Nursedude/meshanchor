@@ -27,6 +27,16 @@ returned so any future counter shows up automatically):
       MeshCore Public (slot 0). Operator fix: set
       ``config.meshcore.bridge_target_channel`` to a valid slot.
 
+  meshcore_requeue_no_slot_refused  — Issue #37 class, at ENQUEUE
+      (2026-10-24). A failed →MeshCore send had no resolved slot, so it was
+      NOT queued (never replayed on the source slot or slot 0 = Public).
+
+  meshcore_queue_row_no_slot_refused  — Issue #37 class, at DISPATCH
+      (2026-10-24). A queued MeshCore channel row carried no explicit
+      slot and never aired; counted once per refusal (queue_send, and the
+      worker backstop). Non-zero means some writer queued a row without
+      ``channel`` — find it in the journal's WARNING line.
+
   meshcore_dm_dropped_contact_not_found  — Issue #35 privacy refusal.
       DM contact resolution failed; message dropped rather than
       cascaded to a channel broadcast.
