@@ -28,6 +28,7 @@ from utils.tx_guard import TransmitBlocked
 from .canonical_message import CanonicalMessage, Protocol
 from .meshcore_dm_reply import companion_error
 from .meshcore_simulator import MeshCoreSimulator
+from .message_queue_models import SendRefused
 
 # The handler's name, not __name__: egress logs kept their identity when
 # this split out of meshcore_handler.py (2026-10-24) — the journal, caplog
@@ -71,6 +72,22 @@ def queue_row_slot(row: Dict) -> int:
     except (TypeError, ValueError):
         return -1
     return slot if slot >= 0 else -1
+
+
+def validate_queue_row(row: Dict) -> Optional[str]:
+    """The queue's ``validate_fn`` for ``meshcore``: refusal reason or None.
+
+    A DM row (``destination`` set) airs to its contact and needs no slot; a
+    CHANNEL row needs an explicit one (``queue_row_slot``). Asked by
+    ``PersistentMessageQueue.enqueue`` so a slot-less row is never written;
+    ``queue_send`` asks the same predicate as backstop for rows already
+    queued (Issue #37 class, 2026-10-24).
+    """
+    if row.get('destination') or queue_row_slot(row) >= 0:
+        return None
+    return (f"MeshCore channel row with no explicit slot "
+            f"(channel={row.get('channel')!r}); never aired on a source "
+            f"slot or slot 0 (Public)")
 
 
 def _companion_refused(err: str, msg_id: Optional[str], what: str,
@@ -468,16 +485,18 @@ class MeshCoreOutboundMixin:
         message = payload.get('message', '')
         destination = payload.get('destination')
 
-        if not self._connected:
-            return False
-
-        # Refuse a slot-less CHANNEL row HERE, before the queue's
-        # mark_delivered records SENT on it (review of b0b57544, finding 1:
-        # the worker-only refusal read SENT + DROPPED + "delivered" for a row
-        # that never aired). False → the queue retries, then dead-letters it.
-        if not payload.get('destination') and queue_row_slot(payload) < 0:
+        # Backstop for a slot-less CHANNEL row already in the table (enqueue
+        # refuses new ones via validate_queue_row). Refused HERE, before the
+        # queue's mark_delivered records SENT on it (review of b0b57544,
+        # finding 1), and as SendRefused, not False: False read as transient
+        # — ~4 retries, then "retries exhausted" (re-review of 0ba66869).
+        refusal = validate_queue_row(payload)
+        if refusal:
             self._note_no_slot_refusal(payload.get('_queue_msg_id'),
                                        payload.get('channel'))
+            raise SendRefused(refusal)
+
+        if not self._connected:
             return False
 
         try:

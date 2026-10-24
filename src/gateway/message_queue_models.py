@@ -56,6 +56,19 @@ class SendDeferred(Exception):
         self.reason = reason
 
 
+class SendRefused(Exception):
+    """Raised by a queue sender: "this row can never be sent as written".
+
+    The row dead-letters on THIS attempt as ``INVALID_PAYLOAD`` with its
+    DROPPED witness and terminal hook — a plain False would read as
+    transient, burn the retry budget and record "retries exhausted".
+    """
+
+    def __init__(self, reason: str = ""):
+        super().__init__(f"refused: {reason}")
+        self.reason = reason
+
+
 class MessagePriority(Enum):
     """Message priority levels."""
     LOW = 1

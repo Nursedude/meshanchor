@@ -521,8 +521,12 @@ class RNSMeshtasticBridge(MessageTransformMixin,  # first: its methods were on t
             )
             # Register MeshCore sender with persistent queue
             if self._persistent_queue:
+                # validate_fn: a slot-less channel row is refused at
+                # enqueue, never written (Issue #37 class, 2026-10-24)
+                from .meshcore_outbound_mixin import validate_queue_row
                 self._persistent_queue.register_sender(
-                    "meshcore", self._meshcore_handler.queue_send
+                    "meshcore", self._meshcore_handler.queue_send,
+                    validate_fn=validate_queue_row,
                 )
             # Tell health monitor that MeshCore is enabled
             self.health.set_subsystem_enabled("meshcore", True)

@@ -51,6 +51,7 @@ from gateway.message_queue_models import (  # noqa: F401 — re-exports
     RetryPolicy,
     QueuedMessage,
     SendDeferred,
+    SendRefused,
     M2R_MAX_AGE_S,
     AGE_SANITY_CAP_S,
 )
@@ -183,6 +184,9 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
         self._failure_callbacks: List[Callable] = []
         # on_terminal hooks per destination (see _fire_terminal; MF lead)
         self._terminal_callbacks: Dict[str, Callable[[Dict, str], None]] = {}
+        # validate_fn per destination: payload -> refusal reason or None,
+        # asked at enqueue so a row its sender can never send is never written
+        self._send_validators: Dict[str, Callable[[Dict], Optional[str]]] = {}
 
         # Drop-log rate-limit state for the no-sender guard (Issue #67):
         # destination -> (last_log_unix_ts, suppressed_count_since_last_log).
@@ -197,6 +201,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
         # Stats
         self._stats = {
             "gated_skips": 0,
+            "refused_invalid": 0,
             "deferred_total": 0,
             "expired_total": 0,
             "terminal_callback_errors": 0,
@@ -464,6 +469,26 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             # dedup hash reads named keys only, so the key never splits it.
             payload = {**payload, LEG_SOURCE_KEY: source}
         content_hash = self._compute_hash(payload)
+
+        validate_fn = self._send_validators.get(destination)
+        if validate_fn is not None:
+            try:
+                refusal = validate_fn(payload)
+            except Exception as e:
+                refusal = f"validator raised: {e}"   # fail closed
+            if refusal:
+                with self._lock:
+                    self._stats["refused_invalid"] += 1
+                logger.warning(f"queue: {destination} row refused at enqueue, "
+                               f"never written: {refusal}")
+                _dc.record(
+                    _dc.DeliveryState.DROPPED,
+                    msg_id=f"refused-{content_hash[:8]}",
+                    protocol=destination, source=source,
+                    drop_reason=_dc.DropReason.INVALID_PAYLOAD,
+                    note=str(refusal)[:80],
+                )
+                return None
 
         # Check for duplicates
         if deduplicate and self._is_duplicate(content_hash, destination):
@@ -767,6 +792,42 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                                 "dropped")
         return changed == 1  # False: row already finished, nothing changed
 
+    def mark_refused(self, msg_id: str, reason: str = "") -> bool:
+        """Dead-letter a row its sender refused as unsendable (SendRefused).
+
+        One attempt, no retry: DROPPED ``invalid_payload`` on the row's own
+        id, WARNING, terminal hook. Guarded like mark_failed — a row already
+        terminal is not a second loss.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
+            if not row:
+                return False
+            message = QueuedMessage.from_dict(dict(row))
+            changed = conn.execute("""
+                UPDATE messages
+                SET status = ?, updated_at = ?, retry_count = retry_count + 1,
+                    error_message = ?
+                WHERE id = ? AND status NOT IN ('dead_letter', 'delivered')
+            """, (MessageStatus.DEAD_LETTER.value, datetime.now().isoformat(),
+                  f"refused: {reason}", msg_id)).rowcount
+        if changed != 1:
+            return False
+        with self._lock:
+            self._stats["failed"] += 1
+            self._stats["permanent_failures"] += 1
+        logger.warning(f"Message {msg_id} moved to dead letter, refused by "
+                       f"its sender (not retried): {reason}")
+        _dc.record(
+            _dc.DeliveryState.DROPPED, msg_id=msg_id,
+            protocol=message.destination,
+            source=payload_source(message.payload),
+            drop_reason=_dc.DropReason.INVALID_PAYLOAD, note=str(reason)[:80],
+        )
+        self._fire_terminal(message.destination, message.payload, "dropped")
+        return True
+
     def set_retry_policy(self, policy: RetryPolicy) -> None:
         """
         Set or update the retry policy.
@@ -786,6 +847,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                         ready_fn: Optional[Callable[[], bool]] = None,
                         max_age_s: Optional[float] = None,
                         on_terminal: Optional[Callable[[Dict, str], None]] = None,
+                        validate_fn: Optional[Callable[[Dict], Optional[str]]] = None,
                         ) -> None:
         """
         Register a send function for a destination.
@@ -805,6 +867,10 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 (or raises) the destination's rows are left untouched — no
                 attempt, no retry_count bump — so an outage longer than the
                 retry budget cannot dead-letter them.
+            validate_fn: Optional payload -> refusal reason (None = valid),
+                asked by enqueue(). A refused row is never written: DROPPED
+                ``invalid_payload`` + WARNING. The sender stays the backstop
+                for rows already queued (raise SendRefused).
         """
         self._send_callbacks[destination] = send_fn
         self._send_spacing[destination] = max(0.0, float(min_spacing_s))
@@ -823,6 +889,10 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             self._terminal_callbacks.pop(destination, None)
         else:
             self._terminal_callbacks[destination] = on_terminal
+        if validate_fn is None:
+            self._send_validators.pop(destination, None)
+        else:
+            self._send_validators[destination] = validate_fn
         # If we've been dropping for this destination and a sender just
         # showed up (e.g. handler reconnected mid-run), clear the rate-
         # limit state so the next drop (if any) logs immediately again.
@@ -954,6 +1024,11 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 except SendDeferred as d:
                     # Transient (circuit open / no path): not an attempt.
                     self.mark_deferred(message.id, d.delay_s, d.reason)
+                    processed += 1
+
+                except SendRefused as r:
+                    # Permanent: dead-letter now, never retry.
+                    self.mark_refused(message.id, r.reason)
                     processed += 1
 
                 except Exception as e:

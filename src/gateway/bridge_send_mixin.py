@@ -770,10 +770,10 @@ class BridgeSendMixin:
                 # channel is 0 = MeshCore Public), and a row with no slot
                 # reached the worker's default of 0. Refuse, loudly: a lost
                 # message is recoverable, private cargo on Public is not.
-                try:
-                    slot = int(channel_override)
-                except (TypeError, ValueError):
-                    slot = -1
+                # queue_row_slot: one predicate with the queue's validator and
+                # queue_send — a bool is not a slot (int(True) == 1).
+                from .meshcore_outbound_mixin import queue_row_slot
+                slot = queue_row_slot({'channel': channel_override})
                 if slot < 0:
                     with self._stats_lock:
                         self.stats['meshcore_requeue_no_slot_refused'] = (

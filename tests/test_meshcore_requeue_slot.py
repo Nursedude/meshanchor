@@ -33,7 +33,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from gateway import delivery_counters as dc
-from gateway.message_queue import PersistentMessageQueue
+from gateway.message_queue import PersistentMessageQueue, SendRefused
 from tests.test_rns_bridge import bridge  # noqa: F401 — fixture
 
 
@@ -175,7 +175,8 @@ def test_a_queued_channel_row_without_an_explicit_slot_never_airs(row):
     h = _mc_handler()
     # queue_send refuses these up front now; this pins the WORKER backstop,
     # for a row handed to the send queue by any other path.
-    assert h.queue_send(dict(row)) is False
+    with pytest.raises(SendRefused):
+        h.queue_send(dict(row))
     h._send_queue.put_nowait(dict(row))
 
     cmds = _drain(h)
@@ -216,8 +217,8 @@ def test_a_bool_is_not_a_slot(slot):
     # Review finding 6: True is an int; it must not become slot 1.
     h = _mc_handler()
 
-    assert h.queue_send({"message": "x", "_queue_msg_id": "q-b",
-                         "channel": slot}) is False
+    with pytest.raises(SendRefused):
+        h.queue_send({"message": "x", "_queue_msg_id": "q-b", "channel": slot})
 
 
 def test_a_queued_row_with_an_explicit_slot_airs_there():
@@ -251,3 +252,146 @@ def test_a_direct_send_text_broadcast_is_unchanged():
     cmds = _drain(h)
 
     cmds.send_chan_msg.assert_awaited_once_with(2, "x")
+
+
+# ── one validation at enqueue (2026-10-24, re-review of 0ba66869) ─────
+# The bridge-side refusal and the queue_send refusal were two gates with two
+# predicates; queue_send's plain False made a permanent refusal look
+# transient (retried ~4x, dead-lettered as "retries exhausted", the per-row
+# DROPPED witness lost). Now the queue itself refuses a row its sender
+# declares invalid, at enqueue, and a sender's SendRefused dead-letters a
+# row already in the table on its FIRST attempt.
+
+def _validated_queue(tmp_path, send_fn=lambda p: True):
+    from gateway.meshcore_outbound_mixin import validate_queue_row
+    q = PersistentMessageQueue(db_path=str(tmp_path / "v.db"))
+    q.register_sender("meshcore", send_fn, validate_fn=validate_queue_row)
+    return q
+
+
+def _drop_reasons(msg_id_prefix):
+    return [(e.state.value, e.drop_reason.value if e.drop_reason else None)
+            for e in dc.get_singleton().recent(200)
+            if e.id.startswith(msg_id_prefix)]
+
+
+def test_the_queue_refuses_a_slot_less_meshcore_row_at_enqueue(tmp_path):
+    q = _validated_queue(tmp_path)
+    try:
+        msg_id = q.enqueue({"message": "x", "metadata": {"channel": 0}},
+                           "meshcore", source="meshtastic")
+
+        assert msg_id is None
+        assert _rows(q) == []
+        assert q.get_stats()["refused_invalid"] == 1
+        assert _drop_reasons("refused-") == [("dropped", "invalid_payload")]
+    finally:
+        q.stop_processing()
+
+
+@pytest.mark.parametrize("slot", [True, False, "", "Public", -1, None])
+def test_no_non_slot_value_passes_enqueue(tmp_path, slot):
+    q = _validated_queue(tmp_path)
+    try:
+        assert q.enqueue({"message": "x", "channel": slot}, "meshcore") is None
+    finally:
+        q.stop_processing()
+
+
+@pytest.mark.parametrize("payload", [
+    {"message": "x", "channel": 1},
+    {"message": "x", "channel": 0},       # Public, chosen explicitly
+    {"message": "x", "destination": "abcd"},
+], ids=["private-slot", "explicit-public", "dm"])
+def test_a_valid_meshcore_row_still_enqueues(tmp_path, payload):
+    q = _validated_queue(tmp_path)
+    try:
+        assert q.enqueue(payload, "meshcore") is not None
+    finally:
+        q.stop_processing()
+
+
+def test_the_bridge_refuses_a_bool_channel_override(bridge, tmp_path):  # noqa: F811
+    # Re-review of 0ba66869: int(True) == 1 made channel_override=True
+    # enqueue as slot 1.
+    q = _validated_queue(tmp_path)
+    bridge._persistent_queue = q
+    try:
+        assert bridge._requeue_failed_message(
+            _mesh_broadcast(channel=0), "meshcore",
+            channel_override=True) is False
+        assert _rows(q) == []
+    finally:
+        q.stop_processing()
+
+
+def test_a_slot_less_row_already_queued_dead_letters_on_its_first_attempt(
+        tmp_path):
+    # A row written before this validation existed (the live table on
+    # deploy day): no validator at write time, the real handler at dispatch.
+    h = _mc_handler()
+    q = PersistentMessageQueue(db_path=str(tmp_path / "legacy.db"))
+    q.register_sender("meshcore", lambda p: True)
+    row = q.enqueue({"message": "x", "metadata": {"channel": 0}}, "meshcore",
+                    source="meshtastic")
+    terminal = []
+    q.register_sender("meshcore", h.queue_send,
+                      on_terminal=lambda p, outcome: terminal.append(outcome))
+    try:
+        q.process_once()
+        cmds = _drain(h)
+
+        cmds.send_chan_msg.assert_not_called()
+        with q._get_connection() as conn:
+            status, retries = conn.execute(
+                "SELECT status, retry_count FROM messages WHERE id = ?",
+                (row,)).fetchone()
+        assert status == "dead_letter"
+        assert retries == 1                  # one attempt, never retried
+        drops = [(e.state.value, e.drop_reason.value)
+                 for e in dc.get_singleton().history_for(row)
+                 if e.state.value == "dropped"]
+        assert drops == [("dropped", "invalid_payload")]
+        assert "sent" not in [e.state.value for e in
+                              dc.get_singleton().history_for(row)]
+        assert terminal == ["dropped"]
+    finally:
+        q.stop_processing()
+
+
+def test_the_bridge_registers_the_meshcore_validator(tmp_path):
+    # Wiring, observed: build the bridge with MeshCore enabled and a real
+    # queue, then ask THAT queue to take a slot-less row. Without validate_fn
+    # on the registration the enqueue validation is dead code on the box.
+    from unittest.mock import patch
+    from tests.test_rns_bridge import _mock_gateway_config
+    q = PersistentMessageQueue(db_path=str(tmp_path / "wired.db"))
+    config = _mock_gateway_config()
+    config.meshcore.enabled = True
+    with patch("gateway.rns_bridge.GatewayConfig"), \
+         patch("gateway.rns_bridge.get_node_tracker"), \
+         patch("gateway.rns_bridge.BridgeHealthMonitor"), \
+         patch("gateway.rns_bridge.DeliveryTracker"), \
+         patch("gateway.rns_bridge.MeshtasticHandler"), \
+         patch("gateway.rns_bridge.ReconnectStrategy"), \
+         patch("gateway.rns_bridge.HAS_CIRCUIT_BREAKER", False), \
+         patch("gateway.rns_bridge.CircuitBreakerRegistry", None), \
+         patch("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", True), \
+         patch("gateway.rns_bridge.PersistentMessageQueue", return_value=q), \
+         patch("gateway.rns_bridge.HAS_MESHCORE", True), \
+         patch("gateway.rns_bridge.MeshCoreHandler"), \
+         patch("utils.meshcore_supervisor_client.is_supervisor_running",
+               return_value=False), \
+         patch("gateway.message_routing.CLASSIFIER_AVAILABLE", False), \
+         patch("gateway.rns_bridge.HAS_SERVICE_CHECK", False), \
+         patch("gateway.rns_bridge.HAS_EVENT_BUS", False), \
+         patch("gateway.rns_bridge.HAS_RNS_SNIFFER", False):
+        from gateway.rns_bridge import RNSMeshtasticBridge
+        RNSMeshtasticBridge(config=config)
+    try:
+        assert q.has_sender("meshcore")
+        assert q.enqueue({"message": "x", "metadata": {"channel": 0}},
+                         "meshcore") is None
+        assert q.enqueue({"message": "x", "channel": 1}, "meshcore")
+    finally:
+        q.stop_processing()
