@@ -57,6 +57,9 @@ from gateway.message_queue_models import (  # noqa: F401 — re-exports
 from gateway.message_queue_lifecycle_mixin import MessageQueueLifecycleMixin
 from gateway.message_queue_ack_mixin import MessageQueueAckMixin
 from gateway.message_queue_outage_mixin import MessageQueueOutageMixin
+# The submodule form, never ``from gateway import ...`` — see
+# _LazyDeliveryCounters below (the 2026-06-06 startup deadlock).
+from gateway.delivery_legs import LEG_SOURCE_KEY, payload_source
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +215,11 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             # Surfaced by get_stats (honest_failure_modes #9).
             "delivered_unrecorded": 0,
         }
+
+    def _leg_record_kwargs(self, payload: Optional[Dict]) -> Dict:
+        """The byte-locked outage mixin's EXPIRED record names the row's leg
+        through this (BIC-2; the mixin's shared default names nothing)."""
+        return {"source": payload_source(payload)}
 
     @contextmanager
     def _get_connection(self):
@@ -402,7 +410,8 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
     def enqueue(self, payload: Dict[str, Any], destination: str,
                 priority: MessagePriority = MessagePriority.NORMAL,
                 max_retries: int = 3, deduplicate: bool = True,
-                created_at: Optional[datetime] = None) -> Optional[str]:
+                created_at: Optional[datetime] = None,
+                source: Optional[str] = None) -> Optional[str]:
         """
         Add a message to the queue.
 
@@ -412,6 +421,10 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             priority: Message priority
             max_retries: Maximum retry attempts
             deduplicate: Check for duplicates
+            source: BIC-2 — the transport the message came in on; the row
+                carries it (``LEG_SOURCE_KEY``) so every later
+                lifecycle event counts on ``source>destination``. None
+                counts under ``?>destination``.
 
         Returns:
             Message ID if enqueued, None if duplicate or if no sender is
@@ -445,6 +458,11 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 self._stats["no_sender_dropped"] += 1
             return None
 
+        if source:
+            # BIC-2: the row remembers its leg for every later lifecycle
+            # event. A copy — the caller's dict is not ours to change; the
+            # dedup hash reads named keys only, so the key never splits it.
+            payload = {**payload, LEG_SOURCE_KEY: source}
         content_hash = self._compute_hash(payload)
 
         # Check for duplicates
@@ -459,7 +477,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             _dc.record(
                 _dc.DeliveryState.DROPPED,
                 msg_id=f"dedup-{content_hash[:8]}",
-                protocol=destination,
+                protocol=destination, source=source,
                 drop_reason=_dc.DropReason.DEDUP,
             )
             return None
@@ -488,7 +506,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                     _dc.record(
                         _dc.DeliveryState.DROPPED,
                         msg_id=f"rejected-{content_hash[:8]}",
-                        protocol=destination,
+                        protocol=destination, source=source,
                         drop_reason=_dc.DropReason.QUEUE_PRESSURE,
                         note=f"depth={depth}/{self._max_queue_size}",
                     )
@@ -544,7 +562,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
         _dc.record(
             _dc.DeliveryState.QUEUED,
             msg_id=msg_id,
-            protocol=destination,
+            protocol=destination, source=source,
         )
 
         return msg_id
@@ -619,12 +637,14 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                     (msg_id,),
                 ).fetchone()
                 protocol = row["destination"] if row else None
+                payload = self._row_payload(row)
                 _dc.record(
                     _dc.DeliveryState.SENT,
                     msg_id=msg_id,
                     protocol=protocol,
+                    source=payload_source(payload),
                 )
-                terminal = (protocol, self._row_payload(row))
+                terminal = (protocol, payload)
             else:
                 terminal = None
         if terminal is None:  # hook runs outside the connection
@@ -649,6 +669,13 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 return False
 
             message = QueuedMessage.from_dict(dict(row))
+            # Recorded only if the guarded UPDATE lands (MF BIC-2 F5 +
+            # re-review #1): a late call on a terminal row — e.g. one the
+            # stale reset already dead-lettered — is not a second loss in
+            # the stats, the log or the delivery counters.
+            drop = None
+            bumps: List[str] = []
+            note_log = None
             message.retry_count += 1
             message.error_message = error
             message.updated_at = datetime.now()
@@ -660,13 +687,11 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 if not decision.retry:
                     # Policy says don't retry (permanent error or max attempts)
                     message.status = MessageStatus.DEAD_LETTER
-                    with self._lock:
-                        self._stats["failed"] += 1
-                        if "permanent_error" in decision.reason:
-                            self._stats["permanent_failures"] += 1
-                    logger.warning(
-                        f"Message {msg_id} moved to dead letter: {decision.reason}"
-                    )
+                    bumps.append("failed")
+                    if "permanent_error" in decision.reason:
+                        bumps.append("permanent_failures")
+                    note_log = (f"Message {msg_id} moved to dead letter: "
+                                f"{decision.reason}")
                     # MF Issue #74 port: terminal drop. Distinguish
                     # "retries exhausted on a transient error" from
                     # "policy judged the error non-retriable on first
@@ -677,19 +702,12 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                         reason = _dc.DropReason.NON_RETRIABLE_ERROR
                     else:
                         reason = _dc.DropReason.RETRIES_EXHAUSTED
-                    _dc.record(
-                        _dc.DeliveryState.DROPPED,
-                        msg_id=msg_id,
-                        protocol=message.destination,
-                        drop_reason=reason,
-                        note=decision.reason[:80],
-                    )
+                    drop = (reason, decision.reason[:80])
                 else:
                     # Policy says retry with calculated delay
                     message.retry_after = datetime.now() + timedelta(seconds=decision.delay)
                     message.status = MessageStatus.PENDING
-                    with self._lock:
-                        self._stats["retried"] += 1
+                    bumps.append("retried")
                     logger.debug(
                         f"Message {msg_id} scheduled for retry in {decision.delay:.1f}s "
                         f"({decision.reason})"
@@ -699,30 +717,21 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 if message.retry_count >= message.max_retries:
                     # Move to dead letter
                     message.status = MessageStatus.DEAD_LETTER
-                    with self._lock:
-                        self._stats["failed"] += 1
-                    logger.warning(
-                        f"Message {msg_id} moved to dead letter after "
-                        f"{message.retry_count} retries"
-                    )
+                    bumps.append("failed")
+                    note_log = (f"Message {msg_id} moved to dead letter after "
+                                f"{message.retry_count} retries")
                     # MF Issue #74 port: terminal drop in the no-policy
                     # fallback path. Always counted as retries-exhausted
                     # because we have no error classifier here.
-                    _dc.record(
-                        _dc.DeliveryState.DROPPED,
-                        msg_id=msg_id,
-                        protocol=message.destination,
-                        drop_reason=_dc.DropReason.RETRIES_EXHAUSTED,
-                        note=f"retry_count={message.retry_count}",
-                    )
+                    drop = (_dc.DropReason.RETRIES_EXHAUSTED,
+                            f"retry_count={message.retry_count}")
                 else:
                     # Schedule retry with backoff
                     delay_idx = min(message.retry_count - 1, len(self.RETRY_DELAYS) - 1)
                     delay = self.RETRY_DELAYS[delay_idx]
                     message.retry_after = datetime.now() + timedelta(seconds=delay)
                     message.status = MessageStatus.PENDING
-                    with self._lock:
-                        self._stats["retried"] += 1
+                    bumps.append("retried")
                     logger.debug(f"Message {msg_id} scheduled for retry in {delay}s")
 
             # Update in database
@@ -737,6 +746,19 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 data["retry_after"], data["error_message"], msg_id
             )).rowcount
 
+        if changed == 1:
+            with self._lock:
+                for key in bumps:
+                    self._stats[key] += 1
+            if note_log:
+                logger.warning(note_log)
+        if changed == 1 and drop is not None:
+            _dc.record(
+                _dc.DeliveryState.DROPPED, msg_id=msg_id,
+                protocol=message.destination,
+                source=payload_source(message.payload),
+                drop_reason=drop[0], note=drop[1],
+            )
         if changed == 1 and message.status == MessageStatus.DEAD_LETTER:
             self._fire_terminal(message.destination, message.payload,
                                 "dropped")
@@ -1078,6 +1100,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 _dc.DeliveryState.DROPPED,
                 msg_id=msg_id,
                 protocol=destination,
+                source=payload_source(payload),
                 drop_reason=_dc.DropReason.QUEUE_SHED,
             )
             self._fire_terminal(destination, payload, "dropped")
@@ -1182,6 +1205,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 _dc.DeliveryState.DROPPED,
                 msg_id=row["id"],
                 protocol=row["destination"],
+                source=payload_source(row.get("payload")),
                 drop_reason=_dc.DropReason.RETRIES_EXHAUSTED,
                 note=f"stale_in_progress retry_count={row['retry_count']}",
             )

@@ -1054,6 +1054,9 @@ class MeshtasticPresetBridge:
                 payload=msg.to_payload(),
                 destination=dest,
                 priority=priority,
+                # BIC-2: a transport, never the interface name ("primary" /
+                # "secondary" is outside the leg vocabulary and reads "?").
+                source="meshtastic",
             )
 
             if msg_id is None:

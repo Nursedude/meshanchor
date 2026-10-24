@@ -1316,6 +1316,7 @@ class RNSMeshtasticBridge(RNSConnectionMixin, MeshCoreBridgeMixin,
                         payload=payload,
                         destination="meshtastic",
                         priority=MessagePriority.NORMAL,
+                        source="rns",
                     ):
                         enqueued += 1
                 if enqueued:

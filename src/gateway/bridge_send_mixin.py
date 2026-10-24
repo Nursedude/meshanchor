@@ -28,6 +28,7 @@ from gateway.message_queue_models import (
     M2R_MAX_AGE_S,
     SendDeferred,
 )
+from gateway.delivery_legs import payload_source
 from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
 from utils.tx_guard import assert_rns_tx_allowed
@@ -457,11 +458,14 @@ class BridgeSendMixin:
                 or f"lxmf-{int(time.time() * 1000)}"
             )
 
+            # BIC-2: the receipt confirms on the queue row's leg.
+            _src = payload_source(payload)
+
             def on_delivered(receipt, _mid=msg_id):
                 self.delivery_tracker.confirm_delivery(_mid)
                 _dc.record(
                     _dc.DeliveryState.CONFIRMED,
-                    msg_id=_mid, protocol="rns",
+                    msg_id=_mid, protocol="rns", source=_src,
                 )
                 self._maybe_emit_ack_for_msgid(_mid, kind='delivered')
 
@@ -472,7 +476,7 @@ class BridgeSendMixin:
                 self.delivery_tracker.confirm_failure(_mid, reason)
                 _dc.record(
                     _dc.DeliveryState.DROPPED,
-                    msg_id=_mid, protocol="rns",
+                    msg_id=_mid, protocol="rns", source=_src,
                     drop_reason=_dc.DropReason.RNS_DELIVERY_FAILED,
                     note=reason[:80],
                 )
@@ -540,6 +544,10 @@ class BridgeSendMixin:
         Returns:
             Message ID if enqueued, None if queue unavailable
         """
+        # BIC-2: a caller may name its leg; popped so it never rides the
+        # payload as a free-form key. The direct fall-back below names no
+        # leg yet (slice 2b: direct sends).
+        leg_source = kwargs.pop('source', None)
         if not self._persistent_queue:
             # Fall back to direct send. ack_required is silently ignored
             # here — direct sends bypass the queue's pending-ack table,
@@ -570,7 +578,8 @@ class BridgeSendMixin:
         msg_id = self._persistent_queue.enqueue(
             payload=payload,
             destination=dest_type,
-            priority=msg_priority
+            priority=msg_priority,
+            source=leg_source,
         )
 
         # Issue #66: register the pending-ack record so the LXMF
@@ -622,6 +631,21 @@ class BridgeSendMixin:
             if node and hasattr(node, 'rns_hash') and node.rns_hash:
                 return node.rns_hash
         return None
+
+    @staticmethod
+    def _leg_source(msg) -> str:
+        """BIC-2: the transport a message came in on (twin of MeshForge's
+        ``_rns_bridge_xform._leg_source``). source_network is a routing
+        input and reads "meshtastic" for MQTT ingress, so the leg reads the
+        origin: a replayed spill carries it in metadata, a live MQTT message
+        as origin=MQTT (enum or plain string)."""
+        leg = (getattr(msg, 'metadata', None) or {}).get('m2r_leg_source')
+        if leg:
+            return leg
+        origin = getattr(msg, 'origin', None)
+        if getattr(origin, 'value', origin) == 'mqtt':
+            return 'mqtt'
+        return getattr(msg, 'source_network', None)
 
     def _requeue_failed_message(self, msg, destination: str,
                                 *, channel_override: Optional[int] = None,
@@ -711,6 +735,7 @@ class BridgeSendMixin:
                 payload=payload,
                 destination=destination,
                 priority=MessagePriority.HIGH,
+                source=self._leg_source(msg),
             )
             if msg_id is None:
                 # Issue #67: enqueue() drops when no sender is registered
@@ -764,6 +789,7 @@ class BridgeSendMixin:
                             destination="rns",
                             priority=MessagePriority.NORMAL,
                             created_at=first_enqueued,
+                            source=self._leg_source(msg),
                         ):
                             persisted += 1
                     except Exception as e:  # noqa: BLE001
@@ -787,6 +813,7 @@ class BridgeSendMixin:
                 destination="rns_xform",
                 priority=MessagePriority.NORMAL,
                 created_at=first_enqueued,
+                source=self._leg_source(msg),
             ):
                 persisted += 1
         finally:
@@ -812,6 +839,11 @@ class BridgeSendMixin:
             metadata = dict(payload.get('metadata') or {})
             # A replay that raises again must not requeue itself forever.
             metadata['m2r_replay'] = True
+            # BIC-2: the real origin for the leg; source_network below is a
+            # routing input and stays as it was.
+            leg = payload_source(payload)
+            if leg:
+                metadata['m2r_leg_source'] = leg
             # Q17: a failed replay's retry rows keep the FIRST enqueue time.
             if payload.get('_queue_created_at'):
                 metadata.setdefault('m2r_first_enqueued_at',
@@ -864,6 +896,7 @@ class BridgeSendMixin:
                     },
                     destination=target,
                     priority=MessagePriority.HIGH,
+                    source="rns",
                 ):
                     requeued += 1
             except Exception as e:
