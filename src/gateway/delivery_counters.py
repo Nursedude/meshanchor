@@ -205,6 +205,21 @@ DELIVERY_FAILURE_REASONS = frozenset({
 })
 
 
+def _add_column(conn: sqlite3.Connection, table: str, col: str) -> None:
+    """Additive ``TEXT NOT NULL DEFAULT ''`` column; a lost race is not an error.
+
+    PRAGMA-then-ALTER is not atomic: the gateway and the map daemon migrate
+    the same DB together on a deploy, and the loser's ALTER raises
+    "duplicate column name" out of the constructor (review F1, 10-23).
+    Any OTHER error still raises."""
+    try:
+        conn.execute(
+            f"ALTER TABLE {table} ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e):
+            raise
+
+
 def _leg_outcome(event: "DeliveryEvent") -> str:
     """The ``delivery_legs.OUTCOMES`` word for one event."""
     if event.state != DeliveryState.DROPPED:
@@ -418,9 +433,7 @@ class DeliveryCounters:
             existing = {row[1] for row in
                         conn.execute("PRAGMA table_info(events)")}
             if "source" not in existing:
-                conn.execute(
-                    "ALTER TABLE events ADD COLUMN source "
-                    "TEXT NOT NULL DEFAULT ''")
+                _add_column(conn, "events", "source")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_id ON events(id)"
             )
@@ -736,6 +749,14 @@ class DeliveryCounters:
                     delivery_legs.bump(conn, event.ts, leg, outcome)
                     conn.execute("RELEASE legs")
                 except sqlite3.Error as e:
+                    if not conn.in_transaction:
+                        # SQLite already rolled back the WHOLE transaction:
+                        # the core event is gone. Say why — ROLLBACK TO would
+                        # raise "no such savepoint" and bury the cause
+                        # (review F2, 10-23).
+                        raise sqlite3.OperationalError(
+                            f"leg write failed ({e}); transaction already "
+                            "rolled back, event lost") from e
                     conn.execute("ROLLBACK TO legs")
                     conn.execute("RELEASE legs")
                     logger.warning("delivery_counters: leg count failed: %s", e)

@@ -3,7 +3,7 @@ per-leg delivery counts over 15 min / 1 h / 24 h. Counter-level tests only;
 the bridge send-path tests port with the MA send slices.
 
 A leg is ``<source>><destination>`` transport (operator 2026-10-23:
-"transport + direction"). Counts live in 15-minute buckets inside the
+"transport + direction"). Counts live in 5-minute buckets (``BUCKET_S``) inside the
 existing delivery_counters.db so a gateway restart does not blind them
 (the DET-DCS class). Observe before alarm: these are counts only.
 
@@ -144,11 +144,6 @@ def test_windows_longer_than_tracking_are_named_partial(counters):
     assert {"1h", "24h"} <= set(counters.snapshot()["legs_partial_windows"])
 
 
-# ── seam 2: the direct RNS send records SENT on its leg ───────────────
-# Before BIC-2 only the queue path recorded SENT, so on moc (10-23) the
-# lifetime RNS `confirmed` (37,626) ran 4.6x RNS `sent` (8,081): every
-# direct send confirmed without ever being counted as sent.
-
 def test_every_state_and_drop_reason_maps_into_the_closed_outcome_set():
     # hfm #7: a new DeliveryState or DropReason must land in OUTCOMES, not
     # invent a bucket word no reader knows.
@@ -274,6 +269,10 @@ def test_a_leg_error_that_rolled_back_the_core_write_is_a_core_write_error(
     snap = counters.snapshot()
 
     assert snap["health"]["consecutive_write_errors"] >= 1
+    # Review F2 (10-23): the witness names the REAL cause, not the
+    # "no such savepoint" the follow-on ROLLBACK TO raises.
+    assert "database or disk is full" in (
+        snap["health"]["last_write_error"] or "")
 
 
 def test_tracking_start_is_the_write_time_not_a_backdated_event_ts(counters):
@@ -328,3 +327,59 @@ def test_the_snapshot_publishes_its_bucket_size(counters):
     from gateway import delivery_legs
 
     assert counters.snapshot()["legs_bucket_s"] == delivery_legs.BUCKET_S
+
+
+# ── port review (contextless reviewer, 10-23) ──────────────────────
+
+def test_a_window_is_whole_once_counting_covers_it():
+    # F4: every other partial test runs with since_ts=None, where every
+    # window is partial by construction; an always-partial bug passed them.
+    from gateway.delivery_legs import partial_windows
+    now = 1_000_000.0
+    assert partial_windows(now - 20 * 60, now) == ["1h", "24h"]
+    assert partial_windows(now - 2 * 3600, now) == ["24h"]
+    assert partial_windows(now - 25 * 3600, now) == []
+
+
+def test_a_migration_that_lost_the_race_to_another_process_is_not_an_error(
+        tmp_path):
+    # F1: PRAGMA-then-ALTER is not atomic; the gateway and the map daemon
+    # migrate together on a deploy, and the loser's ALTER says "duplicate
+    # column name" out of the constructor.
+    import sqlite3
+    from gateway.delivery_counters import _add_column
+    conn = sqlite3.connect(str(tmp_path / "x.db"))
+    conn.execute("CREATE TABLE events (ts REAL)")
+    conn.execute("ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+
+    _add_column(conn, "events", "source")      # the other process won
+
+    with pytest.raises(sqlite3.OperationalError):
+        _add_column(conn, "no_such_table", "source")
+
+
+def test_a_pre_bic2_db_gains_the_source_column_and_keeps_its_rows(tmp_path):
+    # F3: every other test builds a fresh DB, so the ALTER branch never ran.
+    import sqlite3
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE events (ts REAL NOT NULL, id TEXT NOT NULL DEFAULT '',"
+        " state TEXT NOT NULL, protocol TEXT, drop_reason TEXT,"
+        " note TEXT NOT NULL DEFAULT '')")
+    conn.execute("CREATE TABLE counters (key TEXT PRIMARY KEY,"
+                 " value INTEGER NOT NULL DEFAULT 0)")
+    conn.execute("INSERT INTO events VALUES(1.0, 'old', 'sent', 'rns', NULL, '')")
+    conn.commit()
+    conn.close()
+
+    c = DeliveryCounters(db_path=db, run_preflight=False)
+    c.record(DeliveryState.SENT, "new", protocol="rns", source="meshcore")
+
+    cols = {r[1] for r in
+            sqlite3.connect(str(db)).execute("PRAGMA table_info(events)")}
+    assert "source" in cols
+    by_id = {e.id: e for e in c.recent()}
+    assert by_id["old"].source is None
+    assert by_id["new"].source == "meshcore"
+    assert c.snapshot()["legs"]["meshcore>rns"]["15m"]["sent"] == 1
