@@ -55,23 +55,27 @@ def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
         logger.warning(f"MeshCore delivery record failed ({state}): {e}")
 
 
+# The wire's slot field is ONE byte: meshcore_py 2.3.7 send_chan_msg encodes
+# ``chan.to_bytes(1, "little")`` (measured on meshanchor-server 2026-10-24).
+# A radio may carry fewer slots (DEVICE_INFO max_channels) — that refusal is
+# the companion's ERROR Event, recorded by _companion_refused.
+MESHCORE_MAX_SLOT = 255
+
+
 def queue_row_slot(row: Dict) -> int:
     """The explicit MeshCore slot a queued CHANNEL row may air on, or -1.
 
-    ONE predicate for both refusal gates (``queue_send`` before the queue
-    marks the row delivered, and the async worker as backstop — hfm #5).
-    Only the top-level ``channel`` counts: ``metadata['channel']`` is the
-    SOURCE protocol's index (Issue #37 class). A bool is not a slot (True is
-    an int). Missing, empty, unparsable or negative → -1.
+    ONE predicate for every refusal gate (the queue's ``validate_fn`` at
+    enqueue, ``queue_send`` for rows already queued, the async worker as
+    backstop — hfm #5). Only the top-level ``channel`` counts:
+    ``metadata['channel']`` is the SOURCE protocol's index (Issue #37 class).
+    Only an int in 0..MESHCORE_MAX_SLOT is a slot: not a bool (True is an
+    int), not a float (int(1.5) == 1), not a string. Anything else → -1.
     """
     raw = row.get('channel')
-    if isinstance(raw, bool):
+    if isinstance(raw, bool) or not isinstance(raw, int):
         return -1
-    try:
-        slot = int(raw)
-    except (TypeError, ValueError):
-        return -1
-    return slot if slot >= 0 else -1
+    return raw if 0 <= raw <= MESHCORE_MAX_SLOT else -1
 
 
 def validate_queue_row(row: Dict) -> Optional[str]:
@@ -153,8 +157,10 @@ class MeshCoreOutboundMixin:
                 if not dest:
                     channel = queue_row_slot(msg)
                     if channel < 0:
+                        # Reachable only by a path that skipped queue_send.
+                        # Same drop_reason as the queue's two gates (#5).
                         self._note_no_slot_refusal(msg_id, raw_channel)
-                        _record_tx("dropped", msg_id, "non_retriable_error",
+                        _record_tx("dropped", msg_id, "invalid_payload",
                                    "queue row: no explicit slot", source=source)
                         return
                 else:
@@ -485,15 +491,15 @@ class MeshCoreOutboundMixin:
         message = payload.get('message', '')
         destination = payload.get('destination')
 
-        # Backstop for a slot-less CHANNEL row already in the table (enqueue
-        # refuses new ones via validate_queue_row). Refused HERE, before the
-        # queue's mark_delivered records SENT on it (review of b0b57544,
-        # finding 1), and as SendRefused, not False: False read as transient
-        # — ~4 retries, then "retries exhausted" (re-review of 0ba66869).
+        # Backstop for a slot-less CHANNEL row written before enqueue
+        # validated (validate_queue_row). It cannot tell a pre-b0b57544 row
+        # whose top-level channel is the SOURCE index from a resolved one
+        # (review of 39f566c1, #1; 0 such rows live at deploy). Refused
+        # HERE, before the queue's mark_delivered records SENT on it, and as
+        # SendRefused, not False (False read as transient: ~4 retries). The
+        # queue's mark_refused counts it, logs it and records the DROPPED.
         refusal = validate_queue_row(payload)
         if refusal:
-            self._note_no_slot_refusal(payload.get('_queue_msg_id'),
-                                       payload.get('channel'))
             raise SendRefused(refusal)
 
         if not self._connected:

@@ -87,24 +87,38 @@ def test_a_failed_bridge_send_requeues_on_the_resolved_slot(
 
 
 def test_a_meshcore_requeue_without_a_resolved_slot_is_refused(
-        bridge, queue):  # noqa: F811
-    bridge._persistent_queue = queue
+        bridge, tmp_path):  # noqa: F811
+    # ONE gate (review of 39f566c1, #3/#9): the bridge writes only the slot
+    # it resolved and the queue's validate_fn refuses — one counter, one
+    # DROPPED invalid_payload witness, no bridge-side second refusal.
+    q = _validated_queue(tmp_path)
+    bridge._persistent_queue = q
+    try:
+        assert bridge._requeue_failed_message(
+            _mesh_broadcast(channel=0), "meshcore") is False
 
-    assert bridge._requeue_failed_message(
-        _mesh_broadcast(channel=0), "meshcore") is False
+        assert _rows(q) == []
+        assert q.get_stats()["refused_invalid"] == 1
+        assert _drop_reasons("refused-") == [("dropped", "invalid_payload")]
+        assert "meshcore_requeue_no_slot_refused" not in bridge.stats
+    finally:
+        q.stop_processing()
 
-    assert _rows(queue) == []
-    assert bridge.stats["meshcore_requeue_no_slot_refused"] == 1
 
-
-def test_the_refusal_is_said_out_loud(bridge, queue, caplog):  # noqa: F811
+def test_the_refusal_is_said_out_loud(bridge, tmp_path, caplog):  # noqa: F811
     import logging
-    bridge._persistent_queue = queue
-    with caplog.at_level(logging.WARNING):
-        bridge._requeue_failed_message(_mesh_broadcast(), "meshcore")
+    q = _validated_queue(tmp_path)
+    bridge._persistent_queue = q
+    try:
+        with caplog.at_level(logging.WARNING):
+            bridge._requeue_failed_message(_mesh_broadcast(), "meshcore")
+    finally:
+        q.stop_processing()
 
-    assert any("no resolved MeshCore slot" in r.getMessage()
-               for r in caplog.records)
+    said = [r.getMessage() for r in caplog.records
+            if "refused at enqueue" in r.getMessage()]
+    assert len(said) == 1                 # said once, not once per gate
+    assert "no explicit slot" in said[0]
 
 
 def test_an_explicit_slot_still_requeues(bridge, queue):  # noqa: F811
@@ -182,10 +196,13 @@ def test_a_queued_channel_row_without_an_explicit_slot_never_airs(row):
     cmds = _drain(h)
 
     cmds.send_chan_msg.assert_not_called()
-    assert h.stats["meshcore_queue_row_no_slot_refused"] == 2  # both gates
-    states = [e.state.value for e in
-              dc.get_singleton().history_for(row["_queue_msg_id"])]
-    assert states == ["dropped"]          # a witness on the row's own id
+    # queue_send's refusal is the QUEUE's to count (mark_refused); the
+    # handler counter is the worker backstop's alone.
+    assert h.stats["meshcore_queue_row_no_slot_refused"] == 1
+    drops = [(e.state.value, e.drop_reason.value) for e in
+             dc.get_singleton().history_for(row["_queue_msg_id"])]
+    # a witness on the row's own id, under the class's ONE drop_reason (#5)
+    assert drops == [("dropped", "invalid_payload")]
 
 
 def test_a_slot_less_row_is_refused_before_the_queue_calls_it_delivered(
@@ -209,7 +226,8 @@ def test_a_slot_less_row_is_refused_before_the_queue_calls_it_delivered(
         status = conn.execute("SELECT status FROM messages WHERE id = ?",
                               (row,)).fetchone()[0]
     assert status != "delivered"
-    assert h.stats["meshcore_queue_row_no_slot_refused"] == 1
+    assert q.get_stats()["refused_invalid"] == 1
+    assert h.stats.get("meshcore_queue_row_no_slot_refused", 0) == 0
 
 
 @pytest.mark.parametrize("slot", [True, False])
@@ -289,8 +307,16 @@ def test_the_queue_refuses_a_slot_less_meshcore_row_at_enqueue(tmp_path):
         q.stop_processing()
 
 
-@pytest.mark.parametrize("slot", [True, False, "", "Public", -1, None])
+@pytest.mark.parametrize("slot", [
+    True, False, "", "Public", -1, None,
+    1.5, 1.0, "1", 256, 10**6,
+], ids=["true", "false", "empty", "name", "negative", "none",
+        "float", "integral-float", "digit-string", "past-the-wire-byte",
+        "huge"])
 def test_no_non_slot_value_passes_enqueue(tmp_path, slot):
+    # #6: meshcore_py 2.3.7 encodes the slot as chan.to_bytes(1, "little")
+    # (measured on meshanchor-server 2026-10-24): an int in 0..255 or the
+    # send raises. int(1.5) == 1 must not become slot 1.
     q = _validated_queue(tmp_path)
     try:
         assert q.enqueue({"message": "x", "channel": slot}, "meshcore") is None
@@ -301,8 +327,9 @@ def test_no_non_slot_value_passes_enqueue(tmp_path, slot):
 @pytest.mark.parametrize("payload", [
     {"message": "x", "channel": 1},
     {"message": "x", "channel": 0},       # Public, chosen explicitly
+    {"message": "x", "channel": 255},     # the wire byte's last value
     {"message": "x", "destination": "abcd"},
-], ids=["private-slot", "explicit-public", "dm"])
+], ids=["private-slot", "explicit-public", "wire-max", "dm"])
 def test_a_valid_meshcore_row_still_enqueues(tmp_path, payload):
     q = _validated_queue(tmp_path)
     try:
@@ -355,6 +382,7 @@ def test_a_slot_less_row_already_queued_dead_letters_on_its_first_attempt(
         assert "sent" not in [e.state.value for e in
                               dc.get_singleton().history_for(row)]
         assert terminal == ["dropped"]
+        assert q.get_stats()["refused_invalid"] == 1   # ONE counter, #3/#9
     finally:
         q.stop_processing()
 

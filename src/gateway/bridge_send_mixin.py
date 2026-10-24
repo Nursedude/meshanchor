@@ -763,28 +763,15 @@ class BridgeSendMixin:
                 'metadata': metadata,
             }
             if destination == "meshcore":
-                # Chokepoint 1 of 2 (2026-10-24, Issue #37 class): a MeshCore
-                # row replays ONLY on the slot the caller resolved. Falling
-                # through to metadata.channel lifted the SOURCE protocol's
-                # index (Meshtastic ingress always sets it; the primary
-                # channel is 0 = MeshCore Public), and a row with no slot
-                # reached the worker's default of 0. Refuse, loudly: a lost
-                # message is recoverable, private cargo on Public is not.
-                # queue_row_slot: one predicate with the queue's validator and
-                # queue_send — a bool is not a slot (int(True) == 1).
-                from .meshcore_outbound_mixin import queue_row_slot
-                slot = queue_row_slot({'channel': channel_override})
-                if slot < 0:
-                    with self._stats_lock:
-                        self.stats['meshcore_requeue_no_slot_refused'] = (
-                            self.stats.get('meshcore_requeue_no_slot_refused', 0)
-                            + 1)
-                    logger.warning(
-                        "→MeshCore requeue refused: no resolved MeshCore slot "
-                        f"(channel_override={channel_override!r}); not queued, "
-                        "never replayed on a source slot or slot 0 (Public)")
-                    return False
-                payload['channel'] = slot
+                # Issue #37 class (2026-10-24): a MeshCore row carries ONLY
+                # the slot the caller resolved, verbatim — never
+                # metadata.channel (the SOURCE protocol's index; Meshtastic's
+                # primary is 0 = MeshCore Public). The queue's validate_fn
+                # (validate_queue_row) is the ONE gate that refuses a missing
+                # or non-slot value: one counter, one DROPPED invalid_payload
+                # (review of 39f566c1, #3/#9). enqueue returns None → False.
+                if channel_override is not None:
+                    payload['channel'] = channel_override
             elif channel_override is not None:
                 # Caller already resolved the destination slot. Write it
                 # verbatim — do NOT fall through to metadata.channel.

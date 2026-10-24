@@ -817,6 +817,8 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
         with self._lock:
             self._stats["failed"] += 1
             self._stats["permanent_failures"] += 1
+            # Same counter as the enqueue refusal: one class, one counter.
+            self._stats["refused_invalid"] += 1
         logger.warning(f"Message {msg_id} moved to dead letter, refused by "
                        f"its sender (not retried): {reason}")
         _dc.record(

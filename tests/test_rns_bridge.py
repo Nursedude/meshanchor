@@ -1076,9 +1076,13 @@ class TestRequeueFailedMessage:
 
     def test_a_metadata_channel_is_never_lifted_into_a_meshcore_row(self, bridge):
         """Was test_channel_lifted_into_payload_top_level (2026-05-20).
-        REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted."""
+        REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted.
+        The refusal itself is the queue's validate_fn — the ONE gate (review
+        of 39f566c1, #3/#9; real-queue tests in that file). The bridge owes
+        a row with no slot it did not resolve, which that gate refuses."""
+        from gateway.meshcore_outbound_mixin import validate_queue_row
         mock_queue = MagicMock()
-        mock_queue.enqueue.return_value = "msg-123"
+        mock_queue.enqueue.return_value = None   # what the real gate returns
         bridge._persistent_queue = mock_queue
 
         from gateway.rns_bridge import BridgedMessage
@@ -1088,14 +1092,20 @@ class TestRequeueFailedMessage:
             metadata={"channel": 1, "other": "preserved"},
         )
         assert bridge._requeue_failed_message(msg, "meshcore") is False
-        mock_queue.enqueue.assert_not_called()
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert "channel" not in payload
+        assert validate_queue_row(payload)
 
     def test_a_meshcore_row_with_no_slot_is_refused(self, bridge):
         """Was test_channel_lift_skipped_when_metadata_missing: the row used
         to be queued with no slot and replayed on _resolve_channel's 0.
-        REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted."""
+        REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted.
+        The refusal itself is the queue's validate_fn — the ONE gate (review
+        of 39f566c1, #3/#9; real-queue tests in that file). The bridge owes
+        a row with no slot it did not resolve, which that gate refuses."""
+        from gateway.meshcore_outbound_mixin import validate_queue_row
         mock_queue = MagicMock()
-        mock_queue.enqueue.return_value = "msg-x"
+        mock_queue.enqueue.return_value = None   # what the real gate returns
         bridge._persistent_queue = mock_queue
 
         from gateway.rns_bridge import BridgedMessage
@@ -1104,12 +1114,15 @@ class TestRequeueFailedMessage:
             destination_id=None, content="no-channel",
         )
         assert bridge._requeue_failed_message(msg, "meshcore") is False
-        mock_queue.enqueue.assert_not_called()
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert "channel" not in payload
+        assert validate_queue_row(payload)
 
     def test_an_unparsable_metadata_channel_is_refused_without_crashing(self, bridge):
         """Was test_channel_lift_handles_unparsable_metadata. REVERSED 2026-10-24 (Issue #37 class, tests/test_meshcore_requeue_slot.py): metadata['channel'] is the SOURCE protocol's index, so a MeshCore row with no resolved slot is now REFUSED, never lifted or defaulted."""
+        from gateway.meshcore_outbound_mixin import validate_queue_row
         mock_queue = MagicMock()
-        mock_queue.enqueue.return_value = "msg-y"
+        mock_queue.enqueue.return_value = None   # what the real gate returns
         bridge._persistent_queue = mock_queue
 
         from gateway.rns_bridge import BridgedMessage
@@ -1119,7 +1132,9 @@ class TestRequeueFailedMessage:
             metadata={"channel": "not-an-int"},
         )
         assert bridge._requeue_failed_message(msg, "meshcore") is False
-        mock_queue.enqueue.assert_not_called()
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert "channel" not in payload     # the ONE gate (queue) refuses
+        assert validate_queue_row(payload)
 
     def test_channel_override_overrides_metadata_lift(self, bridge):
         """channel_override kwarg (used by the cross-protocol bridge_loop
@@ -1160,13 +1175,18 @@ class TestRequeueFailedMessage:
             metadata={},
         )
         # Was "skip writing the slot, queue anyway" — a slot-less row then
-        # replayed on 0 (Public). Now an unparsable override is no slot:
-        # refused (2026-10-24, tests/test_meshcore_requeue_slot.py).
+        # replayed on 0 (Public). Now the override rides verbatim and the
+        # queue's validate_fn — the ONE gate — refuses a non-slot (review
+        # of 39f566c1, #3/#9; tests/test_meshcore_requeue_slot.py).
+        from gateway.meshcore_outbound_mixin import validate_queue_row
+        mock_queue.enqueue.return_value = None   # what the real gate returns
         ok = bridge._requeue_failed_message(
             msg, "meshcore", channel_override="garbage"  # type: ignore[arg-type]
         )
         assert ok is False
-        mock_queue.enqueue.assert_not_called()
+        payload = mock_queue.enqueue.call_args.kwargs["payload"]
+        assert payload["channel"] == "garbage"
+        assert validate_queue_row(payload)
 
 
 # ---------------------------------------------------------------------------

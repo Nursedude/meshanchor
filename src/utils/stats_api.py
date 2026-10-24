@@ -27,15 +27,17 @@ returned so any future counter shows up automatically):
       MeshCore Public (slot 0). Operator fix: set
       ``config.meshcore.bridge_target_channel`` to a valid slot.
 
-  meshcore_requeue_no_slot_refused  — Issue #37 class, at ENQUEUE
-      (2026-10-24). A failed →MeshCore send had no resolved slot, so it was
-      NOT queued (never replayed on the source slot or slot 0 = Public).
+  Issue #37 class at the persistent queue (2026-10-24) — a MeshCore
+      channel row with no explicit slot (an int 0..255) is refused by the
+      queue's validate_fn at enqueue (never written), or dead-lettered on
+      its first attempt if already queued. Counted ONCE, on the QUEUE's
+      ``refused_invalid`` stat (not in this dict), and recorded on the
+      Delivery screen as DROPPED ``invalid_payload``.
 
-  meshcore_queue_row_no_slot_refused  — Issue #37 class, at DISPATCH
-      (2026-10-24). A queued MeshCore channel row carried no explicit
-      slot and never aired; counted once per refusal (queue_send, and the
-      worker backstop). Non-zero means some writer queued a row without
-      ``channel`` — find it in the journal's WARNING line.
+  meshcore_queue_row_no_slot_refused  — the worker BACKSTOP only: a
+      slot-less channel row reached the MeshCore send queue without going
+      through queue_send. Should stay 0; non-zero means a new path into the
+      send queue — find it in the journal's WARNING line.
 
   meshcore_dm_dropped_contact_not_found  — Issue #35 privacy refusal.
       DM contact resolution failed; message dropped rather than
