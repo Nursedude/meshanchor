@@ -20,9 +20,11 @@ manager, so when SUDO_USER is set we exec systemctl through ``sudo
 systemctl --user``.
 """
 
+import ipaddress
 import logging
 import os
 import pwd
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,6 +50,39 @@ _UNIT_FILENAME = "meshchatx.service"
 _WRAPPER_FILENAME = "meshchatx_wrapper.sh"
 _DEFAULT_PORT = 8000
 _DEFAULT_HOST = "127.0.0.1"
+
+
+def _listen_host(addr: str) -> str:
+    """``0.0.0.0:8000`` -> ``0.0.0.0``; ``[::1]:8000`` -> ``::1``; ``*:8000`` -> ``*``."""
+    return addr.rsplit(":", 1)[0].strip("[]")
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def lan_open(addrs: List[str]) -> bool:
+    """True when any LISTEN address is reachable from beyond this box."""
+    return any(not _is_loopback(_listen_host(a)) for a in addrs)
+
+
+def local_url(addrs: List[str], port: int) -> str:
+    """The URL that reaches the web UI from THIS box, given the real binds.
+
+    A wildcard (``0.0.0.0`` / ``*``) or 127.0.0.1 bind answers on
+    127.0.0.1; ``::`` / ``::1`` on ``[::1]``; anything else only on its own
+    address. No listener -> the default, for the "not bound" screens.
+    """
+    hosts = [_listen_host(a) for a in addrs]
+    if not hosts or any(h in ("0.0.0.0", "*", _DEFAULT_HOST) for h in hosts):
+        return f"http://{_DEFAULT_HOST}:{port}/"
+    if any(h in ("::", "::1") for h in hosts):
+        return f"http://[::1]:{port}/"
+    h = hosts[0]
+    return f"http://[{h}]:{port}/" if ":" in h else f"http://{h}:{port}/"
 
 
 class MeshChatXServiceOpsMixin:
@@ -116,40 +151,39 @@ class MeshChatXServiceOpsMixin:
     # Liveness probe: is the HTTP port bound by the unit's MainPID?
     # ------------------------------------------------------------------
 
-    def _port_bound_by_pid(self, pid: int, port: int = _DEFAULT_PORT) -> bool:
-        """Return True if ``pid`` (or a child) holds a LISTEN on ``port``.
+    def _listen_addrs(self, pid: int, port: int = _DEFAULT_PORT) -> List[str]:
+        """Local addresses of the LISTEN sockets on ``port`` held by ``pid``.
 
         We check ``ss -tnlp`` rather than a generic port scan so we can
         attribute the bind to the meshchatx process and not, e.g., an
-        unrelated dev server. Falls back to a simple ``ss`` parse when
-        the lsof-style ``users:`` field isn't populated.
+        unrelated dev server. Falls back to every listener on the port when
+        no line names ``pid`` (the MainPID may be a parent whose child
+        holds the socket, or the ``users:`` field may be unpopulated).
+        The address is what the TUI shows: measured, never re-derived from
+        meshchatx.env.
         """
         if pid <= 0:
-            return False
+            return []
         ss_bin = shutil.which("ss")
         if not ss_bin:
-            return False
+            return []
         try:
             proc = subprocess.run(
                 [ss_bin, '-Htnlp', f'sport = :{port}'],
                 capture_output=True, text=True, timeout=5,
             )
         except (subprocess.SubprocessError, OSError):
-            return False
+            return []
         if proc.returncode != 0:
-            return False
-        text = proc.stdout or ""
-        if not text.strip():
-            return False
+            return []
+        lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
         # ss output: "users:(("meshchatx",pid=12345,fd=8))"
-        marker = f"pid={pid}"
-        if marker in text:
-            return True
-        # Fall back to "any listener on this port" — a slightly weaker
-        # SSOT but still useful when the unit's MainPID is the parent
-        # and a child holds the actual socket (Python multi-process
-        # patterns).
-        return any(line.strip() for line in text.splitlines())
+        mine = [ln for ln in lines if re.search(rf"pid={pid}\b", ln)]
+        return [ln.split()[3] for ln in (mine or lines) if len(ln.split()) >= 4]
+
+    def _port_bound_by_pid(self, pid: int, port: int = _DEFAULT_PORT) -> bool:
+        """Return True if ``pid`` (or a child) holds a LISTEN on ``port``."""
+        return bool(self._listen_addrs(pid, port))
 
     # ------------------------------------------------------------------
     # State SSOT
@@ -166,7 +200,8 @@ class MeshChatXServiceOpsMixin:
             sub_state         — str:  "running" / "exited" / "failed" / ...
             main_pid          — int:  MainPID
             n_restarts        — int:  NRestarts
-            port_bound        — bool: 127.0.0.1:8000 LISTEN attributable to the unit
+            port_bound        — bool: a :8000 LISTEN attributable to the unit
+            listen            — List[str]: that LISTEN's local addresses (ss)
             port              — int:  the port we expect (default 8000)
             error             — Optional[str]: transient reason state is UNKNOWN
         """
@@ -186,6 +221,7 @@ class MeshChatXServiceOpsMixin:
             "main_pid": 0,
             "n_restarts": 0,
             "port_bound": False,
+            "listen": [],
             "port": _DEFAULT_PORT,
             "error": None,
         }
@@ -225,9 +261,8 @@ class MeshChatXServiceOpsMixin:
                     except ValueError:
                         pass
 
-        state["port_bound"] = self._port_bound_by_pid(
-            state["main_pid"], state["port"],
-        )
+        state["listen"] = self._listen_addrs(state["main_pid"], state["port"])
+        state["port_bound"] = bool(state["listen"])
         return state
 
     def _service_state_line(self, state: Optional[dict] = None) -> str:
@@ -243,6 +278,8 @@ class MeshChatXServiceOpsMixin:
                 parts.append(f"PID {s['main_pid']}")
             if s["port_bound"]:
                 parts.append(f":{s['port']} bound")
+                if lan_open(s.get("listen") or []):
+                    parts.append("LAN-open")
             else:
                 parts.append(f":{s['port']} NOT bound")
             if s["n_restarts"] > 0:
@@ -274,8 +311,13 @@ class MeshChatXServiceOpsMixin:
             print(f"  MainPID:   {svc['main_pid']}")
         if svc["active"]:
             if svc["port_bound"]:
+                listen = svc.get("listen") or []
                 print(f"  Port:      {svc['port']} bound (web UI up)")
-                print(f"  Open:      http://127.0.0.1:{svc['port']}/")
+                if listen:
+                    note = ("  \033[0;33mLAN-open, plain HTTP\033[0m"
+                            if lan_open(listen) else "  (this box only)")
+                    print(f"  Listen:    {', '.join(listen)}{note}")
+                print(f"  Open:      {local_url(listen, svc['port'])}")
             else:
                 print(f"  Port:      \033[0;33m{svc['port']} NOT bound — "
                       f"daemon may still be warming up\033[0m")

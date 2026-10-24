@@ -26,7 +26,9 @@ from typing import List, Optional, Tuple
 from backend import clear_screen
 from handler_protocol import BaseHandler
 
-from handlers._meshchatx_service_ops import MeshChatXServiceOpsMixin
+from handlers._meshchatx_service_ops import (
+    MeshChatXServiceOpsMixin, lan_open, local_url,
+)
 from utils.paths import (
     MeshChatXPaths,
     get_real_user_home,
@@ -70,7 +72,8 @@ class MeshChatXHandler(MeshChatXServiceOpsMixin, BaseHandler):
 
             choices: List[Tuple[str, str]] = [
                 ("status", "Status                  install + service + identity"),
-                ("open_ui", "Open Web UI             http://127.0.0.1:8000/"),
+                ("open_ui", "Open Web UI             "
+                 + local_url(state.get("listen") or [], state.get("port", 8000))),
                 ("service", "Service Control         start / stop / install"),
                 ("logs", "View Logs               journalctl --user -u meshchatx"),
                 ("preflight", "Run install audit       scripts/install_meshchatx.sh --check"),
@@ -165,7 +168,8 @@ class MeshChatXHandler(MeshChatXServiceOpsMixin, BaseHandler):
         """
         state = self._meshchatx_service_state()
         port = state.get("port", 8000)
-        url = f"http://127.0.0.1:{port}/"
+        listen = state.get("listen") or []
+        url = local_url(listen, port)
 
         if not state["active"]:
             self.ctx.dialog.msgbox(
@@ -217,8 +221,12 @@ class MeshChatXHandler(MeshChatXServiceOpsMixin, BaseHandler):
 
         # Headless path: print URL + tunnel hint
         hostname = self._hostname()
+        lan = ""
+        if lan_open(listen):
+            lan = (f"LAN-open ({', '.join(listen)}, plain HTTP) - from the\n"
+                   f"LAN use this box's address on :{port}.\n\n")
         body = (
-            f"URL on this box:\n  {url}\n\n"
+            f"URL on this box:\n  {url}\n\n" + lan +
             f"From a remote workstation, open an SSH tunnel:\n"
             f"  ssh -L {port}:localhost:{port} {self._user()}@{hostname}\n"
             f"Then visit http://localhost:{port}/ in your browser.\n\n"

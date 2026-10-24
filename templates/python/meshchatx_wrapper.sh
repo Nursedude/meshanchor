@@ -19,10 +19,10 @@
 # may shift between releases. To change a flag, edit this wrapper and
 # re-run: sudo bash /opt/meshanchor/scripts/install_meshchatx.sh --refresh
 #
-# Both the canonical installer and the MeshChatX TUI handler's
-# _install_user_unit copy this file verbatim into
-# ``~/.config/meshanchor/meshchatx_wrapper.sh``. Bumping the
-# ``Version:`` line above forces both sides to refresh.
+# The canonical installer copies this file verbatim into
+# ``~/.config/meshanchor/meshchatx_wrapper.sh`` and replaces it whenever the
+# bytes differ (``cmp``); the TUI runs that installer. The ``Version:`` line
+# is informational - it does not drive the refresh.
 
 set -eu
 
@@ -83,31 +83,54 @@ mkdir -p "${STORAGE_DIR}"
 # --------------------------------------------------------------------
 # 4. Listen address — the operator's setting, never re-rendered
 # --------------------------------------------------------------------
-# This wrapper is copied verbatim on every install/refresh, so a hand edit
-# of --host is silently reverted. The knob lives in an operator-owned file
-# the installer never writes:
+# The installer replaces this wrapper whenever its bytes differ (cmp), so a
+# hand edit of --host is silently reverted. The knob lives in an
+# operator-owned file the installer never writes:
 #   ~/.config/meshanchor/meshchatx.env   ->   MESHCHATX_HOST=0.0.0.0
-# Read as DATA (never sourced). Absent -> 127.0.0.1 (SSH-tunnel for remote).
-# A value that is not an IP literal refuses loud (exit 2) instead of falling
-# back to a bind the operator did not choose. A non-loopback bind says so
-# in the journal on every start: it is plain HTTP and, unless --auth is set,
-# anyone who can reach it speaks as this box's LXMF identity.
+# then:  systemctl --user restart meshchatx   (a refresh only STARTs a
+# stopped unit; a running one keeps its old bind until restarted).
+# Read as DATA, never sourced: `export ` and `# comments` are tolerated,
+# the last MESHCHATX_HOST line wins. Absent -> 127.0.0.1 (SSH-tunnel for
+# remote). Every fallback says so in the journal; a value that is not a
+# usable IP literal refuses loud (exit 2) instead of a bind nobody chose.
+# A non-loopback bind says so on every start: it is plain HTTP and, unless
+# --auth is set, anyone who can reach it speaks as this box's LXMF identity.
 MCX_HOST=127.0.0.1
 MCX_ENV="${HOME}/.config/meshanchor/meshchatx.env"
-if [[ -r "${MCX_ENV}" ]]; then
-    v="$(sed -n 's/^[[:space:]]*MESHCHATX_HOST[[:space:]]*=//p' "${MCX_ENV}" | tail -n 1)"
-    v="${v//[[:space:]]/}"; v="${v//\"/}"; v="${v//\'/}"
-    if [[ -n "${v}" ]]; then
-        if [[ "${v}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "${v}" =~ ^[0-9a-fA-F:]*:[0-9a-fA-F:]*$ ]]; then
-            MCX_HOST="${v}"
-        else
-            err "MESHCHATX_HOST='${v}' in ${MCX_ENV} is not an IP literal."
-            err "  FIX: MESHCHATX_HOST=127.0.0.1 (local) or 0.0.0.0 (LAN), or delete the line."
-            exit 2
+
+valid_ip() {
+    [[ "$1" =~ ^[0-9a-fA-F:.]+$ ]] || return 1
+    python3 -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' \
+        "$1" 2>/dev/null
+}
+
+if [[ -e "${MCX_ENV}" ]]; then
+    if [[ ! -f "${MCX_ENV}" || ! -r "${MCX_ENV}" ]]; then
+        err "${MCX_ENV} is not a readable file - using 127.0.0.1."
+    else
+        line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?MESHCHATX_HOST[[:space:]]*=' \
+            "${MCX_ENV}" | tail -n 1 || true)"
+        if [[ -n "${line}" ]]; then
+            v="${line#*=}"
+            v="${v%%#*}"
+            v="${v//[[:space:]]/}"; v="${v//\"/}"; v="${v//\'/}"
+            if [[ -z "${v}" ]]; then
+                err "MESHCHATX_HOST is empty in ${MCX_ENV} - using 127.0.0.1."
+            elif [[ "${v}" == "::" ]]; then
+                err "MESHCHATX_HOST=:: in ${MCX_ENV} may bind IPv6 only (unreachable over IPv4)."
+                err "  FIX: MESHCHATX_HOST=0.0.0.0 for the LAN."
+                exit 2
+            elif ! valid_ip "${v}"; then
+                err "MESHCHATX_HOST='${v}' in ${MCX_ENV} is not an IP literal."
+                err "  FIX: MESHCHATX_HOST=127.0.0.1 (local) or 0.0.0.0 (LAN), or delete the line."
+                exit 2
+            else
+                MCX_HOST="${v}"
+            fi
         fi
     fi
 fi
-if [[ "${MCX_HOST}" != "127.0.0.1" && "${MCX_HOST}" != "::1" ]]; then
+if [[ "${MCX_HOST}" != 127.* && "${MCX_HOST}" != "::1" ]]; then
     err "listening on ${MCX_HOST}:8000 (set in ${MCX_ENV}) - plain HTTP, reachable beyond this box"
 fi
 

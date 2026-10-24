@@ -19,8 +19,8 @@ WRAPPER = REPO_ROOT / "templates" / "python" / "meshchatx_wrapper.sh"
 
 def _run(tmp_path, env_text=None):
     home = tmp_path / "home"
-    (home / ".local" / "bin").mkdir(parents=True)
-    (home / ".config" / "meshanchor").mkdir(parents=True)
+    (home / ".local" / "bin").mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "meshanchor").mkdir(parents=True, exist_ok=True)
     fake = home / ".local" / "bin" / "meshchatx"
     fake.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n')
     fake.chmod(0o755)
@@ -75,3 +75,60 @@ def test_env_file_is_read_as_data_not_sourced(tmp_path):
     r = _run(tmp_path, f"touch {marker}\nMESHCHATX_HOST=127.0.0.1\n")
     assert r.returncode == 0, r.stderr
     assert not marker.exists()
+
+
+# ── review of a4a83703 (contextless reviewer, 10-23) ──────────────────
+
+def test_export_prefix_is_accepted_not_silently_ignored(tmp_path):   # W3
+    r = _run(tmp_path, "export MESHCHATX_HOST=0.0.0.0\n")
+    assert r.returncode == 0, r.stderr
+    assert _host(r.stdout) == "0.0.0.0"
+
+
+def test_inline_comment_is_stripped(tmp_path):                       # W5
+    r = _run(tmp_path, "MESHCHATX_HOST=0.0.0.0   # lab only\n")
+    assert r.returncode == 0, r.stderr
+    assert _host(r.stdout) == "0.0.0.0"
+
+
+def test_an_empty_last_value_says_it_falls_back(tmp_path):           # W3
+    r = _run(tmp_path, "MESHCHATX_HOST=0.0.0.0\nMESHCHATX_HOST=\n")
+    assert r.returncode == 0, r.stderr
+    assert _host(r.stdout) == "127.0.0.1"
+    assert "using 127.0.0.1" in r.stderr
+
+
+def test_an_unreadable_env_path_says_it_falls_back(tmp_path):        # W3
+    home = tmp_path / "home" / ".config" / "meshanchor" / "meshchatx.env"
+    home.mkdir(parents=True)          # a directory where the file belongs
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert _host(r.stdout) == "127.0.0.1"
+    assert "using 127.0.0.1" in r.stderr
+
+
+@pytest.mark.parametrize("bad", ["999.1.1.1", ":", "1:2", ":::::",
+                                 "fe80::1%eth0"])
+def test_an_impossible_address_refuses_before_the_daemon(tmp_path, bad):  # W4
+    r = _run(tmp_path, f"MESHCHATX_HOST={bad}\n")
+    assert r.returncode == 2, (bad, r.stdout, r.stderr)
+    assert "--host" not in r.stdout
+
+
+def test_ipv6_unspecified_refuses_and_points_at_0000(tmp_path):      # W2
+    r = _run(tmp_path, "MESHCHATX_HOST=::\n")
+    assert r.returncode == 2
+    assert "0.0.0.0" in r.stderr
+
+
+@pytest.mark.parametrize("ok", ["::1", "fd00::4", "10.0.0.5"])
+def test_real_addresses_still_pass(tmp_path, ok):
+    r = _run(tmp_path, f"MESHCHATX_HOST={ok}\n")
+    assert r.returncode == 0, r.stderr
+    assert _host(r.stdout) == ok
+
+
+def test_all_of_127_8_is_loopback(tmp_path):                         # S1
+    r = _run(tmp_path, "MESHCHATX_HOST=127.0.0.2\n")
+    assert r.returncode == 0, r.stderr
+    assert "reachable beyond this box" not in r.stderr
