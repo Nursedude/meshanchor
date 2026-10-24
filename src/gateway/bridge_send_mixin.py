@@ -633,15 +633,20 @@ class BridgeSendMixin:
         return None
 
     @staticmethod
-    def _leg_source(msg) -> str:
+    def _leg_source(msg) -> Optional[str]:
         """BIC-2: the transport a message came in on (twin of MeshForge's
         ``_rns_bridge_xform._leg_source``). source_network is a routing
         input and reads "meshtastic" for MQTT ingress, so the leg reads the
         origin: a replayed spill carries it in metadata, a live MQTT message
-        as origin=MQTT (enum or plain string)."""
-        leg = (getattr(msg, 'metadata', None) or {}).get('m2r_leg_source')
+        as origin=MQTT (enum or plain string). A replay that carries no leg
+        (a row queued before BIC-2) is UNKNOWN: its rebuilt source_network
+        is the hard-coded "meshtastic", never a measurement."""
+        meta = getattr(msg, 'metadata', None) or {}
+        leg = meta.get('m2r_leg_source')
         if leg:
             return leg
+        if meta.get('m2r_replay'):
+            return None
         origin = getattr(msg, 'origin', None)
         if getattr(origin, 'value', origin) == 'mqtt':
             return 'mqtt'
@@ -872,7 +877,8 @@ class BridgeSendMixin:
             logger.error(f"rns_xform replay raised (not retried): {e}")
         return True
 
-    def _requeue_failed_chunks(self, chunks, target: str = "meshtastic") -> bool:
+    def _requeue_failed_chunks(self, chunks, target: str = "meshtastic",
+                               source: Optional[str] = "rns") -> bool:
         """Persist already-chunked, byte-bounded RNS→Mesh content for retry.
 
         Ported from MeshForge. Used by the direct-send path on PARTIAL
@@ -896,7 +902,7 @@ class BridgeSendMixin:
                     },
                     destination=target,
                     priority=MessagePriority.HIGH,
-                    source="rns",
+                    source=source,   # BIC-2: the caller's ingress leg
                 ):
                     requeued += 1
             except Exception as e:

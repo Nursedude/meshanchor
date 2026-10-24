@@ -676,6 +676,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             drop = None
             bumps: List[str] = []
             note_log = None
+            retry_log = None
             message.retry_count += 1
             message.error_message = error
             message.updated_at = datetime.now()
@@ -708,7 +709,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                     message.retry_after = datetime.now() + timedelta(seconds=decision.delay)
                     message.status = MessageStatus.PENDING
                     bumps.append("retried")
-                    logger.debug(
+                    retry_log = (
                         f"Message {msg_id} scheduled for retry in {decision.delay:.1f}s "
                         f"({decision.reason})"
                     )
@@ -732,7 +733,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                     message.retry_after = datetime.now() + timedelta(seconds=delay)
                     message.status = MessageStatus.PENDING
                     bumps.append("retried")
-                    logger.debug(f"Message {msg_id} scheduled for retry in {delay}s")
+                    retry_log = f"Message {msg_id} scheduled for retry in {delay}s"
 
             # Update in database
             data = message.to_dict()
@@ -752,6 +753,8 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                     self._stats[key] += 1
             if note_log:
                 logger.warning(note_log)
+            if retry_log:
+                logger.debug(retry_log)
         if changed == 1 and drop is not None:
             _dc.record(
                 _dc.DeliveryState.DROPPED, msg_id=msg_id,

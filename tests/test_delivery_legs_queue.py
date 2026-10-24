@@ -375,3 +375,44 @@ def test_the_mesh_preset_bridge_names_a_transport_not_an_interface():
                for k in node.keywords if k.arg == "source"]
     assert sources and all(isinstance(v, ast.Constant)
                            and v.value == "meshtastic" for v in sources)
+
+
+# ── review of 016a38cb..d97a41e3 (contextless, 10-23) ─────────────────
+
+def test_a_replay_that_carries_no_leg_reads_unknown_not_meshtastic(bridge):  # noqa: F811
+    # F2: the spill replay hard-codes source_network="meshtastic" (a routing
+    # input). A row queued before this slice carries no leg; the rebuilt
+    # message must count under "?", never a guessed real transport.
+    m = _msg("meshtastic")
+    m.metadata = {"m2r_replay": True}
+
+    assert bridge._leg_source(m) is None
+
+
+def test_a_replay_that_carries_its_leg_reads_it(bridge):  # noqa: F811
+    m = _msg("meshtastic")
+    m.metadata = {"m2r_replay": True, "m2r_leg_source": "meshcore"}
+
+    assert bridge._leg_source(m) == "meshcore"
+
+
+def test_chunk_requeue_takes_its_source_from_the_caller(real_queue_bridge):
+    # F5: a generic target must not hard-code the origin.
+    assert real_queue_bridge._requeue_failed_chunks(
+        ["c1"], target="meshcore", source="mqtt") is True
+
+    assert _legs()["mqtt>meshcore"]["15m"]["queued"] == 1
+
+
+def test_a_late_mark_failed_logs_no_retry_it_did_not_schedule(queue, caplog):
+    # F6: the guarded UPDATE matched 0 rows; the log must not claim a retry.
+    import logging
+    msg_id = queue.enqueue({"message": "hi"}, "rns", source="meshcore",
+                           max_retries=3)
+    with queue._get_connection() as conn:
+        conn.execute("UPDATE messages SET status = 'dead_letter' "
+                     "WHERE id = ?", (msg_id,))
+    with caplog.at_level(logging.DEBUG, logger="gateway.message_queue"):
+        assert queue.mark_failed(msg_id, "late worker") is False
+
+    assert "scheduled for retry" not in caplog.text
