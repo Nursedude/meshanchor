@@ -273,7 +273,10 @@ class MessageTransformMixin:
                         payload=payload,
                         destination="meshtastic",
                         priority=MessagePriority.NORMAL,
-                        source="rns",
+                        # The one derivation the direct branch uses: a replay
+                        # with no recorded leg is UNKNOWN, never guessed
+                        # (BIC-2 slice-2b review F4).
+                        source=self._leg_source(msg),
                     ):
                         enqueued += 1
                 if enqueued:

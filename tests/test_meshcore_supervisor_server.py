@@ -241,6 +241,36 @@ class TestRpcDispatch:
         finally:
             c.close()
 
+    @pytest.mark.parametrize("method,cmd", [
+        ("send_message_channel", "send_chan_msg"),
+        ("send_message_contact", "send_msg")])
+    def test_a_companion_refusal_reaches_the_caller(
+            self, supervisor_under_test, method, cmd):
+        """BIC-2 slice-2b review F1: meshcore_py never raises on a failed
+        send — the ERROR Event IS the failure (in-process twin:
+        _companion_refused, 2026-09-23). The supervisor returned
+        {"sent": True} for it, so the caller's SENT counted a refusal."""
+        from utils import tx_guard
+        from utils.meshcore_supervisor_client import SupervisorRemoteError
+
+        class _Err:
+            type, payload = "command_error", {"code_string": "ERR_TIMEOUT"}
+
+            def is_error(self):
+                return True
+        _, socket_path, mock = supervisor_under_test
+        setattr(mock.commands, cmd, mock._async_return(_Err()))
+        c = self._client(socket_path)
+        try:
+            with tx_guard.allow_meshcore_egress(), \
+                    pytest.raises(SupervisorRemoteError, match="ERR_TIMEOUT"):
+                if method == "send_message_channel":
+                    c.send_message_channel(0, "refused")
+                else:
+                    c.send_message_contact("alpha", "refused")
+        finally:
+            c.close()
+
     def test_undeclared_send_is_refused(self, supervisor_under_test):
         """2026-08-09 egress guard drill: without a declaration the
         supervisor refuses the send and the mock radio is never touched."""

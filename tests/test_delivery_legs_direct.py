@@ -401,6 +401,39 @@ def test_a_supervisor_queue_send_leaves_the_sent_to_the_queue():
     assert _legs() == {}
 
 
+def test_a_supervisor_refusal_is_not_counted_sent():
+    # Review F1, handler half: a refusal now arrives as SupervisorRemoteError.
+    from utils.meshcore_supervisor_client import SupervisorRemoteError
+    h = _supervisor()
+    h._client.send_message_contact.side_effect = SupervisorRemoteError(
+        "companion refused: ERR_TIMEOUT")
+
+    assert h.send_text("hello", destination="abcd", source="rns") is False
+
+    assert _legs() == {}
+
+
+def test_the_supervisor_sends_a_real_queue_row():
+    # Review F2: every queue writer stores the text under "message"; the
+    # supervisor read only "content"/"text" and refused every queued row.
+    h = _supervisor()
+
+    assert h.queue_send({"message": "replayed", "destination": "abcd",
+                         "_queue_msg_id": "q-r", LEG_SOURCE_KEY: "rns"})
+
+    h._client.send_message_contact.assert_called_once_with("abcd", "replayed")
+
+
+def test_a_supervisor_queue_row_keeps_its_metadata_channel():
+    # Review F2: the in-process worker falls back to metadata.channel when
+    # the top-level key is absent; defaulting to 0 is the Public-leak class.
+    h = _supervisor()
+
+    assert h.queue_send({"message": "replayed", "metadata": {"channel": 3}})
+
+    h._client.send_message_channel.assert_called_once_with(3, "replayed")
+
+
 # ── BridgeSendMixin: remote egress + direct send_to_rns ───────────────
 
 def test_remote_egress_send_is_counted_sent_on_its_leg(bridge):  # noqa: F811
@@ -471,6 +504,50 @@ def test_enqueue_message_fallback_names_its_leg(bridge):  # noqa: F811
 
     assert bridge._mesh_handler.send_text.call_args.kwargs["source"] == \
         "meshcore"
+
+
+def test_a_queued_rns_to_mesh_replay_is_never_given_a_guessed_leg(
+        bridge, monkeypatch):  # noqa: F811
+    # Review F4: the mqtt_bridge queued branch hard-coded source="rns",
+    # while the direct branch derives it. A replay with no recorded leg is
+    # UNKNOWN on both, never guessed.
+    from gateway.rns_bridge import BridgedMessage
+    bridge.config.bridge_mode = "mqtt_bridge"
+    bridge._persistent_queue = MagicMock()
+    bridge._persistent_queue.enqueue.return_value = "row"
+    monkeypatch.setattr("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", True)
+    msg = BridgedMessage(source_network="rns", source_id="ab" * 16,
+                         destination_id=None, content="hi", is_broadcast=True)
+    msg.metadata = {"m2r_replay": True}
+
+    bridge._process_rns_to_mesh(msg)
+
+    assert bridge._persistent_queue.enqueue.call_args.kwargs["source"] is None
+
+
+def test_a_live_queued_rns_to_mesh_send_is_on_the_rns_leg(
+        bridge, monkeypatch):  # noqa: F811
+    from gateway.rns_bridge import BridgedMessage
+    bridge.config.bridge_mode = "mqtt_bridge"
+    bridge._persistent_queue = MagicMock()
+    bridge._persistent_queue.enqueue.return_value = "row"
+    monkeypatch.setattr("gateway.rns_bridge.HAS_PERSISTENT_QUEUE", True)
+
+    bridge._process_rns_to_mesh(BridgedMessage(
+        source_network="rns", source_id="ab" * 16, destination_id=None,
+        content="hi", is_broadcast=True))
+
+    assert bridge._persistent_queue.enqueue.call_args.kwargs["source"] == "rns"
+
+
+def test_the_handler_contract_names_the_leg():
+    # Review F7: the bridge passes source= to every handler; the abstract
+    # contract a new handler is written against must say so.
+    import inspect
+    from gateway.base_handler import BaseMessageHandler
+    sig = inspect.signature(BaseMessageHandler.send_text)
+
+    assert sig.parameters["source"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 # ── every direct-send caller names its leg ────────────────────────────

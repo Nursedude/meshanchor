@@ -186,8 +186,8 @@ class MeshCoreBridgeMixin:
             )
             return False
         if reply_ctx is not None:
-            # Kwarg passed only when set: existing call shapes (and any
-            # alternate handler implementation without the param) unchanged.
+            # reply_ctx passed only when set; source always — every handler
+            # takes it (BaseMessageHandler.send_text contract, BIC-2).
             return self._meshcore_handler.send_text(
                 message, destination, channel, reply_ctx=reply_ctx,
                 source=source)

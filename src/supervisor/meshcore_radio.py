@@ -471,20 +471,31 @@ class MeshCoreRadioSupervisor:
         commands = getattr(self._meshcore, "commands", None)
         if commands is None:
             raise RuntimeError("meshcore.commands not available")
+        # meshcore_py never raises on a failed send: the ERROR Event IS the
+        # failure (in-process twin _companion_refused, 2026-09-23). Raise it
+        # so the caller gets SupervisorRemoteError, never {"sent": True}
+        # for a refusal (BIC-2 slice-2b review F1).
+        from gateway.meshcore_dm_reply import companion_error
         if kind == "channel":
             channel = int(target if target is not None else 0)
             with timed_boundary("meshcore.send_chan_msg", threshold_s=5.0):
-                await asyncio.wait_for(
+                evt = await asyncio.wait_for(
                     commands.send_chan_msg(channel, text),
                     timeout=10.0,
                 )
+            err = companion_error(evt)
+            if err is not None:
+                raise RuntimeError(f"companion refused ch{channel}: {err}")
             return {"sent": True, "kind": "channel", "channel": channel}
         if kind == "contact":
             with timed_boundary("meshcore.send_msg", threshold_s=5.0):
-                await asyncio.wait_for(
+                evt = await asyncio.wait_for(
                     commands.send_msg(target, text),
                     timeout=10.0,
                 )
+            err = companion_error(evt)
+            if err is not None:
+                raise RuntimeError(f"companion refused DM {target!r}: {err}")
             return {"sent": True, "kind": "contact", "target": str(target)}
         raise ValueError(f"unknown kind: {kind}")
 

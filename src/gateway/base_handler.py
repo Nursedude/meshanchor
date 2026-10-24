@@ -390,8 +390,13 @@ class BaseMessageHandler(ABC):
 
     @abstractmethod
     def send_text(self, message: str, destination: Optional[str] = None,
-                  channel: int = 0) -> bool:
-        """Send a text message. Returns True on success."""
+                  channel: int = 0, *, source: Optional[str] = None) -> bool:
+        """Send a text message. Returns True on success.
+
+        ``source`` is the transport the message came from: it names the
+        BIC-2 delivery leg ``source>dst``. The bridge passes it on every
+        send, so a handler without the keyword loses every bridged send to
+        a swallowed TypeError (slice-2b review F7)."""
         ...
 
     @abstractmethod
