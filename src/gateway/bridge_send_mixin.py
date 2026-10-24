@@ -20,7 +20,6 @@ Host class must provide:
 """
 
 import logging
-import time
 from typing import Dict, Optional
 
 from gateway.message_queue_models import (
@@ -28,7 +27,7 @@ from gateway.message_queue_models import (
     M2R_MAX_AGE_S,
     SendDeferred,
 )
-from gateway.delivery_legs import payload_source
+from gateway.delivery_legs import payload_source, synth_id
 from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
 from utils.tx_guard import assert_rns_tx_allowed
@@ -158,11 +157,16 @@ class BridgeSendMixin:
         # Mirrors the direct RNS→Mesh path in rns_bridge, which builds its
         # failed_chunks list the same way. All-or-nothing on the return so a
         # partial send is never recorded as a delivery.
-        results = [self.send_to_meshtastic(chunk, destination)
+        # BIC-2: the row's leg; the queue's mark_delivered owns its SENT.
+        src = payload_source(payload)
+        results = [self.send_to_meshtastic(chunk, destination,
+                                           source=src, record_sent=False)
                    for chunk in chunks]
         return all(results)
 
-    def send_to_meshtastic(self, message: str, destination: str = None, channel: int = 0) -> bool:
+    def send_to_meshtastic(self, message: str, destination: str = None, channel: int = 0,
+                           *, source: Optional[str] = None,
+                           record_sent: bool = True) -> bool:
         """Send a message to Meshtastic network.
 
         Prefers a local Meshtastic handler. When there is no local radio
@@ -171,15 +175,21 @@ class BridgeSendMixin:
         /api/v1/toradio, e.g. moc:9443). TX-only — never reads fromradio.
         The egress's own channel_index is used (the peer gateway's channel,
         e.g. meshforge=2), not the local-radio channel arg.
+
+        ``source`` names the BIC-2 leg ``source>meshtastic`` (omitted:
+        ``?>meshtastic``); ``record_sent`` is False from a persistent-queue
+        sender, whose row's SENT the queue already owns.
         """
         if self._mesh_handler:
-            return self._mesh_handler.send_text(message, destination, channel)
+            return self._mesh_handler.send_text(message, destination, channel,
+                                                source=source,
+                                                record_sent=record_sent)
 
         eg = getattr(self.config, 'meshtastic_egress', None)
         if eg and getattr(eg, 'enabled', False) and eg.host:
             try:
                 from .meshtastic_protobuf_client import send_text_direct
-                return send_text_direct(
+                ok = send_text_direct(
                     message,
                     host=eg.host,
                     port=int(eg.port),
@@ -187,6 +197,9 @@ class BridgeSendMixin:
                     channel_index=int(eg.channel_index),
                     want_ack=bool(getattr(eg, 'want_ack', True)),
                 )
+                if ok and record_sent:
+                    self._record_direct_sent("meshtastic", "mesh", source)
+                return ok
             except Exception as e:
                 logger.warning("Meshtastic remote egress failed: %s", e)
                 with self._stats_lock:
@@ -196,8 +209,32 @@ class BridgeSendMixin:
         logger.warning("Meshtastic handler not initialized")
         return False
 
-    def send_to_rns(self, message: str, destination_hash: bytes = None) -> bool:
-        """Send a message to RNS network via LXMF"""
+    def _record_direct_sent(self, protocol: str, prefix: str,
+                            source: Optional[str],
+                            msg_id: Optional[str] = None) -> None:
+        """SENT for a successful direct send on the BIC-2 leg
+        ``source>protocol`` (slice 2b, MeshForge twin of slice 1's
+        send_to_rns SENT + f5c6a26d). Fenced: the message is already out,
+        and a bookkeeping error reported as a send failure would requeue it
+        — a duplicate on the air. The swallow leaves a witness (hfm #9)."""
+        try:
+            _dc.record(_dc.DeliveryState.SENT,
+                       msg_id=msg_id or synth_id(prefix),
+                       protocol=protocol, source=source)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("delivery counter SENT not recorded: %s", e)
+            with self._stats_lock:
+                self.stats['delivery_record_errors'] = (
+                    self.stats.get('delivery_record_errors', 0) + 1)
+
+    def send_to_rns(self, message: str, destination_hash: bytes = None,
+                    *, source: Optional[str] = None) -> bool:
+        """Send a message to RNS network via LXMF.
+
+        ``source`` is the transport the message came from; it names the
+        BIC-2 delivery leg, and the receipt's CONFIRMED / DROPPED lands on
+        the same leg as the SENT. Omitted, the send counts under ``?>rns``.
+        """
         if not self._connected_rns:
             logger.warning("Not connected to RNS")
             return False
@@ -271,7 +308,7 @@ class BridgeSendMixin:
             )
 
             # Track delivery confirmation
-            msg_id = f"lxmf-{int(time.time() * 1000)}"
+            msg_id = synth_id("lxmf")
             self.delivery_tracker.track_message(
                 msg_id, destination_hash, message[:50]
             )
@@ -291,7 +328,7 @@ class BridgeSendMixin:
                 # delivery_confirmation_stall check judges.
                 _dc.record(
                     _dc.DeliveryState.CONFIRMED,
-                    msg_id=msg_id, protocol="rns",
+                    msg_id=msg_id, protocol="rns", source=source,
                 )
                 self._maybe_emit_ack_for_msgid(msg_id, kind='delivered')
 
@@ -302,7 +339,7 @@ class BridgeSendMixin:
                 self.delivery_tracker.confirm_failure(msg_id, reason)
                 _dc.record(
                     _dc.DeliveryState.DROPPED,
-                    msg_id=msg_id, protocol="rns",
+                    msg_id=msg_id, protocol="rns", source=source,
                     drop_reason=_dc.DropReason.RNS_DELIVERY_FAILED,
                     note=reason[:80],
                 )
@@ -321,6 +358,9 @@ class BridgeSendMixin:
                           self._lxmf_router.handle_outbound, lxm,
                           target=hash_short)
             self.record_send_success(hash_short)
+            # BIC-2: the direct path's SENT. Only the queue path recorded
+            # one, so a direct send's CONFIRMED had no SENT to answer.
+            self._record_direct_sent("rns", "lxmf", source, msg_id=msg_id)
             return True
 
         except Exception as e:
@@ -455,7 +495,7 @@ class BridgeSendMixin:
             # delivery_confirmation_stall check judges.
             msg_id = (
                 payload.get('_queue_msg_id')
-                or f"lxmf-{int(time.time() * 1000)}"
+                or synth_id("lxmf")
             )
 
             # BIC-2: the receipt confirms on the queue row's leg.
@@ -545,20 +585,22 @@ class BridgeSendMixin:
             Message ID if enqueued, None if queue unavailable
         """
         # BIC-2: a caller may name its leg; popped so it never rides the
-        # payload as a free-form key. The direct fall-back below names no
-        # leg yet (slice 2b: direct sends).
+        # payload as a free-form key. The direct fall-back names it too.
         leg_source = kwargs.pop('source', None)
         if not self._persistent_queue:
             # Fall back to direct send. ack_required is silently ignored
             # here — direct sends bypass the queue's pending-ack table,
             # so there's nothing to register.
             if dest_type == "meshtastic":
-                return "direct" if self.send_to_meshtastic(message, destination, kwargs.get('channel', 0)) else None
+                return "direct" if self.send_to_meshtastic(
+                    message, destination, kwargs.get('channel', 0),
+                    source=leg_source) else None
             else:
                 dest_hash = kwargs.get('destination_hash')
                 if isinstance(dest_hash, str):
                     dest_hash = bytes.fromhex(dest_hash)
-                return "direct" if self.send_to_rns(message, dest_hash) else None
+                return "direct" if self.send_to_rns(
+                    message, dest_hash, source=leg_source) else None
 
         # Map priority string to enum
         priority_map = {

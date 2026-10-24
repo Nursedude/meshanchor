@@ -338,8 +338,10 @@ class MeshtasticReemitBridge:
                 )
                 return False
 
+            # It arrived over LXMF: leg rns>meshcore (BIC-2).
             ok = handler.send_text(
                 body, destination=None, channel=self._config.target_channel,
+                source="rns",
             )
             if ok:
                 with self._stats_lock:

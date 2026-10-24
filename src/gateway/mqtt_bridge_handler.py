@@ -37,6 +37,8 @@ from datetime import datetime
 from queue import Full
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
+# Submodule import, never `from gateway import …` (the 06-06 startup deadlock).
+from gateway.delivery_legs import payload_source, synth_id
 from .ack_tracker import AckTracker, routing_error_to_drop_reason
 from .base_handler import (
     BaseMessageHandler, dual_path_dedup_enabled, dual_path_dedup_window_s,
@@ -201,24 +203,46 @@ class MQTTBridgeHandler(BaseMessageHandler):
                 keys.append(k)
         return keys
 
+    def _record_direct_sent(self, msg_id: Optional[str],
+                            source: Optional[str]) -> None:
+        """SENT for a successful direct send (BIC-2 slice 2b, MeshForge twin
+        f5c6a26d). Fenced: the message is already out, so a counter error
+        never fails the send — it leaves a witness instead (hfm #9)."""
+        try:
+            _dc.record(_dc.DeliveryState.SENT,
+                       msg_id=msg_id or synth_id("mesh"),
+                       protocol="meshtastic", source=source)
+        except Exception as e:
+            logger.debug(f"delivery counter SENT not recorded: {e}")
+            with self._stats_lock:
+                self.stats['delivery_record_errors'] = (
+                    self.stats.get('delivery_record_errors', 0) + 1)
+
     def _maybe_register_ack(self, packet_id, dest_num, msg_id,
-                            record_sent: bool) -> None:
-        """Arm ACK confirmation for a just-sent DM. No-op for broadcasts and
-        when disabled. Direct path synthesizes an id + records SENT; queue
-        path passes _queue_msg_id (SENT owned by mark_delivered)."""
+                            record_sent: bool,
+                            source: Optional[str] = None) -> None:
+        """Record SENT, then arm ACK confirmation for a DM.
+
+        BIC-2: ``record_sent`` records SENT for EVERY successful direct send
+        — broadcasts and ack-consumption-off included — on the leg
+        ``source>meshtastic``; the id is the one the ACK will confirm. ACK
+        arming stays DM-only and needs ack consumption. The queue path
+        passes record_sent=False (SENT owned by mark_delivered).
+        """
+        has_pkt = (isinstance(packet_id, int)          # bool is an int: a
+                   and not isinstance(packet_id, bool)  # success flag is no id
+                   and packet_id > 0)
+        if not msg_id and has_pkt:
+            msg_id = f"mesh-{packet_id:08x}"
+        if record_sent:
+            self._record_direct_sent(msg_id, source)
         try:
             if not self._ack_consumption_enabled():
                 return
-            if (dest_num is None or dest_num == 0xFFFFFFFF
-                    or not isinstance(packet_id, int) or packet_id <= 0):
+            if dest_num is None or dest_num == 0xFFFFFFFF or not has_pkt:
                 return
-            if not msg_id:
-                msg_id = f"mesh-{packet_id:08x}"
-            if record_sent:
-                _dc.record(_dc.DeliveryState.SENT, msg_id=msg_id,
-                           protocol="meshtastic")
             self._ack_tracker.register(packet_id, msg_id, protocol="meshtastic",
-                                       dest_num=dest_num)
+                                       dest_num=dest_num, source=source)
         except Exception as e:
             logger.debug(f"Could not arm ACK tracking: {e}")
 
@@ -230,14 +254,14 @@ class MQTTBridgeHandler(BaseMessageHandler):
             # our radio's implicit ack is not delivery (ack_tracker docstring).
             err = dp.routing_error_name()
             positive = err in (None, "", "NONE")
-            resolved = self._ack_tracker.resolve(
+            resolved = self._ack_tracker.resolve_leg(
                 dp.request_id, from_num=dp.from_node, positive=positive)
             if resolved is None:
                 return
-            msg_id, protocol = resolved
+            msg_id, protocol, source = resolved   # same leg as its SENT
             if positive:
                 _dc.record(_dc.DeliveryState.CONFIRMED, msg_id=msg_id,
-                           protocol=protocol)
+                           protocol=protocol, source=source)
                 with self._stats_lock:
                     self.stats['mesh_ack_confirmed'] = (
                         self.stats.get('mesh_ack_confirmed', 0) + 1)
@@ -247,7 +271,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
             else:
                 reason = routing_error_to_drop_reason(err)
                 _dc.record(_dc.DeliveryState.DROPPED, msg_id=msg_id,
-                           protocol=protocol, drop_reason=reason,
+                           protocol=protocol, source=source, drop_reason=reason,
                            note=f"meshtastic_nak:{err}"[:80])
                 with self._stats_lock:
                     self.stats['mesh_ack_failed'] = (
@@ -726,7 +750,8 @@ class MQTTBridgeHandler(BaseMessageHandler):
             logger.debug(f"Error processing nodeinfo: {e}")
 
     def send_text(self, message: str, destination: str = None, channel: int = 0,
-                  msg_id: Optional[str] = None, record_sent: bool = True) -> bool:
+                  msg_id: Optional[str] = None, record_sent: bool = True,
+                  *, source: Optional[str] = None) -> bool:
         """
         Send a text message to Meshtastic network.
 
@@ -741,6 +766,8 @@ class MQTTBridgeHandler(BaseMessageHandler):
                 ACK (queue path passes _queue_msg_id; direct path synthesizes)
             record_sent: record a SENT transition here (direct path); False
                 when the persistent queue already owns the SENT (queue path)
+            source: the transport the message came from — names the BIC-2
+                delivery leg ``source>meshtastic``; omitted, ``?>meshtastic``
 
         Returns:
             True if message sent successfully, False otherwise.
@@ -749,7 +776,8 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         # Try HTTP protobuf first (preferred — no TCP contention, no subprocess)
         if self._send_via_http_protobuf(message, destination, channel,
-                                        msg_id=msg_id, record_sent=record_sent):
+                                        msg_id=msg_id, record_sent=record_sent,
+                                        source=source):
             # Dual-path dedup (mirror of MeshForge 2d205b7): this toradio
             # route is the destination="meshtastic" dispatch path — register
             # broadcast TX so the other paths to this radio can suppress
@@ -762,6 +790,8 @@ class MQTTBridgeHandler(BaseMessageHandler):
         # Fall back to CLI
         logger.debug("HTTP protobuf TX unavailable, falling back to CLI")
         if self._send_via_cli(message, destination, channel):
+            if record_sent:   # no packet id on this path: nothing to ACK
+                self._record_direct_sent(msg_id, source)
             if not destination:
                 get_rf_tx_registry().register(message)
             return True
@@ -770,6 +800,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
     def _send_via_http_protobuf(
         self, message: str, destination: str = None, channel: int = 0,
         msg_id: Optional[str] = None, record_sent: bool = True,
+        source: Optional[str] = None,
     ) -> bool:
         """Send text via HTTP protobuf transport (preferred TX path).
 
@@ -804,7 +835,8 @@ class MQTTBridgeHandler(BaseMessageHandler):
                 tls=self.config.meshtastic.tls_for_port(http_port),
                 destination=dest_num, channel_index=channel)
             if pkt_id is not None:
-                self._maybe_register_ack(pkt_id, dest_num, msg_id, record_sent)
+                self._maybe_register_ack(pkt_id, dest_num, msg_id, record_sent,
+                                         source)
                 return True
         except Exception as e:
             logger.debug(f"Stateless HTTP protobuf TX failed: {e}")
@@ -834,11 +866,14 @@ class MQTTBridgeHandler(BaseMessageHandler):
                     logger.debug("Protobuf client failed to connect for TX")
                     return False
 
-            return client.send_text(
+            ok = client.send_text(
                 text=message,
                 destination=dest_num,
                 channel_index=channel,
             )
+            if ok and record_sent:   # session path returns no packet id
+                self._record_direct_sent(msg_id, source)
+            return ok
         except Exception as e:
             logger.debug(f"Session-based HTTP protobuf TX failed: {e}")
             return False
@@ -954,7 +989,8 @@ class MQTTBridgeHandler(BaseMessageHandler):
         # arm ACK confirmation against that same id (record_sent=False).
         return self.send_text(message, destination, channel,
                               msg_id=payload.get('_queue_msg_id'),
-                              record_sent=False)
+                              record_sent=False,
+                              source=payload_source(payload))
 
     def test_connection(self) -> bool:
         """Test MQTT broker connectivity."""

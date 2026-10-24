@@ -100,7 +100,8 @@ class MessageTransformMixin:
             sent_count = 0
             failed_legs = []
             for dest_hash in destinations:
-                if self.send_to_rns(content, dest_hash):
+                if self.send_to_rns(content, dest_hash,
+                                    source=self._leg_source(msg)):
                     sent_count += 1
                 else:
                     failed_legs.append(dest_hash)
@@ -289,7 +290,8 @@ class MessageTransformMixin:
             failed_chunks = [
                 chunk for chunk in chunks
                 if not self.send_to_meshtastic(
-                    chunk, channel=self.config.meshtastic.channel)
+                    chunk, channel=self.config.meshtastic.channel,
+                    source=self._leg_source(msg))
             ]
             if chunks and not failed_chunks:
                 logger.info(f"Bridge RNS→Mesh{multi}: {content[:50]}...")

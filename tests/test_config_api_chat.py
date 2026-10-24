@@ -137,7 +137,8 @@ class TestChatSend:
         h = _make_handler_stub("/chat/send", method="POST", body=body)
         with patch.object(active_handler, 'send_text', return_value=True) as mock_send:
             h._handle_chat_send()
-        mock_send.assert_called_once_with("hi", destination=None, channel=2)
+        mock_send.assert_called_once_with("hi", destination=None, channel=2,
+                                          source="local")
         result = _read_response(h)
         assert result["queued"] is True
         assert result["text"] == "hi"
@@ -148,7 +149,8 @@ class TestChatSend:
         h = _make_handler_stub("/chat/send", method="POST", body=body)
         with patch.object(active_handler, 'send_text', return_value=True) as mock_send:
             h._handle_chat_send()
-        mock_send.assert_called_once_with("hi", destination="abc12345", channel=0)
+        mock_send.assert_called_once_with("hi", destination="abc12345", channel=0,
+                                          source="local")
 
     def test_send_rejects_empty_text(self, active_handler):
         body = json.dumps({"text": "  ", "channel": 1}).encode()

@@ -71,6 +71,11 @@ class TestTcpIngressBroadcastLabel:
 # ── F2: private → channel refused at the consumer ──
 
 class _Host(MeshCoreBridgeMixin):
+    # The real host (RNSMeshtasticBridge) gets the BIC-2 leg derivation
+    # from BridgeSendMixin; the mixin's egress names its leg with it.
+    from gateway.bridge_send_mixin import BridgeSendMixin as _BSM
+    _leg_source = staticmethod(_BSM._leg_source)
+
     def __init__(self):
         self.config = SimpleNamespace(
             meshcore=SimpleNamespace(dm_replies_enabled=True,

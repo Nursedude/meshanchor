@@ -1125,7 +1125,9 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._send_error_json(400, "`channel` must be an integer")
             return
 
-        ok = handler.send_text(text, destination=destination, channel=channel)
+        # The operator typed it in the chat UI: leg local>dst (BIC-2).
+        ok = handler.send_text(text, destination=destination, channel=channel,
+                               source="local")
         if ok:
             self._send_json({"queued": True, "text": text,
                              "destination": destination, "channel": channel})

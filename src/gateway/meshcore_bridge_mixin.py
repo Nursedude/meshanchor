@@ -4,6 +4,11 @@ MeshCore Bridge Mixin - MeshCore-specific message bridging logic.
 Extracted from rns_bridge.py to reduce file size per CLAUDE.md guidelines.
 Provides _process_meshcore_to_bridge and _process_bridge_to_meshcore methods
 that route messages between MeshCore and other networks (Meshtastic, RNS).
+
+Expects on the host class (RNSMeshtasticBridge) beyond its handlers:
+``self._leg_source(msg)`` from BridgeSendMixin — the one BIC-2 leg
+derivation every send path uses (slice 2b); a host without it would lose
+every bridge→MeshCore send to the swallow in _process_bridge_to_meshcore.
 """
 
 import logging
@@ -140,7 +145,8 @@ class MeshCoreBridgeMixin:
 
     def send_to_meshcore(self, message: str, destination: str = None,
                          channel: int = -1,
-                         reply_ctx: Optional[dict] = None) -> bool:
+                         reply_ctx: Optional[dict] = None,
+                         *, source: Optional[str] = None) -> bool:
         """Send a message to MeshCore network.
 
         Args:
@@ -153,6 +159,9 @@ class MeshCoreBridgeMixin:
             reply_ctx: directed-DM reply context ({contact, origin}) — when
                 set, the handler watches the DM's expected_ack and feeds
                 the delivery outcome back as a [MC:reply] notice.
+            source: the transport the message came from — names the BIC-2
+                leg ``source>meshcore`` (omitted: ``?>meshcore``). Both
+                handlers (in-process + supervisor) accept it.
 
         Returns:
             True if queued successfully, False otherwise.
@@ -180,8 +189,10 @@ class MeshCoreBridgeMixin:
             # Kwarg passed only when set: existing call shapes (and any
             # alternate handler implementation without the param) unchanged.
             return self._meshcore_handler.send_text(
-                message, destination, channel, reply_ctx=reply_ctx)
-        return self._meshcore_handler.send_text(message, destination, channel)
+                message, destination, channel, reply_ctx=reply_ctx,
+                source=source)
+        return self._meshcore_handler.send_text(message, destination, channel,
+                                                source=source)
 
     def _process_meshcore_to_bridge(self, msg) -> None:
         """Process message from MeshCore → other networks (Meshtastic, RNS).
@@ -242,7 +253,8 @@ class MeshCoreBridgeMixin:
             # from one predicate so a third consumer cannot drift a third way.
             if self.meshtastic_path_available():
                 if self.send_to_meshtastic(bridged_content,
-                                           channel=self.config.meshtastic.channel):
+                                           channel=self.config.meshtastic.channel,
+                                           source="meshcore"):
                     logger.info(f"Bridge MC→Mesh {ch_tag}: {bridged_content[:50]}...")
                     with self._stats_lock:
                         self.stats.setdefault('messages_meshcore_to_mesh', 0)
@@ -293,7 +305,9 @@ class MeshCoreBridgeMixin:
                         dests.append(bytes.fromhex(hex_str))
                     except ValueError:
                         logger.warning(f"Invalid default_lxmf_destination hex: {hex_str!r}")
-                sent_count = sum(1 for dh in dests if self.send_to_rns(bridged_content, dh))
+                sent_count = sum(1 for dh in dests
+                                 if self.send_to_rns(bridged_content, dh,
+                                                     source="meshcore"))
                 if sent_count:
                     if len(dests) > 1:
                         logger.info(f"Bridge MC→RNS {ch_tag}: {sent_count}/{len(dests)} dest(s) — {bridged_content[:50]}...")
@@ -433,7 +447,8 @@ class MeshCoreBridgeMixin:
             if getattr(meshcore_cfg, 'dm_replies_enabled', True):
                 parsed = parse_directed_reply(content)
                 if parsed is not None:
-                    self._bridge_dm_reply(parsed, net_prefix, src_label, src_net)
+                    self._bridge_dm_reply(parsed, net_prefix, src_label, src_net,
+                                          leg_source=self._leg_source(msg))
                     return
 
             # Private never leaves on a channel (bridge matrix F2,
@@ -531,7 +546,11 @@ class MeshCoreBridgeMixin:
                 )
                 return
 
-            if self.send_to_meshcore(bridged_content, channel=target_channel):
+            # The leg (a TRANSPORT) via the one _leg_source derivation every
+            # send path uses (MeshForge c2024ca7 R3). The stats / health keys
+            # below stay on src_net — they count ROUTING networks.
+            if self.send_to_meshcore(bridged_content, channel=target_channel,
+                                     source=self._leg_source(msg)):
                 direction = f"{src_net[:4]}_to_meshcore"
                 logger.info(f"Bridge {net_prefix}→MC ch{target_channel}: {bridged_content[:50]}...")
                 with self._stats_lock:
@@ -557,7 +576,8 @@ class MeshCoreBridgeMixin:
                 self.stats['errors'] += 1
 
     def _bridge_dm_reply(self, parsed: DirectedReply, net_prefix: str,
-                         src_label: str, src_net: str) -> None:
+                         src_label: str, src_net: str,
+                         leg_source: Optional[str] = None) -> None:
         """Deliver a parsed "@<contact> <text>" reply as a MeshCore DM.
 
         The DM text carries the origin identity (the Meshtastic sender lifted
@@ -591,7 +611,8 @@ class MeshCoreBridgeMixin:
             dm_text = _truncate_utf8(dm_text, 160)
         ok = self.send_to_meshcore(
             dm_text, destination=parsed.contact_query,
-            reply_ctx={"contact": parsed.contact_query, "origin": origin})
+            reply_ctx={"contact": parsed.contact_query, "origin": origin},
+            source=leg_source)
         if ok:
             logger.info(
                 f"Bridge {net_prefix}→MC DM @{parsed.contact_query}: "

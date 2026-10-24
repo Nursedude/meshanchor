@@ -77,7 +77,8 @@ class MeshCoreOracleMixin:
             # leg passes the device's name for the slot, or UNNAMED_SLOT when the
             # device cannot name it — never None (meshcore_ingress.UNNAMED_SLOT).
             if channel is not None:
-                return self.send_text(text, destination=None, channel=_reply_slot)
+                return self.send_text(text, destination=None, channel=_reply_slot,
+                                      source="local")   # oracle authored (BIC-2)
             # Second, independent guard, so this closure is safe whatever a
             # future call site passes: a DM target is a WIRE fact — the
             # pubkey_prefix reader.py hands us, always hex. Anything else
@@ -85,7 +86,8 @@ class MeshCoreOracleMixin:
             # it would DM whichever contact the asker named. Refuse, and never
             # fall back to a broadcast (the 2026-05-19 Public leak).
             if dest and _is_wire_prefix(dest):
-                return self.send_text(text, destination=dest, channel=_reply_slot)
+                return self.send_text(text, destination=dest, channel=_reply_slot,
+                                      source="local")
             logger.warning(
                 f"oracle DM reply refused — destination {dest!r} is not a wire "
                 f"pubkey_prefix; not delivered, not broadcast")

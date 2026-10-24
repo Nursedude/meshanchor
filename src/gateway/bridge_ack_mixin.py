@@ -104,6 +104,7 @@ class BridgeAckMixin:
                 # addressee); only DM-origin receipts reach here.
                 return bool(self._mesh_handler.send_text(
                     text, destination=origin_address, channel=0,
+                    source="local",   # the gateway authored the receipt (BIC-2)
                 ))
             if origin_network == 'meshcore':
                 if not self._meshcore_handler:
@@ -115,7 +116,7 @@ class BridgeAckMixin:
                 # channel:<idx> origins are suppressed above (no single
                 # addressee); only DM-origin receipts reach here.
                 return bool(self._meshcore_handler.send_text(
-                    text, destination=origin_address,
+                    text, destination=origin_address, source="local",
                 ))
             if origin_network == 'rns':
                 try:
@@ -126,7 +127,8 @@ class BridgeAckMixin:
                         f"({origin_address!r}) for msg_id={msg_id[:8]}"
                     )
                     return False
-                return bool(self.send_to_rns(text, destination_hash=dest_hash))
+                return bool(self.send_to_rns(text, destination_hash=dest_hash,
+                                             source="local"))
             logger.debug(
                 f"ack synthesis: unknown origin_network={origin_network!r} "
                 f"for msg_id={msg_id[:8]}"

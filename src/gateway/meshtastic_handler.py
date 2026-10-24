@@ -305,7 +305,33 @@ class MeshtasticHandler(BaseMessageHandler):
         self._interface = None
         self._connected = False
 
-    def send_text(self, message: str, destination: str = None, channel: int = 0) -> bool:
+    def _record_direct_sent(self, result, source: Optional[str]) -> None:
+        """SENT for a successful direct send, on the leg ``source>meshtastic``
+        (BIC-2 slice 2b, MeshForge twin f5c6a26d). Before it a direct send
+        from this handler was counted nowhere. The id is the packet id when
+        the library returned one, else a collision-free synthesized id.
+        Fenced: the message is already on the air, so a counter error never
+        fails the send — it leaves a witness instead (hfm #9). Lazy import:
+        a module-level delivery_counters import deadlocked threaded startup
+        (2026-06-06)."""
+        try:
+            from gateway import delivery_counters as dc
+            from gateway.delivery_legs import synth_id
+            pkt = getattr(result, 'id', None)
+            has_pkt = (isinstance(pkt, int) and not isinstance(pkt, bool)
+                       and pkt > 0)
+            dc.record(dc.DeliveryState.SENT,
+                      msg_id=f"mesh-{pkt:08x}" if has_pkt else synth_id("mesh"),
+                      protocol="meshtastic", source=source)
+        except Exception as e:
+            logger.debug(f"delivery counter SENT not recorded: {e}")
+            with self._stats_lock:
+                self.stats['delivery_record_errors'] = (
+                    self.stats.get('delivery_record_errors', 0) + 1)
+
+    def send_text(self, message: str, destination: str = None, channel: int = 0,
+                  *, source: Optional[str] = None,
+                  record_sent: bool = True) -> bool:
         """
         Send a text message to Meshtastic network.
 
@@ -313,6 +339,10 @@ class MeshtasticHandler(BaseMessageHandler):
             message: Text content to send
             destination: Destination node ID (None for broadcast)
             channel: Channel index to send on
+            source: the transport the message came from — names the BIC-2
+                delivery leg ``source>meshtastic``; omitted, ``?>meshtastic``
+            record_sent: False when a persistent-queue sender calls this and
+                the queue's mark_delivered already owns the SENT
 
         Returns:
             True if message sent successfully, False otherwise.
@@ -349,10 +379,15 @@ class MeshtasticHandler(BaseMessageHandler):
                 # suppression flag-gated at the check side.
                 if not destination:
                     get_rf_tx_registry().register(message)
+                if record_sent:
+                    self._record_direct_sent(result, source)
                 return True
             else:
                 # Fallback to CLI
-                return self._send_via_cli(message, destination, channel)
+                ok = self._send_via_cli(message, destination, channel)
+                if ok and record_sent:   # no packet id on this path
+                    self._record_direct_sent(None, source)
+                return ok
         except Exception as e:
             logger.error(f"Failed to send to Meshtastic: {e}")
             with self._stats_lock:

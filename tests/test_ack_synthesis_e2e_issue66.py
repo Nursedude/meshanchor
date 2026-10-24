@@ -153,6 +153,7 @@ class TestAckSynthesisEndToEndDelivered:
             f"[delivered: {msg_id[:8]}]",
             destination="!senderaddr",
             channel=0,
+            source="local",
         )
         # Queue final state: acked (verifies mark_acked ran on the real DB)
         assert bridge._persistent_queue.get_ack_status(msg_id) == 'acked'
@@ -176,6 +177,7 @@ class TestAckSynthesisEndToEndDelivered:
         bridge._meshcore_handler.send_text.assert_called_once_with(
             f"[delivered: {msg_id[:8]}]",
             destination="abc-pubkey",
+            source="local",
         )
 
     def test_failed_ack_path(self, integrated_bridge):
@@ -200,6 +202,7 @@ class TestAckSynthesisEndToEndDelivered:
             f"[failed: {msg_id[:8]}]",
             destination="!senderaddr",
             channel=0,
+            source="local",
         )
         assert bridge._persistent_queue.get_ack_status(msg_id) == 'acked'
 
@@ -237,6 +240,7 @@ class TestAckSynthesisEndToEndTimeout:
         bridge._meshcore_handler.send_text.assert_called_once_with(
             f"[timeout: {msg_id[:8]}]",
             destination="abc-pubkey",
+            source="local",
         )
         assert bridge._persistent_queue.get_ack_status(msg_id) == 'timeout'
 
@@ -488,6 +492,7 @@ class TestMeshtasticChannelPlaceholderDispatch:
             f"[delivered: {msg_id[:8]}]",
             destination="!senderaddr",
             channel=0,
+            source="local",
         )
 
     def test_meshtastic_origin_malformed_channel_placeholder_also_suppressed(

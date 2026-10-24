@@ -192,8 +192,18 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         message: str,
         destination: Optional[str] = None,
         channel: int = 0,
+        *,
+        source: Optional[str] = None,
+        record_sent: bool = True,
     ) -> bool:
-        """TX a message. Returns True on success."""
+        """TX a message. Returns True on success.
+
+        The supervisor's send is synchronous, so a success is a SENT on the
+        BIC-2 leg ``source>meshcore`` (before slice 2b this path recorded
+        nothing). ``record_sent`` is False from ``queue_send``: the
+        persistent queue's mark_delivered owns that row's SENT. A failed
+        send records nothing — its caller may retry (MeshForge c2024ca7 R4).
+        """
         if not self._connected or self._client is None:
             return False
         text = self._truncate_if_needed(message)
@@ -206,6 +216,11 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
                 SupervisorRemoteError) as e:
             logger.warning("Supervisor TX failed: %s", e)
             return False
+        if record_sent:
+            from .meshcore_outbound_mixin import _record_tx
+            _record_tx("sent", None, note="supervisor "
+                       + (f"dm {destination}" if destination else f"ch{channel}"),
+                       source=source)
         # Mirror to chat buffer so the chat HTTP API shows the outbound.
         self.record_chat_message(
             direction="tx",
@@ -223,10 +238,13 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         destination = payload.get("destination") or payload.get("destination_address")
         is_broadcast = payload.get("is_broadcast", destination is None)
         channel = payload.get("channel", 0)
+        from .delivery_legs import payload_source
         return self.send_text(
             text,
             destination=None if is_broadcast else destination,
             channel=int(channel or 0),
+            source=payload_source(payload),
+            record_sent=False,
         )
 
     def test_connection(self) -> bool:

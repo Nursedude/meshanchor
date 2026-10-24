@@ -123,6 +123,10 @@ class TestRecentTextDedup:
 
 class _Host(MeshCoreBridgeMixin):
     """Minimal host: just the attrs _process_bridge_to_meshcore touches."""
+    # The real host (RNSMeshtasticBridge) gets the BIC-2 leg derivation
+    # from BridgeSendMixin; the mixin's egress names its leg with it.
+    from gateway.bridge_send_mixin import BridgeSendMixin as _BSM
+    _leg_source = staticmethod(_BSM._leg_source)
 
     def __init__(self, dm_replies_enabled=True, target_channel=1):
         self.config = SimpleNamespace(

@@ -19,7 +19,6 @@ Expects on the host class:
 """
 
 import logging
-import time
 from queue import Empty, Full
 from typing import Any, Dict, List, Optional
 
@@ -34,26 +33,31 @@ logger = logging.getLogger(__name__)
 
 
 def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
-               note: str = "") -> None:
+               note: str = "", source: Optional[str] = None) -> None:
     """MeshCore egress → delivery_counters (2026-09-23): the primary radio's
     sends never reached the Delivery screen, so a busy leg read as silence.
     Lazy import — the module-level form deadlocked threaded startup
-    (bridge_send_mixin._LazyDeliveryCounters). record() never raises."""
+    (bridge_send_mixin._LazyDeliveryCounters). record() never raises.
+    ``source`` names the BIC-2 leg ``source>meshcore``; a send with no id
+    gets a collision-free synthesized one (MeshForge 7d93de4d #3)."""
     try:
         from gateway import delivery_counters as dc
-        dc.record(dc.DeliveryState(state), msg_id or f"meshcore-{time.time():.3f}",
-                  protocol="meshcore",
+        from gateway.delivery_legs import synth_id
+        dc.record(dc.DeliveryState(state), msg_id or synth_id("meshcore"),
+                  protocol="meshcore", source=source,
                   drop_reason=dc.DropReason(reason) if reason else None,
                   note=note[:80])
     except Exception as e:
         logger.warning(f"MeshCore delivery record failed ({state}): {e}")
 
 
-def _companion_refused(err: str, msg_id: Optional[str], what: str) -> bool:
+def _companion_refused(err: str, msg_id: Optional[str], what: str,
+                       source: Optional[str] = None) -> bool:
     """meshcore_py never raises on a failed send: the ERROR Event IS the
     failure (review 2026-09-23 — it was being recorded as SENT)."""
     logger.warning(f"MeshCore {what} refused by the companion: {err}")
-    _record_tx("dropped", msg_id, "non_retriable_error", f"companion {err}")
+    _record_tx("dropped", msg_id, "non_retriable_error", f"companion {err}",
+               source=source)
     return False
 
 class MeshCoreOutboundMixin:
@@ -70,8 +74,11 @@ class MeshCoreOutboundMixin:
             channel = 0
             reply_ctx = None
             msg_id = None
+            queued = False
+            source = None   # BIC-2 leg origin; None counts under ?>meshcore
             if isinstance(msg, CanonicalMessage):
                 msg_id = msg.id
+                source = msg.metadata.get('leg_source')
                 text = msg.to_meshcore_text()
                 dest = msg.destination_address
                 reply_ctx = msg.metadata.get('dm_reply_ctx')
@@ -85,7 +92,15 @@ class MeshCoreOutboundMixin:
             elif isinstance(msg, dict):
                 text = msg.get('message', '')
                 dest = msg.get('destination')
-                msg_id = msg.get('id')
+                # A persistent-queue row: the queue's mark_delivered records
+                # SENT on _queue_msg_id when queue_send hands it here, so the
+                # worker records only a FAILED outcome, on the row's own id
+                # (MeshForge c2024ca7 R1 / 7d93de4d #2: reading msg['id']
+                # minted a fresh id and counted the row sent twice).
+                queued = bool(msg.get('_queue_msg_id'))
+                msg_id = msg.get('_queue_msg_id') or msg.get('id')
+                from gateway.delivery_legs import payload_source
+                source = payload_source(msg)
                 meta = msg.get('metadata')
                 if isinstance(meta, dict):
                     reply_ctx = meta.get('dm_reply_ctx')
@@ -110,7 +125,8 @@ class MeshCoreOutboundMixin:
                 dest = None
 
             success = await self._send_message(text, dest, channel=channel,
-                                               reply_ctx=reply_ctx, msg_id=msg_id)
+                                               reply_ctx=reply_ctx, msg_id=msg_id,
+                                               source=source, queued=queued)
 
             if success:
                 with self._stats_lock:
@@ -135,7 +151,8 @@ class MeshCoreOutboundMixin:
         except Exception as e:
             logger.error(f"Error processing outbound MeshCore message: {e}")
             # It must not vanish from the Delivery record (review 2026-09-23).
-            _record_tx("dropped", msg_id, "non_retriable_error", f"outbound: {e}")
+            _record_tx("dropped", msg_id, "non_retriable_error", f"outbound: {e}",
+                       source=source)
 
     async def _send_message(
         self,
@@ -144,6 +161,8 @@ class MeshCoreOutboundMixin:
         channel: int = 0,
         reply_ctx: Optional[Dict[str, Any]] = None,
         msg_id: Optional[str] = None,
+        source: Optional[str] = None,
+        queued: bool = False,
     ) -> bool:
         """
         Send a text message to the MeshCore network.
@@ -159,11 +178,20 @@ class MeshCoreOutboundMixin:
                 contact-not-found drop emits a negative notice instead of
                 leaving the addressed reply a silent void.
 
+            source: BIC-2 leg origin — every outcome lands on ``source>meshcore``.
+            queued: a persistent-queue row, whose SENT the queue already
+                recorded; only a failure is recorded here.
+
         Returns:
             True if sent successfully.
         """
+        def _rec(*a, **k):   # BIC-2: every outcome on this send's leg
+            if queued and a and a[0] == "sent":
+                return       # the persistent queue already recorded SENT
+            _record_tx(*a, source=source, **k)
+
         if not self._meshcore or not self._connected:
-            _record_tx("dropped", msg_id, "non_retriable_error", "not connected")
+            _rec("dropped", msg_id, "non_retriable_error", "not connected")
             return False
 
         # RF egress chokepoint — every MeshCore send funnels through here,
@@ -197,11 +225,12 @@ class MeshCoreOutboundMixin:
                         err = companion_error(send_evt)
                         if err is not None:
                             self._notice_dm_refused(destination, err, reply_ctx)
-                            return _companion_refused(err, msg_id, f"DM {destination!r}")
+                            return _companion_refused(err, msg_id, f"DM {destination!r}",
+                                              source=source)
                         if reply_ctx is not None:
                             self._register_dm_ack_watch(
                                 send_evt, destination, reply_ctx)
-                        _record_tx("sent", msg_id, note=f"dm {destination}")
+                        _rec("sent", msg_id, note=f"dm {destination}")
                         return True
                 # Contact resolution failed (advert aged out, peer never
                 # seen, etc.) — drop the DM rather than broadcasting it.
@@ -226,7 +255,7 @@ class MeshCoreOutboundMixin:
                     self._emit_dm_notice(
                         f"✗ no MeshCore contact matching "
                         f"'{destination}' — reply not delivered", reply_ctx)
-                _record_tx("dropped", msg_id, "destination_unreachable",
+                _rec("dropped", msg_id, "destination_unreachable",
                            f"no contact {destination}")
                 return False
             else:
@@ -238,7 +267,8 @@ class MeshCoreOutboundMixin:
                             channel, text)
                     err = companion_error(chan_evt)
                     if err is not None:
-                        return _companion_refused(err, msg_id, f"ch{channel}")
+                        return _companion_refused(err, msg_id, f"ch{channel}",
+                                              source=source)
                 elif hasattr(self._meshcore, 'send_channel_txt_msg'):
                     # Simulator: not egress, so never a delivery record (review A F5).
                     with timed_boundary("meshcore.send_chan_msg",
@@ -247,14 +277,14 @@ class MeshCoreOutboundMixin:
                     return True
                 else:
                     logger.error("MeshCore instance has no send method")
-                    _record_tx("dropped", msg_id, "non_retriable_error", "no send method")
+                    _rec("dropped", msg_id, "non_retriable_error", "no send method")
                     return False
-                _record_tx("sent", msg_id, note=f"ch{channel}")
+                _rec("sent", msg_id, note=f"ch{channel}")
                 return True
 
         except Exception as e:
             logger.error(f"Failed to send MeshCore message: {e}")
-            _record_tx("dropped", msg_id, "non_retriable_error", str(e))
+            _rec("dropped", msg_id, "non_retriable_error", str(e))
             return False
 
     @staticmethod
@@ -338,7 +368,8 @@ class MeshCoreOutboundMixin:
 
     def send_text(self, message: str, destination: str = None,
                   channel: int = 0,
-                  reply_ctx: Optional[Dict[str, Any]] = None) -> bool:
+                  reply_ctx: Optional[Dict[str, Any]] = None,
+                  *, source: Optional[str] = None) -> bool:
         """
         Send a text message to MeshCore (synchronous interface).
 
@@ -351,6 +382,9 @@ class MeshCoreOutboundMixin:
             reply_ctx: directed-DM reply context ({contact, origin}) — when
                 set on a DM, the send's expected_ack is watched and the
                 delivery outcome fed back as a [MC:reply] bridge notice.
+            source: the transport the message came from — rides metadata
+                ``leg_source`` to the worker so every outcome counts on the
+                BIC-2 leg ``source>meshcore``; omitted, ``?>meshcore``.
 
         Returns:
             True if queued successfully, False otherwise.
@@ -372,6 +406,8 @@ class MeshCoreOutboundMixin:
             msg.metadata['channel'] = int(channel)
             if reply_ctx is not None:
                 msg.metadata['dm_reply_ctx'] = dict(reply_ctx)
+            if source:
+                msg.metadata['leg_source'] = source
             self._send_queue.put_nowait(msg)
             # Record outbound for TUI parity — operators need to see what
             # they sent alongside what came in.

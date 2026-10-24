@@ -414,7 +414,9 @@ def send_to_meshtastic(
         return CommandResult.fail("Not connected to Meshtastic")
 
     try:
-        success = bridge.send_to_meshtastic(message, destination, channel)
+        # The operator authored it: leg local>meshtastic (BIC-2).
+        success = bridge.send_to_meshtastic(message, destination, channel,
+                                            source="local")
         if success:
             dest_str = destination or "broadcast"
             return CommandResult.ok(f"Message sent to Meshtastic ({dest_str})")
@@ -447,7 +449,8 @@ def send_to_rns(
         return CommandResult.fail("Not connected to RNS")
 
     try:
-        success = bridge.send_to_rns(message, destination_hash)
+        # The operator authored it: leg local>rns (BIC-2).
+        success = bridge.send_to_rns(message, destination_hash, source="local")
         if success:
             return CommandResult.ok("Message sent to RNS")
         else:

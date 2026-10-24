@@ -471,7 +471,8 @@ class TestSendToMeshtastic:
         bridge._mesh_handler.send_text.return_value = True
         result = bridge.send_to_meshtastic("Hello", "!dest", 2)
         assert result is True
-        bridge._mesh_handler.send_text.assert_called_once_with("Hello", "!dest", 2)
+        bridge._mesh_handler.send_text.assert_called_once_with(
+            "Hello", "!dest", 2, source=None, record_sent=True)
 
     def test_returns_false_no_handler(self, bridge):
         from gateway.config import MeshtasticEgressConfig
@@ -804,7 +805,7 @@ class TestProcessMeshToRNS:
         )
         sent_content = None
 
-        def capture_send(content, dest_hash=None):
+        def capture_send(content, dest_hash=None, *, source=None):
             nonlocal sent_content
             sent_content = content
             return True
@@ -831,7 +832,7 @@ class TestProcessMeshToRNS:
         )
         sent_hashes = []
 
-        def capture_send(content, dest_hash=None):
+        def capture_send(content, dest_hash=None, *, source=None):
             sent_hashes.append(dest_hash)
             return True
 
@@ -866,7 +867,7 @@ class TestProcessMeshToRNS:
         bridge._lxmf_source = MagicMock(name="lxmf_source")
         sent_to = []
 
-        def capture(content, dest_hash=None):
+        def capture(content, dest_hash=None, *, source=None):
             sent_to.append(dest_hash)
             return True
 
@@ -934,7 +935,7 @@ class TestProcessRNSToMesh:
         )
         sent_content = None
 
-        def capture_send(content, destination=None, channel=0):
+        def capture_send(content, destination=None, channel=0, *, source=None):
             nonlocal sent_content
             sent_content = content
             return True
@@ -955,7 +956,7 @@ class TestProcessRNSToMesh:
                              destination_id=None, content=body)
         sent = []
 
-        def capture(content, destination=None, channel=0):
+        def capture(content, destination=None, channel=0, *, source=None):
             sent.append(content)
             return True
 
@@ -980,7 +981,7 @@ class TestProcessRNSToMesh:
                              destination_id=None, content=body)
         calls = {"n": 0}
 
-        def send(content, destination=None, channel=0):
+        def send(content, destination=None, channel=0, *, source=None):
             calls["n"] += 1
             return calls["n"] == 1  # first chunk sends, rest fail
 
@@ -1278,7 +1279,8 @@ class TestBridgeToMeshcoreChannelLeak:
         bridge._meshcore_handler.send_text = MagicMock(return_value=True)
         ok = bridge.send_to_meshcore("hi", channel=2)
         assert ok is True
-        bridge._meshcore_handler.send_text.assert_called_once_with("hi", None, 2)
+        bridge._meshcore_handler.send_text.assert_called_once_with("hi", None, 2,
+                                                                  source=None)
 
     def test_send_to_meshcore_dm_ignores_channel_default(self, bridge):
         """DMs pass the destination; channel arg is irrelevant. The
@@ -1288,7 +1290,7 @@ class TestBridgeToMeshcoreChannelLeak:
         ok = bridge.send_to_meshcore("hi", destination="contact-abc")
         assert ok is True
         bridge._meshcore_handler.send_text.assert_called_once_with(
-            "hi", "contact-abc", -1
+            "hi", "contact-abc", -1, source=None
         )
 
     def test_process_bridge_to_meshcore_uses_config_not_metadata(self, bridge):
@@ -2416,6 +2418,7 @@ class TestAckSynthesisIssue66:
         assert ok is True
         mock_handler.send_text.assert_called_once_with(
             "[delivered: abcdef01]", destination="!aabbccdd", channel=0,
+            source="local",
         )
 
     def test_emit_ack_to_origin_meshcore_dispatches_to_handler(self, bridge):
@@ -2429,6 +2432,7 @@ class TestAckSynthesisIssue66:
         assert ok is True
         mock_handler.send_text.assert_called_once_with(
             "[failed: abcdef01]", destination="publickey-prefix",
+            source="local",
         )
 
     def test_emit_ack_to_origin_rns_converts_hex_to_bytes(self, bridge):
@@ -2685,7 +2689,7 @@ class TestMeshcoreEgressHeaderReformat:
     def _capture_egress(self, bridge):
         captured = {}
 
-        def fake_send(text, channel=None):
+        def fake_send(text, channel=None, *, source=None):
             captured["text"] = text
             return True
 
@@ -2886,7 +2890,7 @@ class TestRnsToMeshTaggedChunks:
         self._fresh_registry(monkeypatch)
         sent = []
         with patch.object(bridge, 'send_to_meshtastic',
-                          side_effect=lambda c, channel=0: sent.append(c) or True):
+                          side_effect=lambda c, channel=0, source=None: sent.append(c) or True):
             bridge._process_rns_to_mesh(self._msg(_ML_REPLY))
         assert len(sent) >= 2
         assert all(c.startswith("[RNS:abcd] ") for c in sent)
