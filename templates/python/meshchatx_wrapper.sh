@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MeshAnchor MeshChatX wrapper — refuses-loud on rpc_key mismatch.
 #
-# Version: 1
+# Version: 2
 #
 # Ported from MeshForge (which paired this with the canonical NomadNet
 # wrapper). MeshChatX is a web daemon, not a TUI that imports RNS
@@ -14,7 +14,7 @@
 #     carries one clear diagnostic line instead of a silent restart
 #     loop.
 #
-# Storage dir, host, port, and HTTPS settings are pinned here so the
+# Storage dir, port, and HTTPS settings are pinned here (host: section 4) so the
 # unit's ExecStart is independent of MeshChatX's CLI defaults — those
 # may shift between releases. To change a flag, edit this wrapper and
 # re-run: sudo bash /opt/meshanchor/scripts/install_meshchatx.sh --refresh
@@ -81,10 +81,41 @@ STORAGE_DIR="${HOME}/.local/share/meshchatx"
 mkdir -p "${STORAGE_DIR}"
 
 # --------------------------------------------------------------------
-# 4. Exec MeshChatX with canonical flags
+# 4. Listen address — the operator's setting, never re-rendered
+# --------------------------------------------------------------------
+# This wrapper is copied verbatim on every install/refresh, so a hand edit
+# of --host is silently reverted. The knob lives in an operator-owned file
+# the installer never writes:
+#   ~/.config/meshanchor/meshchatx.env   ->   MESHCHATX_HOST=0.0.0.0
+# Read as DATA (never sourced). Absent -> 127.0.0.1 (SSH-tunnel for remote).
+# A value that is not an IP literal refuses loud (exit 2) instead of falling
+# back to a bind the operator did not choose. A non-loopback bind says so
+# in the journal on every start: it is plain HTTP and, unless --auth is set,
+# anyone who can reach it speaks as this box's LXMF identity.
+MCX_HOST=127.0.0.1
+MCX_ENV="${HOME}/.config/meshanchor/meshchatx.env"
+if [[ -r "${MCX_ENV}" ]]; then
+    v="$(sed -n 's/^[[:space:]]*MESHCHATX_HOST[[:space:]]*=//p' "${MCX_ENV}" | tail -n 1)"
+    v="${v//[[:space:]]/}"; v="${v//\"/}"; v="${v//\'/}"
+    if [[ -n "${v}" ]]; then
+        if [[ "${v}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ || "${v}" =~ ^[0-9a-fA-F:]*:[0-9a-fA-F:]*$ ]]; then
+            MCX_HOST="${v}"
+        else
+            err "MESHCHATX_HOST='${v}' in ${MCX_ENV} is not an IP literal."
+            err "  FIX: MESHCHATX_HOST=127.0.0.1 (local) or 0.0.0.0 (LAN), or delete the line."
+            exit 2
+        fi
+    fi
+fi
+if [[ "${MCX_HOST}" != "127.0.0.1" && "${MCX_HOST}" != "::1" ]]; then
+    err "listening on ${MCX_HOST}:8000 (set in ${MCX_ENV}) - plain HTTP, reachable beyond this box"
+fi
+
+# --------------------------------------------------------------------
+# 5. Exec MeshChatX with canonical flags
 # --------------------------------------------------------------------
 # --headless        : no Electron/browser auto-launch
-# --host 127.0.0.1  : localhost-only by default; SSH-tunnel for remote
+# --host            : MCX_HOST above (default 127.0.0.1)
 # --port 8000       : free in MeshAnchor (config_api on 8081, map on 5000)
 # --no-https        : self-signed cert friction is a UX cost we pay
 #                     only when exposing beyond localhost
@@ -92,7 +123,7 @@ mkdir -p "${STORAGE_DIR}"
 #                     doesn't depend on cwd
 exec "${MCX_BIN}" \
     --headless \
-    --host 127.0.0.1 \
+    --host "${MCX_HOST}" \
     --port 8000 \
     --no-https \
     --storage-dir "${STORAGE_DIR}"
