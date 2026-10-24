@@ -413,27 +413,6 @@ def test_a_supervisor_refusal_is_not_counted_sent():
     assert _legs() == {}
 
 
-def test_the_supervisor_sends_a_real_queue_row():
-    # Review F2: every queue writer stores the text under "message"; the
-    # supervisor read only "content"/"text" and refused every queued row.
-    h = _supervisor()
-
-    assert h.queue_send({"message": "replayed", "destination": "abcd",
-                         "_queue_msg_id": "q-r", LEG_SOURCE_KEY: "rns"})
-
-    h._client.send_message_contact.assert_called_once_with("abcd", "replayed")
-
-
-def test_a_supervisor_queue_row_keeps_its_metadata_channel():
-    # Review F2: the in-process worker falls back to metadata.channel when
-    # the top-level key is absent; defaulting to 0 is the Public-leak class.
-    h = _supervisor()
-
-    assert h.queue_send({"message": "replayed", "metadata": {"channel": 3}})
-
-    h._client.send_message_channel.assert_called_once_with(3, "replayed")
-
-
 # ── BridgeSendMixin: remote egress + direct send_to_rns ───────────────
 
 def test_remote_egress_send_is_counted_sent_on_its_leg(bridge):  # noqa: F811

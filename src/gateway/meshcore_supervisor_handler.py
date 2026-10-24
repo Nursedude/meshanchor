@@ -231,23 +231,22 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         return True
 
     def queue_send(self, payload: Dict) -> bool:
-        """Persistent-queue sender. Same shape as MeshCoreHandler.queue_send."""
-        # Every queue writer (_requeue_failed_message, enqueue_message)
-        # stores the text under "message", as MeshCoreHandler.queue_send
-        # reads it; "content"/"text" were the only keys read here, so every
-        # queued row was refused (BIC-2 slice-2b review F2).
-        text = (payload.get("message") or payload.get("content")
-                or payload.get("text") or "")
+        """Persistent-queue sender. Same shape as MeshCoreHandler.queue_send.
+
+        ⚠️ KNOWN, deliberately left failing CLOSED (BIC-2 slice-2b review
+        F2, reverted 10-24): every queue writer stores the text under
+        "message", which this never reads, so every queued row is refused.
+        Reading it makes the rows SEND, and a row with no resolvable slot
+        then reaches int(channel or 0) = slot 0 (Public) silently — the
+        re-review's finding. Fix it as one supervisor-path slice (explicit
+        slot or refuse, int guard, reply_ctx), never as a one-key change.
+        """
+        text = payload.get("content") or payload.get("text") or ""
         if not text:
             return False
         destination = payload.get("destination") or payload.get("destination_address")
         is_broadcast = payload.get("is_broadcast", destination is None)
-        # Top-level channel, else metadata.channel — the in-process worker's
-        # fallback; defaulting a lost slot to 0 is the Public-leak class.
-        channel = payload.get("channel")
-        if channel is None or channel == "":
-            meta = payload.get("metadata")
-            channel = meta.get("channel") if isinstance(meta, dict) else None
+        channel = payload.get("channel", 0)
         from .delivery_legs import payload_source
         return self.send_text(
             text,

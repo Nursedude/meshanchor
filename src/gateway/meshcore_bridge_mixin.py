@@ -186,8 +186,10 @@ class MeshCoreBridgeMixin:
             )
             return False
         if reply_ctx is not None:
-            # reply_ctx passed only when set; source always — every handler
-            # takes it (BaseMessageHandler.send_text contract, BIC-2).
+            # reply_ctx passed only when set. ⚠️ MeshCoreSupervisorHandler's
+            # send_text has NO reply_ctx, so on a supervisor box this raises
+            # TypeError and the DM reply is lost (pre-existing; queued as the
+            # supervisor-path slice). source always: every handler takes it.
             return self._meshcore_handler.send_text(
                 message, destination, channel, reply_ctx=reply_ctx,
                 source=source)
