@@ -308,7 +308,8 @@ class MessageTransformMixin:
                 # the whole un-chunked original (which the retry would truncate)
                 # and without re-transmitting chunks that already went out.
                 requeued = self._requeue_failed_chunks(
-                    failed_chunks or chunks, "meshtastic")
+                    failed_chunks or chunks, "meshtastic",
+                    source=self._leg_source(msg))
                 self.health.record_message_failed("rns_to_mesh", requeued=requeued)
 
         except Exception as e:

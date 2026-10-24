@@ -877,8 +877,8 @@ class BridgeSendMixin:
             logger.error(f"rns_xform replay raised (not retried): {e}")
         return True
 
-    def _requeue_failed_chunks(self, chunks, target: str = "meshtastic",
-                               source: Optional[str] = "rns") -> bool:
+    def _requeue_failed_chunks(self, chunks, target: str = "meshtastic", *,
+                               source: Optional[str]) -> bool:
         """Persist already-chunked, byte-bounded RNS→Mesh content for retry.
 
         Ported from MeshForge. Used by the direct-send path on PARTIAL
@@ -902,7 +902,7 @@ class BridgeSendMixin:
                     },
                     destination=target,
                     priority=MessagePriority.HIGH,
-                    source=source,   # BIC-2: the caller's ingress leg
+                    source=source,   # BIC-2: required — no default origin
                 ):
                     requeued += 1
             except Exception as e:

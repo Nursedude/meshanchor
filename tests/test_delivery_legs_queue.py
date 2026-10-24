@@ -358,7 +358,7 @@ def test_mqtt_origin_is_read_whether_enum_or_string(bridge, origin):  # noqa: F8
 def test_requeued_rns_to_mesh_chunks_are_queued_on_the_rns_leg(
         real_queue_bridge):
     assert real_queue_bridge._requeue_failed_chunks(
-        ["part 1", "part 2"], target="meshtastic") is True
+        ["part 1", "part 2"], target="meshtastic", source="rns") is True
 
     assert _legs()["rns>meshtastic"]["15m"]["queued"] == 2
 
@@ -396,23 +396,48 @@ def test_a_replay_that_carries_its_leg_reads_it(bridge):  # noqa: F811
     assert bridge._leg_source(m) == "meshcore"
 
 
-def test_chunk_requeue_takes_its_source_from_the_caller(real_queue_bridge):
-    # F5: a generic target must not hard-code the origin.
-    assert real_queue_bridge._requeue_failed_chunks(
-        ["c1"], target="meshcore", source="mqtt") is True
+def test_chunk_requeue_has_no_default_origin(real_queue_bridge):
+    # F5 + re-review R4: a default only relocates the hard-code — a caller
+    # that forgets the origin must fail loudly, not count on rns>X.
+    # (Meshtastic target only: the chunks carry the Meshtastic channel, so
+    # any other target is the #37 channel-leak class — re-review R3.)
+    with pytest.raises(TypeError):
+        real_queue_bridge._requeue_failed_chunks(["c1"], target="meshtastic")
 
-    assert _legs()["mqtt>meshcore"]["15m"]["queued"] == 1
+
+def test_the_rns_to_mesh_chunk_requeue_names_the_messages_leg():
+    # Re-review R7: pin the REAL call site, not a hypothetical shape.
+    import inspect
+    from gateway.rns_bridge import RNSMeshtasticBridge
+    tree = ast.parse(inspect.cleandoc(
+        "def _f():\n" + inspect.getsource(
+            RNSMeshtasticBridge._process_rns_to_mesh)).replace(
+                "def _f():\n", "", 1))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "_requeue_failed_chunks"]
+    assert calls
+    for c in calls:
+        src = [k.value for k in c.keywords if k.arg == "source"]
+        assert len(src) == 1 and ast.unparse(src[0]) == "self._leg_source(msg)"
 
 
-def test_a_late_mark_failed_logs_no_retry_it_did_not_schedule(queue, caplog):
+@pytest.mark.parametrize("with_policy", [False, True])
+def test_a_late_mark_failed_logs_no_retry_it_did_not_schedule(
+        queue, caplog, with_policy):
     # F6: the guarded UPDATE matched 0 rows; the log must not claim a retry.
+    # Both branches (re-review R8): the RetryPolicy path and the
+    # RETRY_DELAYS fallback each build their own retry line.
     import logging
+    from gateway.message_queue_models import RetryPolicy
+    if with_policy:
+        queue.set_retry_policy(RetryPolicy(max_tries=5))
     msg_id = queue.enqueue({"message": "hi"}, "rns", source="meshcore",
                            max_retries=3)
     with queue._get_connection() as conn:
         conn.execute("UPDATE messages SET status = 'dead_letter' "
                      "WHERE id = ?", (msg_id,))
     with caplog.at_level(logging.DEBUG, logger="gateway.message_queue"):
-        assert queue.mark_failed(msg_id, "late worker") is False
+        assert queue.mark_failed(msg_id, "timeout") is False
 
     assert "scheduled for retry" not in caplog.text

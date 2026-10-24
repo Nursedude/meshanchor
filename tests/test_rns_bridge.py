@@ -986,9 +986,10 @@ class TestProcessRNSToMesh:
 
         captured = {}
 
-        def fake_requeue_chunks(chunks, target="meshtastic"):
+        def fake_requeue_chunks(chunks, target="meshtastic", *, source):
             captured["chunks"] = list(chunks)
             captured["target"] = target
+            captured["source"] = source
             return True
 
         with patch.object(bridge, 'send_to_meshtastic', side_effect=send), \
@@ -997,6 +998,7 @@ class TestProcessRNSToMesh:
 
         assert bridge.stats['errors'] == 1
         assert captured["target"] == "meshtastic"
+        assert captured["source"] == "rns"     # BIC-2: the R->M leg it came in on
         assert len(captured["chunks"]) >= 1                   # only the failed ones
         assert all(len(c.encode("utf-8")) <= 228 for c in captured["chunks"])
         bridge.health.record_message_failed.assert_called_with("rns_to_mesh", requeued=True)
