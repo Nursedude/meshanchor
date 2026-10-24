@@ -135,7 +135,11 @@ INVENTORY: List[DBSpec] = [
             "/ per-protocol breakdown / first+last event ts) and events "
             "(FIFO ring pruned on insert at RING_BUFFER_CAP = 500). "
             "Cross-process: gateway daemon writes, map daemon serves "
-            "/api/gateway/delivery from the same file."
+            "/api/gateway/delivery from the same file. BIC-2 (MeshForge "
+            "twin): leg_buckets (5-min per-leg outcome counts, pruned on "
+            "insert past 24 h + 2 buckets, gateway.delivery_legs) + leg_meta "
+            "(since_ts, set by the first leg write); events gained a source "
+            "column (ALTER-migrated)."
         ),
     ),
     DBSpec(

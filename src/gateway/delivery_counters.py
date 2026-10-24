@@ -63,6 +63,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from gateway import delivery_legs
 from utils.db_helpers import connect_tuned
 from utils.delivery_labels import canonical_protocol, lane_of
 from utils.paths import get_real_user_home
@@ -161,6 +162,10 @@ class DeliveryEvent:
     protocol: Optional[str] = None
     drop_reason: Optional[DropReason] = None
     note: str = ""
+    # BIC-2 (MeshForge twin): the transport the message came FROM; with
+    # ``protocol`` it names the leg (``source>protocol``). None = the call
+    # site did not say.
+    source: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -170,6 +175,8 @@ class DeliveryEvent:
             "protocol": self.protocol,
             "drop_reason": self.drop_reason.value if self.drop_reason else None,
         }
+        if self.source:
+            d["source"] = self.source
         if self.note:
             d["note"] = self.note
         return d
@@ -196,6 +203,15 @@ DELIVERY_FAILURE_REASONS = frozenset({
     DropReason.WEDGED.value,
     DropReason.EXPIRED.value,
 })
+
+
+def _leg_outcome(event: "DeliveryEvent") -> str:
+    """The ``delivery_legs.OUTCOMES`` word for one event."""
+    if event.state != DeliveryState.DROPPED:
+        return event.state.value
+    if event.drop_reason and event.drop_reason.value in DELIVERY_FAILURE_REASONS:
+        return "failed"
+    return "dropped_other"
 
 
 def compute_confirmation_view(
@@ -392,12 +408,23 @@ class DeliveryCounters:
                 " state TEXT NOT NULL,"
                 " protocol TEXT,"
                 " drop_reason TEXT,"
-                " note TEXT NOT NULL DEFAULT ''"
+                " note TEXT NOT NULL DEFAULT '',"
+                # BIC-2: the leg's origin transport, for the per-message trace.
+                " source TEXT NOT NULL DEFAULT ''"
                 ")"
             )
+            # A DB created before BIC-2 has no source column (CREATE TABLE IF
+            # NOT EXISTS is a no-op when the table exists, so it needs ALTER).
+            existing = {row[1] for row in
+                        conn.execute("PRAGMA table_info(events)")}
+            if "source" not in existing:
+                conn.execute(
+                    "ALTER TABLE events ADD COLUMN source "
+                    "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_id ON events(id)"
             )
+            delivery_legs.init_schema(conn)
             conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -499,6 +526,7 @@ class DeliveryCounters:
         drop_reason: Optional[DropReason] = None,
         note: str = "",
         ts: Optional[float] = None,
+        source: Optional[str] = None,
     ) -> DeliveryEvent:
         """Record one lifecycle transition.
 
@@ -543,6 +571,7 @@ class DeliveryCounters:
             protocol=protocol,
             drop_reason=drop_reason,
             note=note,
+            source=canonical_protocol(source) or None,
         )
 
         try:
@@ -680,17 +709,45 @@ class DeliveryCounters:
             )
             # Event row.
             conn.execute(
-                "INSERT INTO events(ts, id, state, protocol, drop_reason, note) "
-                "VALUES(?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events(ts, id, state, protocol, drop_reason, "
+                "source, note) VALUES(?, ?, ?, ?, ?, ?, ?)",
                 (
                     event.ts,
                     event.id,
                     event.state.value,
                     event.protocol,
                     event.drop_reason.value if event.drop_reason else None,
+                    event.source or "",
                     event.note,
                 ),
             )
+            outcome = _leg_outcome(event)
+            leg = delivery_legs.leg_for(event.source, event.protocol, outcome)
+            if leg:
+                # Fenced in a SAVEPOINT (MeshForge reviews R7, F1/F2): legs
+                # are measure-only, so a failure undoes the leg write WHOLE
+                # and keeps the core event. If SQLite already rolled back the
+                # whole transaction (FULL/IOERR), ROLLBACK TO raises and the
+                # core write fails loudly instead of committing a witness
+                # over a lost event. The witness is on disk so the map
+                # daemon can read it.
+                conn.execute("SAVEPOINT legs")
+                try:
+                    delivery_legs.bump(conn, event.ts, leg, outcome)
+                    conn.execute("RELEASE legs")
+                except sqlite3.Error as e:
+                    conn.execute("ROLLBACK TO legs")
+                    conn.execute("RELEASE legs")
+                    logger.warning("delivery_counters: leg count failed: %s", e)
+                    conn.execute(
+                        "INSERT INTO counters(key, value) "
+                        "VALUES('legs.write_errors', 1) "
+                        "ON CONFLICT(key) DO UPDATE SET value = value + 1")
+                    conn.execute(
+                        "INSERT INTO counters(key, value) "
+                        "VALUES('legs.last_write_error_ts', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (round(time.time() * 1000),))
             # Ring cap via prune-on-insert. SELECT COUNT(*) is O(N) on
             # an unindexed scan but N is tiny (cap 500), and we only
             # pay it on the writes that are likely to push us over.
@@ -727,7 +784,7 @@ class DeliveryCounters:
                     "SELECT key, value FROM counters"
                 ).fetchall()
                 events_rows = conn.execute(
-                    "SELECT ts, id, state, protocol, drop_reason, note "
+                    "SELECT ts, id, state, protocol, drop_reason, source, note "
                     "FROM events ORDER BY rowid DESC "
                     "LIMIT ?",
                     (max(0, recent_limit),),
@@ -750,6 +807,7 @@ class DeliveryCounters:
                      max(0, recent_limit)),
                 ).fetchall()
                 ring_capacity = self._ring_cap
+                legs_view = delivery_legs.read(conn, time.time())
         except sqlite3.Error as e:
             logger.warning(
                 "delivery_counters: snapshot read failed (%s) — "
@@ -759,6 +817,7 @@ class DeliveryCounters:
             events_rows = []
             terminal_rows = []
             ring_capacity = self._ring_cap
+            legs_view = (None, None, None, None, None)
             snapshot_failed = True
 
         state_totals: Dict[str, int] = {s.value: 0 for s in DeliveryState}
@@ -817,7 +876,8 @@ class DeliveryCounters:
         # the snapshot contract is newest-LAST so the operator can
         # tail a JSON dump and read the latest at the bottom.
         recent: List[Dict[str, Any]] = []
-        for ts, msg_id, state, protocol, drop_reason, note in reversed(events_rows):
+        for (ts, msg_id, state, protocol, drop_reason,
+                source, note) in reversed(events_rows):
             d: Dict[str, Any] = {
                 "ts": ts,
                 "id": msg_id,
@@ -825,6 +885,8 @@ class DeliveryCounters:
                 "protocol": canonical_protocol(protocol),
                 "drop_reason": drop_reason,
             }
+            if source:
+                d["source"] = source
             if note:
                 d["note"] = note
             recent.append(d)
@@ -889,6 +951,9 @@ class DeliveryCounters:
                 health["db_unobservable"] = True
                 health["preflight_ok"] = None
 
+        (legs, legs_since_ts, legs_partial, legs_write_errors,
+         legs_last_error_ts) = legs_view
+
         return {
             "state_totals": state_totals,
             "drop_reasons": drop_reasons,
@@ -899,6 +964,12 @@ class DeliveryCounters:
             "first_event_ts": first_event_ts,
             "last_event_ts": last_event_ts,
             "ring_capacity": ring_capacity,
+            "legs": legs,
+            "legs_since_ts": legs_since_ts,
+            "legs_bucket_s": delivery_legs.BUCKET_S,   # readers derive reach
+            "legs_partial_windows": legs_partial,
+            "legs_write_errors": legs_write_errors,
+            "legs_last_write_error_ts": legs_last_error_ts,
             "health": health,
         }
 
@@ -910,14 +981,16 @@ class DeliveryCounters:
             with self._connect() as conn:
                 if limit is None:
                     cursor = conn.execute(
-                        "SELECT ts, id, state, protocol, drop_reason, note "
+                        "SELECT ts, id, state, protocol, drop_reason, note, "
+                        "source "
                         "FROM events ORDER BY rowid ASC"
                     )
                 elif limit <= 0:
                     return []
                 else:
                     cursor = conn.execute(
-                        "SELECT ts, id, state, protocol, drop_reason, note "
+                        "SELECT ts, id, state, protocol, drop_reason, note, "
+                        "source "
                         "FROM events ORDER BY rowid DESC LIMIT ?",
                         (limit,),
                     )
@@ -938,7 +1011,7 @@ class DeliveryCounters:
         try:
             with self._connect() as conn:
                 rows = conn.execute(
-                    "SELECT ts, id, state, protocol, drop_reason, note "
+                    "SELECT ts, id, state, protocol, drop_reason, note, source "
                     "FROM events WHERE id = ? ORDER BY rowid ASC",
                     (str(msg_id),),
                 ).fetchall()
@@ -948,9 +1021,9 @@ class DeliveryCounters:
 
     @staticmethod
     def _row_to_event(
-        row: Tuple[float, str, str, Optional[str], Optional[str], str],
+        row: Tuple[float, str, str, Optional[str], Optional[str], str, str],
     ) -> DeliveryEvent:
-        ts, msg_id, state, protocol, drop_reason, note = row
+        ts, msg_id, state, protocol, drop_reason, note, source = row
         try:
             state_enum = DeliveryState(state)
         except ValueError:
@@ -964,7 +1037,7 @@ class DeliveryCounters:
         return DeliveryEvent(
             ts=ts, id=msg_id, state=state_enum,
             protocol=canonical_protocol(protocol), drop_reason=dr_enum,
-            note=note or "",
+            note=note or "", source=source or None,
         )
 
     # ── test helpers ───────────────────────────────────────────
@@ -975,6 +1048,8 @@ class DeliveryCounters:
             with self._connect() as conn:
                 conn.execute("DELETE FROM counters")
                 conn.execute("DELETE FROM events")
+                conn.execute("DELETE FROM leg_buckets")
+                conn.execute("DELETE FROM leg_meta")
                 conn.commit()
         except sqlite3.Error:
             pass
@@ -1007,11 +1082,12 @@ def record(
     protocol: Optional[str] = None,
     drop_reason: Optional[DropReason] = None,
     note: str = "",
+    source: Optional[str] = None,
 ) -> DeliveryEvent:
     """Module-level convenience — bumps the singleton's counters."""
     return get_singleton().record(
         state, msg_id,
-        protocol=protocol, drop_reason=drop_reason, note=note,
+        protocol=protocol, drop_reason=drop_reason, note=note, source=source,
     )
 
 
