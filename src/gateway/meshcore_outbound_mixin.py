@@ -89,9 +89,9 @@ def validate_queue_row(row: Dict) -> Optional[str]:
     """
     if row.get('destination') or queue_row_slot(row) >= 0:
         return None
-    return (f"MeshCore channel row with no explicit slot "
-            f"(channel={row.get('channel')!r}); never aired on a source "
-            f"slot or slot 0 (Public)")
+    return (f"MeshCore channel row with no valid slot (an int "
+            f"0..{MESHCORE_MAX_SLOT}; got channel={row.get('channel')!r}); "
+            f"never aired on a source slot or slot 0 (Public)")
 
 
 def _companion_refused(err: str, msg_id: Optional[str], what: str,
@@ -474,7 +474,7 @@ class MeshCoreOutboundMixin:
             self.stats['meshcore_queue_row_no_slot_refused'] = (
                 self.stats.get('meshcore_queue_row_no_slot_refused', 0) + 1)
         logger.warning(
-            f"MeshCore queue row {msg_id!r} refused: no explicit slot "
+            f"MeshCore queue row {msg_id!r} refused: no valid slot "
             f"(channel={raw_channel!r}); never aired on a source slot or "
             f"slot 0 (Public)")
 

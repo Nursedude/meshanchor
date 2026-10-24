@@ -704,15 +704,12 @@ class BridgeSendMixin:
         Args:
             msg: The message that failed to send (BridgedMessage or CanonicalMessage).
             destination: Target network ("meshtastic", "rns", or "meshcore").
-            channel_override: When set, this slot is written to the
-                payload's top-level ``channel`` field — overriding any
-                ``metadata['channel']`` lift. Cross-protocol bridge
-                cargo passes this (resolved via
-                ``_resolve_bridge_target_channel``) so the replay path
-                doesn't preserve the SOURCE protocol's channel index.
-                Without this override, Issue #37's privacy class was
-                still live via the replay path even after the resolver
-                fix — bug discovered live 2026-05-20.
+            channel_override: The destination slot the caller resolved
+                (``_resolve_bridge_target_channel``), written to the row's
+                top-level ``channel``. For "meshcore" it is the ONLY slot a
+                row can carry — never ``metadata['channel']``, the SOURCE
+                protocol's index (Issue #37 class) — and the queue's
+                validate_fn refuses a row without a valid one (2026-10-24).
             rns_destinations: for "rns", the LXMF hashes the send already
                 resolved — one "rns" row each, in the shape _queue_send_rns
                 reads (bridge matrix F4, MF lead). Without them an "rns"
@@ -749,13 +746,9 @@ class BridgeSendMixin:
                 return self._requeue_failed_rns(
                     msg, source_id, dest_id, content, metadata,
                     rns_destinations, rns_message, origin)
-            # Lift channel into the top-level payload — channel-0 Public
-            # leak follow-up (2026-05-20). The persistent queue's MeshCore
-            # sender (meshcore_handler.queue_send → _process_outbound)
-            # reads ``msg.get('channel')`` from the outer dict; without
-            # this lift, a requeued message would have channel=None and
-            # `_resolve_channel` would default it to 0 (Public), leaking
-            # private-channel cargo on replay after a disconnect window.
+            # The queue's senders read the slot from the row's top-level
+            # ``channel``. MeshCore: only the caller-resolved slot, never a
+            # metadata lift (below). Other destinations keep the lift.
             payload = {
                 'message': content,
                 'source_id': source_id,

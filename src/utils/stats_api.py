@@ -28,10 +28,12 @@ returned so any future counter shows up automatically):
       ``config.meshcore.bridge_target_channel`` to a valid slot.
 
   Issue #37 class at the persistent queue (2026-10-24) — a MeshCore
-      channel row with no explicit slot (an int 0..255) is refused by the
+      channel row with no valid slot (an int 0..255) is refused by the
       queue's validate_fn at enqueue (never written), or dead-lettered on
       its first attempt if already queued. Counted ONCE, on the QUEUE's
-      ``refused_invalid`` stat (not in this dict), and recorded on the
+      ``refused_invalid`` — served beside this dict as
+      ``queue_counters.refused_invalid`` (null + ``queue_counters_unobservable``
+      when there is no queue to read, never zeros) — and recorded on the
       Delivery screen as DROPPED ``invalid_payload``.
 
   meshcore_queue_row_no_slot_refused  — the worker BACKSTOP only: a
@@ -208,6 +210,20 @@ def handle_get(handler: Any) -> None:
         except Exception:
             reemit_stats = None
 
+    # The persistent queue's own counters (refused_invalid: the Issue #37
+    # slot gate's ONE counter). Tri-state: a dict, or null + the reason —
+    # an unreadable queue must not read as a queue that refused nothing.
+    queue_counters = None
+    queue_unobservable = None
+    pq = getattr(bridge, "_persistent_queue", None)
+    if pq is None:
+        queue_unobservable = "no persistent queue on this bridge"
+    else:
+        try:
+            queue_counters = dict(pq.counter_snapshot())
+        except Exception as e:
+            queue_unobservable = f"queue counter read failed: {e}"
+
     payload = {
         "oracle": _oracle_posture(meshcore_handler),
         "running": bool(getattr(bridge, "_running", False)),
@@ -221,6 +237,9 @@ def handle_get(handler: Any) -> None:
             meshcore_handler.is_connected if meshcore_handler is not None else False
         ),
         "stats": stats_snapshot,
+        "queue_counters": queue_counters,
         "reemit": reemit_stats,
     }
+    if queue_unobservable:
+        payload["queue_counters_unobservable"] = queue_unobservable
     handler._send_json(payload)

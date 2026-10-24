@@ -1075,6 +1075,12 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             self._process_thread.join(timeout=5)
         logger.info("Message queue processing stopped")
 
+    def counter_snapshot(self) -> Dict[str, Any]:
+        """The cumulative in-memory counters only — no DB read, so a status
+        poll (/api/stats) stays cheap. ``get_stats`` adds the row counts."""
+        with self._lock:
+            return dict(self._stats)
+
     def get_stats(self) -> Dict[str, Any]:
         """Get queue statistics including overflow metrics."""
         with self._get_connection() as conn:

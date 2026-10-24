@@ -118,7 +118,7 @@ def test_the_refusal_is_said_out_loud(bridge, tmp_path, caplog):  # noqa: F811
     said = [r.getMessage() for r in caplog.records
             if "refused at enqueue" in r.getMessage()]
     assert len(said) == 1                 # said once, not once per gate
-    assert "no explicit slot" in said[0]
+    assert "no valid slot" in said[0]
 
 
 def test_an_explicit_slot_still_requeues(bridge, queue):  # noqa: F811

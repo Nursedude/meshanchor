@@ -191,6 +191,63 @@ class TestHandleGetPrivacyCounters:
         assert handler.sent_json["stats"]["meshcore_dm_dropped_contact_not_found"] == 5
 
 
+class TestHandleGetQueueCounters:
+    """Issue #37 class at the persistent queue (review of 7c582519, #1): a
+    slot-less MeshCore row is counted ONCE, on the queue's refused_invalid.
+    That counter lived only in memory with no reader — the refusal was
+    visible in the journal alone. It rides /api/stats as queue_counters;
+    no queue reads null with a reason, never zeros."""
+
+    def _get(self, bridge):
+        handler = _FakeHandler()
+        with patch("gateway.gateway_cli.get_active_bridge",
+                   return_value=bridge):
+            stats_api.handle_get(handler)
+        return handler.sent_json
+
+    def test_a_refused_slot_less_row_is_visible(self, tmp_path, monkeypatch):
+        from gateway import delivery_counters as dc
+        from gateway.meshcore_outbound_mixin import validate_queue_row
+        from gateway.message_queue import PersistentMessageQueue
+        monkeypatch.setenv("MESHANCHOR_DELIVERY_COUNTERS_DB",
+                           str(tmp_path / "d.db"))
+        dc._reset_singleton_for_tests()
+        q = PersistentMessageQueue(db_path=str(tmp_path / "q.db"))
+        q.register_sender("meshcore", lambda p: True,
+                          validate_fn=validate_queue_row)
+        try:
+            assert q.enqueue({"message": "x"}, "meshcore") is None
+            bridge = _make_bridge(stats={"errors": 0})
+            bridge._persistent_queue = q
+
+            body = self._get(bridge)
+        finally:
+            q.stop_processing()
+            dc._reset_singleton_for_tests()
+
+        assert body["queue_counters"]["refused_invalid"] == 1
+        assert "queue_counters_unobservable" not in body
+
+    def test_no_queue_is_unobservable_not_zero(self):
+        bridge = _make_bridge(stats={"errors": 0})
+        bridge._persistent_queue = None
+
+        body = self._get(bridge)
+
+        assert body["queue_counters"] is None
+        assert "no persistent queue" in body["queue_counters_unobservable"]
+
+    def test_a_failing_queue_read_is_unobservable_not_a_500(self):
+        bridge = _make_bridge(stats={"errors": 0})
+        bridge._persistent_queue.counter_snapshot.side_effect = RuntimeError(
+            "torn down")
+
+        body = self._get(bridge)
+
+        assert body["queue_counters"] is None
+        assert "torn down" in body["queue_counters_unobservable"]
+
+
 class TestHandleGetExceptionPath:
     def test_stats_read_exception_returns_500(self):
         """If the stats lock or dict copy raises (e.g. during a tear-
