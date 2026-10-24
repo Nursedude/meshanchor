@@ -39,12 +39,12 @@ import threading
 import time
 from collections import deque
 from datetime import datetime
-from queue import Empty, Full, Queue
+from queue import Full, Queue
 from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional
 
 from ._meshcore_ingress import note_ingress_queue_full
 from .base_handler import BaseMessageHandler
-from .canonical_message import CanonicalMessage, Protocol
+from .canonical_message import CanonicalMessage
 from .config import GatewayConfig
 from .meshcore_radio_config import (
     MeshCoreRadioConfig,
@@ -55,7 +55,7 @@ from .meshcore_radio_config import (
 from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
 from .meshcore_oracle_mixin import MeshCoreOracleMixin
-from .meshcore_dm_reply import PendingDmAcks, companion_error
+from .meshcore_dm_reply import PendingDmAcks
 from .meshcore_ingress import (
     InboundChannelPolicy,
     apply_inbound_policy,
@@ -76,7 +76,6 @@ from utils.meshcore_connection import (
     validate_meshcore_device,
 )
 from utils.safe_import import safe_import
-from utils.tx_guard import TransmitBlocked
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -111,32 +110,17 @@ __all__ = [
 from gateway.meshcore_simulator import MeshCoreSimulator
 
 
-def _record_tx(state: str, msg_id: Optional[str], reason: Optional[str] = None,
-               note: str = "") -> None:
-    """MeshCore egress → delivery_counters (2026-09-23): the primary radio's
-    sends never reached the Delivery screen, so a busy leg read as silence.
-    Lazy import — the module-level form deadlocked threaded startup
-    (bridge_send_mixin._LazyDeliveryCounters). record() never raises."""
-    try:
-        from gateway import delivery_counters as dc
-        dc.record(dc.DeliveryState(state), msg_id or f"meshcore-{time.time():.3f}",
-                  protocol="meshcore",
-                  drop_reason=dc.DropReason(reason) if reason else None,
-                  note=note[:80])
-    except Exception as e:
-        logger.warning(f"MeshCore delivery record failed ({state}): {e}")
-
-
-def _companion_refused(err: str, msg_id: Optional[str], what: str) -> bool:
-    """meshcore_py never raises on a failed send: the ERROR Event IS the
-    failure (review 2026-09-23 — it was being recorded as SENT)."""
-    logger.warning(f"MeshCore {what} refused by the companion: {err}")
-    _record_tx("dropped", msg_id, "non_retriable_error", f"companion {err}")
-    return False
+# Egress (send entry points, outbound worker, _send_message, the delivery
+# record helpers) split to meshcore_outbound_mixin 2026-10-24 (MF025);
+# the two helpers are re-exported for existing importers.
+from .meshcore_outbound_mixin import (  # noqa: E402,F401
+    MeshCoreOutboundMixin, _companion_refused, _record_tx,
+)
 
 
 class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleMixin,
-                      MeshCoreContactCaptureMixin, BaseMessageHandler):
+                      MeshCoreContactCaptureMixin, MeshCoreOutboundMixin,
+                      BaseMessageHandler):
     """
     Handles MeshCore companion radio connection and message processing.
 
@@ -936,356 +920,6 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
         m['channel_suppressed'] = self._inbound_policy.suppressed
         m['inbound_policy'] = self._inbound_policy.describe()
         return m
-
-    async def _process_outbound(self) -> None:
-        """Process outbound messages from the bridge → MeshCore."""
-        try:
-            msg = self._send_queue.get_nowait()
-        except Empty:
-            return
-
-        try:
-            channel = 0
-            reply_ctx = None
-            msg_id = None
-            if isinstance(msg, CanonicalMessage):
-                msg_id = msg.id
-                text = msg.to_meshcore_text()
-                dest = msg.destination_address
-                reply_ctx = msg.metadata.get('dm_reply_ctx')
-                # MeshCore channel slot rides on metadata since
-                # CanonicalMessage is protocol-agnostic. send_text() stashes
-                # it; routing fallbacks default to slot 0 (Public).
-                raw_channel = msg.metadata.get('channel')
-                channel = self._resolve_channel(
-                    raw_channel, source=f"CanonicalMessage dest={dest!r}"
-                )
-            elif isinstance(msg, dict):
-                text = msg.get('message', '')
-                dest = msg.get('destination')
-                msg_id = msg.get('id')
-                meta = msg.get('metadata')
-                if isinstance(meta, dict):
-                    reply_ctx = meta.get('dm_reply_ctx')
-                # Top-level 'channel' is the preferred carrier (set by
-                # send_text → CanonicalMessage path), but persistent
-                # queue replays from _requeue_failed_message lift channel
-                # from metadata into the outer dict at enqueue time. For
-                # any future call site that forgets to lift, fall back
-                # to metadata.channel before letting _resolve_channel
-                # default-to-zero. Channel-0 Public leak follow-up
-                # (2026-05-20).
-                raw_channel = msg.get('channel')
-                if raw_channel is None or raw_channel == '':
-                    meta = msg.get('metadata') or {}
-                    if isinstance(meta, dict):
-                        raw_channel = meta.get('channel')
-                channel = self._resolve_channel(
-                    raw_channel, source=f"dict dest={dest!r}"
-                )
-            else:
-                text = str(msg)
-                dest = None
-
-            success = await self._send_message(text, dest, channel=channel,
-                                               reply_ctx=reply_ctx, msg_id=msg_id)
-
-            if success:
-                with self._stats_lock:
-                    self.stats.setdefault('meshcore_tx', 0)
-                    self.stats['meshcore_tx'] += 1
-                self.health.record_message_sent("to_meshcore")
-            else:
-                with self._stats_lock:
-                    self.stats.setdefault('errors', 0)
-                    self.stats['errors'] += 1
-
-        except TransmitBlocked as e:
-            # Deliberate catch (see tx_guard docstring): the refusal is
-            # already recorded+logged by the guard; letting it fly would kill
-            # the outbound task mid-bookkeeping (the finding-5 class). The
-            # message is dropped, witnessed by the stat.
-            with self._stats_lock:
-                self.stats.setdefault('tx_blocked', 0)
-                self.stats['tx_blocked'] += 1
-            logger.warning(
-                f"MeshCore outbound refused by tx_guard — dropped: {e}")
-        except Exception as e:
-            logger.error(f"Error processing outbound MeshCore message: {e}")
-            # It must not vanish from the Delivery record (review 2026-09-23).
-            _record_tx("dropped", msg_id, "non_retriable_error", f"outbound: {e}")
-
-    async def _send_message(
-        self,
-        text: str,
-        destination: Optional[str] = None,
-        channel: int = 0,
-        reply_ctx: Optional[Dict[str, Any]] = None,
-        msg_id: Optional[str] = None,
-    ) -> bool:
-        """
-        Send a text message to the MeshCore network.
-
-        Args:
-            text: Message text (will be truncated to 160 bytes if needed)
-            destination: Destination address (None = channel broadcast)
-            channel: Channel slot for broadcasts (0 = Public; 1+ = private
-                slots set up via meshcore_set_channel.py / Node-Connect).
-            reply_ctx: directed-DM reply context — when set on a DM, the
-                send result's expected_ack is registered so _on_ack can
-                feed the delivery back as a [MC:reply] notice, and a
-                contact-not-found drop emits a negative notice instead of
-                leaving the addressed reply a silent void.
-
-        Returns:
-            True if sent successfully.
-        """
-        if not self._meshcore or not self._connected:
-            _record_tx("dropped", msg_id, "non_retriable_error", "not connected")
-            return False
-
-        # RF egress chokepoint — every MeshCore send funnels through here,
-        # and the companion is a real LoRa radio (2026-08-09 MF review: this
-        # radio sat entirely outside the egress architecture — and it is
-        # MeshAnchor's PRIMARY). The in-process simulator is not egress.
-        # OUTSIDE the try, so the refusal cannot be absorbed into
-        # "send failed".
-        if not isinstance(self._meshcore, MeshCoreSimulator):
-            from utils.tx_guard import assert_meshcore_tx_allowed
-            assert_meshcore_tx_allowed(
-                kind="meshcore_tx",
-                detail=f"meshcore_handler send dest={destination!r} "
-                       f"text={text[:40]!r}")
-
-        try:
-            if destination:
-                # Direct message — resolve the contact first. get_contacts()
-                # returns an Event whose payload is the actual dict/list of
-                # contacts; older code iterated the Event itself, which
-                # raised "Event object is not iterable".
-                if hasattr(self._meshcore, 'commands'):
-                    with timed_boundary("meshcore.get_contacts"):
-                        contacts_evt = await self._meshcore.commands.get_contacts()
-                    contacts = self._extract_contacts(contacts_evt)
-                    contact = self._find_contact(contacts, destination)
-                    if contact:
-                        with timed_boundary("meshcore.send_msg",
-                                            target=destination):
-                            send_evt = await self._meshcore.commands.send_msg(contact, text)
-                        err = companion_error(send_evt)
-                        if err is not None:
-                            self._notice_dm_refused(destination, err, reply_ctx)
-                            return _companion_refused(err, msg_id, f"DM {destination!r}")
-                        if reply_ctx is not None:
-                            self._register_dm_ack_watch(
-                                send_evt, destination, reply_ctx)
-                        _record_tx("sent", msg_id, note=f"dm {destination}")
-                        return True
-                # Contact resolution failed (advert aged out, peer never
-                # seen, etc.) — drop the DM rather than broadcasting it.
-                # See channel-0 Public leak (2026-05-19): a DM addressed
-                # to a specific recipient must never be aired to a
-                # channel audience on contact-not-found, because the
-                # default-channel cascade lands it on slot 0 (Public).
-                # Privacy bug independent of which channel; broadcast
-                # was never an intended fallback for a misdirected DM.
-                with self._stats_lock:
-                    self.stats.setdefault('meshcore_dm_dropped_contact_not_found', 0)
-                    self.stats['meshcore_dm_dropped_contact_not_found'] += 1
-                logger.warning(
-                    f"MeshCore DM dropped — contact not found for "
-                    f"{destination!r}. Pre-fix behavior was to broadcast "
-                    f"on slot {channel}, which leaked to Public; "
-                    f"see persistent_issues channel-0-leak-2026-05-19."
-                )
-                if reply_ctx is not None:
-                    # An addressed reply must not vanish silently: tell the
-                    # originating mesh the address didn't resolve.
-                    self._emit_dm_notice(
-                        f"✗ no MeshCore contact matching "
-                        f"'{destination}' — reply not delivered", reply_ctx)
-                _record_tx("dropped", msg_id, "destination_unreachable",
-                           f"no contact {destination}")
-                return False
-            else:
-                # Channel broadcast
-                if hasattr(self._meshcore, 'commands'):
-                    with timed_boundary("meshcore.send_chan_msg",
-                                        target=str(channel)):
-                        chan_evt = await self._meshcore.commands.send_chan_msg(
-                            channel, text)
-                    err = companion_error(chan_evt)
-                    if err is not None:
-                        return _companion_refused(err, msg_id, f"ch{channel}")
-                elif hasattr(self._meshcore, 'send_channel_txt_msg'):
-                    # Simulator: not egress, so never a delivery record (review A F5).
-                    with timed_boundary("meshcore.send_chan_msg",
-                                        target=str(channel)):
-                        await self._meshcore.send_channel_txt_msg(text)
-                    return True
-                else:
-                    logger.error("MeshCore instance has no send method")
-                    _record_tx("dropped", msg_id, "non_retriable_error", "no send method")
-                    return False
-                _record_tx("sent", msg_id, note=f"ch{channel}")
-                return True
-
-        except Exception as e:
-            logger.error(f"Failed to send MeshCore message: {e}")
-            _record_tx("dropped", msg_id, "non_retriable_error", str(e))
-            return False
-
-    @staticmethod
-    def _resolve_channel(raw_value: Any, source: str) -> int:
-        """Normalize a channel metadata value, surfacing missing/unparsable
-        cases at DEBUG.
-
-        The pre-2026-05-19 pattern ``int(meta.get('channel', 0) or 0)``
-        silently coerced None / '' / missing-key / unparsable values to 0
-        (Public), which masked the call site that should have set the
-        channel explicitly. After the channel-0 Public leak fix, the DM
-        side no longer broadcasts on contact-not-found, but explicit
-        broadcasts still default to 0 when the caller forgets to set it.
-        Logging surfaces those callers at DEBUG so they can be fixed
-        without changing routing behaviour.
-        """
-        if raw_value is None or raw_value == '':
-            logger.debug(
-                f"_process_outbound: {source} missing channel metadata, "
-                f"defaulting to slot 0 (Public)"
-            )
-            return 0
-        try:
-            return int(raw_value)
-        except (TypeError, ValueError):
-            logger.debug(
-                f"_process_outbound: {source} unparsable channel "
-                f"{raw_value!r}, defaulting to slot 0 (Public)"
-            )
-            return 0
-
-    @staticmethod
-    def _extract_contacts(contacts_evt: Any) -> List[Any]:
-        """Pull the contact list out of meshcore_py's get_contacts Event.
-
-        Real Event has `.payload` (dict keyed by name or list); simulator
-        returns a plain list. Both shapes flow through here.
-        """
-        if contacts_evt is None:
-            return []
-        payload = getattr(contacts_evt, 'payload', contacts_evt)
-        if isinstance(payload, dict):
-            return list(payload.values())
-        if isinstance(payload, list):
-            return payload
-        # Unknown shape — be defensive, don't iterate the Event itself.
-        return []
-
-    def _find_contact(self, contacts: List[Any], address: str) -> Optional[Any]:
-        """
-        Find a MeshCore contact matching the given address.
-
-        Args:
-            contacts: List of contact objects from meshcore_py
-            address: Address to match (pubkey prefix or name)
-
-        Returns:
-            Matching contact object or None.
-        """
-        if not contacts:
-            return None
-
-        for contact in contacts:
-            # Match by public key prefix
-            if isinstance(contact, dict):
-                pk = contact.get('public_key', b'')
-                name = contact.get('adv_name', '')
-            else:
-                pk = getattr(contact, 'public_key', b'')
-                name = getattr(contact, 'adv_name', '')
-
-            if isinstance(pk, bytes):
-                pk_hex = pk.hex()
-            else:
-                pk_hex = str(pk)
-
-            if address in pk_hex or address == name:
-                return contact
-
-        return None
-
-    def send_text(self, message: str, destination: str = None,
-                  channel: int = 0,
-                  reply_ctx: Optional[Dict[str, Any]] = None) -> bool:
-        """
-        Send a text message to MeshCore (synchronous interface).
-
-        Queues the message for async processing in the event loop.
-
-        Args:
-            message: Text content to send
-            destination: Destination address (None for broadcast)
-            channel: Channel index (MeshCore uses channels differently)
-            reply_ctx: directed-DM reply context ({contact, origin}) — when
-                set on a DM, the send's expected_ack is watched and the
-                delivery outcome fed back as a [MC:reply] bridge notice.
-
-        Returns:
-            True if queued successfully, False otherwise.
-        """
-        if not self._connected:
-            logger.warning("Not connected to MeshCore")
-            return False
-
-        try:
-            msg = CanonicalMessage(
-                content=message,
-                destination_address=destination,
-                is_broadcast=destination is None,
-                source_network=Protocol.MESHCORE.value,
-            )
-            # Carry the channel slot through metadata so _process_outbound
-            # can route to the right slot (CanonicalMessage is protocol-
-            # agnostic; channel is a MeshCore-specific concept).
-            msg.metadata['channel'] = int(channel)
-            if reply_ctx is not None:
-                msg.metadata['dm_reply_ctx'] = dict(reply_ctx)
-            self._send_queue.put_nowait(msg)
-            # Record outbound for TUI parity — operators need to see what
-            # they sent alongside what came in.
-            self.record_chat_message(
-                direction="tx",
-                text=message,
-                channel=channel if destination is None else None,
-                destination=destination,
-            )
-            return True
-        except Full:
-            logger.warning("MeshCore send queue full")
-            return False
-
-    def queue_send(self, payload: Dict) -> bool:
-        """
-        Send handler for persistent queue — MeshCore destination.
-
-        Args:
-            payload: Dictionary with 'message', 'destination', 'channel' keys
-
-        Returns:
-            True if queued successfully.
-        """
-        message = payload.get('message', '')
-        destination = payload.get('destination')
-
-        if not self._connected:
-            return False
-
-        try:
-            self._send_queue.put_nowait(payload)
-            return True
-        except Full:
-            logger.warning("MeshCore send queue full (persistent)")
-            return False
 
     def disconnect(self) -> None:
         """Disconnect from MeshCore companion radio."""

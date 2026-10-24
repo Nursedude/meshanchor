@@ -917,7 +917,9 @@ MF025_SPLIT_HINTS = {
         "meshcore_* modules here vs 2 in MeshForge), so MF's smaller handler is "
         "a thinner implementation, not a proven split. A split here is a real "
         "design decision: find a seam with meaning, or say plainly that the "
-        "file earns its size."
+        "file earns its size. Seams taken so far: egress → "
+        "meshcore_outbound_mixin.py (2026-10-24), DM ack → "
+        "meshcore_dm_ack_mixin.py, radio ops → meshcore_radio_ops_mixin.py."
     ),
 }
 
