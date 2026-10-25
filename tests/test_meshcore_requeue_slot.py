@@ -476,6 +476,8 @@ def test_an_out_of_range_bridge_slot_is_refused_and_recorded(
              if e.protocol == "meshcore"]
     assert drops == [("dropped", "unsendable", "meshtastic")]
     assert bridge.stats["meshcore_bridge_slot_out_of_range"] == 1
+    # One message, one stat (review of 6a21cde3, #3): not ALSO "unset".
+    assert "meshcore_bridge_default_channel_drop" not in bridge.stats
 
 
 def test_an_unset_bridge_slot_records_no_failure(bridge):  # noqa: F811
@@ -531,3 +533,51 @@ def test_repeated_refusals_warn_once_and_count_every_one(tmp_path, caplog):
         assert len(said) == 1 and "4 more suppressed" in said[0]
     finally:
         q.stop_processing()
+
+
+# ── review of 6a21cde3 (fix round) ────────────────────────────────────
+
+@pytest.mark.parametrize("slot", [300, True, 1.9, "Public"])
+def test_the_resolver_is_pure(bridge, slot):  # noqa: F811
+    # #2: the replay path calls the resolver BEFORE its private-message
+    # check; a resolver that records made one private message two drops.
+    # The CALLER records, once, on the branch that actually drops.
+    bridge.config.meshcore.bridge_target_channel = slot
+    assert bridge._resolve_bridge_target_channel(_mesh_broadcast()) == -1
+    assert dc.get_singleton().recent(200) == []
+    assert "meshcore_bridge_slot_out_of_range" not in bridge.stats
+
+
+@pytest.mark.parametrize("slot", [True, 1.9, "Public"])
+def test_a_non_slot_config_never_airs_live(bridge, slot):  # noqa: F811
+    # #9: int(True) == int(1.9) == 1 aired live on slot 1 while the queue's
+    # predicate refused the same value. ONE predicate for both paths.
+    bridge.config.meshcore.bridge_target_channel = slot
+    bridge._meshcore_handler = MagicMock()
+
+    bridge._process_bridge_to_meshcore(_mesh_broadcast(channel=0))
+
+    bridge._meshcore_handler.send_text.assert_not_called()
+    assert bridge.stats["meshcore_bridge_slot_out_of_range"] == 1
+
+
+def test_a_digit_string_config_still_bridges(bridge):  # noqa: F811
+    # Control: JSON config is not coerced by the dataclass; "1" worked
+    # before (int()) and must keep working.
+    bridge.config.meshcore.bridge_target_channel = "1"
+    assert bridge._resolve_bridge_target_channel(_mesh_broadcast()) == 1
+
+
+def test_a_raising_validator_reads_as_our_error_not_the_destinations(
+        tmp_path):
+    # #8: fail-closed is right, but a validator bug is a GATEWAY fault —
+    # labelling it unsendable sends the operator to the slot config.
+    def boom(payload):
+        raise KeyError("shape")
+    q = PersistentMessageQueue(db_path=str(tmp_path / "boom.db"))
+    q.register_sender("meshcore", lambda p: True, validate_fn=boom)
+    try:
+        assert q.enqueue({"message": "x", "channel": 1}, "meshcore") is None
+    finally:
+        q.stop_processing()
+    assert _drop_reasons("refused-") == [("dropped", "non_retriable_error")]

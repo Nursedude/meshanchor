@@ -192,7 +192,8 @@ class DeliveryEvent:
 
 # Terminal DELIVERY-failure reasons — the denominator's failure half for the
 # honest confirmation view. Deliberately excludes benign pre-delivery drops
-# (dedup, queue_pressure, queue_shed, evicted_overflow, invalid_payload):
+# (dedup, queue_pressure, queue_shed, evicted_overflow; invalid_payload —
+# no producer since 2026-10-24, the slot gates moved to UNSENDABLE):
 # those messages never reached a delivery attempt, so counting them would
 # read as delivery failure. PORT of MeshForge's #74 display cure (twin file,
 # UNTRACKED-diverged tier — keep the reason set aligned when either side

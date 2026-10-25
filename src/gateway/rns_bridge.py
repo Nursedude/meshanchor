@@ -954,10 +954,7 @@ class RNSMeshtasticBridge(MessageTransformMixin,  # first: its methods were on t
                                 "mesh_to_meshcore", requeued=False,
                             )
                         elif target_channel < 0:
-                            with self._stats_lock:
-                                self.stats.setdefault(
-                                    'meshcore_bridge_default_channel_drop', 0)
-                                self.stats['meshcore_bridge_default_channel_drop'] += 1
+                            self._note_bridge_slot_drop(msg)
                             logger.warning(
                                 "Bridge →MC (replay): no valid channel "
                                 "(config.meshcore.bridge_target_channel unset "
@@ -978,13 +975,6 @@ class RNSMeshtasticBridge(MessageTransformMixin,  # first: its methods were on t
                                 logger.debug(
                                     "→MeshCore: subsystem down, "
                                     f"queued for replay on ch{target_channel}"
-                                )
-                            else:
-                                # Refused / deduped / no sender: the queue
-                                # said why; health must still see the loss
-                                # (re-review of 7c582519, #2).
-                                self.health.record_message_failed(
-                                    "mesh_to_meshcore", requeued=False,
                                 )
                     else:
                         self._process_bridge_to_meshcore(msg)

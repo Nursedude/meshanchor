@@ -474,10 +474,12 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
 
         validate_fn = self._send_validators.get(destination)
         if validate_fn is not None:
+            validator_raised = False
             try:
                 refusal = validate_fn(payload)
             except Exception as e:
                 refusal = f"validator raised: {e}"   # fail closed
+                validator_raised = True
             if refusal:
                 with self._lock:
                     self._stats["refused_invalid"] += 1
@@ -501,7 +503,11 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                     _dc.DeliveryState.DROPPED,
                     msg_id=f"refused-{content_hash[:8]}",
                     protocol=destination, source=source,
-                    drop_reason=_dc.DropReason.UNSENDABLE,
+                    # A validator that RAISED is our bug, not the
+                    # destination refusing (review of 6a21cde3, #8).
+                    drop_reason=(_dc.DropReason.NON_RETRIABLE_ERROR
+                                 if validator_raised
+                                 else _dc.DropReason.UNSENDABLE),
                     note=str(refusal)[:80],
                 )
                 return None

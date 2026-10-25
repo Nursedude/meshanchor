@@ -532,10 +532,7 @@ class MeshCoreBridgeMixin:
 
             target_channel = self._resolve_bridge_target_channel(msg)
             if target_channel < 0:
-                with self._stats_lock:
-                    self.stats.setdefault(
-                        'meshcore_bridge_default_channel_drop', 0)
-                    self.stats['meshcore_bridge_default_channel_drop'] += 1
+                self._note_bridge_slot_drop(msg)
                 logger.warning(
                     f"Bridge {net_prefix}→MC: no valid channel "
                     f"(config.meshcore.bridge_target_channel unset or not "
@@ -655,29 +652,60 @@ class MeshCoreBridgeMixin:
         MeshCore source slot.
 
         Returns:
-          - ``config.meshcore.bridge_target_channel`` if in 0..255
+          - ``config.meshcore.bridge_target_channel`` if it is a slot
           - -1 (caller drops the message) otherwise
 
-        Above 255 is not a slot (the wire byte, ``MESHCORE_MAX_SLOT``): the
-        ONE bound for the live and replay paths (re-review of 7c582519, #3).
-        That message is refused HERE and recorded DROPPED ``unsendable`` —
-        a misconfiguration losing every bridged message is a delivery
-        failure. Unset records nothing: the bridge to MeshCore is off.
+        PURE (review of 6a21cde3, #2): the replay path asks this BEFORE its
+        private-message check, so the caller that actually drops records,
+        once, via ``_note_bridge_slot_drop``.
+        """
+        return self._bridge_slot_config()[0]
+
+    def _bridge_slot_config(self) -> "tuple[int, str]":
+        """``(slot, state)`` for config.meshcore.bridge_target_channel.
+
+        state ``ok`` → slot is airable; ``unset`` (None / negative, the
+        default -1) → the bridge to MeshCore is off by config; ``invalid``
+        → configured but not a slot. Validity is the queue's own predicate
+        (``queue_row_slot``: an int 0..255, never a bool or a float — review
+        of 6a21cde3, #9), so the live and replay paths cannot disagree. A
+        digit string is coerced first: JSON config is not typed by the
+        dataclass, and ``"1"`` worked before.
+        """
+        from .meshcore_outbound_mixin import queue_row_slot
+        meshcore_cfg = getattr(self.config, 'meshcore', None)
+        raw = getattr(meshcore_cfg, 'bridge_target_channel', -1)
+        if isinstance(raw, str):
+            try:
+                raw = int(raw.strip())
+            except ValueError:
+                return -1, "invalid"
+        if raw is None or (isinstance(raw, int) and not isinstance(raw, bool)
+                           and raw < 0):
+            return -1, "unset"
+        slot = queue_row_slot({'channel': raw})
+        return (slot, "ok") if slot >= 0 else (-1, "invalid")
+
+    def _note_bridge_slot_drop(self, msg) -> None:
+        """The witness for a message dropped because no slot resolved.
+
+        Unset: ``meshcore_bridge_default_channel_drop`` only — the bridge is
+        off, not failing. Invalid: ``meshcore_bridge_slot_out_of_range`` +
+        DROPPED ``unsendable`` on the leg — a misconfiguration losing every
+        bridged message is a delivery failure (operator 2026-10-24). One
+        stat per message, never both (review of 6a21cde3, #3).
         """
         from .meshcore_outbound_mixin import MESHCORE_MAX_SLOT, _record_tx
-        meshcore_cfg = getattr(self.config, 'meshcore', None)
-        cfg_slot = getattr(meshcore_cfg, 'bridge_target_channel', -1)
-        try:
-            cfg_slot = int(cfg_slot)
-        except (TypeError, ValueError):
-            cfg_slot = -1
-        if cfg_slot > MESHCORE_MAX_SLOT:
-            with self._stats_lock:
-                self.stats.setdefault('meshcore_bridge_slot_out_of_range', 0)
-                self.stats['meshcore_bridge_slot_out_of_range'] += 1
+        state = self._bridge_slot_config()[1]
+        key = ('meshcore_bridge_slot_out_of_range' if state == "invalid"
+               else 'meshcore_bridge_default_channel_drop')
+        with self._stats_lock:
+            self.stats.setdefault(key, 0)
+            self.stats[key] += 1
+        if state == "invalid":
+            cfg = getattr(getattr(self.config, 'meshcore', None),
+                          'bridge_target_channel', None)
             _record_tx("dropped", getattr(msg, 'id', None), "unsendable",
-                       f"bridge_target_channel={cfg_slot} not a slot "
+                       f"bridge_target_channel={cfg!r} not a slot "
                        f"(0..{MESHCORE_MAX_SLOT})",
                        source=self._leg_source(msg))
-            return -1
-        return cfg_slot if cfg_slot >= 0 else -1
