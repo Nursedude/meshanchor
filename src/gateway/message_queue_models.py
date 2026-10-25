@@ -59,7 +59,7 @@ class SendDeferred(Exception):
 class SendRefused(Exception):
     """Raised by a queue sender: "this row can never be sent as written".
 
-    The row dead-letters on THIS attempt as ``INVALID_PAYLOAD`` with its
+    The row dead-letters on THIS attempt as ``UNSENDABLE`` with its
     DROPPED witness and terminal hook — a plain False would read as
     transient, burn the retry budget and record "retries exhausted".
     """

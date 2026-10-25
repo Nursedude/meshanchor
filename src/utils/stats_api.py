@@ -34,7 +34,12 @@ returned so any future counter shows up automatically):
       ``refused_invalid`` — served beside this dict as
       ``queue_counters.refused_invalid`` (null + ``queue_counters_unobservable``
       when there is no queue to read, never zeros) — and recorded on the
-      Delivery screen as DROPPED ``invalid_payload``.
+      Delivery screen as DROPPED ``unsendable`` — a delivery FAILURE on its
+      leg (operator 2026-10-24), not a benign drop.
+
+  meshcore_bridge_slot_out_of_range  — config.meshcore.bridge_target_channel
+      is set but is not a slot (0..255): every bridged message is refused
+      at the bridge and recorded DROPPED ``unsendable``. Fix the config.
 
   meshcore_queue_row_no_slot_refused  — the worker BACKSTOP only: a
       slot-less channel row reached the MeshCore send queue without going

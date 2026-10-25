@@ -160,7 +160,7 @@ class MeshCoreOutboundMixin:
                         # Reachable only by a path that skipped queue_send.
                         # Same drop_reason as the queue's two gates (#5).
                         self._note_no_slot_refusal(msg_id, raw_channel)
-                        _record_tx("dropped", msg_id, "invalid_payload",
+                        _record_tx("dropped", msg_id, "unsendable",
                                    "queue row: no explicit slot", source=source)
                         return
                 else:

@@ -194,6 +194,8 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
         # destination that has no registered sender (e.g. meshtastic-leg
         # on a meshcore-only gateway box).
         self._no_sender_log_state: Dict[str, "tuple[float, int]"] = {}
+        # Same throttle shape for enqueue refusals (queued #7, 2026-10-24).
+        self._refused_log_state: Dict[str, "tuple[float, int]"] = {}
 
         # Initialize database
         self._init_db()
@@ -479,13 +481,27 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             if refusal:
                 with self._lock:
                     self._stats["refused_invalid"] += 1
-                logger.warning(f"queue: {destination} row refused at enqueue, "
-                               f"never written: {refusal}")
+                # Every writer funnels into this one line now that the queue
+                # is the ONE gate: rate-limited like the no-sender log above.
+                # The counter and the DROPPED record still count every row.
+                now = time.time()
+                last_ts, suppressed = self._refused_log_state.get(
+                    destination, (0.0, 0))
+                if now - last_ts >= self.NO_SENDER_LOG_INTERVAL:
+                    more = (f" ({suppressed} more suppressed in the last "
+                            f"{self.NO_SENDER_LOG_INTERVAL}s)"
+                            if suppressed else "")
+                    logger.warning(f"queue: {destination} row refused at "
+                                   f"enqueue, never written: {refusal}{more}")
+                    self._refused_log_state[destination] = (now, 0)
+                else:
+                    self._refused_log_state[destination] = (
+                        last_ts, suppressed + 1)
                 _dc.record(
                     _dc.DeliveryState.DROPPED,
                     msg_id=f"refused-{content_hash[:8]}",
                     protocol=destination, source=source,
-                    drop_reason=_dc.DropReason.INVALID_PAYLOAD,
+                    drop_reason=_dc.DropReason.UNSENDABLE,
                     note=str(refusal)[:80],
                 )
                 return None
@@ -795,7 +811,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
     def mark_refused(self, msg_id: str, reason: str = "") -> bool:
         """Dead-letter a row its sender refused as unsendable (SendRefused).
 
-        One attempt, no retry: DROPPED ``invalid_payload`` on the row's own
+        One attempt, no retry: DROPPED ``unsendable`` on the row's own
         id, WARNING, terminal hook. Guarded like mark_failed — a row already
         terminal is not a second loss.
         """
@@ -825,7 +841,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             _dc.DeliveryState.DROPPED, msg_id=msg_id,
             protocol=message.destination,
             source=payload_source(message.payload),
-            drop_reason=_dc.DropReason.INVALID_PAYLOAD, note=str(reason)[:80],
+            drop_reason=_dc.DropReason.UNSENDABLE, note=str(reason)[:80],
         )
         self._fire_terminal(message.destination, message.payload, "dropped")
         return True
@@ -871,7 +887,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 retry budget cannot dead-letter them.
             validate_fn: Optional payload -> refusal reason (None = valid),
                 asked by enqueue(). A refused row is never written: DROPPED
-                ``invalid_payload`` + WARNING. The sender stays the backstop
+                ``unsendable`` + WARNING (rate-limited). The sender stays the backstop
                 for rows already queued (raise SendRefused).
         """
         self._send_callbacks[destination] = send_fn

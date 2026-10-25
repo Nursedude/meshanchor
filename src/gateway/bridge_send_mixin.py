@@ -761,7 +761,7 @@ class BridgeSendMixin:
                 # metadata.channel (the SOURCE protocol's index; Meshtastic's
                 # primary is 0 = MeshCore Public). The queue's validate_fn
                 # (validate_queue_row) is the ONE gate that refuses a missing
-                # or non-slot value: one counter, one DROPPED invalid_payload
+                # or non-slot value: one counter, one DROPPED unsendable
                 # (review of 39f566c1, #3/#9). enqueue returns None → False.
                 if channel_override is not None:
                     payload['channel'] = channel_override

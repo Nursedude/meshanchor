@@ -72,7 +72,7 @@ class TestDropReasonEnum:
             "RETRIES_EXHAUSTED", "NON_RETRIABLE_ERROR",
             "CIRCUIT_OPEN", "WEDGED", "DESTINATION_UNREACHABLE",
             "RNS_DELIVERY_FAILED", "DELIVERY_TIMEOUT",
-            "EVICTED_OVERFLOW", "INVALID_PAYLOAD", "UNKNOWN",
+            "EVICTED_OVERFLOW", "INVALID_PAYLOAD", "UNSENDABLE", "UNKNOWN",
         ]:
             assert required in names, f"DropReason.{required} missing"
 

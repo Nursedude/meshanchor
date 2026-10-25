@@ -127,6 +127,11 @@ class DropReason(Enum):
     DELIVERY_TIMEOUT = "delivery_timeout"
     EVICTED_OVERFLOW = "evicted_overflow"
     INVALID_PAYLOAD = "invalid_payload"
+    # 2026-10-24 (operator): the destination's own gate refused a message the
+    # gateway had ACCEPTED, as not sendable as addressed (MeshCore: no slot
+    # 0..255). It is lost, so it is a delivery failure — unlike
+    # INVALID_PAYLOAD, which stays benign. MeshForge carries the same member.
+    UNSENDABLE = "unsendable"
     # ROADMAP 6f (MF lead): a queued row outlived its max age undelivered.
     EXPIRED = "expired"
     UNKNOWN = "unknown"
@@ -202,6 +207,7 @@ DELIVERY_FAILURE_REASONS = frozenset({
     DropReason.CIRCUIT_OPEN.value,
     DropReason.WEDGED.value,
     DropReason.EXPIRED.value,
+    DropReason.UNSENDABLE.value,
 })
 
 
