@@ -13,8 +13,10 @@ every bridge→MeshCore send to the swallow in _process_bridge_to_meshcore.
 
 import logging
 import time
+from queue import Full
 from typing import Optional
 
+from .base_handler import is_already_bridged
 from .bridge_health import SubsystemState, MessageOrigin
 from .meshcore_dm_reply import (
     DirectedReply,
@@ -23,6 +25,10 @@ from .meshcore_dm_reply import (
 )
 
 logger = logging.getLogger(__name__)
+
+# One WARNING per window for a fan-out loss; DEBUG after (twin of
+# _meshcore_ingress.INGRESS_FULL_WARN_WINDOW_S).
+FANOUT_WARN_WINDOW_S = 300.0
 
 # MeshCore-origin bridge markers. Content carrying any of these (possibly
 # nested after a wire prefix) originated on MeshCore and must never be
@@ -382,6 +388,64 @@ class MeshCoreBridgeMixin:
         except Exception as e:  # noqa: BLE001 — the count above already landed
             logger.debug(f"MC→RNS: health record failed: {e}")
 
+    def _fan_out_to_meshcore(self, msg) -> None:
+        """The ONE entry from the bridge loop onto the →MeshCore queue
+        (bridge matrix F16, MeshForge lead). Decided on the MeshCore leg's
+        own facts — never on what Mesh→RNS decided, so an RNS outage cannot
+        starve it:
+
+        - internet / MQTT origin: never a MeshCore attempt (quiet; the same
+          filter _process_bridge_to_meshcore applies, run first so the echo
+          counter means the same thing on both twins);
+        - a bridge-tagged Meshtastic line is already bridged — counted
+          (split-horizon in _process_bridge_to_meshcore sees only MeshCore
+          markers, so ``[RNS:…]`` used to leave as ``[Mesh:x] [RNS:…]``).
+          ⚠️ Trade-off, same as the 10-19 Mesh→RNS guard: "already bridged"
+          means bridged to RNS. This box's MeshCore then gets that content
+          only via MA-4 (RNS→MeshCore), i.e. only if this box is a
+          recipient of the sender's LXMF fan-out — e.g. an MF-6
+          ``[Mesh:<preset>]`` forward heard here is no longer re-aired;
+        - a full queue is a lost message — counted, WARNING once a window.
+
+        MeshForge's ``can_broadcast`` refusal (F5) is not ported: MeshAnchor
+        has outbound slot routing.
+        """
+        if not self._meshcore_handler:
+            return
+        if getattr(msg, 'via_internet', False) or \
+                getattr(msg, 'origin', None) == MessageOrigin.MQTT:
+            return   # _process_bridge_to_meshcore's filter, applied early
+        if getattr(msg, "source_network", None) == "meshtastic" and \
+                is_already_bridged(getattr(msg, "content", None)):
+            self._fanout_count('meshcore_fanout_echo_suppressed')
+            logger.debug("→MeshCore: bridge-tagged Meshtastic line not fanned "
+                         "out (already bridged): %r", str(msg.content)[:48])
+            return
+        try:
+            self._bridge_to_meshcore_queue.put_nowait(msg)
+        except Full:
+            total = self._fanout_count('meshcore_fanout_dropped_queue_full')
+            self._fanout_warn('queue_full', f"→MeshCore queue full — message dropped "
+                              f"({total} so far)")
+
+    def _fanout_count(self, key: str) -> int:
+        with self._stats_lock:
+            self.stats[key] = self.stats.get(key, 0) + 1
+            return self.stats[key]
+
+    def _fanout_warn(self, reason: str, what: str) -> None:
+        """WARNING once per window PER REASON, DEBUG after — a stalled leg must not flood the journal, and one reason's warning
+        must not hide another's."""
+        now = time.monotonic()
+        warned = self.__dict__.setdefault('_fanout_warned_at', {})
+        last = warned.get(reason)
+        if last is None or now - last >= FANOUT_WARN_WINDOW_S:
+            warned[reason] = now
+            logger.warning(f"{what}; further ones at DEBUG for "
+                           f"{FANOUT_WARN_WINDOW_S:.0f}s")
+        else:
+            logger.debug(what)
+
     def _process_bridge_to_meshcore(self, msg) -> None:
         """Process message from other networks → MeshCore.
 
@@ -557,9 +621,9 @@ class MeshCoreBridgeMixin:
                     key = f'messages_{src_net}_to_meshcore'
                     self.stats.setdefault(key, 0)
                     self.stats[key] += 1
-                self.health.record_message_sent(f"mesh_to_meshcore"
-                                                if src_net == "meshtastic"
-                                                else "rns_to_meshcore")
+                # No health "sent" here: send_to_meshcore returns True on
+                # ENQUEUE (bridge matrix F5). The TX worker records the
+                # outcome as to_meshcore sent / failed.
             else:
                 logger.warning(f"Failed to bridge {net_prefix}→MC")
                 with self._stats_lock:
@@ -624,9 +688,7 @@ class MeshCoreBridgeMixin:
             with self._stats_lock:
                 self.stats.setdefault('meshcore_dm_reply_tx', 0)
                 self.stats['meshcore_dm_reply_tx'] += 1
-            self.health.record_message_sent(
-                "mesh_to_meshcore" if src_net == "meshtastic"
-                else "rns_to_meshcore")
+            # Enqueued, not delivered (F5): the TX worker counts the outcome.
         else:
             logger.warning(
                 f"Bridge {net_prefix}→MC DM @{parsed.contact_query} failed to queue")

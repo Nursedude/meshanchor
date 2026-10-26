@@ -183,6 +183,10 @@ class MeshCoreOutboundMixin:
                 with self._stats_lock:
                     self.stats.setdefault('errors', 0)
                     self.stats['errors'] += 1
+                # The outcome, not the hand-off: the bridge no longer counts
+                # an ENQUEUE as sent (bridge matrix F5, MeshForge lead), so
+                # this is health's only view of a send that did not air.
+                self.health.record_message_failed("to_meshcore", requeued=False)
 
         except TransmitBlocked as e:
             # Deliberate catch (see tx_guard docstring): the refusal is
