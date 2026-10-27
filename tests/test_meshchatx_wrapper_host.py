@@ -32,7 +32,15 @@ def _run(tmp_path, env_text=None):
                                                   str(cfg)))
     if env_text is not None:
         (home / ".config" / "meshanchor" / "meshchatx.env").write_text(env_text)
-    env = {"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    # Never read this box's rnsd: the wrapper's #69 owner wait is pinned in
+    # test_meshchatx_wrapper_rnsd_wait.py; here rnsd reads as not installed.
+    stubs = tmp_path / "stubs"
+    stubs.mkdir(exist_ok=True)
+    (stubs / "systemctl").write_text(
+        "#!/usr/bin/env bash\nprintf 'LoadState=not-found\\n'\n")
+    (stubs / "systemctl").chmod(0o755)
+    env = {"HOME": str(home),
+           "PATH": f"{stubs}:" + os.environ.get("PATH", "/usr/bin:/bin")}
     return subprocess.run(["bash", str(script)], env=env, capture_output=True,
                           text=True, timeout=30)
 

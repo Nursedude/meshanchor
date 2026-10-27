@@ -135,7 +135,148 @@ if [[ "${MCX_HOST}" != 127.* && "${MCX_HOST}" != "::1" ]]; then
 fi
 
 # --------------------------------------------------------------------
-# 5. Exec MeshChatX with canonical flags
+# 5. Wait for rnsd to OWN the shared-instance socket (#69 boot race)
+# --------------------------------------------------------------------
+# MeshChatX embeds stock RNS: whoever binds @rns/<instance> first becomes
+# the shared-instance HOST. On the 2026-10-26 meshanchor-server reboot this
+# (lingering, user) unit reached its RNS stage 0.6s before rnsd (system
+# unit, behind its IPv6 gate) bound the socket, so MeshChatX hosted and
+# rnsd ran as its client. The unit's After=rnsd.service cannot prevent
+# that: a USER manager cannot order against a SYSTEM unit.
+#
+# So wait for an OWNER, not a socket (MeshForge cfad33b2): the listener
+# must belong to rnsd's MainPID (or a process named rnsd). A squatter
+# keeps us waiting; past the budget we exit 75 and Restart= retries, so
+# MeshChatX comes up once rnsd does. A deliberate absence — rnsd not
+# installed, or disabled AND stopped — is the operator's call: skip, say so.
+# ⚠️ Behaviour change: an rnsd that is enabled but FAILED now keeps
+# MeshChatX down (loudly, retrying) where it used to run standalone — a
+# standalone MeshChatX IS the squatter rnsd later loses to.
+# MESHANCHOR_RNSD_WAIT_S exists for tests; keep the budget well above
+# RestartSec x StartLimitBurst / StartLimitIntervalSec or 75 parks the unit.
+EXIT_RNSD_NOT_OWNER=75
+RNSD_WAIT_S="${MESHANCHOR_RNSD_WAIT_S:-90}"
+
+# rns_cfg_value <key> — last matching line, unquoted the way configobj does
+# (instance_name = "mf" binds @rns/mf, not @rns/"mf").
+rns_cfg_value() {
+    local cfg="" v=""
+    if [[ -r /etc/reticulum/config ]]; then
+        cfg=/etc/reticulum/config
+    elif [[ -r "${HOME}/.reticulum/config" ]]; then
+        cfg="${HOME}/.reticulum/config"
+    fi
+    [[ -n "${cfg}" ]] || return 0
+    v="$(grep -E "^[[:space:]]*$1[[:space:]]*=" "${cfg}" | tail -n 1 || true)"
+    v="${v#*=}"; v="${v%%#*}"; v="${v//[[:space:]]/}"
+    v="${v//\"/}"; v="${v//\'/}"
+    printf '%s' "${v}"
+}
+
+prop() {   # prop <Key> — from the current RNSD_PROPS snapshot
+    sed -n "s/^$1=//p" <<<"${RNSD_PROPS}" | head -n 1
+}
+
+# Which manager runs rnsd? The fleet's is a SYSTEM unit; rnsd-user.service
+# documents a USER-unit install. RNSD_SCOPE: system | user | none (asked
+# both, neither has it) | "" (systemctl unreadable — UNOBSERVABLE, never
+# read as "not installed").
+read_rnsd_unit() {
+    local q=(show rnsd.service -p LoadState -p UnitFileState
+             -p ActiveState -p MainPID) sys usr
+    sys="$(systemctl "${q[@]}" 2>/dev/null || true)"
+    RNSD_PROPS="${sys}"
+    if [[ -n "${sys}" && "$(prop LoadState)" != "not-found" ]]; then
+        RNSD_SCOPE=system; return
+    fi
+    usr="$(systemctl --user "${q[@]}" 2>/dev/null || true)"
+    RNSD_PROPS="${usr}"
+    if [[ -n "${usr}" && "$(prop LoadState)" != "not-found" ]]; then
+        RNSD_SCOPE=user; return
+    fi
+    if [[ -n "${sys}" ]]; then
+        RNSD_SCOPE=none; RNSD_PROPS="${sys}"
+    else
+        RNSD_SCOPE=""; RNSD_PROPS=""
+    fi
+}
+
+SHARED_TYPE="$(rns_cfg_value shared_instance_type)"
+INSTANCE="$(rns_cfg_value instance_name)"
+RNS_SOCK="@rns/${INSTANCE:-default}"
+read_rnsd_unit
+
+if [[ "${SHARED_TYPE,,}" == "tcp" ]]; then
+    err "shared_instance_type = tcp - there is no ${RNS_SOCK} socket to own;" \
+        "not waiting (the #69 owner check covers unix shared instances only)."
+elif [[ "${RNSD_SCOPE}" == "none" ]]; then
+    err "rnsd.service not installed here (system or user) - not waiting;" \
+        "MeshChatX may host ${RNS_SOCK} itself."
+elif [[ -n "${RNSD_SCOPE}" \
+        && ( "$(prop LoadState)" == "masked" \
+             || "$(prop UnitFileState)" == "disabled" \
+             || "$(prop UnitFileState)" == "masked" ) \
+        && "$(prop ActiveState)" != "active" \
+        && "$(prop ActiveState)" != "activating" ]]; then
+    # Only disabled/masked is deliberate: static/indirect/enabled-runtime/...
+    # read `inactive` at boot before rnsd's job runs — that IS the race.
+    err "rnsd.service (${RNSD_SCOPE}) is $(prop UnitFileState) and" \
+        "$(prop ActiveState) - a deliberate stop; not waiting," \
+        "MeshChatX may host ${RNS_SOCK} itself."
+elif ! command -v ss >/dev/null 2>&1; then
+    err "ss (iproute2) not found - cannot see who owns ${RNS_SOCK};" \
+        "starting UNCHECKED (#69 boot race possible)."
+else
+    deadline=$(( SECONDS + RNSD_WAIT_S ))
+    owner="nobody (socket absent)"
+    while :; do
+        read_rnsd_unit
+        mainpid="$(prop MainPID)"
+        row="$(ss -xHnlp 2>/dev/null \
+            | awk -v s="${RNS_SOCK}" '$5 == s' | head -n 1 || true)"
+        ok=false
+        if [[ -z "${RNSD_SCOPE}" ]]; then
+            owner="UNKNOWN (systemctl unreadable - rnsd state unobservable)"
+        elif [[ -n "${row}" && "${row}" == *users:* ]]; then
+            # Every ("name",pid=N) holder; any one being rnsd is the owner.
+            owner=""
+            while IFS= read -r h; do
+                [[ -n "${h}" ]] || continue
+                hname="${h#(\"}"; hname="${hname%%\"*}"
+                hpid="${h##*pid=}"
+                if [[ "${hname}" == "rnsd" || ( -n "${hpid}" \
+                        && "${mainpid:-0}" != "0" && "${hpid}" == "${mainpid}" ) ]]; then
+                    ok=true; break
+                fi
+                owner="${owner:+${owner}, }${hname} pid ${hpid}"
+            done < <(grep -oE '\("[^"]*",pid=[0-9]+' <<<"${row}" || true)
+            owner="${owner:-unparseable holder: ${row##*users:}} (not rnsd)"
+        elif [[ -n "${row}" ]]; then
+            if [[ "$(prop ActiveState)" == "active" ]]; then
+                err "owner of ${RNS_SOCK} not visible to $(id -un);" \
+                    "rnsd.service is active - ASSUMING it is rnsd's, unverified."
+                ok=true
+            else
+                owner="not visible to $(id -un), rnsd $(prop ActiveState)"
+            fi
+        fi
+        "${ok}" && break
+        if (( SECONDS >= deadline )); then
+            err "rnsd has not taken ${RNS_SOCK} in ${RNSD_WAIT_S}s - owner:" \
+                "${owner}."
+            err "  Refusing to start: MeshChatX would become the shared-instance"
+            err "  host and rnsd its client (#69). Restart= retries in a moment."
+            err "  CHECK: sudo ss -xnlp | grep '@rns/'   (owner must be rnsd)"
+            err "         systemctl status rnsd"
+            err "  REPAIR ORDER: stop the squatter -> restart rnsd -> start it."
+            exit "${EXIT_RNSD_NOT_OWNER}"
+        fi
+        sleep 1
+    done
+fi
+
+# --------------------------------------------------------------------
+# 6. Exec MeshChatX with canonical flags
 # --------------------------------------------------------------------
 # --headless        : no Electron/browser auto-launch
 # --host            : MCX_HOST above (default 127.0.0.1)

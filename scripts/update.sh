@@ -410,6 +410,25 @@ if [[ -n "$REAL_USER" && -d "$INSTALL_DIR/templates/systemd" ]]; then
         done <<< "$uut_plan"
     fi
     # END user-template deploy
+    # The MeshChatX wrapper is copied by install_meshchatx.sh (TUI-driven),
+    # so a pull alone never reached it: the #69 rnsd-owner wait (2026-10-26)
+    # would sit in the repo while the box kept the old wrapper. Refresh it
+    # ONLY where it is already installed, byte-compared like the installer;
+    # no restart — it takes effect on the next start, which is the boot race.
+    mcx_src="$INSTALL_DIR/templates/python/meshchatx_wrapper.sh"
+    mcx_dst="$REAL_HOME/.config/meshanchor/meshchatx_wrapper.sh"
+    # Root writes into a user-owned dir: a symlink there is refused (never
+    # followed), and `install` replaces the file rather than writing through it.
+    if [[ -L "$mcx_dst" ]]; then
+        echo -e "  ${YELLOW}⚠ $mcx_dst is a symlink — NOT refreshed (root never writes through a user-owned link); inspect it${NC}"
+    elif [[ -f "$mcx_dst" && -f "$mcx_src" ]] && ! cmp -s "$mcx_src" "$mcx_dst"; then
+        if install -o "$REAL_USER" -g "$(id -gn "$REAL_USER")" -m 0755 \
+                "$mcx_src" "$mcx_dst"; then
+            echo -e "  ${GREEN}✓ MeshChatX wrapper refreshed (applies on its next start)${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ MeshChatX wrapper NOT refreshed — run: sudo bash $INSTALL_DIR/scripts/install_meshchatx.sh --refresh${NC}"
+        fi
+    fi
     chown -R "${REAL_USER}:" "$USER_SYSTEMD_DIR" 2>/dev/null || true
     USER_SVC_UPDATED=true
     if [[ $uut_rc -eq 0 ]]; then
