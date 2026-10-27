@@ -32,7 +32,7 @@ from utils.boundary_timing import call_boundary
 from utils.safe_import import safe_import
 from utils.tx_guard import assert_rns_tx_allowed
 
-from .base_handler import chunk_for_mesh
+from .base_handler import chunk_for_mesh, mesh_text_budget
 from .bridge_health import SubsystemState
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,8 @@ class BridgeSendMixin:
         # persists the whole original) would therefore lose every line past
         # the cap. chunk_for_mesh is the same helper the direct RNS→Mesh path
         # uses, so a retried message keeps the content the first attempt had.
-        chunks = chunk_for_mesh(message)
+        # A DM gets the smaller PKI-DM budget (bridge matrix F17).
+        chunks = chunk_for_mesh(message, max_bytes=mesh_text_budget(destination))
         if not chunks:
             return False
         # Send EVERY chunk, then judge — deliberately not a short-circuiting

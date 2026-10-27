@@ -43,7 +43,7 @@ _MAX_LONG_NAME = 64
 _MAX_SHORT_NAME = 16
 _MAX_HW_MODEL = 48
 _MAX_ROLE = 32
-_MAX_TEXT_LEN = 2048  # LoRa text tops out ~237 bytes; generous ceiling
+_MAX_TEXT_LEN = 2048  # LoRa text tops out at 233 bytes (DATA_PAYLOAD_LEN); generous ceiling
 _MAX_MSG_ID_LEN = 64
 
 

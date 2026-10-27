@@ -152,7 +152,7 @@ MeshForge, untested here; **Code-Ready** = implemented, awaiting hardware).
   with your own Claude API key (in-TUI assistant) or subscription (Claude Code
   in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
 
-The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->358<!--/STAT--> test files.
+The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->360<!--/STAT--> test files.
 
 **Full inventory, with proven vs. unvalidated called out:
 [docs/capabilities.md](docs/capabilities.md)**

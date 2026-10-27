@@ -13,7 +13,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-from utils.defaults import MAX_MESHTASTIC_MSG_LENGTH
+from utils.defaults import MAX_MESHTASTIC_DM_MSG_LENGTH, MAX_MESHTASTIC_MSG_LENGTH
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -245,6 +245,20 @@ def is_rns_to_mesh_echo(text) -> bool:
         RNS_TO_MESH_ECHO_PREFIXES)
 
 
+def mesh_text_budget(destination) -> int:
+    """The single-packet text budget for a Meshtastic send to ``destination``
+    (bridge matrix F17): a broadcast gets the broadcast budget, a DM the
+    smaller PKI-DM budget. Broadcast is decided by the ONE rule
+    (``canonical_message.packet_is_broadcast``); None / '' = broadcast."""
+    from .canonical_message import packet_is_broadcast
+    if destination is None or destination == '':
+        return MAX_MESHTASTIC_MSG_LENGTH
+    pkt = {'to': destination} if isinstance(destination, int) \
+        else {'toId': str(destination)}
+    return (MAX_MESHTASTIC_MSG_LENGTH if packet_is_broadcast(pkt)
+            else MAX_MESHTASTIC_DM_MSG_LENGTH)
+
+
 def chunk_for_mesh(message: str,
                    max_bytes: int = MAX_MESHTASTIC_MSG_LENGTH,
                    prefix: str = "") -> List[str]:
@@ -418,8 +432,12 @@ class BaseMessageHandler(ABC):
                 logger.error(f"Status callback error: {e}")
 
     def _truncate_if_needed(self, message: str,
-                            max_length: int = MAX_MESHTASTIC_MSG_LENGTH) -> str:
-        """Truncate message to byte limit if needed."""
+                            max_length: Optional[int] = None, *,
+                            destination=None) -> str:
+        """Truncate message to byte limit if needed (a DM's limit is smaller,
+        bridge matrix F17)."""
+        if max_length is None:
+            max_length = mesh_text_budget(destination)
         msg_bytes = message.encode('utf-8')
         if len(msg_bytes) > max_length:
             logger.warning(
