@@ -304,7 +304,8 @@ class BridgeSendMixin:
                 destination,
                 self._lxmf_source,
                 message,
-                "MeshAnchor Gateway"
+                "MeshAnchor Gateway",
+                desired_method=LXMF.LXMessage.DIRECT,   # explicit (F12)
             )
 
             # Track delivery confirmation
@@ -481,10 +482,12 @@ class BridgeSendMixin:
                 # Late delivery is still delivery; say how late (6f, Q3).
                 lxm = LXMF.LXMessage(destination, self._lxmf_source, message,
                                      "MeshAnchor Gateway",
-                                     fields={'meshforge_queued_s': queued_s})
+                                     fields={'meshforge_queued_s': queued_s},
+                                     desired_method=LXMF.LXMessage.DIRECT)  # F12
             else:
                 lxm = LXMF.LXMessage(destination, self._lxmf_source, message,
-                                     "MeshAnchor Gateway")
+                                     "MeshAnchor Gateway",
+                                     desired_method=LXMF.LXMessage.DIRECT)  # F12
 
             # MF Issue #74 port (Fork C syn/ack): pin the LXMF delivery
             # callbacks to the queue row's id (injected at dispatch by
