@@ -182,6 +182,9 @@ class NomadNetRNSChecksMixin:
                     "Shared instance is available.",
                 )
                 return True
+            if ok is None:  # UNKNOWN: the operator decides — clients may be HELD (#69)
+                return bool(self.ctx.dialog.yesno("rnsd Restart UNKNOWN", f"{detail}\n\n"
+                                                  "Restart unconfirmed. Launch NomadNet anyway?"))
             self.ctx.dialog.msgbox(
                 "Restart Failed",
                 "rnsd restart did not fully recover.\n\n"

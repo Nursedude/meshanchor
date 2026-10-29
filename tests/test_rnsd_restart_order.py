@@ -31,8 +31,20 @@ class Recorder:
     def __init__(self, owns_after_start=True, owns_value=None):
         self.log = []
         self.rnsd_up = False
+        # rnsd's systemd view: running as 100 before the restart
+        self.rnsd_pid, self.rnsd_nrestarts = 100, 0
+        self.stop_rnsd_ok = True      # False = the stop fails, the old rnsd stays
+        self.crash_in_wait = False    # True = systemd Restart= during ownership wait
+        self.start_dies = False       # True = `start` returns ok but rnsd is not running
+        self.show_value = None        # {} = systemctl show unobservable
+        self.rpc_late = 0             # polls before rnsd's RPC listener exists
+        self.rpc_value = "follow"     # "follow" rnsd_up, or a fixed True/False/None
         self.owns_after_start = owns_after_start
         self.owns_value = owns_value  # override (e.g. None = unobservable)
+        self.activating = 0           # ownership polls rnsd spends in ExecStartPre
+        self.in_start_pre = False     # set by `start` when activating > 0
+        self.owns_names = []          # instance name every ownership check asked about
+        self.stop_timeouts = {}       # unit -> the timeout its stop was given
 
     def system_active(self, unit, timeout=5):
         return (unit, False) in ACTIVE
@@ -42,18 +54,60 @@ class Recorder:
 
     def stop(self, unit, timeout=30, user=False):
         self.log.append(("stop", unit))
+        self.stop_timeouts[unit] = timeout
         if unit == "rnsd":
+            if not self.stop_rnsd_ok:
+                return False, "Job for rnsd.service failed"
             self.rnsd_up = False
+            self.rnsd_pid = 0
         return True, "ok"
 
     def start(self, unit, timeout=30, user=False):
         self.log.append(("start", unit))
         if unit == "rnsd":
+            if self.start_dies:
+                return True, "ok"
+            if self.activating:       # start returns while ExecStartPre still runs
+                self.in_start_pre = True
+                return False, "Timeout while starting rnsd"
             self.rnsd_up = True
+            if self.rnsd_pid == 0:   # starting an ACTIVE unit is a no-op success
+                self.rnsd_pid = 200
         return True, "ok"
+
+    def show(self, unit, user=False):
+        self.log.append(("show", unit))
+        if self.show_value is not None:
+            return dict(self.show_value)
+        assert unit == "rnsd", unit
+        pid = self.rnsd_pid
+        if self.in_start_pre:
+            return {"ActiveState": "activating", "SubState": "start-pre",
+                    "MainPID": "0", "NRestarts": str(self.rnsd_nrestarts)}
+        return {"ActiveState": "active" if pid else "inactive",
+                "SubState": "running" if pid else "dead",
+                "MainPID": str(pid), "NRestarts": str(self.rnsd_nrestarts)}
+
+    def rpc(self, name=None):
+        self.log.append(("rpc?", None))
+        if self.rpc_value != "follow":
+            return self.rpc_value
+        if self.rpc_late > 0:
+            self.rpc_late -= 1
+            return False
+        return self.rnsd_up
 
     def owns(self, name=None):
         self.log.append(("owns?", None))
+        self.owns_names.append(name)
+        if self.in_start_pre:
+            self.activating -= 1
+            if self.activating:
+                return False
+            self.in_start_pre = False                  # ExecStartPre done, rnsd runs
+            self.rnsd_up, self.rnsd_pid = True, 200
+        if self.crash_in_wait and self.rnsd_pid == 200:
+            self.rnsd_pid, self.rnsd_nrestarts = 201, self.rnsd_nrestarts + 1
         if self.owns_value is not None or not self.owns_after_start:
             return self.owns_value if self.owns_value is not None else False
         return self.rnsd_up
@@ -79,6 +133,8 @@ def _patched(rec):
         patch.object(ro, "rnsd_owns_listener", rec.owns),
         patch.object(ro, "listener_owners", lambda name=None: []),
         patch.object(ro, "instance_name", lambda: "volcano"),
+        patch.object(ro, "show_unit", rec.show),
+        patch.object(ro, "rpc_listener_up", rec.rpc),
     ]
 
 
@@ -144,6 +200,304 @@ class TestOrderedRestart:
         assert release.rnsd_owns is None and not release.ok
         assert not any(e == ("start", "nomadnet") for e in rec.log)
         assert "could not be observed" in release.summary()
+
+
+class TestRnsdActuallyRestarted:
+    """rnsd-ordered-restart-residue (1)+(2): the shared restart MEASURES that
+    rnsd restarted. `systemctl start` on a still-active unit is a no-op
+    success, so a failed stop used to read as a repair in the TUI and
+    `commands.rns` (only the CLI compared MainPIDs)."""
+
+    def test_failed_stop_is_not_a_restart(self):
+        rec = Recorder()
+        rec.stop_rnsd_ok = False
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=1))
+        assert release.rnsd_owns is True        # the OLD rnsd still owns it
+        assert not release.ok
+        assert "did not restart" in release.summary()
+        assert "MainPID unchanged (100)" in release.summary()
+        # F2 (operator, 2026-10-27): a PROVEN failed restart leaves the
+        # clients stopped and named — never back on the process the repair
+        # was for, even though the old rnsd still owns the socket.
+        assert ("start", "nomadnet") not in rec.log
+        assert ("start", "meshforge-map") not in rec.log
+        assert "nomadnet (user)" in release.left_stopped
+        assert "left STOPPED" in release.summary()
+
+    def test_dead_after_start_does_not_wait_for_ownership(self):
+        # decidable the moment `start` returns: MainPID 0 — waiting the full
+        # ownership window could only end the same way
+        rec = Recorder()
+        rec.start_dies = True
+        waits = []
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=30))
+        assert ("start", "nomadnet") not in rec.log
+        assert release.verdict is False and "not running" in release.summary()
+        assert sum(1 for e in rec.log if e == ("owns?", None)) <= 1
+
+    def test_crash_during_ownership_wait_is_not_a_clean_restart(self):
+        rec = Recorder()
+        rec.crash_in_wait = True
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=1))
+        assert not release.ok
+        assert "crashed" in release.summary()
+        assert "NRestarts 0 -> 1" in release.summary()
+        assert ("start", "nomadnet") not in rec.log   # F2: proven → held
+
+    def test_unobservable_mainpid_is_unverified_never_ok(self):
+        rec = Recorder()
+        rec.show_value = {}
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=1))
+        assert not release.ok and release.verdict is None
+        assert "UNVERIFIED" in release.summary()
+        # operator rule: unverified → release + UNKNOWN (rnsd owns + RPC up)
+        assert ("start", "nomadnet") in rec.log
+
+    def test_rnsd_not_running_before_is_still_a_restart(self):
+        rec = Recorder()
+        rec.rnsd_pid = 0
+        started, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=1))
+        assert started and release.ok, release.summary()
+
+    def test_rnsd_stop_waits_its_own_stop_timeout(self):
+        # review of the MA port, SHOULD 2: a plain stop_service('rnsd') (30 s)
+        # under a longer TimeoutStopSec races the start against a queued stop
+        rec = Recorder()
+        _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=1))
+        assert rec.stop_timeouts["rnsd"] == ro.stop_deadline_s("rnsd", False)
+
+    def test_baseline_is_read_before_rnsd_is_stopped(self):
+        # NIT 3: read after the stop, the baseline is MainPID 0, and a stop
+        # that did nothing can never read "MainPID unchanged"
+        rec = Recorder()
+        _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=1))
+        assert _idx(rec.log, ("show", "rnsd")) < _idx(rec.log, ("stop", "rnsd")), rec.log
+
+    def test_judge_is_pure(self):
+        up = {"ActiveState": "active", "SubState": "running"}
+        j = ro.judge_rnsd_restart(dict(up, MainPID="1", NRestarts="0"),
+                                  dict(up, MainPID="2", NRestarts="0"),
+                                  dict(up, MainPID="2", NRestarts="0"))
+        assert (j.state, j.why) == ("ok", "") and "1 -> 2" in j.trace
+        assert "not running" in ro.judge_rnsd_restart(
+            dict(up, MainPID="1", NRestarts="0"),
+            {"ActiveState": "failed", "SubState": "failed", "MainPID": "0", "NRestarts": "0"},
+            {"ActiveState": "failed", "SubState": "failed", "MainPID": "0", "NRestarts": "0"})[1]
+
+
+class TestRnsdActivating:
+    """Review of 2cf548ae, blocker #2: rnsd's ExecStartPre (wait_for_ipv6_ll.sh,
+    up to 30 s) runs with ActiveState=activating and MainPID 0. start_service
+    gives up after 30 s, so the release can begin while rnsd is still in its
+    pre-start. MainPID 0 there means "not started YET", not "dead"."""
+
+    def test_slow_execstartpre_is_waited_for_not_judged_dead(self):
+        rec = Recorder()
+        rec.activating = 3
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=5))
+        assert release.ok, release.summary()
+        assert ("start", "nomadnet") in rec.log
+        assert release.rnsd_restart == "ok"
+        assert "100 -> 0 -> 200" in release.restart.trace
+
+    def test_still_activating_after_the_wait_is_unconfirmed_not_dead(self):
+        rec = Recorder()
+        rec.activating = 10_000
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=0.01))
+        assert ("start", "nomadnet") not in rec.log   # never owned: held
+        assert release.verdict is False
+        assert release.rnsd_restart == "unverified"
+        assert "still starting" in release.summary()
+        assert "not running" not in release.summary()
+
+    def _st(self, active, pid, n="0", sub=None):
+        sub = sub or {"activating": "start-pre", "active": "running"}.get(active, "dead")
+        return {"ActiveState": active, "SubState": sub, "MainPID": pid, "NRestarts": n}
+
+    def test_judge_activating_then_running_is_ok(self):
+        j = ro.judge_rnsd_restart(self._st("active", "100"), self._st("activating", "0"),
+                                  self._st("active", "200"))
+        assert j.state == "ok", j
+
+    def test_judge_activating_then_systemd_restart_is_a_crash(self):
+        # ExecStartPre or the first start failed and Restart= fired: NRestarts moved
+        j = ro.judge_rnsd_restart(self._st("active", "100"), self._st("activating", "0"),
+                                  self._st("active", "300", n="1"))
+        assert j.state == "failed" and "crashed" in j.why
+
+    def test_judge_activating_then_old_pid_is_not_a_restart(self):
+        j = ro.judge_rnsd_restart(self._st("active", "100"), self._st("activating", "0"),
+                                  self._st("active", "100"))
+        assert j.state == "failed" and "unchanged" in j.why
+
+    def test_judge_auto_restart_after_the_wait_is_a_crash_not_still_starting(self):
+        # review SHOULD 1: activating/auto-restart is BETWEEN Restart= cycles
+        # (the Errno-99 status=255 exit this drop-in exists for) — proven crash
+        j = ro.judge_rnsd_restart(self._st("active", "100"), self._st("active", "200"),
+                                  self._st("activating", "0", n="1", sub="auto-restart"))
+        assert j.state == "failed" and "crashed" in j.why, j
+
+    def test_judge_auto_restart_queued_at_start_is_a_crash(self):
+        # review NIT 4: systemd >=254 has already counted it in NRestarts
+        j = ro.judge_rnsd_restart(self._st("active", "100"),
+                                  self._st("activating", "0", n="1", sub="auto-restart-queued"),
+                                  self._st("active", "300", n="1"))
+        assert j.state == "failed" and "crashed" in j.why, j
+
+    def test_judge_inactive_at_start_then_running_is_not_a_clean_restart(self):
+        # review NIT 3: only ACTIVATING excuses MainPID 0 at start (mutation pin)
+        j = ro.judge_rnsd_restart(self._st("active", "100"), self._st("inactive", "0"),
+                                  self._st("active", "300"))
+        assert j.state == "failed" and "not running" in j.why, j
+        assert "(inactive/dead)" in j.why, j   # NIT 4: names the state that WAS 0
+
+    def test_judge_dead_after_start_is_still_failed(self):
+        # the fix must not soften the real "start returned, nothing running" case
+        j = ro.judge_rnsd_restart(self._st("active", "100"), self._st("failed", "0"),
+                                  self._st("failed", "0"))
+        assert j.state == "failed" and "not running" in j.why
+
+
+class TestRpcReadiness:
+    """rnsd-ordered-restart-residue (8), root-caused 2026-10-27: RNS binds
+    @rns/<name> in __start_local_interface, brings up every interface (the
+    RNode serial open, 2-5 s), and only THEN creates @rns/<name>/rpc. A
+    client released on ownership alone hit ECONNREFUSED on its first RPC and
+    died (NomadNet, 09:00 + 18:34 on the RNode desktop box; both survivors started later)."""
+
+    def test_clients_wait_for_the_rpc_listener(self):
+        rec = Recorder()
+        rec.rnsd_up, rec.rpc_late = True, 3
+        hold = ro.ClientHold(stopped=[("nomadnet", True)])
+        release = _run(rec, lambda: ro.release_rns_clients(
+            hold, wait_s=5, _wait=lambda s: None,
+            rnsd_before={"MainPID": "99", "NRestarts": "0"}))   # the caller restarted it
+        assert release.ok, release.summary()
+        last_rpc_false = max(i for i, e in enumerate(rec.log) if e == ("rpc?", None))
+        assert last_rpc_false < _idx(rec.log, ("start", "nomadnet"))
+        assert sum(1 for e in rec.log if e == ("rpc?", None)) >= 4
+
+    def test_rpc_never_up_leaves_clients_stopped_and_says_why(self):
+        rec = Recorder()
+        rec.rpc_value = False
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=0.01))
+        assert ("start", "nomadnet") not in rec.log
+        assert not release.ok
+        assert "RPC" in release.summary() and "left STOPPED" in release.summary()
+
+    def test_rpc_unobservable_releases_and_reads_unknown(self):
+        # R3 (review 2026-10-28): holding on an unreadable /proc/net/unix
+        # turned "cannot see" into a service outage we caused, reported as
+        # UNKNOWN. Operator rule: unverified → release + UNKNOWN.
+        rec = Recorder()
+        rec.rpc_value = None
+        _, release, _ = _run(rec, lambda: ro.ordered_restart_rnsd(wait_s=0.01))
+        assert ("start", "nomadnet") in rec.log
+        assert release.verdict is None and not release.ok
+        assert "could not be observed" in release.summary()
+        assert "left STOPPED" not in release.summary()
+
+    def _proc(self, tmp_path, *paths_flags):
+        f = tmp_path / "unix"
+        rows = ["Num       RefCount Protocol Flags    Type St Inode Path"]
+        for i, (flags, path) in enumerate(paths_flags):
+            rows.append(f"0000{i:012x}: 00000002 00000000 {flags} 0001 01 {1000 + i} {path}")
+        f.write_text("\n".join(rows) + "\n")
+        return str(f)
+
+    def test_parser_spaced_name_listening(self, tmp_path):
+        # ss truncates "volcano ai rns" to "@rns/volcano" for BOTH sockets;
+        # /proc/net/unix keeps the full path — the reason to read it here
+        f = self._proc(tmp_path, ("00010000", "@rns/volcano ai rns"),
+                       ("00010000", "@rns/volcano ai rns/rpc"))
+        assert ro.rpc_listener_up("volcano ai rns", proc_net_unix=f) is True
+
+    def test_parser_data_socket_only_is_not_ready(self, tmp_path):
+        f = self._proc(tmp_path, ("00010000", "@rns/volcano ai rns"))
+        assert ro.rpc_listener_up("volcano ai rns", proc_net_unix=f) is False
+
+    def test_parser_connected_rpc_socket_is_not_a_listener(self, tmp_path):
+        f = self._proc(tmp_path, ("00000000", "@rns/x/rpc"))
+        assert ro.rpc_listener_up("x", proc_net_unix=f) is False
+
+    def test_parser_other_instance_does_not_count(self, tmp_path):
+        f = self._proc(tmp_path, ("00010000", "@rns/x-2/rpc"))
+        assert ro.rpc_listener_up("x", proc_net_unix=f) is False
+
+    def test_parser_unreadable_is_none(self, tmp_path):
+        assert ro.rpc_listener_up("x", proc_net_unix=str(tmp_path / "nope")) is None
+
+
+class TestVerdict:
+    """Review of f9b5e0eb: ONE tri-state the CLI's exit code and `ok` both
+    read — an unobservable state is UNKNOWN (rc 2), never a proven FAIL."""
+
+    def _rel(self, **k):
+        base = dict(rnsd_owns=True, rpc_ready=True, restart=ro.RestartJudgement("ok", ""))
+        base.update(k)
+        return ro.ReleaseResult(**base)
+
+    def test_clean_is_true(self):
+        assert self._rel().verdict is True and self._rel().ok
+
+    def test_unobservable_states_are_none(self):
+        assert self._rel(rpc_ready=None).verdict is None
+        assert self._rel(rnsd_owns=None).verdict is None
+        assert self._rel(restart=ro.RestartJudgement("unverified", "x")).verdict is None
+
+    def test_a_proven_failure_beats_an_unknown(self):
+        assert self._rel(rpc_ready=None,
+                         restart=ro.RestartJudgement("failed", "x")).verdict is False
+        assert self._rel(rnsd_owns=False).verdict is False
+        assert self._rel(start_failed=["x (user)"], rpc_ready=None).verdict is False
+
+    def test_unjudged_release_is_unknown_never_a_pass(self):
+        # R6/F3: a release with no rnsd baseline cannot say rnsd restarted;
+        # it used to read True and the diagnostics dialogs said "Fixed"
+        assert ro.ReleaseResult(rnsd_owns=True, rpc_ready=True).verdict is None
+        with patch.object(ro, "rnsd_owns_listener", return_value=True), \
+             patch.object(ro, "rpc_listener_up", return_value=True), \
+             patch.object(ro, "start_service", return_value=(True, "ok")):
+            rel = ro.release_rns_clients(ro.ClientHold(), name="x", wait_s=0)
+        assert rel.restart.state == "not_judged" and rel.verdict is None
+
+    def test_problem_text_cannot_drift_from_the_state(self):
+        # R4: rnsd_problem and rnsd_restart were two hand-synced fields
+        with pytest.raises(TypeError):
+            ro.ReleaseResult(rnsd_owns=True, rnsd_problem="x")
+        rel = self._rel(restart=ro.RestartJudgement("failed", "why."))
+        assert rel.rnsd_problem == "why." and rel.rnsd_restart == "failed"
+
+    def test_judge_returns_the_state(self):
+        up = {"ActiveState": "active", "SubState": "running", "NRestarts": "0"}
+        assert ro.judge_rnsd_restart(dict(up, MainPID="1"), dict(up, MainPID="2"),
+                                     dict(up, MainPID="2")).state == "ok"
+        assert ro.judge_rnsd_restart({}, {}, {}).state == "unverified"
+        assert ro.judge_rnsd_restart(dict(up, MainPID="1"), dict(up, MainPID="1"),
+                                     dict(up, MainPID="1")).state == "failed"
+
+    def test_held_after_a_failed_restart_is_named_as_such(self):
+        # finding 10's successor: F2 no longer puts them back, so say why
+        rel = self._rel(restart=ro.RestartJudgement(
+            "failed", "rnsd did not restart: MainPID unchanged (100)."),
+            left_stopped=["nomadnet (user)"])
+        assert "Restarted clients" not in rel.summary()
+        assert "left STOPPED" in rel.summary() and "nomadnet (user)" in rel.summary()
+
+    def test_unreadable_rpc_does_not_wait_the_full_window(self):
+        # finding 6: polling a read that can never answer cost 30 s
+        # R10: every seam pinned — listener_owners ran ss + /proc on the host
+        waits = []
+        with patch.object(ro, "rnsd_owns_listener", return_value=True), \
+             patch.object(ro, "rpc_listener_up", return_value=None), \
+             patch.object(ro, "listener_owners", return_value=[]), \
+             patch.object(ro, "show_unit", return_value={"MainPID": "2", "NRestarts": "0"}), \
+             patch.object(ro, "start_service", return_value=(True, "ok")) as start:
+            rel = ro.release_rns_clients(ro.ClientHold(stopped=[("nomadnet", True)]),
+                                         name="x", wait_s=30, _wait=waits.append,
+                                         rnsd_before={"MainPID": "1", "NRestarts": "0"})
+        assert waits == [] and rel.rpc_ready is None and rel.verdict is None
+        assert start.called   # R3: released, not held
 
 
 class TestOwnership:
@@ -281,15 +635,17 @@ class TestSystemUnitTriState:
 class TestRepairWizardOrder:
     """repair_rns_shared_instance must hold clients across the rnsd restart."""
 
-    def _run_repair(self, rec, instance_up=True):
+    def _run_repair(self, rec, instance_up=True, blocking=(), disabled=()):
         from handlers import _rns_repair as rr
         from handler_test_utils import make_handler_context
 
         handler = MagicMock()
         handler.ctx = make_handler_context()
+        if disabled:   # MA asks inline: say Yes, or the disable path never runs
+            handler.ctx.dialog._yesno_returns = [True]
 
         def release(hold, name=None, **kw):
-            return ro.release_rns_clients(hold, name, wait_s=0.01)
+            return ro.release_rns_clients(hold, name, wait_s=0.01, **kw)
 
         ps = _patched(rec) + [
             patch.object(rr, "stop_service", rec.stop),
@@ -298,13 +654,17 @@ class TestRepairWizardOrder:
             patch.object(rr, "release_rns_clients", release),
             patch.object(rr, "listener_owners", lambda name=None: []),
             patch.object(rr, "instance_name", lambda: "volcano"),
+            patch.object(rr, "show_unit", rec.show),
             patch.object(rr, "ReticulumPaths"),
             patch.object(rr, "validate_rnsd_service_file", return_value=False),
             patch.object(rr, "_clear_stale_auth_files", return_value=0),
             patch.object(rr, "_preflight_share_instance"),
             patch.object(rr, "detect_rnsd_config_drift",
                          return_value=SimpleNamespace(drifted=False)),
-            patch.object(rr, "find_blocking_interfaces", return_value=[]),
+            patch.object(rr, "find_blocking_interfaces", return_value=list(blocking)),
+            # MA asks inline (ctx.dialog.yesno) and then disables
+            patch.object(rr, "disable_interfaces_in_config",
+                         return_value=list(disabled)),
             patch.object(rr, "check_rns_shared_instance",
                          side_effect=lambda: rec.rnsd_up and instance_up),
             patch.object(rr, "get_rns_shared_instance_info",
@@ -340,6 +700,35 @@ class TestRepairWizardOrder:
         assert ("start", "meshforge-map") not in rec.log
         out = capsys.readouterr().out
         assert "LEFT STOPPED" in out and "nomadnet (user)" in out
+
+    def test_disabling_interfaces_does_not_change_the_instance_checked(self, capsys):
+        # `for name in disabled:` reused the instance-name variable, so after
+        # disabling an interface the release asked whether rnsd owned
+        # @rns/<interface name>, never true, and left every client stopped
+        rec = Recorder()
+        blocking = [("RNode LoRa", "port missing", "plug it in")]
+        assert self._run_repair(rec, blocking=blocking, disabled=["RNode LoRa"]) is True
+        # the disable path RAN (a "No" here made this test pass on the bug)
+        assert "Disabled 1 blocking interface(s)" in capsys.readouterr().out
+        assert rec.owns_names and set(rec.owns_names) == {"volcano"}, rec.owns_names
+        assert ("start", "nomadnet") in rec.log
+
+    def test_repair_reads_the_baseline_before_stopping_rnsd(self, capsys):
+        # NIT 3 (review of the MA port), the wizard's own site
+        rec = Recorder()
+        self._run_repair(rec)
+        assert _idx(rec.log, ("show", "rnsd")) < _idx(rec.log, ("stop", "rnsd")), rec.log
+
+    def test_repair_with_a_failed_rnsd_stop_keeps_clients_stopped(self, capsys):
+        # F3: the wizard judged nothing — a failed stop + no-op start read as
+        # "RNS shared instance is now available!" with clients back on it
+        rec = Recorder()
+        rec.stop_rnsd_ok = False
+        rec.rnsd_up = True            # the OLD rnsd keeps answering
+        assert self._run_repair(rec) is False
+        assert ("start", "nomadnet") not in rec.log
+        out = capsys.readouterr().out
+        assert "did not restart" in out and "nomadnet (user)" in out
 
     def test_no_pattern_kill_remains(self):
         import inspect
@@ -383,7 +772,7 @@ class TestEveryRestartSiteIsOrdered:
 
     def test_commands_rns_restart_is_ordered(self):
         from commands import rns
-        rel = MagicMock(ok=True, summary=lambda: "rnsd owns the shared instance.")
+        rel = MagicMock(ok=True, verdict=True, summary=lambda: "rnsd owns the shared instance.")
         with patch("utils.rnsd_restart_order.ordered_restart_rnsd",
                    return_value=(True, rel, ro.ClientHold())) as ordered, \
              patch.object(rns, "stop_service") as bare_stop:
@@ -399,6 +788,61 @@ class TestEveryRestartSiteIsOrdered:
                    return_value=(True, rel, ro.ClientHold())):
             result = rns.restart_rnsd()
         assert not result.success and "nomadnet (user)" in result.message
+
+    def test_commands_rns_restart_unobservable_is_unknown_not_fail(self):
+        # R2: the CLI said rc 2 UNKNOWN while this surface said FAIL
+        from commands import rns
+        from commands.base import ResultStatus
+        rel = ro.ReleaseResult(rnsd_owns=True, rpc_ready=None,
+                               restart=ro.RestartJudgement("ok", ""))
+        with patch("utils.rnsd_restart_order.ordered_restart_rnsd",
+                   return_value=(True, rel, ro.ClientHold())):
+            result = rns.restart_rnsd()
+        assert not result.success                       # never a pass claim
+        assert result.status is ResultStatus.WARNING    # and never ERROR
+        assert result.message.startswith("UNKNOWN")
+
+    def test_tui_restart_reports_the_tri_state(self):
+        from handlers import _rns_repair as rr
+        for verdict_rel, want in (
+                (ro.ReleaseResult(rnsd_owns=True, rpc_ready=None,
+                                  restart=ro.RestartJudgement("ok", "")), None),
+                (ro.ReleaseResult(rnsd_owns=True, rpc_ready=True,
+                                  restart=ro.RestartJudgement("ok", "")), True),
+                (ro.ReleaseResult(rnsd_owns=False), False)):
+            with patch.object(rr, "ordered_restart_rnsd",
+                              return_value=(True, verdict_rel, ro.ClientHold())):
+                assert rr.restart_rnsd_reported()[0] is want
+
+    def test_start_timeout_in_execstartpre_follows_the_measured_release(self):
+        # review SHOULD 2: start_service's client wait (30 s) can expire inside
+        # ExecStartPre; the release then MEASURES rnsd restarted and released
+        # the clients. Neither surface may report that as "did not start".
+        from commands import rns
+        from handlers import _rns_repair as rr
+        rel = ro.ReleaseResult(rnsd_owns=True, rpc_ready=True,
+                               restart=ro.RestartJudgement("ok", ""))
+        with patch("utils.rnsd_restart_order.ordered_restart_rnsd",
+                   return_value=(False, rel, ro.ClientHold())):
+            result = rns.restart_rnsd()
+        assert result.success, result.message
+        assert "start command" in result.message
+        with patch.object(rr, "ordered_restart_rnsd",
+                          return_value=(False, rel, ro.ClientHold())):
+            verdict, text = rr.restart_rnsd_reported()
+        assert verdict is True and "start command" in text
+
+    def test_start_failed_and_release_failed_is_still_a_failure(self):
+        from commands import rns
+        from handlers import _rns_repair as rr
+        rel = ro.ReleaseResult(rnsd_owns=False,
+                               restart=ro.RestartJudgement("failed", "rnsd is not running"))
+        with patch("utils.rnsd_restart_order.ordered_restart_rnsd",
+                   return_value=(False, rel, ro.ClientHold())):
+            assert not rns.restart_rnsd().success
+        with patch.object(rr, "ordered_restart_rnsd",
+                          return_value=(False, rel, ro.ClientHold())):
+            assert rr.restart_rnsd_reported()[0] is False
 
     def _tui_site(self, handler_cls_path, method, capsys):
         import importlib
@@ -429,10 +873,32 @@ class TestEveryRestartSiteIsOrdered:
         from handlers.rns_diagnostics import RNSDiagnosticsHandler
         src = inspect.getsource(RNSDiagnosticsHandler._offer_drift_fix)
         hold = src.index("hold_rns_clients()")
+        before = src.index("show_unit('rnsd')")
         stop = src.index("stop_service('rnsd')")
         start = src.index("start_service('rnsd')")
-        release = src.index("release_rns_clients(hold)")
-        assert hold < stop < start < release
+        release = src.index("release_rns_clients(hold, rnsd_before=")
+        assert hold < before < stop < start < release
+
+    def test_every_release_site_is_judged(self):
+        # F3 as a closed-consumer gate: a release with no rnsd baseline
+        # reads UNKNOWN forever, so every call site must pass one
+        import re
+        from pathlib import Path
+        src = Path(__file__).parent.parent / "src"
+        sites = 0
+        for f in src.rglob("*.py"):
+            text = f.read_text()
+            for m in re.finditer(r"(?<![\w.])(?:ro\.)?(release_rns_clients|_release_and_report)\(", text):
+                line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+                if line.lstrip().startswith(("def ", "#")) or "import" in line:
+                    continue
+                depth, i = 1, m.end()
+                while depth:
+                    depth += {"(": 1, ")": -1}.get(text[i], 0)
+                    i += 1
+                sites += 1
+                assert "rnsd_before=" in text[m.end():i], f"{f.name}: {text[m.start():i]}"
+        assert sites >= 6, sites   # 2 diagnostics + 3 wizard + ordered_restart_rnsd
 
 
 class TestStopFollowsTheUnitsOwnTimeout:
@@ -499,13 +965,15 @@ class TestStopFollowsTheUnitsOwnTimeout:
     def test_release_is_not_ok_while_a_client_could_not_be_stopped(self):
         # F-A: the run-as-user site shows "rnsd Fixed" on `ok` alone.
         hold = ro.ClientHold(stop_failed=[("meshforge-map", False, "Timeout while stopping")])
-        with patch.object(ro, "rnsd_owns_listener", return_value=True):
+        with patch.object(ro, "rnsd_owns_listener", return_value=True), \
+             patch.object(ro, "rpc_listener_up", return_value=True):  # never the host's
             rel = ro.release_rns_clients(hold, name="default", wait_s=0)
         assert rel.ok is False and rel.not_stopped
 
     def test_release_reports_what_could_not_be_stopped(self):
         hold = ro.ClientHold(stop_failed=[("meshforge-gateway", False, "Timeout while stopping")])
-        with patch.object(ro, "rnsd_owns_listener", return_value=True):
+        with patch.object(ro, "rnsd_owns_listener", return_value=True), \
+             patch.object(ro, "rpc_listener_up", return_value=True):
             rel = ro.release_rns_clients(hold, name="default", wait_s=0)
         assert rel.not_stopped and "meshforge-gateway" in rel.not_stopped[0]
         assert "Could NOT be stopped" in rel.summary()
