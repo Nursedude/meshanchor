@@ -779,6 +779,10 @@ def create_gateway_health_probe(
             "rnsd_rpc",
             lambda: probe.check_rns_rpc_responsive(),
         )
+        # Resolve the confirm knob NOW so an ignored value is witnessed at
+        # startup, not first at the next rnstatus timeout — mid-incident
+        # (review 2026-10-28). Still re-read per call, so a retune applies.
+        _ahp_core._rpc_confirm_ticks()
         probe.register_check(
             "rnsd_interface",
             lambda: probe.check_rns_interface_down_peer_reachable(),

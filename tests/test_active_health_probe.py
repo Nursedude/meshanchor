@@ -111,6 +111,23 @@ class TestCreateGatewayHealthProbe:
         assert "rnsd" in registered
         assert "mosquitto" in registered
 
+    def test_bad_confirm_knob_is_witnessed_at_construction(
+            self, monkeypatch, caplog):
+        """Startup, not mid-incident: building the probe resolves the knob."""
+        import logging
+        from utils import active_health_probe as ahp
+        from utils import active_health_probe_core as core
+        core._rejected_tick_knobs.clear()
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "3.0")
+        with patch.object(ahp, '_unmanaged_services', return_value=set()), \
+             patch("utils.profile_services._active_profile",
+                   return_value=self._full_profile()), \
+             caplog.at_level(logging.WARNING):
+            ahp.create_gateway_health_probe()
+        core._rejected_tick_knobs.clear()
+        assert any("MESHANCHOR_RNS_RPC_CONFIRM_TICKS" in r.getMessage()
+                   and "IGNORED" in r.getMessage() for r in caplog.records)
+
     def test_all_managed_registers_all(self):
         from utils import active_health_probe as ahp
         with patch.object(ahp, '_unmanaged_services', return_value=set()), \
@@ -135,11 +152,14 @@ class TestRNSWedgeProbes:
         from utils.active_health_probe_core import (
             reset_rns_rpc_timeout_streak, reset_rnstatus_baseline,
         )
+        from utils import active_health_probe_core as core
         reset_rns_rpc_timeout_streak()
         reset_rnstatus_baseline()
+        core._rejected_tick_knobs.clear()
         yield
         reset_rns_rpc_timeout_streak()
         reset_rnstatus_baseline()
+        core._rejected_tick_knobs.clear()
 
     def _probe(self):
         from utils.active_health_probe import ActiveHealthProbe
@@ -285,6 +305,36 @@ class TestRNSWedgeProbes:
         assert _rpc_confirm_ticks() == _DEFAULT_RPC_CONFIRM_TICKS
         monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "0")
         assert _rpc_confirm_ticks() == _DEFAULT_RPC_CONFIRM_TICKS
+
+    @pytest.mark.parametrize("raw", [
+        "3.0", "1_000", "+3", "\u0663", "0", "nope", " x "])
+    def test_rpc_confirm_ticks_rejects_non_plain_digits(
+            self, monkeypatch, caplog, raw):
+        """int() accepts the first four; an operator cannot have meant any
+        of them. Every ignored value leaves its witness (hfm #9)."""
+        import logging
+        from utils.active_health_probe import (
+            _rpc_confirm_ticks, _DEFAULT_RPC_CONFIRM_TICKS,
+        )
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", raw)
+        with caplog.at_level(logging.WARNING):
+            assert _rpc_confirm_ticks() == _DEFAULT_RPC_CONFIRM_TICKS
+        assert any("IGNORED" in r.getMessage() for r in caplog.records)
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", " 4 ")
+        assert _rpc_confirm_ticks() == 4
+
+    def test_rpc_confirm_ticks_ignored_value_leaves_one_warning(
+            self, monkeypatch, caplog):
+        """hfm #9: a knob that silently does nothing must say so, once."""
+        import logging
+        from utils.active_health_probe import _rpc_confirm_ticks
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "nope")
+        with caplog.at_level(logging.WARNING):
+            _rpc_confirm_ticks()
+            _rpc_confirm_ticks()
+        hits = [r for r in caplog.records
+                if "MESHANCHOR_RNS_RPC_CONFIRM_TICKS" in r.getMessage()]
+        assert len(hits) == 1 and "IGNORED" in hits[0].getMessage()
 
     def test_wedge_reason_carries_load_evidence(self):
         """The alert must let the operator tell `rnsd is wedged` from

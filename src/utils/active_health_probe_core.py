@@ -11,6 +11,7 @@ probes that consume them. Import via ``active_health_probe``, not from here.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -181,17 +182,31 @@ _DEFAULT_RPC_CONFIRM_TICKS = 1
 
 _rpc_timeout_streak = 0
 
+logger = logging.getLogger(__name__)
+
+# Behaviour twin of MeshForge's watchdog_probe_core.env_confirm_ticks
+# (2026-10-28): only a plain positive integer is honoured, and an ignored
+# value leaves ONE warning — a knob that silently does nothing is a swallow
+# with no witness (hfm #9). int() alone took "1_000", "+3" and non-ASCII
+# digits, and fell back on "0"/"nope" without a word.
+_rejected_tick_knobs: set = set()
+
 
 def _rpc_confirm_ticks() -> int:
     """Consecutive timed-out checks required before claiming a wedge."""
     raw = os.environ.get(_RPC_CONFIRM_TICKS_ENV)
     if raw is None:
         return _DEFAULT_RPC_CONFIRM_TICKS
-    try:
-        value = int(raw)
-    except ValueError:
-        return _DEFAULT_RPC_CONFIRM_TICKS
-    return value if value >= 1 else _DEFAULT_RPC_CONFIRM_TICKS
+    text = raw.strip()
+    if text.isdigit() and text.isascii() and int(text) >= 1:
+        return int(text)
+    if (_RPC_CONFIRM_TICKS_ENV, raw) not in _rejected_tick_knobs:
+        _rejected_tick_knobs.add((_RPC_CONFIRM_TICKS_ENV, raw))
+        logger.warning(
+            "%s=%r is not a positive integer; IGNORED, using the default "
+            "of %d tick(s)", _RPC_CONFIRM_TICKS_ENV, raw,
+            _DEFAULT_RPC_CONFIRM_TICKS)
+    return _DEFAULT_RPC_CONFIRM_TICKS
 
 
 def reset_rns_rpc_timeout_streak() -> None:
