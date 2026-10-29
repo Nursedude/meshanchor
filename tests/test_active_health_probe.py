@@ -117,15 +117,31 @@ class TestCreateGatewayHealthProbe:
         import logging
         from utils import active_health_probe as ahp
         from utils import active_health_probe_core as core
-        core._rejected_tick_knobs.clear()
+        core._rejected_knobs.clear()
         monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", "3.0")
         with patch.object(ahp, '_unmanaged_services', return_value=set()), \
              patch("utils.profile_services._active_profile",
                    return_value=self._full_profile()), \
              caplog.at_level(logging.WARNING):
             ahp.create_gateway_health_probe()
-        core._rejected_tick_knobs.clear()
+        core._rejected_knobs.clear()
         assert any("MESHANCHOR_RNS_RPC_CONFIRM_TICKS" in r.getMessage()
+                   and "IGNORED" in r.getMessage() for r in caplog.records)
+
+    def test_bad_slow_factor_is_witnessed_at_construction(
+            self, monkeypatch, caplog):
+        import logging
+        from utils import active_health_probe as ahp
+        from utils import active_health_probe_core as core
+        core._rejected_knobs.clear()
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_SLOW_FACTOR", "inf")
+        with patch.object(ahp, '_unmanaged_services', return_value=set()), \
+             patch("utils.profile_services._active_profile",
+                   return_value=self._full_profile()), \
+             caplog.at_level(logging.WARNING):
+            ahp.create_gateway_health_probe()
+        core._rejected_knobs.clear()
+        assert any("MESHANCHOR_RNS_RPC_SLOW_FACTOR" in r.getMessage()
                    and "IGNORED" in r.getMessage() for r in caplog.records)
 
     def test_all_managed_registers_all(self):
@@ -155,11 +171,11 @@ class TestRNSWedgeProbes:
         from utils import active_health_probe_core as core
         reset_rns_rpc_timeout_streak()
         reset_rnstatus_baseline()
-        core._rejected_tick_knobs.clear()
+        core._rejected_knobs.clear()
         yield
         reset_rns_rpc_timeout_streak()
         reset_rnstatus_baseline()
-        core._rejected_tick_knobs.clear()
+        core._rejected_knobs.clear()
 
     def _probe(self):
         from utils.active_health_probe import ActiveHealthProbe
@@ -335,6 +351,39 @@ class TestRNSWedgeProbes:
         hits = [r for r in caplog.records
                 if "MESHANCHOR_RNS_RPC_CONFIRM_TICKS" in r.getMessage()]
         assert len(hits) == 1 and "IGNORED" in hits[0].getMessage()
+
+    @pytest.mark.parametrize("raw", ["inf", "-inf", "nan", "1.0", "0.5", "nope", "",
+                                     "1_0", "+3", "٣", "1e1"])
+    def test_slow_factor_rejects_and_witnesses(self, monkeypatch, caplog, raw):
+        """float() takes "inf", and inf passes "> 1.0": the latency arm's
+        threshold went infinite, silently (twin of MF, 2026-10-28)."""
+        import logging
+        from utils import active_health_probe_core as core
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_SLOW_FACTOR", raw)
+        with caplog.at_level(logging.WARNING):
+            assert core._rnstatus_slow_factor() == core._DEFAULT_RNSTATUS_SLOW_FACTOR
+        assert any("MESHANCHOR_RNS_RPC_SLOW_FACTOR" in r.getMessage()
+                   and "IGNORED" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize("raw, expected", [("2.5", 2.5), (" 4 ", 4.0)])
+    def test_slow_factor_accepts_finite_above_one(
+            self, monkeypatch, caplog, raw, expected):
+        import logging
+        from utils import active_health_probe_core as core
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_SLOW_FACTOR", raw)
+        with caplog.at_level(logging.WARNING):
+            assert core._rnstatus_slow_factor() == expected
+        assert not [r for r in caplog.records if "IGNORED" in r.getMessage()]
+
+    def test_slow_factor_warns_once_per_value(self, monkeypatch, caplog):
+        import logging
+        from utils import active_health_probe_core as core
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_SLOW_FACTOR", "inf")
+        with caplog.at_level(logging.WARNING):
+            core._rnstatus_slow_factor()
+            core._rnstatus_slow_factor()
+        assert len([r for r in caplog.records
+                    if "MESHANCHOR_RNS_RPC_SLOW_FACTOR" in r.getMessage()]) == 1
 
     def test_wedge_reason_carries_load_evidence(self):
         """The alert must let the operator tell `rnsd is wedged` from

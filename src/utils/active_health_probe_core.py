@@ -12,6 +12,7 @@ probes that consume them. Import via ``active_health_probe``, not from here.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import subprocess
@@ -189,7 +190,17 @@ logger = logging.getLogger(__name__)
 # value leaves ONE warning — a knob that silently does nothing is a swallow
 # with no witness (hfm #9). int() alone took "1_000", "+3" and non-ASCII
 # digits, and fell back on "0"/"nope" without a word.
-_rejected_tick_knobs: set = set()
+_rejected_knobs: set = set()
+
+
+def _warn_ignored_knob(env_name: str, raw: str, why: str, default) -> None:
+    """One WARNING per (knob, value): an ignored knob is a swallow that must
+    leave a witness (hfm #9), but not on every check."""
+    if (env_name, raw) in _rejected_knobs:
+        return
+    _rejected_knobs.add((env_name, raw))
+    logger.warning("%s=%r is not %s; IGNORED, using the default of %s",
+                   env_name, raw, why, default)
 
 
 def _rpc_confirm_ticks() -> int:
@@ -200,12 +211,8 @@ def _rpc_confirm_ticks() -> int:
     text = raw.strip()
     if text.isdigit() and text.isascii() and int(text) >= 1:
         return int(text)
-    if (_RPC_CONFIRM_TICKS_ENV, raw) not in _rejected_tick_knobs:
-        _rejected_tick_knobs.add((_RPC_CONFIRM_TICKS_ENV, raw))
-        logger.warning(
-            "%s=%r is not a positive integer; IGNORED, using the default "
-            "of %d tick(s)", _RPC_CONFIRM_TICKS_ENV, raw,
-            _DEFAULT_RPC_CONFIRM_TICKS)
+    _warn_ignored_knob(_RPC_CONFIRM_TICKS_ENV, raw, "a positive integer",
+                       f"{_DEFAULT_RPC_CONFIRM_TICKS} tick(s)")
     return _DEFAULT_RPC_CONFIRM_TICKS
 
 
@@ -282,15 +289,24 @@ _rpc_slow_streak = 0
 
 
 def _rnstatus_slow_factor() -> float:
-    """Multiple of this box's own median that counts as degraded."""
+    """Multiple of this box's own median that counts as degraded.
+
+    A plain decimal ("2.5", "4"), finite, above 1.0. float() takes "inf",
+    and inf passes a ``> 1.0`` check, which made the threshold infinite and
+    switched the latency arm off unseen; it also takes "1_0", "+3" and
+    non-ASCII digits, which the tick parser rejects. Behaviour twin of
+    MeshForge's ``watchdog_probe_core.env_float_above`` (2026-10-28)."""
     raw = os.environ.get(_RNSTATUS_SLOW_FACTOR_ENV)
     if raw is None:
         return _DEFAULT_RNSTATUS_SLOW_FACTOR
-    try:
-        value = float(raw)
-    except ValueError:
-        return _DEFAULT_RNSTATUS_SLOW_FACTOR
-    return value if value > 1.0 else _DEFAULT_RNSTATUS_SLOW_FACTOR
+    text = raw.strip()
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", text):
+        value = float(text)
+        if math.isfinite(value) and value > 1.0:
+            return value
+    _warn_ignored_knob(_RNSTATUS_SLOW_FACTOR_ENV, raw,
+                       "a finite number above 1.0", _DEFAULT_RNSTATUS_SLOW_FACTOR)
+    return _DEFAULT_RNSTATUS_SLOW_FACTOR
 
 
 def reset_rnstatus_baseline() -> None:
