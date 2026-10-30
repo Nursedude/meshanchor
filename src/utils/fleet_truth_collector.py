@@ -175,7 +175,7 @@ def _fetch_box(alias: str, base_url: str, method: str,
         if spool is not None:
             sp_status = spool.get("status") if isinstance(spool.get("status"), dict) else None
             sp_slo = spool.get("slo") if isinstance(spool.get("slo"), dict) else None
-            for k in ("http_surface_expected", "watchdog_expected", "radio_expected"):
+            for k in ("http_surface_expected", "watchdog_expected"):
                 if isinstance(spool.get(k), bool):
                     snap[k] = spool[k]
             # A map-less box (no /api/status, no /fleet/slo) is described by
