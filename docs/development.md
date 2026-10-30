@@ -26,7 +26,7 @@ coordinated across both projects.
 
 ### Test Coverage
 
-The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->363<!--/STAT--> test files. Top suites by depth
+The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->365<!--/STAT--> test files. Top suites by depth
 (per-file counts are a 2026-07 snapshot — run `python3 -m pytest tests/<file> --co -q` for the live number):
 
 | Test File | Tests | Covers |
