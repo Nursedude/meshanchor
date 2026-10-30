@@ -38,11 +38,12 @@ def spool(tmp_path, monkeypatch):
 
 def test_a_fresh_spool_answers_for_a_dark_peer(spool):
     spool("moc3", status={"app": {"name": "meshforge"}}, slo=None,
-          http_surface_expected=False, watchdog_expected=True)
+          http_surface_expected=False, watchdog_expected=True, radio_expected=False)
     snap = ftc._fetch_box("Gateway 3", _closed_base(), "config", "moc3")
     assert snap["resolution_method"] == "ssh_spool" and snap["error"] is None
     assert snap["status"] == {"app": {"name": "meshforge"}}
     assert snap["http_surface_expected"] is False and snap["watchdog_expected"] is True
+    assert snap["radio_expected"] is False
 
 
 def test_an_empty_handed_spool_names_how_the_read_ended(spool):
@@ -51,6 +52,7 @@ def test_an_empty_handed_spool_names_how_the_read_ended(spool):
     snap = ftc._fetch_box("moc3", _closed_base(), "config", "moc3")
     assert snap["status"] is None and "push moc3" in snap["error"]
     assert "http_surface_expected" not in snap        # undecided stays absent
+    assert "radio_expected" not in snap
 
 
 def test_a_stale_spool_reads_dark_never_last_known_healthy(spool):

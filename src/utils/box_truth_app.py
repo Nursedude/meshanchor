@@ -55,6 +55,11 @@ HTTP_SURFACE_UNIT = "meshanchor-map"
 #: role (``enabled`` where the box runs it, ``absent`` on a MeshAnchor-only
 #: box, so its absence reads inert there instead of dark).
 WATCHDOG_UNIT = "meshforge-watchdog"
+#: None: MeshAnchor's radio is MeshCore, opened in-process by the app, so
+#: there is no unit a role could declare. Its radio expectation is then
+#: undecidable (None) and the radio cell behaves exactly as before —
+#: never False, which would quiet a real "not connected".
+RADIO_UNIT = None
 #: This app's role catalog, and the provisioner that resolves a role in it.
 ROLE_CATALOG = Path(INSTALL_DIR) / "docs" / "fleet_roles.yaml"
 PROVISIONER = Path(INSTALL_DIR) / "scripts" / "provision_role.py"
