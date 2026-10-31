@@ -195,3 +195,116 @@ def test_the_policy_module_is_byte_identical_with_meshforge():
         pytest.skip("MeshForge checkout absent — parity_check carries this on the lead box")
     ma = Path(__file__).resolve().parent.parent / "src" / "gateway" / "rns_ingress_policy.py"
     assert ma.read_bytes() == mf.read_bytes()
+
+
+# ── MF #4 port (BIC-2 gate 3, 2026-10-29): a refusal reaches the record ──
+
+@pytest.fixture
+def recorded(monkeypatch):
+    calls = []
+    monkeypatch.setattr("gateway.delivery_counters.record",
+                        lambda *a, **kw: calls.append((a, kw)))
+    return calls
+
+
+def _hashed(source_hex, msg_hash=b"\x11" * 32, **kw):
+    m = _lxmf(source_hex, **kw)
+    m.hash = msg_hash
+    return m
+
+
+def test_an_enforce_refusal_is_one_dropped_ingress_refused_event(tmp_path, recorded):
+    from gateway import delivery_counters as dc
+    _fake_bridge(tmp_path, [LISTED], "enforce")._on_lxmf_receive(_hashed(STRANGER))
+    assert len(recorded) == 1
+    (state, msg_id), kw = recorded[0]
+    assert state == dc.DeliveryState.DROPPED
+    assert kw["drop_reason"] == dc.DropReason.INGRESS_REFUSED
+    assert msg_id == "11" * 32
+    assert kw["protocol"] == "meshcore" and kw["source"] == "rns"
+    assert "not in bridge_source_identities" in kw["note"]
+
+
+def test_an_unverified_member_claim_is_named(tmp_path, recorded):
+    _fake_bridge(tmp_path, [LISTED], "enforce")._on_lxmf_receive(
+        _hashed(LISTED, validated=None))
+    assert "unverified" in recorded[0][1]["note"]
+
+
+def test_an_unverified_stranger_is_named_unlisted(tmp_path, recorded):
+    _fake_bridge(tmp_path, [LISTED], "enforce")._on_lxmf_receive(
+        _hashed(STRANGER, validated=None))
+    assert "not in bridge_source_identities" in recorded[0][1]["note"]
+
+
+def test_no_hash_gets_an_inbound_id(tmp_path, recorded):
+    m = _lxmf(STRANGER)
+    _fake_bridge(tmp_path, [LISTED], "enforce")._on_lxmf_receive(m)
+    assert recorded[0][0][1].startswith("lxmf-in-")
+
+
+def test_observe_and_admitted_record_no_refusal(tmp_path, recorded):
+    _fake_bridge(tmp_path, [LISTED], "observe")._on_lxmf_receive(_hashed(STRANGER))
+    _fake_bridge(tmp_path, [LISTED], "enforce")._on_lxmf_receive(_hashed(LISTED))
+    assert recorded == []
+
+
+def test_refusal_recording_is_bounded_and_witnessed(tmp_path, recorded, monkeypatch):
+    from gateway import bridge_rns_events_mixin as mx
+    clock = [1000.0]
+    monkeypatch.setattr(mx, "_monotonic", lambda: clock[0])
+    b = _fake_bridge(tmp_path, [LISTED], "enforce")
+    n = mx.INGRESS_REFUSAL_RECORD_MAX
+    for i in range(n + 5):
+        b._on_lxmf_receive(_hashed(STRANGER, bytes([i]) * 32))
+    assert len(recorded) == n
+    assert b.stats["rns_ingress_refusals_unrecorded"] == 5
+    clock[0] += mx.INGRESS_REFUSAL_RECORD_WINDOW_S + 0.1
+    b._on_lxmf_receive(_hashed(STRANGER, b"\xee" * 32))
+    assert len(recorded) == n + 1
+
+
+def test_refusals_cannot_evict_the_terminal_ring(tmp_path):
+    from gateway import delivery_counters as dc
+    c = dc.DeliveryCounters(db_path=tmp_path / "dc.db", run_preflight=False)
+    for i in range(30):
+        c.record(dc.DeliveryState.CONFIRMED, f"x{i}", protocol="rns",
+                 source="meshcore")
+    for i in range(250):
+        c.record(dc.DeliveryState.DROPPED, f"r{i}", protocol="meshcore",
+                 source="rns", drop_reason=dc.DropReason.INGRESS_REFUSED)
+    snap = c.snapshot()
+    assert len(snap["recent_terminal"]) == 30
+    assert snap["legs"]["rns>meshcore"]["15m"]["refused"] == 250
+    assert dc.DropReason.INGRESS_REFUSED.value not in dc.DELIVERY_FAILURE_REASONS
+
+
+def test_a_refusal_flood_never_prunes_a_delivery_row(tmp_path):
+    # re-review 10-29 #1: the terminal-ring FILTER was not enough — the
+    # physical prune-on-insert deleted the oldest rows whatever they were.
+    from gateway import delivery_counters as dc
+    c = dc.DeliveryCounters(db_path=tmp_path / "dc.db", run_preflight=False,
+                            ring_cap=40)
+    for i in range(30):
+        c.record(dc.DeliveryState.CONFIRMED, f"x{i}", protocol="rns",
+                 source="meshcore")
+    for i in range(dc.REFUSAL_RING_CAP * 4):
+        c.record(dc.DeliveryState.DROPPED, f"r{i}", protocol="meshcore",
+                 source="rns", drop_reason=dc.DropReason.INGRESS_REFUSED)
+    snap = c.snapshot()
+    assert len(snap["recent_terminal"]) == 30
+    import sqlite3
+    with sqlite3.connect(str(tmp_path / "dc.db")) as raw:
+        n_ref = raw.execute("SELECT COUNT(*) FROM events WHERE drop_reason = "
+                            "'ingress_refused'").fetchone()[0]
+        n_other = raw.execute("SELECT COUNT(*) FROM events WHERE drop_reason "
+                              "IS NOT 'ingress_refused'").fetchone()[0]
+    assert n_ref == dc.REFUSAL_RING_CAP          # bounded in its own pool
+    assert n_other == 30                         # nothing of ours evicted
+    # the delivery pool still prunes itself at its own cap
+    for i in range(20):
+        c.record(dc.DeliveryState.CONFIRMED, f"y{i}", protocol="rns",
+                 source="meshcore")
+    with sqlite3.connect(str(tmp_path / "dc.db")) as raw:
+        assert raw.execute("SELECT COUNT(*) FROM events WHERE drop_reason "
+                           "IS NOT 'ingress_refused'").fetchone()[0] == 40

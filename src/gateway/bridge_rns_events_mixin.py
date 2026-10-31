@@ -24,6 +24,10 @@ _monotonic = time.monotonic
 #: At most one source-unknown path request per member hash per this many
 #: seconds: a forger spamming claims for a member hash must not make us storm.
 IDENTITY_PATH_NUDGE_S = 60.0
+#: Refusals put on the delivery record per window, ALL senders together (MF
+#: review 2026-10-29 #1): the excess is counted, never silent (hfm #9).
+INGRESS_REFUSAL_RECORD_MAX = 20
+INGRESS_REFUSAL_RECORD_WINDOW_S = 60.0
 #: LXMF's unverified_reason for "source never announced" — the ONLY reason a
 #: path request can cure (an invalid signature is a forgery, not a stale cache).
 _SOURCE_UNKNOWN = 0x01
@@ -59,7 +63,8 @@ class BridgeRnsEventsMixin:
 
     #: The RNS→MeshCore ingress methods a host must carry (tests bind these).
     INGRESS_METHODS = ("_rns_ingress_ledger", "rns_ingress_posture",
-                       "rns_ingress_stamp", "_rns_ingress_admits")
+                       "rns_ingress_stamp", "_rns_ingress_admits",
+                       "_record_ingress_refusal")
 
     def _on_lxmf_receive(self, message):
         """Handle incoming LXMF message"""
@@ -169,6 +174,7 @@ class BridgeRnsEventsMixin:
                     source_hash.hex(),
                     signature_validated=getattr(message, 'signature_validated', None),
                     unverified_reason=getattr(message, 'unverified_reason', None)):
+                self._record_ingress_refusal(message)
                 self._notify_message(msg)
                 return
 
@@ -405,6 +411,46 @@ class BridgeRnsEventsMixin:
             "not bridged onto MeshCore RF" if refused else
             "bridged anyway (observe); add it to the list or enforce")
         return not refused
+
+    def _record_ingress_refusal(self, message) -> None:
+        """Put a refusal on the per-message delivery record (MF BIC-2 gate 3).
+
+        LXMF proved delivery before the gate ran, so the sender reads
+        "delivered" and cannot be told (an unverified source is one whose
+        key we lack). Witness-only: a failure changes nothing decided."""
+        try:
+            now = _monotonic()
+            with self._stats_lock:
+                times = getattr(self, "_rns_refusal_record_times", None)
+                if times is None:
+                    times = self._rns_refusal_record_times = []
+                times[:] = [t for t in times
+                            if 0 <= now - t < INGRESS_REFUSAL_RECORD_WINDOW_S]
+                if len(times) >= INGRESS_REFUSAL_RECORD_MAX:
+                    self.stats['rns_ingress_refusals_unrecorded'] = (
+                        self.stats.get('rns_ingress_refusals_unrecorded', 0) + 1)
+                    return
+                times.append(now)
+            from . import delivery_counters as _dc, delivery_legs
+            from .rns_ingress_policy import verdict, VERDICT_UNVERIFIED
+            source_hex = message.source_hash.hex()
+            unverified = verdict(
+                source_hex, self.rns_ingress_posture()["identities"], (),
+                signature_validated=getattr(message, "signature_validated",
+                                            None)) == VERDICT_UNVERIFIED
+            raw = getattr(message, "hash", None)
+            msg_id = (raw.hex() if isinstance(raw, (bytes, bytearray)) and raw
+                      else delivery_legs.synth_id("lxmf-in"))
+            _dc.record(
+                _dc.DeliveryState.DROPPED, msg_id,
+                protocol="meshcore", source="rns",
+                drop_reason=_dc.DropReason.INGRESS_REFUSED,
+                note=("unverified claim of a member" if unverified
+                      else "sender not in bridge_source_identities"),
+            )
+        except Exception as e:  # noqa: BLE001 — witnessed, never decisive
+            logger.warning(f"rns ingress refusal not recorded ({e}); the "
+                           f"journal REFUSED line is the only witness")
 
     def _on_rns_announce(self, dest_hash, announced_identity, app_data):
         """Handle RNS announce for node discovery"""
