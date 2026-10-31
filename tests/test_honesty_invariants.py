@@ -199,3 +199,55 @@ def test_red_bare_advisory_form_is_detected():
     pat = re.compile(r"\$\{SUDO_USER:-\$USER\}")
     assert pat.search(pre_fix), "the pattern must match the defect it exists for"
     assert not pat.search(post_fix), "the fixed form must not be flagged"
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Step 4 — no false operator-facing instructions (dead AREDN sysinfo URL)
+# ═════════════════════════════════════════════════════════════════════
+
+# Ported from MeshForge ``tests/test_honesty_invariants.py`` (Step 4). AREDN
+# 4.x retired the old node API path: a GET to ``:8080/cgi-bin/sysinfo.json``
+# answers HTTP 307 → ``:8080/a/sysinfo`` (re-observed live 2026-10-31 on
+# AREDN 4.26.10.0: a non-redirect-following client gets an EMPTY body).
+# MA's AREDNClient already used ``/a/sysinfo``, but the operator-FACING text
+# (KB entries + the TUI troubleshooting hint) still pointed at the dead path —
+# a half-port of MeshForge 243d8a9. Instructing the operator toward a
+# redirecting/dead endpoint is a false instruction (MF018).
+_DEAD_AREDN_PATH = "cgi-bin/sysinfo.json"
+_SRC = REPO / "src"
+
+
+def _src_files_referencing(needle: str) -> dict:
+    hits = {}
+    for path in _SRC.rglob("*.py"):
+        n = path.read_text(encoding="utf-8", errors="replace").count(needle)
+        if n:
+            hits[str(path.relative_to(_SRC))] = n
+    return hits
+
+
+class TestNoDeadArednSysinfoUrl:
+    """No source string points the operator at AREDN's retired
+    ``/cgi-bin/sysinfo.json`` (307 → ``/a/sysinfo``)."""
+
+    # Intentional references (e.g. a migration note) go here WITH a reason.
+    ALLOWED: set = set()
+
+    def test_src_tree_present(self):
+        """Fail loud, never vacuously pass, if the scanned tree moved."""
+        assert any(_SRC.rglob("*.py")), f"no .py files under {_SRC}"
+
+    def test_no_dead_aredn_url_in_src(self):
+        hits = {f: n for f, n in _src_files_referencing(_DEAD_AREDN_PATH).items()
+                if f not in self.ALLOWED}
+        assert not hits, (
+            f"deprecated AREDN path {_DEAD_AREDN_PATH!r} (HTTP 307 → /a/sysinfo) "
+            f"still referenced in: {hits}. Point the operator at "
+            f"'/a/sysinfo' (add '?hosts=1' for the node/host list) — instructing "
+            f"them toward a redirecting/dead endpoint is a false instruction (MF018).")
+
+    def test_red_checker_detects_the_dead_path(self):
+        """RED proof — the substring scanner really flags the dead path."""
+        sample = "see http://node:8080/cgi-bin/sysinfo.json for details"
+        assert sample.count(_DEAD_AREDN_PATH) == 1
+        assert "ok /a/sysinfo only".count(_DEAD_AREDN_PATH) == 0
