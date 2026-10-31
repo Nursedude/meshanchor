@@ -382,6 +382,10 @@ class MeshCoreConfig:
     # to the radio at connect. Avoids surprising the operator the first time
     # they upgrade past the addition of these fields.
     apply_desired_on_connect: bool = False
+    # Off by default, same contract as above: the radio clock is always
+    # MEASURED (gateway.meshcore_clock); it is WRITTEN at connect only when
+    # this is true AND the host is NTP-synced AND the radio is skewed.
+    sync_clock_on_connect: bool = False
 
 
 @dataclass

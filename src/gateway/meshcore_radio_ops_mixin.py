@@ -36,6 +36,27 @@ class MeshCoreRadioOpsMixin:
     async def _refresh_radio_state(self) -> None:
         await self._radio.refresh()
 
+    async def _sync_clock_on_connect(self) -> None:
+        """Opt-in clock write (gateway.json[meshcore].sync_clock_on_connect).
+
+        Contract lives in gateway.meshcore_clock.sync_if_allowed: writes
+        only when opted in, the host is NTP-synced and the radio is skewed;
+        the verdict comes from a re-read. Always records what it found.
+        """
+        from . import meshcore_clock
+        from . import meshcore_handler as _mh
+        mc = getattr(self, "_meshcore", None)
+        if mc is None or not _mh._HAS_MESHCORE:
+            return
+        allow = bool(getattr(getattr(self.config, "meshcore", None),
+                             "sync_clock_on_connect", False))
+        verdict = await meshcore_clock.sync_if_allowed(
+            mc.commands, _mh._meshcore_mod.EventType, allow=allow)
+        self._radio.set_clock(verdict)
+        log = logger.warning if verdict.get("state") != "ok" else logger.info
+        log(f"MeshCore {meshcore_clock.describe(verdict)} "
+            f"(sync={verdict.get('sync')})")
+
     def _apply_desired_and_log_drift(self) -> None:
         """Session 3 hook: push gateway.json[meshcore].desired_* to the radio
         and log any drift. Opt-in via apply_desired_on_connect.
@@ -264,6 +285,14 @@ class MeshCoreRadioOpsMixin:
             out["reason"] = f"get_contacts failed: {e}"
             return out
         contacts = [self._normalise_contact(c) for c in raw]
+        # `lastmod` is stamped by the RADIO's RTC — only as true as that
+        # clock (8.29 d slow on RAK1, 2026-10-31). Ship the clock verdict
+        # with the table so no consumer reads lastmod as wall time blind.
+        try:
+            out["radio_clock"] = self.get_radio_state(refresh=False).get("clock")
+        except Exception as e:
+            out["radio_clock"] = {"state": "unobservable",
+                                  "reason": f"radio state unreadable: {e}"}
         # Order by LASTMOD — this radio's own receipt clock. `last_advert` is
         # the SENDER's clock and is forgeable/wrong in practice (8 of 67
         # contacts read >1y off on RAK1, 2026-09-20), so ordering by it puts
@@ -305,8 +334,8 @@ class MeshCoreRadioOpsMixin:
             "last_advert": la,
             "last_advert_iso": la_iso,
             "lastmod": lm,
-            # THIS radio's receipt clock — the honest "last heard". The pane
-            # renders this one; `last_advert*` is the sender's own claim.
+            # THIS radio's RTC at receipt — honest only when the snapshot's
+            # `radio_clock.state` is "ok"; `last_advert*` is the sender's claim.
             "lastmod_iso": lm_iso,
             "out_path_len": g("out_path_len"),  # -1 = no path (flood), else hops
             "adv_lat": g("adv_lat"),

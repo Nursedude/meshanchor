@@ -289,6 +289,7 @@ def _empty_radio_state() -> Dict[str, Any]:
         "last_refresh_ts": None,  # epoch seconds
         "source": None,           # "radio" | "simulator" | None
         "error": None,            # str if last refresh failed
+        "clock": None,            # gateway.meshcore_clock verdict (None = not measured)
     }
 
 
@@ -331,6 +332,11 @@ class MeshCoreRadioConfig:
                 self.set_error(f"Refresh failed: {e}")
         with self._lock:
             return dict(self._state)
+
+    def set_clock(self, clock: Dict[str, Any]) -> None:
+        """Record a clock verdict (e.g. after a connect-time sync)."""
+        with self._lock:
+            self._state["clock"] = clock
 
     def set_error(self, message: str) -> None:
         """Stamp an error onto the cache without losing the prior snapshot."""
@@ -416,9 +422,22 @@ class MeshCoreRadioConfig:
                     "hash": ch.get("channel_hash") or "",
                 })
 
+            # Radio clock — READ only here (meshcore_clock.measure never
+            # writes and never raises). It stamps contact receipts and our
+            # own outbound traffic, so its offset is reported state.
+            from . import meshcore_clock
+            try:
+                clock = await asyncio.wait_for(
+                    meshcore_clock.measure(commands, EventType), timeout=5.0)
+            except asyncio.TimeoutError:
+                # Degrade the clock alone — never lose the radio snapshot.
+                clock = meshcore_clock.judge(None, time.time(), host_synced=None)
+                clock["reason"] = "get_time timed out (5s)"
+
             with self._lock:
                 self._state = _empty_radio_state()
                 self._state.update({
+                    "clock": clock,
                     "radio_freq_mhz": _coerce_float(self_info.get("radio_freq")),
                     "radio_bw_khz": _coerce_float(self_info.get("radio_bw")),
                     "radio_sf": _coerce_int(self_info.get("radio_sf")),

@@ -191,3 +191,42 @@ class TestDeclaredOwnership:
         assert handler._contacts_is_ours(["meshanchor p4"], row)
         assert handler._contacts_is_ours(["7eb0fa"], row)
         assert not handler._contacts_is_ours(["somebody else"], row)
+
+
+class TestRadioClockLine:
+    """2026-10-31: the radio's RTC (8.29 d slow on RAK1) is printed, never assumed."""
+
+    def _render(self, handler, clock, capsys):
+        handler._contacts_radio_clock = clock
+        with patch.object(type(handler), "_contacts_fetch",
+                          return_value=([_row()], None)), \
+             patch.object(type(handler), "_contacts_receipts", return_value={}), \
+             patch.object(type(handler), "_contacts_declared", return_value=[]):
+            handler._meshcore_contacts()
+        return capsys.readouterr().out
+
+    def test_skewed_clock_is_loud_with_the_fix(self, handler, capsys):
+        out = self._render(handler, {"state": "skewed", "offset_s": -8.29 * 86400}, capsys)
+        assert "! radio clock: SKEWED 8.3 d slow" in out
+        assert "sync_clock_on_connect" in out
+
+    def test_older_daemon_without_clock_is_not_measured_not_ok(self, handler, capsys):
+        out = self._render(handler, None, capsys)
+        assert "! radio clock: not measured" in out
+        assert "radio clock: ok" not in out
+
+    def test_ok_clock_is_quiet(self, handler, capsys):
+        out = self._render(handler, {"state": "ok", "offset_s": 3.0}, capsys)
+        assert "radio clock: ok (3 s fast)" in out
+        assert "sync_clock_on_connect" not in out
+
+    def test_fetch_carries_the_clock_from_the_payload(self, handler):
+        import io, json as _j
+        body = _j.dumps({"contacts": [], "radio_clock": {"state": "ok"}}).encode()
+        resp = MagicMock()
+        resp.__enter__ = lambda s: io.BytesIO(body)
+        resp.__exit__ = lambda s, *a: False
+        with patch("urllib.request.urlopen", return_value=resp):
+            rows, err = handler._contacts_fetch()
+        assert err is None
+        assert handler._contacts_radio_clock == {"state": "ok"}

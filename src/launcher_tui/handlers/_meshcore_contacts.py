@@ -16,15 +16,16 @@ field names, they are both misleading):
                seven over a year stale. Fine as "what they claimed",
                useless as a magnitude we can act on.
 
-  lastmod      NOT a receipt clock, despite reading like one. meshcore_py
-               passes it back as ``get_contacts(lastmod=...)`` — an
-               If-Modified-Since sync cursor — so the firmware stamps it
-               when the RECORD changed, not when the node was heard.
-               Observed: frozen 8 days back with zero rows inside a week
-               while adverts were actively arriving, and the newest six
-               clustered inside one 23-minute window (a bulk table
-               rewrite). A pane sorting on it reports a node heard
-               seconds ago as eight days silent.
+  lastmod      stamped by the RADIO's own RTC when the record changes
+               (an advert updates it). The 09-21 reading here — "frozen 8
+               days back while adverts were arriving" — was the radio's
+               CLOCK, not the field: re-measured 2026-10-31 the RAK1 ran
+               8.29 days slow (median last_advert - lastmod over 98 sane
+               contacts; fresh adverts at sender-age 0.00 d carried
+               lastmod 8.3 d old). Since 10-31 the daemon measures the
+               radio clock and ships it as ``radio_clock``; the pane prints
+               it. lastmod is still not shown as "last heard": it is only
+               as true as that clock.
 
 The tracker's ``last_seen`` is stamped by us, on our clock, when an
 advertisement actually arrives (``meshcore_handler._on_advertisement``).
@@ -66,6 +67,9 @@ class MeshCoreContactsMixin:
                 payload = json.loads(resp.read().decode("utf-8"))
         except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
             return None, str(e)
+        # The radio-clock verdict rides with the table (daemon 2026-10-31).
+        # Absent key = an older daemon: say "not measured", never "ok".
+        self._contacts_radio_clock = payload.get("radio_clock")
         rows = payload.get("contacts")
         if not isinstance(rows, list):
             return None, "response carried no 'contacts' list"
@@ -224,6 +228,17 @@ class MeshCoreContactsMixin:
         if receipts is None:
             print("  ! node tracker unreadable - 'last heard' is UNKNOWN for "
                   "every row below, not 'never'.")
+        try:
+            from gateway.meshcore_clock import describe as _clock_line
+        except ImportError:  # pane must render on a box without gateway extras
+            def _clock_line(c):
+                return f"radio clock: {(c or {}).get('state') or 'not measured'}"
+        clock = getattr(self, "_contacts_radio_clock", None)
+        mark = "  " if (clock or {}).get("state") == "ok" else "! "
+        print(f"  {mark}{_clock_line(clock)}")
+        if (clock or {}).get("state") == "skewed":
+            print("    fix: set meshcore.sync_clock_on_connect=true in gateway.json")
+            print("         and restart meshanchor-daemon (writes only if host NTP-synced)")
         print()
         print(f"  {'':1} {'NAME':<22} {'ROLE':<10} {'PREFIX':<13} "
               f"{'LAST HEARD':<14} {'PATH':<8} POSITION")
@@ -279,6 +294,6 @@ class MeshCoreContactsMixin:
     def _contacts_render_legend():
         print("\n  last heard = OUR clock, stamped when an advert arrived.")
         print("  The row's own last_advert is the SENDER's clock (live range")
-        print("  2022..2084) and lastmod is a record-modified sync cursor -")
-        print("  neither is a receipt time, so neither is shown as one.")
+        print("  2022..2084) and lastmod is THIS radio's RTC (see the radio")
+        print("  clock line) - neither is shown as a receipt time.")
         print("  path 'flood' = no stored route; position '-' = none advertised.")

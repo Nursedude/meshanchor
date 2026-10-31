@@ -491,6 +491,14 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             except Exception as e:
                 logger.warning(f"Desired-config apply skipped: {e}")
 
+            # Radio clock: measured on every connect; written only on
+            # opt-in (sync_clock_on_connect) — see gateway.meshcore_clock.
+            if not self._simulation_mode:
+                try:
+                    await self._sync_clock_on_connect()
+                except Exception as e:
+                    logger.warning(f"MeshCore clock check skipped: {e}")
+
             # Periodic advert heartbeat — keep the NOC's name/coords/pubkey
             # inside neighbors' contact-share TTL so portables can introduce
             # us to others. Disabled when interval <= 0.
