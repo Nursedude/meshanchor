@@ -493,11 +493,11 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
 
             # Radio clock: measured on every connect; written only on
             # opt-in (sync_clock_on_connect) — see gateway.meshcore_clock.
-            if not self._simulation_mode:
-                try:
-                    await self._sync_clock_on_connect()
-                except Exception as e:
-                    logger.warning(f"MeshCore clock check skipped: {e}")
+            # (Simulation returned above — this is the real-radio path only.)
+            try:
+                await self._sync_clock_on_connect()
+            except Exception as e:
+                logger.warning(f"MeshCore clock check skipped: {e}")
 
             # Periodic advert heartbeat — keep the NOC's name/coords/pubkey
             # inside neighbors' contact-share TTL so portables can introduce

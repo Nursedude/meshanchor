@@ -20,6 +20,7 @@ Contract:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 import time
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 #: serial latency and second truncation with a wide margin; the defect this
 #: exists for was 8 days.
 SKEW_TOLERANCE_S = 120.0
+
+#: Bound on one radio clock read (refresh() degrades the clock alone past it).
+CLOCK_READ_TIMEOUT_S = 5.0
+
+_UNSET = object()
 
 _TIMEDATECTL = ["timedatectl", "show", "-p", "NTPSynchronized", "--value"]
 
@@ -76,32 +82,57 @@ def judge(device_epoch: Any, host_epoch: float, *,
     return out
 
 
+async def probe_host_synced(
+        host_synced_fn: Optional[Callable[[], Optional[bool]]] = None,
+) -> Optional[bool]:
+    """Run the (blocking, subprocess) host NTP probe OFF the event loop.
+
+    The hook is resolved at CALL time so callers and tests can pin it
+    (review 2026-10-31 F3: a def-time default bound the test box's state).
+    """
+    fn = host_synced_fn or host_clock_synced
+    try:
+        return await asyncio.to_thread(fn)
+    except Exception:  # an unanswerable probe is unknown, never "synced"
+        return None
+
+
 async def measure(commands: Any, event_type: Any, *,
-                  now: Callable[[], float] = time.time,
-                  host_synced_fn: Callable[[], Optional[bool]] = host_clock_synced,
+                  now: Optional[Callable[[], float]] = None,
+                  host_synced_fn: Optional[Callable[[], Optional[bool]]] = None,
+                  host_synced: Any = _UNSET,
                   ) -> Dict[str, Any]:
-    """Read the radio clock. Never raises, never writes."""
+    """Read the radio clock. Never raises, never writes.
+
+    ``host_synced`` may be passed pre-probed (sync_if_allowed probes once).
+    """
+    clock = now or time.time
+    if host_synced is _UNSET:
+        host_synced = await probe_host_synced(host_synced_fn)
     try:
         evt = await commands.get_time()
     except Exception as e:  # serial gone / timeout — unobservable, say why
-        v = judge(None, now(), host_synced=host_synced_fn())
+        v = judge(None, clock(), host_synced=host_synced)
         v["reason"] = f"get_time failed: {e}"
         return v
     if getattr(evt, "type", None) != event_type.CURRENT_TIME:
-        v = judge(None, now(), host_synced=host_synced_fn())
+        v = judge(None, clock(), host_synced=host_synced)
         v["reason"] = f"get_time returned {getattr(evt, 'type', None)}"
         return v
     payload = getattr(evt, "payload", None) or {}
-    return judge(payload.get("time"), now(), host_synced=host_synced_fn())
+    return judge(payload.get("time"), clock(), host_synced=host_synced)
 
 
 async def sync_if_allowed(commands: Any, event_type: Any, *, allow: bool,
-                          now: Callable[[], float] = time.time,
-                          host_synced_fn: Callable[[], Optional[bool]] = host_clock_synced,
+                          now: Optional[Callable[[], float]] = None,
+                          host_synced_fn: Optional[Callable[[], Optional[bool]]] = None,
                           ) -> Dict[str, Any]:
     """Measure; write ``set_time`` only under the module contract."""
-    before = await measure(commands, event_type, now=now,
-                           host_synced_fn=host_synced_fn)
+    clock = now or time.time
+    allow = allow is True  # a truthy non-bool never opts in (review F1)
+    host_synced = await probe_host_synced(host_synced_fn)
+    before = await measure(commands, event_type, now=clock,
+                           host_synced=host_synced)
     if before["state"] == "unobservable":
         before["sync"] = "not_attempted_unobservable"
         return before
@@ -115,17 +146,23 @@ async def sync_if_allowed(commands: Any, event_type: Any, *, allow: bool,
         before["sync"] = "not_opted_in"
         return before
 
-    target = int(now())
+    target = int(clock())
     try:
         res = await commands.set_time(target)
         acked = getattr(res, "type", None) == event_type.OK
     except Exception as e:
         logger.warning(f"MeshCore clock sync: set_time failed: {e}")
         acked = False
-    after = await measure(commands, event_type, now=now,
-                          host_synced_fn=host_synced_fn)
+    after = await measure(commands, event_type, now=clock,
+                          host_synced=host_synced)
     after["offset_before_s"] = before["offset_s"]
-    after["sync"] = "synced" if (acked and after["state"] == "ok") else "failed"
+    if acked and after["state"] == "ok":
+        after["sync"] = "synced"
+    elif acked and after["state"] == "unobservable":
+        # The radio said OK and we could not re-read: we do not know.
+        after["sync"] = "unverified"
+    else:
+        after["sync"] = "failed"
     logger.warning(
         "MeshCore clock sync: offset %.0fs -> %s (sync=%s, acked=%s)",
         before["offset_s"],

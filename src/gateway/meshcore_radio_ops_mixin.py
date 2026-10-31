@@ -48,8 +48,9 @@ class MeshCoreRadioOpsMixin:
         mc = getattr(self, "_meshcore", None)
         if mc is None or not _mh._HAS_MESHCORE:
             return
-        allow = bool(getattr(getattr(self.config, "meshcore", None),
-                             "sync_clock_on_connect", False))
+        # `is True`: a JSON string "false" is truthy (review 2026-10-31 F1).
+        allow = getattr(getattr(self.config, "meshcore", None),
+                        "sync_clock_on_connect", False) is True
         verdict = await meshcore_clock.sync_if_allowed(
             mc.commands, _mh._meshcore_mod.EventType, allow=allow)
         self._radio.set_clock(verdict)

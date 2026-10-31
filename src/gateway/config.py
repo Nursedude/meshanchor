@@ -387,6 +387,19 @@ class MeshCoreConfig:
     # this is true AND the host is NTP-synced AND the radio is skewed.
     sync_clock_on_connect: bool = False
 
+    def __post_init__(self) -> None:
+        # Radio-WRITE opt-ins accept a real JSON boolean only. A hand-typed
+        # "false" is truthy and used to opt the radio in (review 2026-10-31
+        # F1); anything that is not True/False refuses, loudly.
+        for flag in ("apply_desired_on_connect", "sync_clock_on_connect"):
+            val = getattr(self, flag)
+            if not isinstance(val, bool):
+                logging.getLogger(__name__).error(
+                    "gateway.json meshcore.%s=%r is not a JSON boolean "
+                    "(true/false, unquoted) — treating as false (no radio write)",
+                    flag, val)
+                setattr(self, flag, False)
+
 
 @dataclass
 class RNSConfig:

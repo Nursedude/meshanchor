@@ -428,11 +428,13 @@ class MeshCoreRadioConfig:
             from . import meshcore_clock
             try:
                 clock = await asyncio.wait_for(
-                    meshcore_clock.measure(commands, EventType), timeout=5.0)
+                    meshcore_clock.measure(commands, EventType),
+                    timeout=meshcore_clock.CLOCK_READ_TIMEOUT_S)
             except asyncio.TimeoutError:
                 # Degrade the clock alone — never lose the radio snapshot.
                 clock = meshcore_clock.judge(None, time.time(), host_synced=None)
-                clock["reason"] = "get_time timed out (5s)"
+                clock["reason"] = (f"get_time timed out "
+                                   f"({meshcore_clock.CLOCK_READ_TIMEOUT_S:g}s)")
 
             with self._lock:
                 self._state = _empty_radio_state()

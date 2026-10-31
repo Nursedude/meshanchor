@@ -307,3 +307,193 @@ def test_refresh_records_the_clock_read_only():
     assert st["error"] is None and st["node_name"] == "RAK1"
     assert st["clock"]["state"] == "skewed"
     assert cmds.set_calls == []
+
+
+# ── review fixes (non-author review of a2eeca46, 2026-10-31) ─────────────
+
+# F1: a STRING in gateway.json must never opt the radio in to a write.
+@pytest.mark.parametrize("raw", ["false", "no", "0", "true", 1, None])
+def test_config_non_bool_flags_refuse(raw):
+    from gateway.config import MeshCoreConfig
+    c = MeshCoreConfig(sync_clock_on_connect=raw, apply_desired_on_connect=raw)
+    assert c.sync_clock_on_connect is False
+    assert c.apply_desired_on_connect is False
+
+
+def test_config_real_true_survives():
+    from gateway.config import MeshCoreConfig
+    c = MeshCoreConfig(sync_clock_on_connect=True)
+    assert c.sync_clock_on_connect is True
+
+
+def test_connect_hook_string_flag_never_writes():
+    from gateway import meshcore_handler as mh
+    cmds = FakeCommands(-EIGHT_DAYS)
+    h = _handler_with(cmds, flag="false")   # bypasses the dataclass on purpose
+    with patch.object(mh, "_HAS_MESHCORE", True), \
+         patch.object(mh, "_meshcore_mod", SimpleNamespace(EventType=_ET), create=True), \
+         patch.object(mc_clock, "host_clock_synced", return_value=True), \
+         patch.object(mc_clock.time, "time", return_value=HOST):
+        _run(h._sync_clock_on_connect())
+    assert cmds.set_calls == []
+
+
+# F3: the module hooks must be resolved at CALL time, so tests (and any
+# caller) can pin them; a def-time default bound the test box's NTP state.
+def test_patched_host_state_takes_effect():
+    cmds = FakeCommands(-EIGHT_DAYS)
+    with patch.object(mc_clock, "host_clock_synced", return_value=False), \
+         patch.object(mc_clock.time, "time", return_value=HOST):
+        v = _run(mc_clock.sync_if_allowed(cmds, _ET, allow=True))
+    assert v["host_synced"] is False
+    assert v["host_epoch"] == HOST
+    assert cmds.set_calls == []
+
+
+# F2: the NTP probe is a blocking subprocess — it must not stall the loop.
+def test_host_probe_does_not_block_the_event_loop():
+    import time as _t
+
+    def slow_probe():
+        _t.sleep(0.3)
+        return True
+
+    async def main():
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        t = asyncio.create_task(ticker())
+        await mc_clock.measure(FakeCommands(0), _ET, now=lambda: HOST,
+                               host_synced_fn=slow_probe)
+        t.cancel()
+        return ticks
+
+    assert _run(main()) >= 5
+
+
+def test_sync_probes_host_once():
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return True
+
+    _run(mc_clock.sync_if_allowed(FakeCommands(-EIGHT_DAYS), _ET, allow=True,
+                                  now=lambda: HOST, host_synced_fn=probe))
+    assert len(calls) == 1
+
+
+# F5: an acked write whose re-read fails is UNVERIFIED, not "failed".
+def test_acked_write_then_unreadable_is_unverified():
+    class Flaky(FakeCommands):
+        reads = 0
+
+        async def get_time(self):
+            self.reads += 1
+            if self.reads > 1:
+                return _Evt(type=_ET.ERROR, payload={})
+            return await super().get_time()
+
+    v = _run(mc_clock.sync_if_allowed(Flaky(-EIGHT_DAYS), _ET, allow=True,
+                                      now=lambda: HOST, host_synced_fn=lambda: True))
+    assert v["sync"] == "unverified"
+    assert v["state"] == "unobservable"
+
+
+# F4: describe() never says ok for an unobservable clock.
+def test_describe_unobservable_is_unknown():
+    line = mc_clock.describe({"state": "unobservable", "offset_s": None, "reason": "x"})
+    assert "UNKNOWN" in line and "ok" not in line
+
+
+def test_describe_host_unsynced_is_not_ok():
+    line = mc_clock.describe({"state": "host_unsynced", "offset_s": 5.0})
+    assert "cannot judge" in line and "ok" not in line
+
+
+# F4: refresh() keeps the radio snapshot when the clock read hangs.
+def test_refresh_survives_a_hung_clock_read():
+    from gateway import meshcore_handler as mh
+
+    class ET(_ET):
+        SELF_INFO = "self_info"
+        DEVICE_INFO = "device_info"
+        CHANNEL_INFO = "channel_info"
+
+    class Cmds(FakeCommands):
+        async def send_appstart(self):
+            return _Evt(type=ET.SELF_INFO, payload={"name": "RAK1"})
+
+        async def send_device_query(self):
+            return _Evt(type=ET.DEVICE_INFO, payload={"max_channels": 1})
+
+        async def get_channel(self, idx):
+            return _Evt(type=ET.ERROR, payload={})
+
+        async def get_time(self):
+            await asyncio.sleep(5)
+
+    h = _handler_with(Cmds(0), flag=False)
+    with patch.object(mh, "_HAS_MESHCORE", True), \
+         patch.object(mh, "_meshcore_mod", SimpleNamespace(EventType=ET), create=True), \
+         patch.object(mc_clock, "CLOCK_READ_TIMEOUT_S", 0.05), \
+         patch.object(mc_clock, "host_clock_synced", return_value=True):
+        _run(h._radio.refresh())
+    st = h._radio.get_state()
+    assert st["error"] is None and st["node_name"] == "RAK1"
+    assert st["clock"]["state"] == "unobservable"
+    assert "timed out" in st["clock"]["reason"]
+
+
+# F4 / M1: the REAL connect path (not simulation) runs the clock hook.
+def test_real_connect_path_runs_the_clock_hook():
+    import contextlib
+    import threading
+    from queue import Queue
+    from unittest.mock import AsyncMock, MagicMock
+    from gateway import meshcore_handler as mh
+
+    cfg = SimpleNamespace(
+        meshcore=SimpleNamespace(
+            enabled=True, device_path="/dev/ttyFAKE", baud_rate=115200,
+            connection_type="serial", auto_fetch_messages=False,
+            simulation_mode=False, sync_clock_on_connect=False,
+            channel_poll_interval_sec=5),
+        meshtastic=SimpleNamespace(host="localhost", port=4403))
+    h = mh.MeshCoreHandler(
+        config=cfg, node_tracker=MagicMock(),
+        health=MagicMock(record_error=MagicMock(return_value="transient")),
+        stop_event=threading.Event(), stats={}, stats_lock=threading.Lock(),
+        message_queue=Queue(maxsize=10))
+    h._simulation_mode = False
+
+    @contextlib.contextmanager
+    def got_lock(**kw):
+        yield True
+
+    fake_mc = SimpleNamespace(commands=FakeCommands(0))
+    MeshCore = SimpleNamespace(create_serial=AsyncMock(return_value=fake_mc))
+    hook = AsyncMock()
+    try:
+        with patch.object(mh, "_HAS_MESHCORE", True), \
+             patch.object(mh, "_meshcore_mod", SimpleNamespace(MeshCore=MeshCore, EventType=_ET), create=True), \
+             patch.object(mh, "acquire_for_connect", got_lock), \
+             patch.object(mh, "_get_meshcore_connection_manager", return_value=MagicMock()), \
+             patch("utils.tx_guard.meshcore_attach_allowed", return_value=True), \
+             patch("utils.meshcore_connection._probe_device_unlocked",
+                   return_value={"exists": True, "readable": True, "responds": True}), \
+             patch.object(type(h), "_subscribe_events", lambda self: None), \
+             patch.object(type(h), "_refresh_radio_state", AsyncMock()), \
+             patch.object(type(h), "_apply_desired_and_log_drift", lambda self: None), \
+             patch.object(type(h), "_start_advert_heartbeat", lambda self: None), \
+             patch.object(type(h), "_sync_clock_on_connect", hook):
+            _run(h._connect())
+        assert h._connected is True
+        hook.assert_awaited_once()
+    finally:
+        mh._clear_active_handler(h)
