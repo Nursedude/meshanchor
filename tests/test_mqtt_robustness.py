@@ -814,11 +814,15 @@ class TestFrontierReviewFixes20260709:
         })
         assert subscriber.get_messages() == []
 
-    def test_save_config_writes_0600(self, subscriber, tmp_path,
-                                     monkeypatch):
+    def test_save_settings_writes_0600(self, tmp_path, monkeypatch):
+        # MQTT-CFG S5: the dead subscriber.save_config is gone; the ONE writer
+        # is save_settings (mqtt_settings.save through MA's real writer). The
+        # file may carry broker credentials — it must land 0600.
         import monitoring.mqtt_subscriber as ms
+        from monitoring import mqtt_settings
         monkeypatch.setattr(ms, "get_real_user_home", lambda: tmp_path)
-        assert subscriber.save_config() is True
+        res = ms.save_settings(mqtt_settings.defaults())
+        assert res.ok is True, res.errors
         mode = (tmp_path / ".config" / "meshanchor"
                 / "mqtt_nodeless.json").stat().st_mode & 0o777
         assert mode == 0o600

@@ -165,6 +165,7 @@ class MQTTMessage:
 
 
 from monitoring._mqtt_message_decoder import MQTTMessageDecoderMixin
+from monitoring import mqtt_settings
 
 
 class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
@@ -181,8 +182,11 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
 
         Args:
             config: Optional configuration dict. If not provided,
-                   loads from ~/.config/meshanchor/mqtt_nodeless.json
+                   loads the saved settings (``mqtt_settings``); an
+                   UNREADABLE saved file sets ``config_error`` and start()
+                   then refuses — never a silent swap to the defaults.
         """
+        self.config_error: Optional[str] = None
         self._config = config or self._load_config()
         self._client = None
         self._connected = False
@@ -235,47 +239,28 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
         self._mesh_size_history: Dict[str, datetime] = {}
 
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from file or return defaults."""
-        config_path = get_real_user_home() / ".config" / "meshanchor" / "mqtt_nodeless.json"
+        """The saved settings through THE owner (``mqtt_settings``).
 
-        if config_path.exists():
-            try:
-                return json.loads(config_path.read_text())
-            except Exception as e:
-                logger.error(f"Failed to load MQTT nodeless config: {e}")
-
-        # Return defaults
-        return {
-            "broker": DEFAULT_BROKER,
-            "port": DEFAULT_PORT_TLS,
-            "username": "",
-            "password": "",
-            "root_topic": DEFAULT_ROOT_TOPIC,
-            "channel": DEFAULT_CHANNEL,
-            "key": DEFAULT_KEY,
-            "use_tls": True,
-            "regions": ["US"],  # Subscribe to these regions
-            "auto_reconnect": True,
-            "reconnect_delay": MQTT_RECONNECT_INITIAL,
-            "max_reconnect_delay": MQTT_RECONNECT_MAX,
-        }
-
-    def save_config(self) -> bool:
-        """Save current configuration to file."""
-        config_dir = get_real_user_home() / ".config" / "meshanchor"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / "mqtt_nodeless.json"
-
-        try:
-            config_path.write_text(json.dumps(self._config, indent=2))
-            config_path.chmod(0o600)  # may carry broker credentials
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save MQTT nodeless config: {e}")
-            return False
+        absent → the public-broker defaults (normal: never configured).
+        unreadable → the same defaults so the object still works for stats,
+        but ``config_error`` is set and start() refuses (MQTT-CFG F6): an
+        operator setting we failed to honour must not read as running.
+        """
+        loaded = load_settings()
+        if loaded.state == "ok":
+            return mqtt_settings.subscriber_config(loaded.intent)
+        if loaded.state == "unreadable":
+            self.config_error = loaded.error
+            logger.error("Saved MQTT settings unreadable — the subscriber "
+                         "will NOT start until fixed: %s", loaded.error)
+        return mqtt_settings.subscriber_config(mqtt_settings.defaults())
 
     def start(self) -> bool:
         """Start the MQTT subscriber."""
+        if self.config_error:
+            logger.error("MQTT subscriber not started — saved settings "
+                         "unreadable: %s", self.config_error)
+            return False
         if self._connected:
             return True
 
@@ -477,27 +462,24 @@ class MQTTNodelessSubscriber(MQTTMessageDecoderMixin):
             }
             logger.error(f"MQTT connect failed: {error_msgs.get(rc, f'Error {rc}')}")
 
+    def subscriptions(self) -> List[str]:
+        """The topics this subscriber subscribes to (or will, on connect) —
+        public so a status surface shows the LIVE ones, never a re-derivation."""
+        return mqtt_settings.subscriptions(self._config, DEFAULT_ROOT_TOPIC,
+                                           DEFAULT_CHANNEL)
+
     def _subscribe_topics(self) -> None:
         """Subscribe to Meshtastic MQTT topics."""
         if not self._client:
             return
 
-        root = self._config.get("root_topic", DEFAULT_ROOT_TOPIC)
-        channel = self._config.get("channel", DEFAULT_CHANNEL)
-
-        # Subscribe to JSON-formatted messages (easier to parse)
-        # Topic format: msh/{region}/2/json/{channel}/#
-        topic = f"{root.rsplit('/', 1)[0]}/json/{channel}/#"
-        with timed_boundary("mosquitto.subscribe", target=topic):
-            self._client.subscribe(topic)
-        logger.info(f"Subscribed to: {topic}")
-
-        # Also subscribe to encrypted topic for node discovery
-        # Topic format: msh/{region}/2/e/{channel}/#
-        enc_topic = f"{root}/{channel}/#"
-        with timed_boundary("mosquitto.subscribe", target=enc_topic):
-            self._client.subscribe(enc_topic)
-        logger.info(f"Subscribed to: {enc_topic}")
+        # ONE derivation (mqtt_settings.subscriptions): the JSON leg
+        # (msh/{region}/2/json/{json_channel}/#) then the encrypted leg
+        # (msh/{region}/2/e/{channel}/#) for node discovery.
+        for topic in self.subscriptions():
+            with timed_boundary("mosquitto.subscribe", target=topic):
+                self._client.subscribe(topic)
+            logger.info(f"Subscribed to: {topic}")
 
     def _on_disconnect(self, client, userdata, rc):
         """MQTT disconnection callback."""
@@ -1024,6 +1006,29 @@ def create_public_subscriber(
         "max_reconnect_delay": MQTT_RECONNECT_MAX,
     }
     return MQTTNodelessSubscriber(config=config)
+
+
+# --- the saved operator settings: per-repo bindings of mqtt_settings --------
+#
+# `mqtt_settings` (byte-identical with MeshForge) owns the file: validate,
+# load (ok / absent / unreadable), save, the legacy conversion and the topic
+# derivation. These three functions are the only MeshAnchor-specific part:
+# WHERE the file lives (sudo-safe home) and WHICH writer keeps the operator's
+# ownership when the TUI saves as root. MQTT-CFG S5.
+
+def mqtt_config_dir() -> Path:
+    """The operator's MeshAnchor config dir (sudo-safe home)."""
+    return get_real_user_home() / ".config" / "meshanchor"
+
+
+def load_settings() -> "mqtt_settings.Loaded":
+    return mqtt_settings.load(mqtt_config_dir())
+
+
+def save_settings(intent: Dict[str, Any]) -> "mqtt_settings.SaveResult":
+    from utils.paths import atomic_write_text_preserving
+    return mqtt_settings.save(mqtt_config_dir(), intent,
+                              atomic_write_text_preserving)
 
 
 # Singleton instance management

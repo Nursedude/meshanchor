@@ -212,6 +212,15 @@ class MQTTSubscriberService(DaemonService):
             # service shim can target a non-default broker without dropping
             # channel/topic settings from the loaded config.
             self._subscriber = MQTTNodelessSubscriber()
+            # MQTT-CFG S5: an unreadable saved file is refused by the
+            # subscriber (never silently the defaults) — report it as a failed
+            # start, not "started". Other start() results keep the old
+            # contract: the subscriber reconnects on its own.
+            config_error = getattr(self._subscriber, "config_error", None)
+            if config_error:
+                logger.error("MQTT subscriber not started — saved settings "
+                             "unreadable: %s", config_error)
+                return False
             self._subscriber._config['broker'] = self._broker
             self._subscriber._config['port'] = self._port
             # Localhost mosquitto is plain MQTT by default; use_tls defaults
