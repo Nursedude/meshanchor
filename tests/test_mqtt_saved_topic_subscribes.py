@@ -75,3 +75,32 @@ def test_daemon_service_reports_failure_when_settings_unreadable(tmp_path):
             patch.object(sub_mod.MQTTNodelessSubscriber, "_connect") as conn:
         assert svc.start() is False
     conn.assert_not_called()
+
+
+def test_tui_save_returns_true_when_written_false_when_refused(tmp_path):
+    # MQTT-CFG S5: save_mqtt_config returned None, so every report_action(ok)
+    # read a successful write as "Save Failed". True iff written; a refused
+    # intent writes NOTHING and returns False.
+    sys.path.insert(0, os.path.join(SRC_DIR, "launcher_tui"))
+    from handlers import mqtt as tui
+    from monitoring import mqtt_settings
+    path = tmp_path / ".config" / "meshanchor" / "mqtt_nodeless.json"
+    with patch.object(sub_mod, "get_real_user_home", return_value=tmp_path):
+        assert tui.save_mqtt_config({**mqtt_settings.defaults(),
+                                     "root_topic": "msh/HI"}) is False
+        assert not path.exists()
+        assert tui.save_mqtt_config(mqtt_settings.defaults()) is True
+    assert json.loads(path.read_text())["schema_version"] == 1
+
+
+def test_suite_never_resolves_the_real_saved_settings_path():
+    # 2026-11-01: a red-first run against the old TUI handler wrote the real
+    # ~/.config/meshanchor/mqtt_nodeless.json (MeshForge hit the same on
+    # 10-31). The conftest _OPERATOR_STORE_MODULES redirect is the gate; this
+    # pins it — it FAILS if those entries are dropped.
+    import pwd
+    sys.path.insert(0, os.path.join(SRC_DIR, "launcher_tui"))
+    from handlers import mqtt as tui_mqtt
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    assert not str(sub_mod.mqtt_config_dir()).startswith(real_home + "/")
+    assert not str(tui_mqtt.get_real_user_home()).startswith(real_home)

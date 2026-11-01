@@ -391,6 +391,14 @@ _OPERATOR_STORE_MODULES = (
     "commands.rns",                    # lxmf_storage/ (LXMF ratchets)
     "gateway._rns_bridge_connection",  # lxmf_storage/ (LXMF ratchets)
     "utils.map_data_collector",        # map_nodes.geojson, node_history.db
+    # mqtt_nodeless.json — the operator's saved MQTT settings. Ported from
+    # MeshForge's 10-31 gate on 2026-11-01, after the SAME accident repeated
+    # here: a red-first run against the OLD TUI save_mqtt_config (it resolves
+    # the home through its OWN import) wrote the live file. Every module that
+    # resolves that path:
+    "monitoring.mqtt_subscriber",      # mqtt_config_dir / load+save_settings
+    "launcher_tui.handlers.mqtt",      # load/save_mqtt_config (+ alias below)
+    "handlers.mqtt",
 )
 
 

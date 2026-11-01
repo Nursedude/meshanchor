@@ -718,11 +718,33 @@ class BrokerHandler(BaseHandler):
         """Apply a broker profile to the MQTT subscriber configuration."""
         from handlers.mqtt import load_mqtt_config, save_mqtt_config
 
-        tui_config = profile.to_tui_config()
+        from monitoring import mqtt_settings
+        existing = load_mqtt_config()
+        intent = {**profile.to_intent(),
+                  'auto_start': existing.get('auto_start', False),
+                  'auto_start_telemetry': existing.get('auto_start_telemetry', True)}
+        errs = mqtt_settings.validate(intent)
+        if errs:
+            # refuse at the boundary, naming the field (MQTT-CFG) — a profile
+            # whose root/channel cannot be subscribed is not "applied"
+            self.ctx.dialog.msgbox(
+                "Not Applied",
+                f"Broker profile '{profile.name}' was saved but NOT applied to "
+                "the MQTT subscriber:\n\n" + "\n".join(errs))
+            return
 
-        existing_config = load_mqtt_config()
-        tui_config['auto_start'] = existing_config.get('auto_start', False)
-        tui_config['auto_start_telemetry'] = existing_config.get('auto_start_telemetry', True)
-
-        save_mqtt_config(tui_config)
-        logger.info("Applied broker profile '%s' to MQTT subscriber config", profile.name)
+        ok = save_mqtt_config(intent)
+        if ok:
+            logger.info("Applied broker profile '%s' to MQTT subscriber config", profile.name)
+        else:
+            logger.error(
+                "Failed to write MQTT subscriber config for broker profile '%s'",
+                profile.name,
+            )
+            self.ctx.report_action(
+                False,
+                "Applied", "",  # success path unreachable; ok is always False here
+                "Apply Failed",
+                "Could not write the MQTT subscriber config to disk — "
+                "the broker profile was saved but NOT applied to the subscriber.",
+            )

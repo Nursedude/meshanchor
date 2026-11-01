@@ -23,11 +23,7 @@ from typing import Optional, Dict, Any
 
 from handler_protocol import BaseHandler
 from utils.mqtt_defaults import (
-    MESHTASTIC_PUBLIC_BROKER,
-    MESHTASTIC_PUBLIC_CHANNEL,
     MESHTASTIC_PUBLIC_PASSWORD,
-    MESHTASTIC_PUBLIC_PORT,
-    MESHTASTIC_PUBLIC_ROOT_TOPIC,
     MESHTASTIC_PUBLIC_USERNAME,
 )
 from utils.safe_import import safe_import
@@ -62,33 +58,50 @@ TelemetryPoller, get_telemetry_poller, _HAS_TELEMETRY_POLLER = safe_import(
 # ---------------------------------------------------------------------------
 
 def load_mqtt_config() -> Dict[str, Any]:
-    """Load MQTT configuration from file."""
-    config_path = get_real_user_home() / ".config" / "meshanchor" / "mqtt_nodeless.json"
-    try:
-        if config_path.exists():
-            with open(config_path) as f:
-                return json.load(f)
-    except Exception as e:
-        logger.debug("Error loading MQTT config: %s", e)
+    """The saved INTENT for the menus (owner: monitoring.mqtt_settings).
 
-    return {
-        'broker': 'mqtt.meshtastic.org',
-        'port': 8883,
-        'topic': 'msh/US/2/e/LongFast/#',
-        'username': None,
-        'password': None
-    }
+    absent -> the public defaults; unreadable -> the defaults too, so it can
+    be fixed and saved, but WARNING-logged and refused by every Start path
+    (`_saved_subscriber_config`). The status screen says which."""
+    from monitoring import mqtt_settings
+    from monitoring.mqtt_subscriber import load_settings
+    loaded = load_settings()
+    if loaded.state == "unreadable":
+        logger.warning("Saved MQTT settings unreadable — showing defaults: %s",
+                       loaded.error)
+    return dict(loaded.intent) if loaded.state == "ok" else mqtt_settings.defaults()
 
 
-def save_mqtt_config(config: Dict[str, Any]):
-    """Save MQTT configuration to file."""
-    config_path = get_real_user_home() / ".config" / "meshanchor" / "mqtt_nodeless.json"
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=2)
-    except Exception as e:
-        logger.error("Error saving MQTT config: %s", e)
+def save_mqtt_config(intent: Dict[str, Any]) -> bool:
+    """True iff written (validated, 0600, operator ownership kept); False
+    when refused or the write failed — never "Saved" for nothing (#74)."""
+    from monitoring.mqtt_subscriber import save_settings
+    res = save_settings(intent)
+    if not res.ok:
+        logger.error("MQTT settings NOT saved — %s", res.error)
+    return res.ok
+
+
+def _saved_subscriber_config():
+    """(subscriber config, None) | (None, error) — absent = the defaults,
+    unreadable = refused (MQTT-CFG F6), never a silent swap."""
+    from monitoring import mqtt_settings
+    from monitoring.mqtt_subscriber import load_settings
+    loaded = load_settings()
+    if loaded.state == "unreadable":
+        return None, loaded.error
+    intent = loaded.intent if loaded.state == "ok" else mqtt_settings.defaults()
+    return mqtt_settings.subscriber_config(intent), None
+
+
+_ROOT_HELP = ("MQTT root topic (must end in /e — the JSON leg is derived from it):\n\n"
+              "  msh/US/2/e   = US region\n"
+              "  msh/EU_868/2/e = EU 868 region\n\n"
+              "Your meshtasticd MQTT module must use the same root topic.")
+_CHANNEL_HELP = ("Meshtastic channel to subscribe to (must match your radio):\n\n"
+                 "  LongFast   = Default Meshtastic channel\n"
+                 "  <regional> = Your regional/community channel name\n"
+                 "  +          = every channel (local broker)")
 
 
 class MQTTHandler(BaseHandler):
@@ -124,41 +137,21 @@ class MQTTHandler(BaseHandler):
             return
 
         try:
+            # the file's STATE first: an unreadable file's auto_start is
+            # unknowable, and the defaults (auto_start off) must not turn that
+            # into a silent no-start (review F6)
+            subscriber_config, err = _saved_subscriber_config()
+            if err:
+                logger.error("MQTT auto-start NOT attempted — saved settings "
+                             "unreadable, so whether to auto-start is unknown: %s", err)
+                return
             config = load_mqtt_config()
             if not config.get('auto_start', False):
                 return
 
             if not _HAS_MQTT:
                 return
-
-            broker = config.get('broker', 'mqtt.meshtastic.org')
-            port = config.get('port', 8883)
-            topic = config.get('topic', 'msh/US/2/e/LongFast/#')
-
-            parts = topic.rstrip('#').rstrip('/').split('/')
-            if len(parts) >= 4:
-                channel = parts[-1] if parts[-1] else 'LongFast'
-                if '/json/' in topic:
-                    root_topic = '/'.join(parts[:-1]).replace('/json', '/e')
-                else:
-                    root_topic = '/'.join(parts[:-1])
-            else:
-                root_topic = 'msh/US/2/e'
-                channel = 'LongFast'
-
-            subscriber_config = {
-                "broker": broker,
-                "port": port,
-                "username": config.get('username') or "",
-                "password": config.get('password') or "",
-                "root_topic": root_topic,
-                "channel": channel,
-                "key": "AQ==",
-                "use_tls": config.get('use_tls', port == 8883),
-                "auto_reconnect": True,
-                "reconnect_delay": 2 if broker == 'localhost' else 5,
-                "max_reconnect_delay": 30 if broker == 'localhost' else 60,
-            }
+            broker = subscriber_config["broker"]
 
             self._mqtt_subscriber = MQTTNodelessSubscriber(config=subscriber_config)
             self._mqtt_subscriber.start()
@@ -183,10 +176,7 @@ class MQTTHandler(BaseHandler):
             if (config.get('auto_start', False) and
                     config.get('auto_start_telemetry', True) and
                     _HAS_TELEMETRY_POLLER and get_telemetry_poller):
-                get_telemetry_poller(
-                    poll_interval_minutes=config.get('telemetry_poll_minutes', 30),
-                    auto_start=True
-                )
+                get_telemetry_poller(auto_start=True)
         except Exception as e:
             logger.debug("TelemetryPoller auto-start failed (non-fatal): %s", e)
 
@@ -401,7 +391,7 @@ class MQTTHandler(BaseHandler):
             )
             return
 
-        lines = ["MQTT SUBSCRIBER STATUS", "=" * 40, ""]
+        lines = ["MQTT SUBSCRIBER STATUS", "=" * 40, "", self._saved_state_line(), ""]
 
         if self._mqtt_subscriber:
             connected = self._mqtt_subscriber.is_connected()
@@ -411,13 +401,8 @@ class MQTTHandler(BaseHandler):
             lines.append(f"Nodes discovered: {stats.get('node_count', 0)}")
             lines.append(f"Messages received: {stats.get('messages_received', 0)}")
 
-            config = load_mqtt_config()
-            if config:
-                lines.append("")
-                lines.append("CONFIGURATION:")
-                lines.append(f"  Broker: {config.get('broker', 'mqtt.meshtastic.org')}")
-                lines.append(f"  Port: {config.get('port', 8883)}")
-                lines.append(f"  Topic: {config.get('topic', 'msh/US/2/e/LongFast/#')}")
+            lines += ["", "SUBSCRIBED (live):"]
+            lines += [f"  {t}" for t in self._mqtt_subscriber.subscriptions()]
 
             if _HAS_WS_BRIDGE:
                 lines.append("")
@@ -451,38 +436,17 @@ class MQTTHandler(BaseHandler):
             self.ctx.dialog.msgbox("Already Running", "MQTT subscriber is already connected.")
             return
 
-        config = load_mqtt_config()
         self.ctx.dialog.infobox("Starting MQTT", "Connecting to MQTT broker...")
 
         try:
-            broker = config.get('broker', 'mqtt.meshtastic.org')
-            port = config.get('port', 8883)
-            topic = config.get('topic', 'msh/US/2/e/LongFast/#')
-
-            parts = topic.rstrip('#').rstrip('/').split('/')
-            if len(parts) >= 4:
-                channel = parts[-1] if parts[-1] else 'LongFast'
-                if '/json/' in topic:
-                    root_topic = '/'.join(parts[:-1]).replace('/json', '/e')
-                else:
-                    root_topic = '/'.join(parts[:-1])
-            else:
-                root_topic = 'msh/US/2/e'
-                channel = 'LongFast'
-
-            subscriber_config = {
-                "broker": broker,
-                "port": port,
-                "username": config.get('username') or "",
-                "password": config.get('password') or "",
-                "root_topic": root_topic,
-                "channel": channel,
-                "key": "AQ==",
-                "use_tls": config.get('use_tls', port == 8883),
-                "auto_reconnect": True,
-                "reconnect_delay": 2 if broker == 'localhost' else 5,
-                "max_reconnect_delay": 30 if broker == 'localhost' else 60,
-            }
+            subscriber_config, err = _saved_subscriber_config()
+            if err:
+                self.ctx.dialog.msgbox(
+                    "MQTT Settings Unreadable",
+                    "The saved MQTT settings could not be used, so the "
+                    f"subscriber was NOT started:\n\n{err}\n\n"
+                    "Fix it in Configure and Save, or edit the file.")
+                return
 
             self._mqtt_subscriber = MQTTNodelessSubscriber(config=subscriber_config)
             self._mqtt_subscriber.start()
@@ -542,7 +506,8 @@ class MQTTHandler(BaseHandler):
 
     def _configure_mqtt(self):
         """Configure MQTT broker settings."""
-        config = load_mqtt_config()
+        from monitoring import mqtt_settings
+        config = {**mqtt_settings.defaults(), **load_mqtt_config()}
         # Edits below only touch this dict; nothing reaches disk until
         # 'Save & Exit'. Keep the on-disk shape so the form can SAY when
         # it is carrying unsaved changes — the Cancel row discards them.
@@ -552,7 +517,9 @@ class MQTTHandler(BaseHandler):
             dirty = config != on_disk
             broker = config.get('broker', 'mqtt.meshtastic.org')
             port = config.get('port', 8883)
-            topic = config.get('topic', 'msh/US/2/e/LongFast/#')
+            tls = config.get('tls', 'auto')
+            tls_txt = {True: "on", False: "off"}.get(tls) or (
+                f"auto -> {'on' if mqtt_settings.effective_tls(config) else 'off'}")
 
             mode = "Local" if broker == "localhost" else "Public"
 
@@ -567,7 +534,9 @@ class MQTTHandler(BaseHandler):
                 ("private", "Use Private Broker  Custom: your own broker"),
                 ("broker", f"Broker              {broker}"),
                 ("port", f"Port                {port}"),
-                ("topic", f"Topic               {topic[:30]}..."),
+                ("root", f"Root Topic          {config['root_topic']}"),
+                ("channel", f"Channel             {config['channel']}"),
+                ("tls", f"TLS                 {tls_txt}"),
                 ("auth", "Authentication      Username/password"),
                 ("autostart", f"Auto-Start          [{auto_status}] Start on TUI launch"),
                 ("autotelem", f"Auto Telemetry      [{telem_status}] Poll silent nodes"),
@@ -589,55 +558,30 @@ class MQTTHandler(BaseHandler):
             if choice is None or choice == "cancel":
                 break
 
+            keep = {k: config[k] for k in ("auto_start", "auto_start_telemetry")}
             if choice == "local":
-                channel = self._detect_local_channel()
-                topic = f"msh/2/json/{channel}/#" if channel else "msh/2/json/+/#"
-                config = {
-                    'broker': 'localhost',
-                    'port': 1883,
-                    'topic': topic,
-                    'username': None,
-                    'password': None,
-                    'use_tls': False
-                }
-                ok = save_mqtt_config(config)
-                self.ctx.report_action(
-                    ok,
-                    "Local Mode Set",
-                    f"Configured for local mosquitto broker:\n\n"
-                    f"  Broker: localhost:1883\n"
-                    f"  Topic: {topic}\n"
-                    f"  TLS: disabled\n\n"
-                    "Make sure:\n"
-                    "  1. Mosquitto is running (systemctl status mosquitto)\n"
-                    "  2. Meshtasticd MQTT is configured\n\n"
-                    "Use Service Config -> MQTT Setup for full setup.",
-                    "Save Failed",
-                    "MQTT config could not be written to disk — your change was NOT saved.",
-                )
+                intent = {**mqtt_settings.defaults(), **keep, "broker": "localhost",
+                          "port": 1883, "root_topic": "msh/2/e", "channel": "+"}
+                found = self._detect_local_channel()
+                if found and not mqtt_settings.validate({**intent, "channel": found}):
+                    intent["channel"] = found
+                elif found:   # a parse fragment is not a channel (review F5)
+                    logger.warning("Detected channel %r is not a topic segment — "
+                                   "listening on every channel (+)", found)
+                self._save_or_refuse(intent, "Local Mode Set",
+                                     "Configured for the local mosquitto broker.\n\n"
+                                     "Make sure mosquitto is running and meshtasticd's\n"
+                                     "MQTT module is configured (Service Config ->\n"
+                                     "MQTT Setup).")
                 break
 
             elif choice == "public":
-                config = {
-                    'broker': MESHTASTIC_PUBLIC_BROKER,
-                    'port': MESHTASTIC_PUBLIC_PORT,
-                    'topic': f'{MESHTASTIC_PUBLIC_ROOT_TOPIC}/{MESHTASTIC_PUBLIC_CHANNEL}/#',
-                    'username': MESHTASTIC_PUBLIC_USERNAME,
-                    'password': MESHTASTIC_PUBLIC_PASSWORD,
-                    'use_tls': True
-                }
-                ok = save_mqtt_config(config)
-                self.ctx.report_action(
-                    ok,
-                    "Public Mode Set",
-                    "Configured for public Meshtastic broker:\n\n"
-                    "  Broker: mqtt.meshtastic.org:8883\n"
-                    "  Topic: msh/US/2/e/LongFast/#\n"
-                    "  TLS: enabled\n\n"
-                    "This is nodeless monitoring - no local radio needed.",
-                    "Save Failed",
-                    "MQTT config could not be written to disk — your change was NOT saved.",
-                )
+                intent = {**mqtt_settings.defaults(), **keep,
+                          "username": MESHTASTIC_PUBLIC_USERNAME,
+                          "password": MESHTASTIC_PUBLIC_PASSWORD}
+                self._save_or_refuse(intent, "Public Mode Set",
+                                     "Configured for the public Meshtastic broker —\n"
+                                     "nodeless monitoring, no local radio needed.")
                 break
 
             elif choice == "private":
@@ -657,25 +601,28 @@ class MQTTHandler(BaseHandler):
                 if new_port and new_port.isdigit():
                     config['port'] = int(new_port)
 
-            elif choice == "topic":
-                new_topic = self.ctx.dialog.inputbox(
-                    "MQTT Topic",
-                    "Enter MQTT topic filter:\n(Default: msh/US/2/e/LongFast/#)",
-                    init=topic)
-                if new_topic:
-                    config['topic'] = new_topic
+            elif choice in ("root", "channel"):
+                val = self.ctx.dialog.inputbox(
+                    "Root Topic" if choice == "root" else "Channel",
+                    _ROOT_HELP if choice == "root" else _CHANNEL_HELP,
+                    init=config[f"{choice}_topic" if choice == "root" else choice])
+                if val:
+                    config["root_topic" if choice == "root" else "channel"] = val.strip()
+
+            elif choice == "tls":
+                config['tls'] = {"auto": True, True: False}.get(tls, "auto")
 
             elif choice == "auth":
                 username = self.ctx.dialog.inputbox(
                     "Username", "Enter MQTT username (blank for anonymous):",
                     init=config.get('username', ''))
                 if username is not None:
-                    config['username'] = username if username else None
+                    config['username'] = username or ""
 
                 password = self.ctx.dialog.inputbox(
                     "Password", "Enter MQTT password (blank for none):", init='')
                 if password is not None:
-                    config['password'] = password if password else None
+                    config['password'] = password or ""
 
             elif choice == "autostart":
                 current = config.get('auto_start', False)
@@ -703,16 +650,9 @@ class MQTTHandler(BaseHandler):
                 )
 
             elif choice == "save":
-                ok = save_mqtt_config(config)
-                self.ctx.report_action(
-                    ok,
-                    "Saved",
-                    "MQTT configuration saved.\n\n"
-                    "Restart the subscriber for changes to take effect.",
-                    "Save Failed",
-                    "MQTT config could not be written to disk — your change was NOT saved.",
-                )
-                break
+                if self._save_or_refuse(config, "Saved", "MQTT configuration saved.\n\n"
+                                        "Restart the subscriber for changes to take effect."):
+                    break
 
     def _show_mqtt_nodes(self):
         """Show nodes discovered via MQTT."""
@@ -1079,12 +1019,7 @@ class MQTTHandler(BaseHandler):
 
         root_topic = self.ctx.dialog.inputbox(
             "Root Topic",
-            "MQTT root topic -- controls which nodes you see:\n\n"
-            "  msh           = ALL nodes (can be 5000+)\n"
-            "  msh/US        = US region only\n"
-            "  msh/US/2/e    = US encrypted channel\n"
-            "  msh/HI        = Hawaii only (if broker supports)\n\n"
-            "Your meshtasticd MQTT module must use the same root topic.",
+            _ROOT_HELP,
             init=config.get('root_topic', 'msh/US/2/e')
         )
         if not root_topic:
@@ -1102,38 +1037,47 @@ class MQTTHandler(BaseHandler):
         if not channel:
             channel = "LongFast"
 
-        topic = f"{root_topic}/{channel}/#"
-        use_tls = int(port) == 8883
+        from monitoring import mqtt_settings
+        intent = {**mqtt_settings.defaults(), "broker": broker, "port": int(port),
+                  "root_topic": root_topic.strip(), "channel": channel.strip(),
+                  "username": username or "", "password": password or "",
+                  "key": config.get('key') or "AQ==",
+                  "auto_start": config.get('auto_start', False),
+                  "auto_start_telemetry": config.get('auto_start_telemetry', True)}
+        self._save_or_refuse(intent, "Private Broker Configured",
+                             f"Root topic '{root_topic}' determines node scope.\n"
+                             "Restart the MQTT subscriber to apply.")
 
-        new_config = {
-            'broker': broker,
-            'port': int(port),
-            'topic': topic,
-            'root_topic': root_topic,
-            'channel': channel,
-            'username': username if username else None,
-            'password': password if password else None,
-            'use_tls': use_tls,
-        }
+    def _saved_state_line(self) -> str:
+        """What the saved file IS — ok / legacy / absent / UNREADABLE."""
+        from monitoring.mqtt_subscriber import load_settings
+        loaded = load_settings()
+        if loaded.state == "unreadable":
+            return f"Saved settings: UNREADABLE — {loaded.error}"
+        if loaded.state == "absent":
+            return "Saved settings: none (public defaults)"
+        return ("Saved settings: legacy file — Save once to convert"
+                if loaded.legacy else "Saved settings: ok")
 
-        new_config['auto_start'] = config.get('auto_start', False)
-        new_config['auto_start_telemetry'] = config.get('auto_start_telemetry', True)
-
-        ok = save_mqtt_config(new_config)
+    def _save_or_refuse(self, intent: Dict[str, Any], title: str, body: str) -> bool:
+        """Refuse at the boundary with the field named; otherwise save and
+        show what the subscriber WILL subscribe to (the same derivation)."""
+        from monitoring import mqtt_settings
+        errs = mqtt_settings.validate(intent)
+        if errs:
+            self.ctx.dialog.msgbox("Not Saved", "The settings were NOT saved:\n\n"
+                                   + "\n".join(errs))
+            return False
+        cfg = mqtt_settings.subscriber_config(intent)
+        ok = save_mqtt_config(intent)
         self.ctx.report_action(
-            ok,
-            "Private Broker Configured",
-            f"Saved configuration:\n\n"
-            f"  Broker:   {broker}:{port}\n"
-            f"  Topic:    {topic}\n"
-            f"  Channel:  {channel}\n"
-            f"  Username: {username or '(anonymous)'}\n"
-            f"  TLS:      {'Yes' if use_tls else 'No'}\n\n"
-            f"Root topic '{root_topic}' determines node scope.\n"
-            f"Restart MQTT subscriber to apply.",
+            ok, title,
+            f"{body}\n\n  Broker: {cfg['broker']}:{cfg['port']}"
+            f"  TLS: {'on' if cfg['use_tls'] else 'off'}\n  Will subscribe:\n"
+            + "\n".join(f"    {t}" for t in mqtt_settings.subscriptions(cfg)),
             "Save Failed",
-            "MQTT config could not be written to disk — your change was NOT saved.",
-        )
+            "MQTT config could not be written to disk — your change was NOT saved.")
+        return ok
 
     def _request_telemetry_menu(self):
         """Request telemetry from silent Meshtastic 2.7+ nodes."""
