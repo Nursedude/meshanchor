@@ -37,6 +37,9 @@ class FakeDialog:
         self.last_msgbox_text = text
 
     def menu(self, title, text, choices, **kwargs):
+        d = kwargs.get('default_item')
+        assert d is None or any(t == d for t, _ in choices), (
+            f"menu '{title}': default_item {d!r} is not a tag")   # phantom default
         self.calls.append(('menu', (title, text, choices), kwargs))
         if self._menu_returns:
             return self._menu_returns.pop(0)
