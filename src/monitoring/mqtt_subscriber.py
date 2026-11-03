@@ -1026,9 +1026,26 @@ def load_settings() -> "mqtt_settings.Loaded":
 
 
 def save_settings(intent: Dict[str, Any]) -> "mqtt_settings.SaveResult":
-    from utils.paths import atomic_write_text_preserving
-    return mqtt_settings.save(mqtt_config_dir(), intent,
-                              atomic_write_text_preserving)
+    """INTERIM (MeshForge F8 v2, 2026-11-03): the byte-locked owner now
+    refuses a save without an edit lease. Until this repo's TUI twin holds
+    a lease for the whole screen (ported after MeshForge's live drill), each
+    save takes its OWN short lease and Resets an unreadable file — exactly
+    the pre-lease behaviour (backup kept, then written). The stale-screen
+    class F8 cures is therefore still OPEN here; this keeps MA unchanged,
+    it does not fix it."""
+    from utils.paths import atomic_write_text_preserving, get_real_username
+    r = mqtt_settings.acquire_lease(mqtt_config_dir(), user=get_real_username(),
+                                    tty="-")
+    if r.state != "held":
+        who = (f"{r.holder.user} (pid {r.holder.pid})" if r.holder
+               else "an unknown session")
+        return mqtt_settings.SaveResult(False, error=(
+            r.error or f"MQTT settings are being edited by {who}"),
+            code="no_lease")
+    with r.lease as lease:
+        return mqtt_settings.save(mqtt_config_dir(), intent,
+                                  atomic_write_text_preserving, lease,
+                                  reset=lease.loaded_state == "unreadable")
 
 
 # Singleton instance management
