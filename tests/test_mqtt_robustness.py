@@ -821,6 +821,8 @@ class TestFrontierReviewFixes20260709:
         import monitoring.mqtt_subscriber as ms
         from monitoring import mqtt_settings
         monkeypatch.setattr(ms, "get_real_user_home", lambda: tmp_path)
+        # ~/.config is the lock target and is never created (MF F8 r3 #4)
+        (tmp_path / ".config").mkdir()
         res = ms.save_settings(mqtt_settings.defaults())
         assert res.ok is True, res.errors
         mode = (tmp_path / ".config" / "meshanchor"

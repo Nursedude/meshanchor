@@ -85,6 +85,7 @@ def test_tui_save_returns_true_when_written_false_when_refused(tmp_path):
     from handlers import mqtt as tui
     from monitoring import mqtt_settings
     path = tmp_path / ".config" / "meshanchor" / "mqtt_nodeless.json"
+    (tmp_path / ".config").mkdir()   # the lock target, never created (MF F8 r3 #4)
     with patch.object(sub_mod, "get_real_user_home", return_value=tmp_path):
         assert tui.save_mqtt_config({**mqtt_settings.defaults(),
                                      "root_topic": "msh/HI"}) is False
