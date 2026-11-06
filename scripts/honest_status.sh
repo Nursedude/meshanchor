@@ -46,14 +46,33 @@ GH_REPO="${MESHANCHOR_GH_REPO:-Nursedude/meshanchor}"
 # false PASS on an unconfigured fleet).
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/lib/fleet_hosts.sh"
 BOXES="${HONEST_BOXES:-}"
-if [ -z "$BOXES" ] && fleet_hosts_resolve; then
-  BOXES="$(printf '%s\n' "$FLEET_HOSTS_LIST" | tr '\n' ' ' | sed 's/ *$//')"
+# r8 review #4: track WHICH absence; a parent's exported FLEET_HOSTS_* must
+# never speak for a resolve that did not run here.
+unset FLEET_HOSTS_FILE FLEET_HOSTS_LIST FLEET_HOSTS_ERROR FLEET_HOSTS_WHY
+_hs_rrc="not run"
+if [ -z "$BOXES" ]; then
+  _hs_rrc=0; fleet_hosts_resolve || _hs_rrc=$?
+  [ "$_hs_rrc" = 0 ] && BOXES="$(printf '%s\n' "$FLEET_HOSTS_LIST" | tr '\n' ' ' | sed 's/ *$//')"
 fi
 # r7e #2 port: rc 2 = the list is present but unreadable/uncheckable. The
 # fleet legs stay UNKNOWN as before, but they must say WHY — "no fleet
 # configured" would send the operator to create a file that is already there.
-# ONE value for every fleet leg (r7g F6).
-NOFLEET_WHY="${FLEET_HOSTS_ERROR:-no fleet configured (set HONEST_BOXES or ~/.config/meshanchor/fleet_hosts)}"
+# ONE value for every fleet leg (r7g F6). The WHY is the resolver's own
+# (r8 review #2): this script no longer re-derives which overrides and
+# tiers exist — with HOME unset, a hand-written hint named a per-user file
+# the resolver never reads.
+if [ -n "${FLEET_HOSTS_ERROR:-}" ]; then
+  NOFLEET_WHY="$FLEET_HOSTS_ERROR"
+elif [ -n "${FLEET_HOSTS_FILE:-}" ]; then
+  # r7i review #1: resolved (rc 0) but lists nobody — it EXISTS.
+  NOFLEET_WHY="fleet list $(printf '%q' "$FLEET_HOSTS_FILE") lists no hosts"
+elif [ "$_hs_rrc" = 1 ]; then
+  NOFLEET_WHY="${FLEET_HOSTS_WHY:-no fleet list found} (or set HONEST_BOXES)"
+elif [ "$_hs_rrc" = "not run" ]; then
+  NOFLEET_WHY="no fleet configured (set HONEST_BOXES)"
+else
+  NOFLEET_WHY="the fleet_hosts resolver did not run (rc $_hs_rrc) - fleet unknown"
+fi
 
 # Watchdog signals — MeshAnchor emits silence as BLACKOUT rows in
 # fleet_history.db, surfaced live at /fleet/blackouts. There is NO watchdog.json

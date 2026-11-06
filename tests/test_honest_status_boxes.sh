@@ -154,5 +154,20 @@ if [ "$(id -u)" != 0 ]; then
     "$(echo "$out" | grep -q 'no fleet configured' && echo '' || echo ok)"
 fi
 
+# ── r7i: a SET override pointing nowhere is named, not "set it" ─────────
+out="$(MESHANCHOR_FLEET_HOSTS="$TMP/nope" run)"
+check "set-but-missing override: the drift leg names it (r7i)" \
+  "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q 'MESHANCHOR_FLEET_HOSTS=.*does not exist' && echo ok)"
+check "and does not tell the operator to set it" \
+  "$(echo "$out" | grep -q 'no fleet configured' && echo '' || echo ok)"
+
+# ── r8: an EXISTING override that lists nobody is not "does not exist" ──
+printf '# nobody yet\n' > "$TMP/emptylist"
+out="$(MESHANCHOR_FLEET_HOSTS="$TMP/emptylist" run)"
+check "empty list: the drift leg says it lists no hosts (r8)" \
+  "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q 'lists no hosts' && echo ok)"
+check "and never claims it does not exist" \
+  "$(echo "$out" | grep -q 'does not exist' && echo '' || echo ok)"
+
 echo "---"
 if [ "$fails" = 0 ]; then echo "ALL PASS"; exit 0; else echo "FAILED"; exit 1; fi

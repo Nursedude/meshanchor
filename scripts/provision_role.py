@@ -61,7 +61,6 @@ from utils.service_check import (  # noqa: E402
 
 DEFAULT_ROLES_FILE = _SCRIPT_DIR.parent / "docs" / "fleet_roles.yaml"
 DEPLOYMENT_JSON = get_real_user_home() / ".config" / "meshanchor" / "deployment.json"
-FLEET_HOSTS = get_real_user_home() / ".config" / "meshanchor" / "fleet_hosts"
 # Remote role-gathering shells out to ssh; the command is operator-configurable
 # via $MESHANCHOR_SSH (no key/host hardcoded here — MF014).
 SSH_CMD = os.environ.get("MESHANCHOR_SSH", "ssh")
@@ -402,15 +401,15 @@ def write_role(role: str) -> None:
 # --------------------------------------------------------------------------
 
 def parse_fleet_hosts(path: Path) -> List[str]:
-    """Return the host list from a fleet_hosts file (one per line, '#' comments)."""
-    if not path.exists():
+    """Host list via ``utils.fleet_hosts.read_fleet_hosts_file`` — THE reader
+    (r11, Fable r10 #3: this line parser read "moc1 moc2" as ONE host and
+    accepted a NUL-filled list). [] ONLY when absent; a refused list raises
+    FleetHostsUnreadable."""
+    from utils.fleet_hosts import read_fleet_hosts_file
+    try:
+        return read_fleet_hosts_file(path)
+    except FileNotFoundError:
         return []
-    hosts = []
-    for line in path.read_text().splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            hosts.append(line)
-    return hosts
 
 
 def validate_fleet(catalog: dict, role_map: Dict[str, Optional[str]]) -> List[str]:
@@ -512,7 +511,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     if args.fleet_check:
-        hosts = parse_fleet_hosts(FLEET_HOSTS)
+        from utils.fleet_hosts import FleetHostsUnreadable, resolve_fleet_hosts_file
+        try:
+            # THE resolver (r13, Fable r12 #5): a hard-coded FLEET_HOSTS
+            # path missed the override and /etc tiers honest_status uses.
+            _hf = resolve_fleet_hosts_file()
+            hosts = parse_fleet_hosts(_hf) if _hf else []
+        except FleetHostsUnreadable as e:   # r11: never "OK" over no fleet
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
         role_map = gather_fleet_roles(hosts, read_role())
         print("# fleet role assignment")
         for host, role in role_map.items():
