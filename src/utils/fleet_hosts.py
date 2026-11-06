@@ -330,6 +330,46 @@ def _shell_out(lines: List[str]) -> None:
     sys.stdout.flush()
 
 
+def explain_absent(*, env: Optional[Mapping[str, str]] = None,
+                   etc_dir: str = DEFAULT_ETC_DIR) -> Tuple[str, List[str]]:
+    """THE words for "no list resolved": ``(why, advice_lines)``. Every
+    consumer (``--shell`` rc 10 -> the shell lib's ``fleet_hosts_absent_say``,
+    the rollup pane) says these - never its own hand-typed advice.
+
+    Shape port of the MeshForge twin's 2026-11-06 fix (MF ``5d73d48b``): the
+    consumers advised "create ~/.config/meshanchor/fleet_hosts" while a SET
+    override pointed at a missing path - advice that cannot work, since a
+    set override is authoritative. The advice follows the SAME inputs the
+    resolver used (which overrides are set, whether HOME is). MeshAnchor has
+    no per-repo tier and no example file, so MF's sister-repo and ``cp``
+    lines do not apply here."""
+    env_map: Mapping[str, str] = os.environ if env is None else env
+    set_keys = [k for k in ENV_OVERRIDE_KEYS if env_map.get(k)]
+    if set_keys:
+        key = set_keys[0]
+        why = ("$%s=%s does not exist (authoritative - no fall-through to "
+               "another list)" % (key, env_map[key]))
+        return why, ["The override is authoritative: create %s, or unset %s "
+                     "to use this box's own list." % (env_map[key], " and ".join(
+                         "$" + k for k in set_keys))]
+    tiers = _tier_candidates(env, etc_dir)
+    why = "no fleet list found (checked %s)" % ", ".join(str(t) for t in tiers)
+    if env is None:
+        from utils.paths import get_real_user_home
+        home: Optional[Path] = get_real_user_home()
+    else:
+        home = Path(env["HOME"]) if env.get("HOME") else None
+    if home is None:
+        why += "; HOME is unset, so no per-user list was checked"
+        advice = ["Create %s (system-wide; one host per line, '#' comments "
+                  "allowed), or run with HOME set." % (Path(etc_dir) / "fleet_hosts")]
+    else:
+        advice = ["Create one at %s (one host per line, '#' comments allowed)."
+                  % (home / ".config" / "meshanchor" / "fleet_hosts")]
+    advice.append("Or set $MESHANCHOR_FLEET_HOSTS to a different path.")
+    return why, advice
+
+
 def _shell_main(argv: List[str]) -> int:
     """``--shell``. Home and the overrides come from THIS process's
     environment exactly as the shell passed them (``$HOME``, not the
@@ -340,16 +380,9 @@ def _shell_main(argv: List[str]) -> int:
     try:
         f = resolve_fleet_hosts_file(env=env)
         if f is None:
-            for key in ENV_OVERRIDE_KEYS:
-                if env.get(key):
-                    _shell_out(["$%s=%s does not exist (authoritative - no "
-                                "fall-through to another list)" % (key, env[key])])
-                    return SHELL_RC_ABSENT
-            tiers = _tier_candidates(env, DEFAULT_ETC_DIR)
-            why = "no fleet list found (checked %s)" % ", ".join(str(t) for t in tiers)
-            if not env.get("HOME"):
-                why += "; HOME is unset, so no per-user list was checked"
-            _shell_out([why])
+            # line 1 = why (one line: $FLEET_HOSTS_WHY); the rest = advice
+            why, advice = explain_absent(env=env)
+            _shell_out([why] + advice)
             return SHELL_RC_ABSENT
         try:
             hosts = read_fleet_hosts_file(f)

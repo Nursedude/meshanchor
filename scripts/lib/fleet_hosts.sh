@@ -21,6 +21,8 @@
 #     echo "$FLEET_HOSTS_LIST"   # hosts, one per line, comments stripped
 #   fi                            # rc 1 = no list found anywhere:
 #                                 #   $FLEET_HOSTS_WHY says what was checked
+#                                 #   ($FLEET_HOSTS_ADVICE: what to do) -
+#                                 #   print both: fleet_hosts_absent_say
 #                                 # rc 2 = a list is present but unreadable
 #                                 #   or uncheckable: $FLEET_HOSTS_ERROR says
 #                                 #   which and why (also said on stderr)
@@ -71,6 +73,7 @@ fleet_hosts_resolve() {
   FLEET_HOSTS_LIST=""
   FLEET_HOSTS_ERROR=""
   FLEET_HOSTS_WHY=""
+  FLEET_HOSTS_ADVICE=""
   if [ -z "$_FH_PY" ]; then
     FLEET_HOSTS_ERROR="fleet host list could not be resolved (src/utils/fleet_hosts.py not found beside this lib) - refusing to guess"
     printf 'fleet_hosts: %s\n' "$FLEET_HOSTS_ERROR" >&2
@@ -104,10 +107,28 @@ fleet_hosts_resolve() {
       # rc 0 with NO file line: the resolver did not run (a shadowed
       # `timeout`/`python3`). An empty list here would read "lists nobody".
       FLEET_HOSTS_ERROR="fleet host list could not be resolved (python resolver answered rc 0 with no file) - refusing to guess" ;;   # also: no format marker
-    10) FLEET_HOSTS_WHY="$_fh_out"; return 1 ;;   # why: for a status line
+    10) # line 1 = why (one line, for a status line); the rest = advice
+      FLEET_HOSTS_WHY="${_fh_out%%
+*}"
+      case "$_fh_out" in *"
+"*) FLEET_HOSTS_ADVICE="${_fh_out#*
+}" ;; esac
+      return 1 ;;
     11) FLEET_HOSTS_ERROR="$_fh_out" ;;
     *) FLEET_HOSTS_ERROR="fleet host list could not be resolved (python resolver $_FH_PY exited $_fh_rc) - refusing to guess" ;;
   esac
   printf 'fleet_hosts: %s\n' "$FLEET_HOSTS_ERROR" >&2
   return 2
+}
+
+# fleet_hosts_absent_say <self> - THE message for rc 1 (no list resolved).
+# Call it right after fleet_hosts_resolve returned 1, then exit as you like.
+# Both lines come from the python resolver (explain_absent): the reason it
+# found no list, and advice that matches the SAME inputs - a set override is
+# authoritative (never "create ~/.config/..."), HOME unset points at /etc.
+# Shape port of the MeshForge twin (MF 5d73d48b, 2026-11-06).
+fleet_hosts_absent_say() {
+  printf '%s: %s\n' "${1:-fleet}" "${FLEET_HOSTS_WHY:-no fleet host list (the resolver gave no reason)}" >&2
+  [ -n "${FLEET_HOSTS_ADVICE:-}" ] && printf '%s\n' "$FLEET_HOSTS_ADVICE" >&2
+  return 0
 }
