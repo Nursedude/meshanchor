@@ -193,3 +193,24 @@ def test_rollup_pane_absent_list_still_explains(monkeypatch, tmp_path, capsys):
     assert rollup.main([]) == 0
     out = capsys.readouterr().out
     assert str(missing) in out and "authoritative" in out, out
+
+
+def test_explain_absent_never_raises_and_says_so(monkeypatch):
+    """Twin of MeshForge d003d497: a wording failure must never become a
+    traceback or skip a refusal; it says so, with no advice built on inputs
+    it could not read."""
+    import utils.fleet_hosts as fh
+
+    def boom(*a, **k):
+        raise RuntimeError("no home for this uid")
+    monkeypatch.setattr(fh, "_explain_absent", boom)
+    why, advice = fh.explain_absent()
+    assert "could not be worded" in why and "RuntimeError" in why
+    assert advice == []
+
+
+def test_the_why_is_one_line_even_from_a_newline_home(tmp_path):
+    odd = tmp_path / "a\nb"
+    why, advice = explain_absent(env={"HOME": str(odd)}, etc_dir=str(tmp_path / "etc"))
+    for line in [why] + advice:
+        assert "\n" not in line and "\r" not in line, line
