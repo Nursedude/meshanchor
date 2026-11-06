@@ -114,7 +114,8 @@ def resolve_fleet_hosts(env: dict | None = None) -> list[str]:
     """MeshAnchor fleet host list — delegates to ``utils.fleet_hosts``, THE
     MA resolver ($MESHANCHOR_FLEET_HOSTS / legacy $FLEET_HOSTS override,
     authoritative when set → ~/.config/meshanchor/fleet_hosts →
-    /etc/meshanchor/fleet_hosts). [] if no list exists.
+    /etc/meshanchor/fleet_hosts). [] if no list exists; raises
+    ``FleetHostsUnreadable`` when a list is present but unreadable (r7e #2).
 
     This WAS the MF twin's function verbatim — it read the MESHFORGE
     namespace, which does not exist on MA's own boxes (the pane silently

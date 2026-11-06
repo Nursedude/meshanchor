@@ -52,7 +52,8 @@ fi
 # r7e #2 port: rc 2 = the list is present but unreadable/uncheckable. The
 # fleet legs stay UNKNOWN as before, but they must say WHY — "no fleet
 # configured" would send the operator to create a file that is already there.
-NOFLEET_WHY="${FLEET_HOSTS_ERROR:-no fleet configured}"
+# ONE value for every fleet leg (r7g F6).
+NOFLEET_WHY="${FLEET_HOSTS_ERROR:-no fleet configured (set HONEST_BOXES or ~/.config/meshanchor/fleet_hosts)}"
 
 # Watchdog signals — MeshAnchor emits silence as BLACKOUT rows in
 # fleet_history.db, surfaced live at /fleet/blackouts. There is NO watchdog.json
@@ -143,11 +144,7 @@ fi
 
 # 2. Fleet SHA drift — each box's HEAD vs this repo's HEAD (external).
 if [ -z "$BOXES" ]; then
-  if [ -n "${FLEET_HOSTS_ERROR:-}" ]; then
-    unk "fleet SHA drift" "$FLEET_HOSTS_ERROR"
-  else
-    unk "fleet SHA drift" "no fleet configured (set HONEST_BOXES or ~/.config/meshanchor/fleet_hosts)"
-  fi
+  unk "fleet SHA drift" "$NOFLEET_WHY"
 else
   matched=0; reached=0; total=0; norepo=0; desc=""
   for b in $BOXES; do

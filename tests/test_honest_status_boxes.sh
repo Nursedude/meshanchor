@@ -146,6 +146,10 @@ if [ "$(id -u)" != 0 ]; then
   chmod 600 "$TMP/locked"
   check "unreadable list: the drift leg names it unreadable" \
     "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q 'unreadable' && echo ok)"
+  check "unreadable list: the conf_rate leg names it too (r7g F7)" \
+    "$(echo "$out" | grep -E 'conf_rate' | grep -q 'unreadable' && echo ok)"
+  check "unreadable list: the watchdog leg names it too (r7g F7)" \
+    "$(echo "$out" | grep -E 'watchdog signals' | grep -q 'unreadable' && echo ok)"
   check "and never says 'no fleet configured'" \
     "$(echo "$out" | grep -q 'no fleet configured' && echo '' || echo ok)"
 fi
