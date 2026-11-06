@@ -1070,3 +1070,24 @@ def test_r19_ma_fleet_check_refuses_an_empty_list(tmp_path, monkeypatch, capsys)
     monkeypatch.setenv("PATH", "%s:%s" % (nossh, os.environ.get("PATH", "")))
     assert pr.main(["--fleet-check"]) == 2
     assert "lists no hosts" in capsys.readouterr().err
+
+
+
+def test_the_reader_never_opens_a_fifo(tmp_path):
+    """Fable standalone-arc #5 (VERIFIED): opening a FIFO blocked forever —
+    it hung the whole TUI Fleet Membership menu. Run in a subprocess so the
+    OLD code fails by timeout instead of hanging the suite."""
+    fifo = tmp_path / "fl"
+    os.mkfifo(fifo)
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import sys; sys.path.insert(0, %r)\n"
+        "from utils.fleet_hosts import read_fleet_hosts_file, FleetHostsUnreadable\n"
+        "try:\n    read_fleet_hosts_file(%r)\nexcept FleetHostsUnreadable as e:\n    print('REFUSED', e.reason)\n"
+        % (str(_LIB.parent.parent.parent / "src"), str(fifo)))
+    try:
+        p = subprocess.run([sys.executable, "-I", str(probe)], capture_output=True,
+                           text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the reader blocked on a FIFO")
+    assert "REFUSED not a regular file" in p.stdout, (p.stdout, p.stderr)

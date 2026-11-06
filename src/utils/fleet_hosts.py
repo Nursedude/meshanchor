@@ -111,6 +111,12 @@ def read_fleet_hosts_file(path: "Path | str", *, allow_empty: bool = False) -> L
       must SHOW the file's contents (the TUI wizard) passes allow_empty."""
     p = Path(path)
     try:
+        # stat BEFORE opening (Fable, standalone arc #5): opening a FIFO
+        # blocks forever — it hung the whole TUI Fleet Membership menu.
+        st = os.stat(p)
+        if not stat.S_ISREG(st.st_mode):
+            raise FleetHostsUnreadable(p, "a directory, not a file"
+                                       if stat.S_ISDIR(st.st_mode) else "not a regular file")
         text = p.read_text(encoding="utf-8", errors="replace")
     except (FileNotFoundError, NotADirectoryError) as exc:
         if os.path.lexists(p):
@@ -119,6 +125,8 @@ def read_fleet_hosts_file(path: "Path | str", *, allow_empty: bool = False) -> L
             # _usable refuses it. Only a truly absent path is "absent".
             raise FleetHostsUnreadable(p, "dangling symlink") from exc
         raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(p)) from exc
+    except FleetHostsUnreadable:
+        raise                      # already says what and why — never re-wrap
     except OSError as exc:
         raise FleetHostsUnreadable(p, exc.strerror or str(exc)) from exc
     hosts = _parse_fleet_hosts_text(text, p)
