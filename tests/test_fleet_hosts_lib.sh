@@ -61,5 +61,13 @@ out="$(run_lib HOME="$FAKE_HOME")"
 check "trailing comment yields the host, not a garbage token" \
   "$(echo "$out" | grep -q '|kept$' && echo ok)"
 
+# ── r7e #2 port: a PRESENT-but-unreadable list is rc 2, never a fall-through ─
+if [ "$(id -u)" != 0 ]; then
+  printf 'etc-would-win\n' > "$TMP/ov3"; chmod 000 "$TMP/ov3"
+  rc="$(env -i PATH="$PATH" MESHANCHOR_FLEET_HOSTS="$TMP/ov3" bash -c '. "'"$LIB"'"; fleet_hosts_resolve 2>/dev/null; echo $?')"
+  chmod 600 "$TMP/ov3"
+  check "unreadable override => rc 2 (not rc 1 'no list')" "$([ "$rc" = 2 ] && echo ok)"
+fi
+
 echo "---"
 if [ "$fails" = 0 ]; then echo "ALL PASS"; exit 0; else echo "FAILED"; exit 1; fi

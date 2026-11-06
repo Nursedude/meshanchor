@@ -49,6 +49,10 @@ BOXES="${HONEST_BOXES:-}"
 if [ -z "$BOXES" ] && fleet_hosts_resolve; then
   BOXES="$(printf '%s\n' "$FLEET_HOSTS_LIST" | tr '\n' ' ' | sed 's/ *$//')"
 fi
+# r7e #2 port: rc 2 = the list is present but unreadable/uncheckable. The
+# fleet legs stay UNKNOWN as before, but they must say WHY — "no fleet
+# configured" would send the operator to create a file that is already there.
+NOFLEET_WHY="${FLEET_HOSTS_ERROR:-no fleet configured}"
 
 # Watchdog signals — MeshAnchor emits silence as BLACKOUT rows in
 # fleet_history.db, surfaced live at /fleet/blackouts. There is NO watchdog.json
@@ -139,7 +143,11 @@ fi
 
 # 2. Fleet SHA drift — each box's HEAD vs this repo's HEAD (external).
 if [ -z "$BOXES" ]; then
-  unk "fleet SHA drift" "no fleet configured (set HONEST_BOXES or ~/.config/meshanchor/fleet_hosts)"
+  if [ -n "${FLEET_HOSTS_ERROR:-}" ]; then
+    unk "fleet SHA drift" "$FLEET_HOSTS_ERROR"
+  else
+    unk "fleet SHA drift" "no fleet configured (set HONEST_BOXES or ~/.config/meshanchor/fleet_hosts)"
+  fi
 else
   matched=0; reached=0; total=0; norepo=0; desc=""
   for b in $BOXES; do
@@ -252,7 +260,7 @@ else bad "lint" "exit $rc — $(grep -E '\[E\]' $HS_TMP/lint.log | tail -1)"; fi
 # 5. Live honesty assert — no displayed confirmation_rate may exceed 1.0
 #    (the #74 false-green: a rate reading >1.0 = ">100% confirmed").
 if [ -z "$BOXES" ]; then
-  unk "live conf_rate<=1.0" "no fleet configured — cannot poll /api/gateway/delivery"
+  unk "live conf_rate<=1.0" "$NOFLEET_WHY — cannot poll /api/gateway/delivery"
 else
   viol=""; checked=0; det=""
   for b in $BOXES; do
@@ -281,7 +289,7 @@ fi
 #    so empty-active from a dead watchdog is UNKNOWN, never clean (absence-of-
 #    signal ≠ healthy, honest_failure #2). Unreachable/unparseable = UNKNOWN.
 if [ -z "$BOXES" ]; then
-  unk "watchdog signals" "no fleet configured — cannot poll $BLACKOUTS_PATH across the fleet"
+  unk "watchdog signals" "$NOFLEET_WHY — cannot poll $BLACKOUTS_PATH across the fleet"
 else
   active_t=0; clean=0; unverif=0; wdfault=0; sigdesc=""
   btotal=$(echo $BOXES | wc -w)

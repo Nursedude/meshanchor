@@ -55,7 +55,11 @@ def _resolve_preset_name(name: str) -> str:
     deliberately not parity-tracked): the verbatim port resolved the
     MESHFORGE namespace and named the preset ``meshforge_fleet``, which MA
     does not ship — ``--preset auto`` with any hosts resolved was a
-    guaranteed import crash, masked only by the unit pinning its preset."""
+    guaranteed import crash, masked only by the unit pinning its preset.
+
+    An UNREADABLE list raises ``FleetHostsUnreadable`` (r7e #2 port,
+    2026-11-05): here the list ALWAYS decides fleet vs standalone (no NATS
+    branch, unlike MF), so it must never be read as "none declared"."""
     if name != "auto":
         return name
     from .rollup import resolve_fleet_hosts
@@ -125,7 +129,14 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if args.preset:
-        build_engine = _import_preset(_resolve_preset_name(args.preset))
+        from utils.fleet_hosts import FleetHostsUnreadable
+        try:
+            resolved_preset = _resolve_preset_name(args.preset)
+        except FleetHostsUnreadable as e:
+            # Refuse rather than guess fleet vs standalone from a list that
+            # exists and could not be read. Deployed units pin their preset.
+            raise SystemExit(f"mini-dudeai: preset auto cannot be resolved — {e}")
+        build_engine = _import_preset(resolved_preset)
         engine = build_engine()
         interval = args.interval if args.interval is not None else 30.0
     else:

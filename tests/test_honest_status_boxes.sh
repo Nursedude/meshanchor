@@ -139,5 +139,16 @@ check "fleet_hosts file drives the drift leg via the lib (1/1)" \
 check "and the trailing comment parsed to the host, not a garbage token" \
   "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q 'UNKNOWN\|unreach' && echo '' || echo ok)"
 
+# ── r7e #2 port: a PRESENT-but-unreadable list is named, never "not configured" ─
+if [ "$(id -u)" != 0 ]; then
+  printf 'box-good\n' > "$TMP/locked"; chmod 000 "$TMP/locked"
+  out="$(MESHANCHOR_FLEET_HOSTS="$TMP/locked" run)"
+  chmod 600 "$TMP/locked"
+  check "unreadable list: the drift leg names it unreadable" \
+    "$(echo "$out" | grep -E 'fleet SHA drift' | grep -q 'unreadable' && echo ok)"
+  check "and never says 'no fleet configured'" \
+    "$(echo "$out" | grep -q 'no fleet configured' && echo '' || echo ok)"
+fi
+
 echo "---"
 if [ "$fails" = 0 ]; then echo "ALL PASS"; exit 0; else echo "FAILED"; exit 1; fi

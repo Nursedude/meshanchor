@@ -25,6 +25,15 @@ Resolution order::
     ~/.config/meshanchor/fleet_hosts
     /etc/meshanchor/fleet_hosts
 
+A tier that is ABSENT passes to the next one. A tier that is PRESENT but
+cannot be read — permission, a directory, a dangling symlink — or cannot be
+CHECKED (a parent directory is not searchable) raises
+:class:`FleetHostsUnreadable` naming the path, and so does a read that fails
+after resolution. Ported 2026-11-05 from MF r7e #2 (a7d198f0) + r7f
+(d4fb041f); operator: "quietly failing is not an answer". Falling through
+handed the caller the NEXT tier's list — a different fleet, reported as the
+fleet.
+
 Deliberate divergences from the MF twin's ``utils/fleet_hosts.py``: the
 meshanchor namespace, and NO per-repo ``fleet_hosts.<basename>`` tier (no MA
 consumer scopes by repo; an unused tier is speculative surface).
@@ -39,6 +48,7 @@ anywhere on the line, so ``"moc1  # retired"`` parses as host ``moc1``.
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import List, Mapping, Optional, Tuple
 
@@ -56,11 +66,51 @@ def parse_fleet_hosts_text(text: str) -> List[str]:
     return hosts
 
 
-def _readable_file(p: Path) -> bool:
+class FleetHostsUnreadable(OSError):
+    """A fleet host list at ``path`` is present but unusable, or cannot be
+    checked. An ``OSError`` so an existing ``except OSError`` still refuses;
+    every caller must turn it into its own refusal / UNKNOWN, never "no
+    fleet". Same class, same words as the MF twin."""
+
+    def __init__(self, path: Path, reason: str):
+        self.path = Path(path)
+        self.reason = reason
+        super().__init__(
+            "fleet host list %s is unreadable (%s) - refusing to fall "
+            "through to another list" % (self.path, reason))
+
+
+#: A tier we cannot prove absent. Shared wording with the shell twin.
+UNCHECKABLE = "cannot be checked: a parent directory is not searchable"
+
+
+def _usable(p: Path) -> bool:
+    """True = a readable regular file; False = provably absent (ENOENT, or a
+    non-directory where a parent should be); raises when present but unusable
+    OR uncheckable. Explicit ``lstat``, not ``Path.is_file`` (whose EACCES
+    handling differs by Python version) — mirrors MF r7f F2."""
     try:
-        return p.is_file() and os.access(p, os.R_OK)
-    except OSError:
+        st = os.lstat(p)
+    except (FileNotFoundError, NotADirectoryError):
         return False
+    except PermissionError as exc:
+        raise FleetHostsUnreadable(p, UNCHECKABLE) from exc
+    except (OSError, ValueError) as exc:
+        raise FleetHostsUnreadable(p, getattr(exc, "strerror", None) or str(exc)) from exc
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            st = os.stat(p)
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise FleetHostsUnreadable(p, "dangling symlink") from exc
+        except OSError as exc:
+            raise FleetHostsUnreadable(p, "symlink target " + UNCHECKABLE) from exc
+    if stat.S_ISDIR(st.st_mode):
+        raise FleetHostsUnreadable(p, "a directory, not a file")
+    if not stat.S_ISREG(st.st_mode):
+        raise FleetHostsUnreadable(p, "not a regular file")
+    if not os.access(p, os.R_OK):
+        raise FleetHostsUnreadable(p, "permission denied")
+    return True
 
 
 def resolve_fleet_hosts_file(
@@ -69,14 +119,15 @@ def resolve_fleet_hosts_file(
     etc_dir: str = DEFAULT_ETC_DIR,
 ) -> Optional[Path]:
     """The file that wins the resolution order, or ``None`` if no list exists
-    (including a SET-but-unresolvable env override — authoritative, no
-    fall-through)."""
+    (including a SET-but-ABSENT env override — authoritative, no
+    fall-through). Raises :class:`FleetHostsUnreadable` when the winning
+    candidate — or any tier above it — is present but unusable/uncheckable."""
     env_map: Mapping[str, str] = os.environ if env is None else env
     for key in ENV_OVERRIDE_KEYS:
         val = env_map.get(key)
         if val:
             p = Path(val)
-            return p if _readable_file(p) else None
+            return p if _usable(p) else None
     if env is None:
         from utils.paths import get_real_user_home
         home: Optional[Path] = get_real_user_home()
@@ -87,7 +138,7 @@ def resolve_fleet_hosts_file(
         candidates.append(home / ".config" / "meshanchor" / "fleet_hosts")
     candidates.append(Path(etc_dir) / "fleet_hosts")
     for c in candidates:
-        if _readable_file(c):
+        if _usable(c):
             return c
     return None
 
@@ -97,14 +148,15 @@ def resolve_fleet_hosts(
     env: Optional[Mapping[str, str]] = None,
     etc_dir: str = DEFAULT_ETC_DIR,
 ) -> List[str]:
-    """The host list, or ``[]`` when no list resolves."""
+    """The host list, or ``[]`` when no list resolves. An unreadable list
+    RAISES :class:`FleetHostsUnreadable` — never ``[]``."""
     f = resolve_fleet_hosts_file(env=env, etc_dir=etc_dir)
     if f is None:
         return []
     try:
         return parse_fleet_hosts_text(f.read_text(encoding="utf-8", errors="replace"))
-    except OSError:
-        return []
+    except OSError as exc:
+        raise FleetHostsUnreadable(f, getattr(exc, "strerror", None) or str(exc)) from exc
 
 
 # --- the generated /etc/hosts fleet block -------------------------------------
