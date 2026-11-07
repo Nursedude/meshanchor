@@ -57,6 +57,8 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
+from utils.http_listener import LISTEN_BACKLOG
+
 logger = logging.getLogger(__name__)
 
 
@@ -1135,6 +1137,15 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self._send_error_json(503, "MeshCore send queue full or not connected")
 
 
+class ConfigAPITCPServer(socketserver.TCPServer):
+    """The :8081 config listener: single-threaded TCPServer with SO_REUSEADDR
+    and a burst-deep accept queue (stock is 5; MAP-H H13 follow-up, twin of
+    MeshForge 5a72ea9e)."""
+
+    allow_reuse_address = True
+    request_queue_size = LISTEN_BACKLOG
+
+
 class ConfigAPIServer:
     """HTTP server for Configuration API (TCP, localhost only)."""
 
@@ -1165,10 +1176,7 @@ class ConfigAPIServer:
         )
 
         try:
-            class TCPServer(socketserver.TCPServer):
-                allow_reuse_address = True
-
-            self._server = TCPServer((self.host, self.port), handler)
+            self._server = ConfigAPITCPServer((self.host, self.port), handler)
             logger.info(f"ConfigAPI server starting on {self.host}:{self.port}")
 
             self._running = True

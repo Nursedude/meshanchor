@@ -15,13 +15,13 @@ name even with a session), then the login, then the unit allowlist.
 """
 import http.client
 import threading
-from http.server import ThreadingHTTPServer
 
 import pytest
 
 from utils import _map_trust_gate as tg
 from utils import web_auth
 from utils.map_http_handler import MapRequestHandler
+from utils.map_data_service import _make_http_server  # the live listener class
 
 LAN = ["http://localhost", "http://127.0.0.1", "http://192.0.2."]
 
@@ -39,7 +39,7 @@ def operator_session(monkeypatch, tmp_path):
 @pytest.fixture
 def server(monkeypatch):
     monkeypatch.setattr(MapRequestHandler, "allowed_origins", LAN)
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), MapRequestHandler)
+    srv = _make_http_server("127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield srv
     srv.shutdown()
@@ -99,7 +99,7 @@ def test_standalone_map_with_no_lan_origins_still_checks_host(monkeypatch):
     # box" rebinding case — the Host rule must not depend on a LAN being set
     # (Fable re-review #4, mutant M2 survived)
     monkeypatch.setattr(MapRequestHandler, "allowed_origins", None)
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), MapRequestHandler)
+    srv = _make_http_server("127.0.0.1", 0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         assert _get(srv, "/fleet/logs", "evil.example:5000")[0] == 403
