@@ -723,14 +723,17 @@ class TestSelfPortRegistrationIsWired:
 
     def test_every_server_bind_registers_the_port(self):
         """Source-level, because binding two real ports in a unit test is
-        worse. Each `ThreadingHTTPServer(...)` construction must be followed
+        worse. Each listener bind (`_make_http_server(...)`) must be followed
         closely by a registration call — a new bind site added without one
         silently re-opens the storm on whichever box hits that path."""
         import inspect
         from utils import map_data_service
         lines = inspect.getsource(map_data_service).splitlines()
+        # H13 (2026-11-06): both start paths bind via _make_http_server(); a
+        # stock construction stays in the net so a revert is still checked.
         binds = [i for i, l in enumerate(lines)
-                 if "ThreadingHTTPServer((" in l]
+                 if "= _make_http_server(" in l.split("#")[0]
+                 or "ThreadingHTTPServer((" in l.split("#")[0]]
         assert binds, "no bind site found — did the server construction move?"
         for i in binds:
             window = "\n".join(lines[i:i + 8])

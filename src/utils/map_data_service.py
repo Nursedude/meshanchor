@@ -34,7 +34,7 @@ import logging
 import os
 import socket
 import threading
-from http.server import HTTPServer, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import List, Optional
 
@@ -155,6 +155,24 @@ def _operator_position():
         return None
 
 
+class MapHTTPServer(ThreadingHTTPServer):
+    """The map's listener. One thread per request, and an accept queue that
+    holds a burst (H13, twin of MeshForge b60166c5): Python's default
+    ``request_queue_size`` is 5, so of 50 simultaneous requests ~8 waited a full
+    1 s TCP SYN retry before the server saw them (measured on MeshForge
+    2026-11-06: connect 1.01-1.04 s, answer <= 30 ms). The kernel still caps
+    this at ``net.core.somaxconn``."""
+
+    request_queue_size = 128
+    # daemon_threads is already True on ThreadingHTTPServer (3.7+): shutdown
+    # never waits for in-flight handlers.
+
+
+def _make_http_server(host: str, port: int) -> MapHTTPServer:
+    """THE one way the map binds its listener (both start paths)."""
+    return MapHTTPServer((host, port), MapRequestHandler)
+
+
 class MapServer:
     """MeshAnchor HTTP server for network monitoring and radio control.
 
@@ -245,7 +263,7 @@ class MapServer:
             )
 
         self.collector = MapDataCollector(meshtastic_enabled=meshtastic_enabled)
-        self._server: Optional[ThreadingHTTPServer] = None
+        self._server: Optional[MapHTTPServer] = None  # only via _make_http_server()
         self._terrain_warm_started = False
         self._thread: Optional[threading.Thread] = None
         self._message_listener_started = False
@@ -419,12 +437,11 @@ class MapServer:
         # Start message listener for inbound messages
         self._start_message_listener()
 
-        # ThreadingHTTPServer: one thread per request so a slow endpoint
-        # (e.g. large /api/map/geojson under fleet load) no longer blocks
-        # subsequent requests. daemon_threads=True prevents hanging workers
-        # from preventing shutdown.
-        self._server = ThreadingHTTPServer((self.host, self.port), MapRequestHandler)
-        self._server.daemon_threads = True
+        # MapHTTPServer (ThreadingHTTPServer): one thread per request so a slow
+        # endpoint (e.g. large /api/map/geojson under fleet load) no longer
+        # blocks subsequent requests. Its daemon threads keep hanging workers
+        # from preventing shutdown; a 128-deep accept queue holds a burst (H13).
+        self._server = _make_http_server(self.host, self.port)
         _register_self_http_port(self.port)
         logger.info(f"Map server starting on http://{self.host}:{self.port}")
         print(f"MeshAnchor NOC Server running on port {self.port}")
@@ -573,8 +590,7 @@ class MapServer:
         # Start message listener for inbound messages
         self._start_message_listener()
 
-        self._server = ThreadingHTTPServer((self.host, self.port), MapRequestHandler)
-        self._server.daemon_threads = True
+        self._server = _make_http_server(self.host, self.port)
         # BEFORE serve_forever: the guard must be armed before the first
         # request can reach slo_view, or the storm gets a head start.
         _register_self_http_port(self.port)
