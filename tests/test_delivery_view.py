@@ -63,6 +63,30 @@ def test_healthy_reads_arriving(tmp_path):
     assert v.headline().startswith("Messages are arriving")
 
 
+def test_window_uses_the_screens_clock_not_the_wall(tmp_path, monkeypatch):
+    """Fable MA r1 L1 (port of MF's 2026-11-07 pin): the 7-day window must be
+    judged on the `now` the screen was handed. With the window's wall clock
+    30 d past this file's fixed NOW, the ring must still read as judged — a
+    wall-clock window would read TOO FEW (the 2027-01-22 time-bomb)."""
+    from utils import active_health_checks_delivery as h
+    monkeypatch.setattr(h.time, "time", lambda: NOW + 30 * 86400.0)
+    v = _gather(tmp_path, delivery=_snap(), queue=_queue())
+    lines = [ln for leg in v.legs for ln in leg.lines]
+    assert any("200 confirmed / 0 failed of 200" in ln for ln in lines), lines
+    assert any("72 h:" in ln for ln in lines), lines   # the format_window line
+
+
+def test_span_line_reads_stamps_like_the_window(tmp_path):
+    """Fable MA r3 LOW (2026-11-07): a ts=0 entry is 'unknown age' to the
+    window; the span line measured it and printed 500000.0 h."""
+    d = _snap(confirmed=25)
+    d["recent_terminal"].append({"ts": 0, "state": "confirmed", "protocol": "rns"})
+    v = _gather(tmp_path, delivery=d, queue=_queue())
+    lines = [ln for leg in v.legs for ln in leg.lines]
+    assert any("of unknown age" in ln for ln in lines), lines
+    assert not any("500000" in ln for ln in lines), lines
+
+
 def test_map_down_with_daemon_running_is_unknown_and_prints_no_number(tmp_path):
     v = _gather(tmp_path, down=True)
     assert v.headline().startswith("UNKNOWN")

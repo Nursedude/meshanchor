@@ -37,6 +37,8 @@ from urllib.request import urlopen
 from utils.active_health_checks_delivery import (
     DELIVERY_STALL_MIN_TERMINAL,
     confirmation_window,
+    event_ts,
+    format_window,
 )
 
 OK = "ok"
@@ -217,7 +219,7 @@ def delivery_leg(now: float, organ: str, fetcher=None) -> Leg:
                    f"{health.get('preflight_error') or 'snapshot read failed'}")
         return leg
 
-    win = confirmation_window(snap)
+    win = confirmation_window(snap, now=now)   # one clock per screen (MF Fable r1 F1)
     if not win["confirmable"]:
         leg.thin = True
         leg.lines.append("Recent window: no protocol has ever confirmed here — "
@@ -236,16 +238,19 @@ def delivery_leg(now: float, organ: str, fetcher=None) -> Leg:
                 f"Recent window ({protos}): {win['confirmed']} confirmed / "
                 f"{win['failed']} failed — TOO FEW to judge ({t} of "
                 f"{DELIVERY_STALL_MIN_TERMINAL} needed). Quiet, not proven healthy.")
+            leg.lines.append(f"  {format_window(win)}")
         else:
             rate = win["confirmed"] / t
             leg.lines.append(
                 f"Recent window ({protos}): {win['confirmed']} confirmed / "
                 f"{win['failed']} failed of {t} -> {rate:.1%}")
+            leg.lines.append(f"  {format_window(win)}")
             if rate <= _RATE_DEGRADED:
                 leg.failing = True
                 leg.lines.append(f"  !! at or below {_RATE_DEGRADED:.0%} — the "
                                  f"stall check calls this degraded")
-        ts = [_num(e.get("ts")) for e in win["ring"] if isinstance(e, dict)]
+        # The window's own stamp reader — one verdict per entry on this screen.
+        ts = [event_ts(e, now) for e in win["ring"] if isinstance(e, dict)]
         ts = [x for x in ts if x is not None]
         if ts:
             leg.lines.append(f"  window: {len(ts)} events over "
