@@ -390,7 +390,11 @@ _OPERATOR_STORE_MODULES = (
     "gateway.message_queue",           # message_queue.db
     "commands.rns",                    # lxmf_storage/ (LXMF ratchets)
     "gateway._rns_bridge_connection",  # lxmf_storage/ (LXMF ratchets)
-    "utils.map_data_collector",        # map_nodes.geojson, node_history.db
+    "utils.map_data_collector",        # map_nodes.geojson
+    # node_history.db — NodeHistoryDB() with no db_path resolves the home
+    # through ITS OWN import, so the map_data_collector line above never
+    # covered it (2026-11-09, found porting MAP-H H14 before any red run).
+    "utils.node_history",
     # mqtt_nodeless.json — the operator's saved MQTT settings. Ported from
     # MeshForge's 10-31 gate on 2026-11-01, after the SAME accident repeated
     # here: a red-first run against the OLD TUI save_mqtt_config (it resolves

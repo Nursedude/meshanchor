@@ -217,9 +217,13 @@ class MeshtasticDataCollectorMixin:
                     no_position_nodes.append({
                         "id": node.node_id,
                         "name": node.long_name or node.short_name or node.node_id,
+                        "network": "meshtastic",
                         "hw_model": node.hw_model,
                         "snr": node.snr,
                         "last_heard": node.last_heard,
+                        # H14: without it collect() defaults False and an
+                        # MQTT-only node reads as heard by this radio.
+                        "via_mqtt": node.via_mqtt,
                     })
 
             # Extend (don't replace) — _collect_locked clears once at the
@@ -237,6 +241,37 @@ class MeshtasticDataCollectorMixin:
             logger.debug(f"HTTP collection error: {e}")
             return []
 
+    @staticmethod
+    def _own_node_id(interface):
+        """This radio's own node id from the EXISTING connection
+        (``myInfo.my_node_num``, else ``localNode.nodeNum``), or None.
+        Never inferred from traffic (MAP-H H14)."""
+        for obj, attr in ((getattr(interface, 'myInfo', None), 'my_node_num'),
+                          (getattr(interface, 'localNode', None), 'nodeNum')):
+            num = getattr(obj, attr, None) if obj is not None else None
+            if isinstance(num, int) and not isinstance(num, bool) and num > 0:
+                return _canonical_meshtastic_id("", num)
+        return None
+
+    @staticmethod
+    def _stamp_radio_heard(props, self_id):
+        """H14: ``radio_last_heard`` = THIS radio's hearing time, set ONLY
+        here (the radio's nodedb drain). ``last_heard`` is freshest-across-
+        sources after ``_merge_feature`` (an MQTT copy can move it), so
+        node_history reads this one prop instead. MQTT-downlinked nodes get
+        none; the radio's OWN row is tagged ``is_self`` and gets none — it
+        advances on TX, so it would vouch for a deaf radio."""
+        if not isinstance(props, dict):
+            return
+        if self_id is not None and props.get("id") == self_id:
+            props["is_self"] = True
+            return
+        if props.get("via_mqtt"):
+            return
+        lh = props.get("last_heard")
+        if isinstance(lh, (int, float)) and not isinstance(lh, bool) and lh > 0:
+            props["radio_last_heard"] = float(lh)
+
     def _drain_interface_nodes(self, interface, source, post_feature=None):
         """Read nodes off a connected interface into LOCAL lists.
 
@@ -253,6 +288,7 @@ class MeshtasticDataCollectorMixin:
         total = 0
         if hasattr(interface, 'nodes') and interface.nodes:
             now = time.time()
+            self_id = self._own_node_id(interface)
             online_threshold = self.get_online_threshold_seconds()
             total = len(interface.nodes)
             for node_id, node_data in interface.nodes.items():
@@ -260,12 +296,14 @@ class MeshtasticDataCollectorMixin:
                 if feature:
                     if post_feature is not None:
                         post_feature(feature)
+                    self._stamp_radio_heard(feature["properties"], self_id)
                     features.append(feature)
                 else:
                     no_pos_info = self._extract_node_info_without_position(
                         node_id, node_data, now, online_threshold
                     )
                     if no_pos_info:
+                        self._stamp_radio_heard(no_pos_info, self_id)
                         no_position.append(no_pos_info)
             logger.debug(
                 "%s: %d with GPS, %d without GPS (total: %d)",
@@ -517,6 +555,10 @@ class MeshtasticDataCollectorMixin:
             via_mqtt=data.get('viaMqtt', False),
             is_local=(data.get('hopsAway', 99) == 0),
             last_seen=last_seen,
+            # Port of MeshForge 9c579cdd (2026-04-06, missed by the split):
+            # without it every positioned TCP node read last_heard 0, so the
+            # merge's freshest-wins rule always lost and H14 had no stamp.
+            last_heard=last_heard,
             temperature=env_metrics.get('temperature'),
             humidity=env_metrics.get('relativeHumidity'),
             pressure=env_metrics.get('barometricPressure'),
@@ -562,6 +604,10 @@ class MeshtasticDataCollectorMixin:
         return {
             "id": formatted_id,
             "name": name or formatted_id,
+            # MeshForge's twin carries it; without it map_data_collector wrote
+            # every GPS-less Meshtastic node to the directory as "unknown"
+            # (H14 port review F1, 2026-11-09).
+            "network": "meshtastic",
             "is_online": is_online,
             "last_seen": last_seen,
             "hardware": user.get('hwModel', ''),
@@ -570,6 +616,9 @@ class MeshtasticDataCollectorMixin:
             "battery": device_metrics.get('batteryLevel'),
             "hops_away": data.get('hopsAway'),
             "via_mqtt": data.get('viaMqtt', False),
+            # H14: the radio's heard epoch, so a GPS-less node's directory
+            # row carries radio_heard too (most nodes have no GPS).
+            "last_heard": last_heard,
         }
 
     def _collect_via_cli(self) -> List[Dict]:

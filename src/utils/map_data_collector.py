@@ -46,6 +46,7 @@ from utils._map_collector_meshtastic import MeshtasticDataCollectorMixin
 from utils._map_collector_meshcore_public import MeshCorePublicCollectorMixin
 from utils._map_collector_config import MapCollectorConfigMixin
 from utils.meshcore_positions import get_position_store
+from utils.peer_radio_heard import strip_radio_stamp
 
 
 class MapDataCollector(
@@ -491,8 +492,9 @@ class MapDataCollector(
         # collectors take precedence so meshforge-maps can't shadow data
         # we already have first-hand.
         if self._meshforge_maps_enabled:
+            # A relayed aggregate is another box's radio, never ours (H14).
             meshforge_maps_features = self._tag_source_origin(
-                self._collect_meshforge_maps(), "external_maps"
+                strip_radio_stamp(self._collect_meshforge_maps()), "external_maps"
             )
             for f in meshforge_maps_features:
                 fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
@@ -504,7 +506,9 @@ class MapDataCollector(
         # Source 7: Last-known cache (fill gaps). node_tracker tier — the
         # cache is whatever this box has previously seen locally.
         if not features:
-            cache_features = self._tag_source_origin(self._load_cache(), "node_tracker")
+            # The cache is not this cycle's radio: no H14 stamp survives it.
+            cache_features = self._tag_source_origin(
+                strip_radio_stamp(self._load_cache()), "node_tracker")
             for f in cache_features:
                 fid = (f.get("properties") or {}).get("id", "") if isinstance(f, dict) else ""
                 if fid:
@@ -586,6 +590,12 @@ class MapDataCollector(
                         "network": entry.get("network", "unknown"),
                         "is_online": entry.get("is_online", False),
                         "source_origin": origin,
+                        # H14: without these the directory's radio_heard
+                        # stays NULL for every GPS-less node; only the radio
+                        # drain's stamp is ever read.
+                        "radio_last_heard": entry.get("radio_last_heard"),
+                        "via_mqtt": entry.get("via_mqtt", False),
+                        "is_self": entry.get("is_self", False),
                     },
                 })
             if history_features:
