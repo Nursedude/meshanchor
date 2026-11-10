@@ -1233,13 +1233,29 @@ class MeshtasticPresetBridge:
                 interface, kind="tcp_sendtext",
                 detail=f"mesh_bridge cross-preset forward -> {dest_name}")
             if msg.is_broadcast:
-                interface.sendText(content, channelIndex=msg.channel)
+                sent = interface.sendText(content, channelIndex=msg.channel)
             else:
-                interface.sendText(
+                sent = interface.sendText(
                     content,
                     destinationId=msg.destination_id,
                     channelIndex=msg.channel
                 )
+
+            # BR-T #1 (port of MeshForge 6fe286ef, 2026-11-10): a write the
+            # interface REFUSED is not a send. MQTTMeshInterface.sendText
+            # returns False when the HTTP send fails, the text is over the
+            # on-air budget, or the protobuf client is unavailable; that value
+            # used to be discarded, so the failure got a "Bridged" line, a
+            # delivered counter and a cleared queue row. Only the declared
+            # failure value is read as failure — the meshtastic library
+            # returns a packet object on success.
+            if sent is False:
+                logger.error(
+                    f"Forward to {dest_name} REFUSED by the interface "
+                    f"(sendText returned False) — not sent: {content[:50]}...")
+                with self._stats_lock:
+                    self.stats['errors'] += 1
+                return False
 
             logger.info(f"Bridged {msg.source_preset} -> {dest_name}: {content[:50]}...")
             return True
