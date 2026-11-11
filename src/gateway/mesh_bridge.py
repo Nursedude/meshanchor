@@ -46,6 +46,57 @@ logger = logging.getLogger(__name__)
 _meshtastic, _HAS_MESHTASTIC = safe_import('meshtastic')
 _meshtastic_tcp, _HAS_MESHTASTIC_TCP = safe_import('meshtastic.tcp_interface')
 _pub, _HAS_PUBSUB = safe_import('pubsub', 'pub')
+# Leg machinery below ported from MeshForge BR-T #8/#10–#13 (2026-11-10). Its
+# comments that name a SERIAL leg describe the MeshForge twin; MeshAnchor's
+# legs are TCP and MQTT (the stream checks still cover TCPInterface, a
+# StreamInterface subclass).
+# How long a TCP leg waits for its endpoint's connection lock (one slot per
+# meshtasticd, Issue #17) before it gives up this attempt and the leg loop retries.
+_LOCK_WAIT_S = 10
+# The library CLASSES, imported apart from the modules above (tests replace
+# those modules with fakes): the write-target check below asks what the
+# library's own _writeBytes gates on, so it must recognise the real types.
+_TCPInterfaceCls, _HAS_TCP_CLS = safe_import('meshtastic.tcp_interface', 'TCPInterface')
+_StreamInterfaceCls, _HAS_STREAM_CLS = safe_import(
+    'meshtastic.stream_interface', 'StreamInterface')
+
+
+def _write_target_gone(interface) -> bool:
+    """True when the meshtastic library would DROP a write to ``interface``
+    without a word (BR-T #10, 2026-11-10).
+
+    ``TCPInterface._writeBytes`` writes only ``if self.socket is not None`` (a
+    failed ``_reconnect()`` or a ``close()`` leaves it None) and the serial
+    ``StreamInterface._writeBytes`` only ``if self.stream:``; either way
+    ``sendText`` still returns a packet. This reads exactly what those gates
+    read. Any other interface (MQTT leg, a fake) is not judged here: False.
+    """
+    if _HAS_TCP_CLS and isinstance(interface, _TCPInterfaceCls):
+        return interface.socket is None
+    if _HAS_STREAM_CLS and isinstance(interface, _StreamInterfaceCls):
+        return not interface.stream
+    return False
+
+
+def _library_gave_up(interface) -> bool:
+    """True when a meshtastic library stream interface reads not-connected:
+    its ``_disconnected()`` clears ``isConnected`` — when the reader thread
+    exits (the link is gone for good), and also on a ``FromRadio.rebooted``,
+    after which the library re-configs the SAME object and sets it again (r3
+    finding 2: an earlier docstring claimed "nothing sets it again"). Both also
+    publish ``connection.lost``, so an installed leg is torn down and
+    reconnected either way; this read only decides a leg that MISSED that
+    event. During the library's own 1 s ``_reconnect()`` it stays SET, so a
+    self-healing link is never judged dead. Non-library interfaces: False.
+
+    The backstop for a missed ``connection.lost`` (11-10 review r2 F-A: one
+    that fires before the leg's handle is installed is dropped by the identity
+    check, and the leg read connected on a dead handle forever)."""
+    if not (_HAS_STREAM_CLS and isinstance(interface, _StreamInterfaceCls)):
+        return False
+    flag = getattr(interface, "isConnected", None)
+    return isinstance(flag, threading.Event) and not flag.is_set()
+
 
 @dataclass
 class BridgedMeshMessage:
@@ -166,6 +217,30 @@ class MeshtasticPresetBridge:
         self._message_callbacks: List[Callable] = []
         self._status_callbacks: List[Callable] = []
 
+        # Strong references to stream-leg (serial AND tcp) pubsub listeners.
+        # pypubsub holds listeners WEAKLY — a nested on_receive closure with
+        # no other reference is garbage-collected right after connect and
+        # the callback never fires (RX silently dead: serial 2026-06-03,
+        # tcp BR-T #8 2026-11-10).
+        self._stream_rx_keepalive: Dict[str, Callable] = {}
+        # Same weak-listener rule for the link-lost listener (below).
+        self._stream_lost_keepalive: Dict[str, Callable] = {}
+        # TCP handle -> the endpoint connection lock it holds (a plain,
+        # non-reentrant Lock from connection_lock_for, taken by _connect_tcp
+        # for the connection's life). Each lock has at most one holder here;
+        # released when THAT handle is torn down, never otherwise (BR-T #11;
+        # per endpoint since #13, so two legs can hold two locks).
+        self._tcp_lock_holds: Dict[Any, threading.Lock] = {}
+        # Guards leg handles (_primary/_secondary_interface + _connected) and
+        # _tcp_lock_holds across the leg loops, the bridge loop and the
+        # library's publishing thread. Held only for swaps, never across I/O.
+        # The ONLY writers of leg state are _install_leg / _take_leg /
+        # _mark_leg_down (gate: TestLegStateHasOneWriter).
+        self._leg_lock = threading.Lock()
+        # Kind ("serial" / "tcp") of each stream leg, recorded at attach — the
+        # one source for its log lines (LOST, planned close).
+        self._stream_kind: Dict[str, str] = {}
+
         # Statistics
         self._stats_lock = threading.Lock()
         self.stats = {
@@ -180,6 +255,11 @@ class MeshtasticPresetBridge:
             # primary radio (it won the race this time).
             'dual_path_suppressed': 0,
             'errors': 0,
+            # TCP legs whose link vanished (a library reconnect that failed,
+            # a backstop read of isConnected) and were marked disconnected so
+            # the leg loop reconnects. Pre-seeded: healthy-zero vs
+            # meter-absent (honest_failure_modes #9).
+            'link_lost': 0,
             'start_time': None,
         }
 
@@ -307,6 +387,19 @@ class MeshtasticPresetBridge:
         pri_mode = "MQTT" if pri.use_mqtt else "TCP"
         sec_mode = "MQTT" if sec.use_mqtt else "TCP"
 
+        # A previous run's leg thread can outlive stop()'s 5 s join (blocked in
+        # the library's connect). Starting now would clear _stop_event and let
+        # it resume BESIDE the new one — two loops per leg, stranded handles
+        # (r4 F2). Refuse, and say why; start again once it has exited.
+        alive = [t.name for t in (self._primary_thread, self._secondary_thread)
+                 if t is not None and t.is_alive()]
+        if alive:
+            logger.error(
+                f"Mesh bridge NOT started: the previous run's leg thread(s) "
+                f"{alive} have not exited yet (still inside a connect) — retry "
+                f"in a few seconds")
+            return False
+
         logger.info("Starting Meshtastic preset bridge...")
         logger.info(f"  Primary: {pri.preset} @ {pri.host}:{pri.port} ({pri_mode})")
         logger.info(f"  Secondary: {sec.preset} @ {sec.host}:{sec.port} ({sec_mode})")
@@ -433,33 +526,45 @@ class MeshtasticPresetBridge:
 
     def _primary_loop(self):
         """Main loop for primary Meshtastic connection."""
-        while self._running:
-            try:
-                if not self._primary_connected:
-                    self._connect_primary()
-
-                if self._stop_event.wait(1):
-                    break
-
-            except Exception as e:
-                logger.error(f"Primary loop error: {e}")
-                self._primary_connected = False
-                if self._stop_event.wait(5):
-                    break
+        self._leg_loop("primary")
 
     def _secondary_loop(self):
         """Main loop for secondary Meshtastic connection."""
+        self._leg_loop("secondary")
+
+    def _leg_loop(self, leg: str):
+        """One loop for both legs (they were two copies; a fix landed in one
+        and not the other is how this file grew its defects)."""
+        connect = getattr(self, f"_connect_{leg}")
         while self._running:
             try:
-                if not self._secondary_connected:
-                    self._connect_secondary()
+                if not getattr(self, f"_{leg}_connected"):
+                    connect()
+                    if not getattr(self, f"_{leg}_connected"):
+                        # absent radio: retry every 10 s, not every 1 s
+                        # (each failed attempt logs an ERROR)
+                        if self._stop_event.wait(10):
+                            break
+                        continue
+
+                # Backstop for a connection.lost this leg never heard (r2 F-A):
+                # read the library's own verdict every tick.
+                iface = getattr(self, f"_{leg}_interface")
+                if _library_gave_up(iface):
+                    logger.warning(
+                        f"{leg} link: the library gave it up (isConnected "
+                        f"cleared) with no connection.lost heard — treating as lost")
+                    self._on_stream_link_lost(
+                        leg, iface, self._stream_kind.get(leg, "stream"))
+                    # no `continue`: fall through to the wait, so a claim that
+                    # fails can never spin this loop hot (r3 mutant hang)
 
                 if self._stop_event.wait(1):
                     break
 
             except Exception as e:
-                logger.error(f"Secondary loop error: {e}")
-                self._secondary_connected = False
+                logger.error(f"{leg.capitalize()} loop error: {e}")
+                self._mark_leg_down(leg)
                 if self._stop_event.wait(5):
                     break
 
@@ -515,19 +620,58 @@ class MeshtasticPresetBridge:
 
     def _connect_primary(self):
         """Connect to primary Meshtastic interface."""
-        self._primary_interface, self._primary_connected = self._connect_interface(
+        # A leg can be down while still holding its old handle — the loop's
+        # except branch flips _primary_connected without a teardown. Tear it
+        # down first, or a TCP leg's old handle keeps the connection lock and
+        # the reconnect waits on it forever (BR-T #11, second branch).
+        if self._primary_interface is not None:
+            self._disconnect_primary()
+        self._install_or_close("primary", *self._connect_interface(
             self.bridge_config.primary,
             "primary",
             self._on_primary_receive
-        )
+        ))
 
     def _connect_secondary(self):
         """Connect to secondary Meshtastic interface."""
-        self._secondary_interface, self._secondary_connected = self._connect_interface(
+        if self._secondary_interface is not None:   # see _connect_primary
+            self._disconnect_secondary()
+        self._install_or_close("secondary", *self._connect_interface(
             self.bridge_config.secondary,
             "secondary",
             self._on_secondary_receive
-        )
+        ))
+
+    # ---- the ONE writer set for leg state (gate: TestLegStateHasOneWriter) --
+
+    def _install_leg(self, leg: str, interface, connected: bool) -> bool:
+        """Set ``leg``'s handle and connected flag together, under _leg_lock
+        (11-10 review r2 F-B: a loss handled between two separate stores left
+        connected=True with no handle — "reconnecting", forever).
+
+        Refuses (returns False, installs nothing) once stop() has begun: stop()
+        sets _stop_event BEFORE its teardown takes this lock, so a connect still
+        in flight either lands first and is torn down, or sees the event here —
+        never a handle installed after the teardown (r3 finding 1: socket open
+        and the connection lock held after stop())."""
+        with self._leg_lock:
+            if interface is not None and self._stop_event.is_set():
+                return False
+            setattr(self, f"_{leg}_interface", interface)
+            setattr(self, f"_{leg}_connected", bool(connected) and interface is not None)
+            return True
+
+    def _install_or_close(self, leg: str, interface, connected: bool) -> None:
+        """Install a fresh connect, or — if stop() got there first — close it
+        (releasing its connection lock) instead of leaving it to nobody."""
+        if not self._install_leg(leg, interface, connected):
+            self._close_taken(leg, interface)
+
+    def _mark_leg_down(self, leg: str) -> None:
+        """Mark ``leg`` disconnected without detaching its handle (the next
+        connect tears that down first)."""
+        with self._leg_lock:
+            setattr(self, f"_{leg}_connected", False)
 
     def _connect_interface(self, config: MeshtasticConfig, name: str,
                            callback: Callable) -> tuple:
@@ -540,6 +684,72 @@ class MeshtasticPresetBridge:
         if config.use_mqtt:
             return self._connect_mqtt(config, name, callback)
         return self._connect_tcp(config, name, callback)
+
+    def _attach_stream_listeners(self, interface, name: str,
+                                 callback: Callable, kind: str) -> None:
+        """RX + link-loss listeners for a meshtastic library STREAM leg
+        (serial or tcp) — one implementation, so the two legs cannot drift
+        apart again (the tcp leg had neither until BR-T #8/#10, 2026-11-10)."""
+        our_interface = interface
+        self._stream_kind[name] = kind
+
+        def on_receive(packet, interface):
+            # pubsub "meshtastic.receive" is global — filter to packets
+            # from THIS interface (the other leg, or any other meshtastic
+            # interface in the same process, would otherwise leak in).
+            if interface is not our_interface:
+                return
+            callback(packet)
+
+        # pypubsub holds listeners weakly — retain a strong reference
+        # or the closure is garbage-collected and RX silently dies.
+        self._stream_rx_keepalive[name] = on_receive
+        _pub.subscribe(on_receive, "meshtastic.receive")
+
+        # Link loss. Without this the leg stays "connected" on a dead handle:
+        # serial — moc 2026-09-27, the V3 was unplugged at 08:36, the loop
+        # never reconnected, and the first sign was "Failed to forward to
+        # secondary" 5.7 h later; tcp — a failed library _reconnect() leaves
+        # socket=None and every later write is a silent no-op (BR-T #10).
+        # The library publishes connection.lost when its reader thread exits.
+        def on_lost(interface=None):
+            if interface is not our_interface:
+                return
+            self._on_stream_link_lost(name, our_interface, kind)
+
+        self._stream_lost_keepalive[name] = on_lost
+        _pub.subscribe(on_lost, "meshtastic.connection.lost")
+
+    def _on_stream_link_lost(self, name: str, interface, kind: str) -> None:
+        """A stream leg's link went away: mark THAT leg disconnected so its
+        loop reconnects, and leave a witness. Identity-matched, so a late
+        event from an interface already replaced changes nothing.
+
+        The log line ``<leg> <kind> link LOST`` is parsed by
+        ``scripts/c21_bridge_run.py`` (``_LOST_RE``) — change both together."""
+        if interface is self._secondary_interface:
+            leg = "secondary"
+        elif interface is self._primary_interface:
+            leg = "primary"
+        else:
+            return
+        if self._stop_event.is_set():
+            # stop() closing the port fires connection.lost: planned, not lost
+            logger.info(f"{leg} {kind} link closed ({name}) — bridge stopping")
+            return
+        # Claim the leg atomically BEFORE counting: a second teardown arriving
+        # while this one is inside close() (the library's publishing thread vs
+        # a leg loop) finds it already taken — one loss, one count, one close
+        # (11-10 review F2: link_lost=2 for one loss).
+        taken = self._take_leg(leg, expected=interface)
+        if taken is None:
+            return
+        logger.warning(
+            f"{leg} {kind} link LOST ({name}) — link gone; reconnecting")
+        with self._stats_lock:
+            self.stats['link_lost'] += 1
+        self._close_taken(leg, taken)
+        self._notify_status(f"{leg}_disconnected")
 
     def _connect_mqtt(self, config: MeshtasticConfig, name: str,
                       callback: Callable) -> tuple:
@@ -588,7 +798,7 @@ class MeshtasticPresetBridge:
             )
 
             from utils.meshtastic_connection import (
-                MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown
+                connection_lock_for, wait_for_cooldown
             )
             from utils.service_check import check_service
 
@@ -597,51 +807,122 @@ class MeshtasticPresetBridge:
             if not status.available:
                 logger.warning("meshtasticd pre-flight: %s (attempting connection anyway)", status.message)
 
-            # Acquire global lock to prevent connection thrashing
-            if not MESHTASTIC_CONNECTION_LOCK.acquire(timeout=10):
-                logger.error("TCP connection lock busy — another component owns it")
+            # THIS port's lock (BR-T #13): meshtasticd serves one TCP client
+            # (Issue #17) and a daemon listens on one port, so the lock is per
+            # PORT — the default two-TCP-leg bridge (4403 + 4404) connects both
+            # legs; 4403 is still MESHTASTIC_CONNECTION_LOCK.
+            endpoint = f"{config.host}:{config.port}"
+            conn_lock = connection_lock_for(config.host, config.port)
+            if not conn_lock.acquire(timeout=_LOCK_WAIT_S):
+                with self._leg_lock:     # read the holds map under its lock (r4 F4)
+                    ours = any(h is conn_lock for h in self._tcp_lock_holds.values())
+                other = "the OTHER bridge leg" if ours else "another component"
+                # The lock is per PORT (connection_lock_for): say so, and the
+                # way out — the operator cannot see a lock.
+                logger.error(
+                    f"TCP connection lock for {endpoint} busy — {other} holds the "
+                    f"lock for TCP port {config.port} (one meshtasticd client per "
+                    f"port, Issue #17)"
+                    + (" — both legs use that port: if they are the same radio, "
+                       "check mesh_bridge primary/secondary host+port; if they "
+                       "are two radios, give them different ports or use MQTT"
+                       if ours else ""))
                 return None, False
 
+            interface = None
             try:
                 wait_for_cooldown()
-                interface = _meshtastic_tcp.TCPInterface(hostname=config.host)
-
-                def on_receive(packet, interface):
-                    callback(packet)
-
-                _pub.subscribe(on_receive, "meshtastic.receive")
+                # portNumber: the leg's OWN port. Omitted, the library default
+                # (4403) connected a :4404 leg to the other leg's radio (BR-T #12).
+                interface = _meshtastic_tcp.TCPInterface(
+                    hostname=config.host, portNumber=config.port)
+                with self._leg_lock:
+                    self._tcp_lock_holds[interface] = conn_lock
+                # Held listener + interface filter + link-loss (BR-T #8/#10):
+                # the bare closure here was garbage-collected after connect.
+                self._attach_stream_listeners(interface, name, callback, "tcp")
 
                 logger.info(f"Connected to {name} via TCP ({config.preset})")
                 self._notify_status(f"{name}_connected")
-                # Note: lock stays held — released on disconnect
+                # Note: lock stays held — released when THIS handle is torn down
                 return interface, True
             except Exception:
-                MESHTASTIC_CONNECTION_LOCK.release()
+                # Anything after construction raised (11-10 review F5): close
+                # the half-made handle, forget it as owner, THEN free the lock —
+                # never leave an open radio connection or a stale owner behind.
+                if interface is not None:
+                    try:
+                        interface.close()
+                    except Exception as close_err:
+                        logger.debug(f"Error closing half-made {name}: {close_err}")
+                    with self._leg_lock:
+                        self._tcp_lock_holds.pop(interface, None)
+                conn_lock.release()
                 raise
 
         except Exception as e:
             logger.error(f"Failed to connect to {name} via TCP: {e}")
             return None, False
 
+    def _take_leg(self, leg: str, expected=None):
+        """Atomically detach ``leg``'s interface and mark the leg down; return
+        it, or None if there is nothing to take (or it is no longer
+        ``expected``). Exactly one caller gets a given handle, so teardown runs
+        once however many threads race to it (11-10 review F2)."""
+        with self._leg_lock:
+            current = getattr(self, f"_{leg}_interface")
+            if current is None or (expected is not None and current is not expected):
+                return None
+            setattr(self, f"_{leg}_interface", None)
+            setattr(self, f"_{leg}_connected", False)
+            return current
+
+    def _close_taken(self, leg: str, interface) -> None:
+        """Close a handle _take_leg returned, then free the TCP lock if it held it."""
+        if self._stop_event.is_set() and leg in self._stream_kind:
+            # stop(): the close is planned. Said HERE, because the
+            # connection.lost it fires arrives after the handle is taken and so
+            # never reaches _on_stream_link_lost (11-10 review r2 F-C).
+            logger.info(f"{leg} {self._stream_kind[leg]} link closed ({leg}) "
+                        f"— bridge stopping")
+        try:
+            interface.close()
+        except Exception as e:
+            logger.debug(f"Error closing {leg}: {e}")
+        self._release_tcp_lock_if_owner(interface)
+
     def _disconnect_primary(self):
         """Disconnect primary interface."""
-        if self._primary_interface:
-            try:
-                self._primary_interface.close()
-            except Exception as e:
-                logger.debug(f"Error closing primary: {e}")
-            self._primary_interface = None
-        self._primary_connected = False
+        taken = self._take_leg("primary")
+        if taken is not None:
+            self._close_taken("primary", taken)
+        self._mark_leg_down("primary")
 
     def _disconnect_secondary(self):
         """Disconnect secondary interface."""
-        if self._secondary_interface:
-            try:
-                self._secondary_interface.close()
-            except Exception as e:
-                logger.debug(f"Error closing secondary: {e}")
-            self._secondary_interface = None
-        self._secondary_connected = False
+        taken = self._take_leg("secondary")
+        if taken is not None:
+            self._close_taken("secondary", taken)
+        self._mark_leg_down("secondary")
+
+    def _release_tcp_lock_if_owner(self, interface) -> None:
+        """Release the endpoint lock ``interface`` took in _connect_tcp, iff it
+        holds one (BR-T #11/#13). A plain Lock: never released, the next
+        reconnect waited 10 s on this process's own hold and failed, forever;
+        released for the wrong handle, it would free ANOTHER holder's slot.
+        Lookup-and-forget is one step under _leg_lock."""
+        if interface is None:
+            return
+        with self._leg_lock:
+            held = self._tcp_lock_holds.pop(interface, None)
+        if held is None:
+            return
+        try:
+            held.release()
+        except RuntimeError:
+            # already unlocked: someone released it out from under us — say so
+            logger.warning("TCP connection lock was already released "
+                           "(leg teardown found it unlocked)")
 
     # ========================================
     # Message Processing
@@ -953,6 +1234,26 @@ class MeshtasticPresetBridge:
             # broadcast default — meshtastic's TCPInterface hard-exits the
             # process (our_exit) on destinationId=None, while its default is
             # BROADCAST_ADDR ('^all').
+            # BR-T #10 (2026-11-10): "connected" is a flag; the write target is
+            # a fact. In the window before the library's connection.lost lands
+            # (or during its own 1 s _reconnect), its write is a silent no-op
+            # that still returns a packet. Measure it and REFUSE — the queue
+            # retries. Do NOT tear the leg down here: closing an interface the
+            # library is mid-reconnect on leaves its reader to open a socket
+            # nobody owns (11-10 review F1); connection.lost is the ONE
+            # teardown signal. After the downlink branch: that path goes via
+            # the broker, not the socket (F4). Residual, UNKNOWN by design: a
+            # write racing a mid-call socket drop cannot be seen from here.
+            if _write_target_gone(interface):
+                logger.error(
+                    f"Forward to {dest_name} REFUSED: link down "
+                    f"({type(interface).__name__} has no open socket/stream — "
+                    f"the library would drop this write silently) — not sent: "
+                    f"{content[:50]}...")
+                with self._stats_lock:
+                    self.stats['errors'] += 1
+                return False
+
             assert_iface_tx_allowed(
                 interface, kind="tcp_sendtext",
                 detail=f"mesh_bridge cross-preset forward -> {dest_name}")

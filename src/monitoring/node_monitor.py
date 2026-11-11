@@ -28,12 +28,17 @@ if not logger.handlers:
 # Meshtastic connection — optional gateway in MeshAnchor
 try:
     from utils.meshtastic_connection import (
-        MESHTASTIC_CONNECTION_LOCK, wait_for_cooldown, safe_close_interface
+        connection_lock_for, wait_for_cooldown, safe_close_interface,
     )
     _HAS_MESHTASTIC_CONN = True
 except ImportError:
     import threading as _threading
-    MESHTASTIC_CONNECTION_LOCK = _threading.Lock()
+    # No connection module: one process-local lock for every endpoint (the
+    # most exclusive reading of connection_lock_for's rule).
+    _FALLBACK_CONNECTION_LOCK = _threading.Lock()
+
+    def connection_lock_for(host, port=4403):
+        return _FALLBACK_CONNECTION_LOCK
     wait_for_cooldown = lambda: None
     safe_close_interface = lambda x: None
     _HAS_MESHTASTIC_CONN = False
@@ -145,6 +150,7 @@ class NodeMonitor:
         self._stop_event = threading.Event()
         self._reconnect_thread = None
         self._holds_global_lock = False  # Track if we hold the global connection lock
+        self._held_lock = None  # WHICH lock (per endpoint since BR-T #13)
         self.MAX_NODES = 5000
         self.STALE_NODE_HOURS = 72
 
@@ -205,11 +211,17 @@ class NodeMonitor:
             logger.warning("Already connected")
             return True
 
-        # Acquire global lock - meshtasticd only supports one TCP connection
-        if not MESHTASTIC_CONNECTION_LOCK.acquire(timeout=timeout):
-            logger.error("Could not acquire connection lock (another connection in progress)")
+        # Acquire THIS port's lock — meshtasticd serves one TCP client (Issue
+        # #17); per port since BR-T #13 (connection_lock_for, port of
+        # MeshForge 33743347). Port 4403's is still MESHTASTIC_CONNECTION_LOCK.
+        lock = self._connection_lock()
+        if not lock.acquire(timeout=timeout):
+            logger.error(
+                f"Could not acquire the connection lock for {self.host}:{self.port} "
+                "(another connection to that radio is in progress)")
             return False
 
+        self._held_lock = lock
         self._holds_global_lock = True
         self.state = ConnectionState.CONNECTING
         self._running = True
@@ -291,14 +303,24 @@ class NodeMonitor:
                 self.on_error(e)
             return False
 
+    def _connection_lock(self):
+        """This monitor's endpoint lock (the ONE rule: connection_lock_for)."""
+        return connection_lock_for(self.host, self.port)
+
     def _release_global_lock(self):
-        """Release the global connection lock if we hold it"""
+        """Release the connection lock this monitor took, if it holds one"""
         if getattr(self, '_holds_global_lock', False):
-            try:
-                MESHTASTIC_CONNECTION_LOCK.release()
-            except RuntimeError:
-                pass  # Already released
+            # Exactly the lock connect() took — never a fallback: guessing the
+            # global lock would free the LOCAL daemon's slot for a remote
+            # monitor (MF r4 F3). No record → release nothing.
+            lock = getattr(self, '_held_lock', None)
+            if lock is not None:
+                try:
+                    lock.release()
+                except RuntimeError:
+                    pass  # Already released
             self._holds_global_lock = False
+            self._held_lock = None
 
     def disconnect(self, timeout: float = 5.0):
         """Disconnect from meshtasticd and wait for threads to finish

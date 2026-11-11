@@ -147,6 +147,50 @@ _manager_lock = threading.Lock()
 # All code that connects to meshtasticd MUST acquire this lock first
 MESHTASTIC_CONNECTION_LOCK = threading.Lock()
 
+# The local meshtasticd's TCP port — the slot MESHTASTIC_CONNECTION_LOCK guards.
+DEFAULT_MESHTASTICD_TCP_PORT = 4403
+
+# One lock per TCP PORT other than the local default (BR-T #13). Created on
+# first ask, never dropped: a few Lock objects for the life of the process.
+_port_locks: Dict[int, threading.Lock] = {}
+_port_locks_guard = threading.Lock()
+
+
+def connection_lock_for(host: str, port: int = DEFAULT_MESHTASTICD_TCP_PORT) -> threading.Lock:
+    """The lock that guards a meshtasticd TCP slot (one client per daemon,
+    Issue #17) — keyed by PORT, never by host.
+
+    Why not by host (BR-T #13 reviews r4 + r5, 11-10): "which daemon does this
+    host reach?" cannot be decided from a name — ``127.1``/``0.0.0.0``/the box's
+    own name, a transient resolver failure, zone ids, multi-address names and
+    NAT fronts each split ONE daemon across two locks in a review by running
+    (two clients on one slot = the #17 thrash). One daemon listens on ONE port,
+    so every spelling of it lands on one port, and therefore one lock:
+
+    - port ``DEFAULT_MESHTASTICD_TCP_PORT`` (4403) → ``MESHTASTIC_CONNECTION_LOCK``,
+      the lock local holders always took;
+    - any other port → that port's own lock (the default two-TCP-leg bridge,
+      localhost:4403 + localhost:4404, connects BOTH legs — #13);
+    - two different radios on the SAME port share a lock: the second waits and
+      says so. That over-excludes — the safe direction — and is never MORE
+      exclusive than before #13, when every endpoint shared one lock.
+
+    ``host`` is accepted and deliberately unused: no resolver, no I/O, nothing
+    to fail. A port that is not a number keys as the default (most exclusive).
+    """
+    try:
+        p = int(port) if port not in (None, "", 0) else DEFAULT_MESHTASTICD_TCP_PORT
+    except (TypeError, ValueError):
+        p = DEFAULT_MESHTASTICD_TCP_PORT
+    if p == DEFAULT_MESHTASTICD_TCP_PORT:
+        return MESHTASTIC_CONNECTION_LOCK
+    with _port_locks_guard:
+        lock = _port_locks.get(p)
+        if lock is None:
+            lock = _port_locks[p] = threading.Lock()
+        return lock
+
+
 # Cooldown between connections (meshtasticd needs time to cleanup)
 CONNECTION_COOLDOWN = 1.0  # seconds (increased from 0.5)
 
