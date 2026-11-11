@@ -139,7 +139,7 @@ class TestRefusedWriteIsNotSent:
         # stubbed instead, and must not be reached.
         with patch("gateway.mesh_bridge.assert_iface_tx_allowed"), \
              patch("gateway.meshtastic_protobuf_client.send_text_direct") as direct, \
-             patch("gateway.mesh_bridge._get_protobuf_client") as session:
+             patch("gateway._mesh_bridge_mqtt._get_protobuf_client") as session:
             assert bridge._send_to_primary(_msg(content=text).to_payload()) is False
         assert direct.call_count == 0 and session.call_count == 0   # refused before any I/O
         assert bridge.stats["messages_secondary_to_primary"] == 0
