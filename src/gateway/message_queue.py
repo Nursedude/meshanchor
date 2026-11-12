@@ -870,7 +870,8 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             source=payload_source(message.payload),
             drop_reason=_dc.DropReason.UNSENDABLE, note=str(reason)[:80],
         )
-        self._fire_terminal(message.destination, message.payload, "dropped")
+        self._fire_terminal(message.destination, message.payload, "dropped",
+                            reason="refused")
         return True
 
     def set_retry_policy(self, policy: RetryPolicy) -> None:
@@ -1232,7 +1233,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 source=payload_source(payload),
                 drop_reason=_dc.DropReason.QUEUE_SHED,
             )
-            self._fire_terminal(destination, payload, "dropped")
+            self._fire_terminal(destination, payload, "dropped", reason="shed")
         return shed_count
 
     def _maybe_auto_cleanup(self) -> None:
