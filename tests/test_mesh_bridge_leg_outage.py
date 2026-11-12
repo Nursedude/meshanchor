@@ -355,7 +355,7 @@ class TestReviewRound2_2026_11_11:
     def test_m18_the_drain_obeys_direction(self, bridge, direction, drained):
         bridge.bridge_config.direction = direction
         bridge._running = True
-        # legs UP: §B #23 skips a queue whose leg cannot take a write
+        # legs up: keeps this test about direction, not leg state
         bridge._primary_interface, bridge._primary_connected = _Radio(), True
         bridge._secondary_interface, bridge._secondary_connected = _Radio(), True
         waits = iter([True])
@@ -395,7 +395,6 @@ class TestReviewRound2_2026_11_11:
         assert inj.inject.call_count == 1
         _enqueue_for_primary(bridge, "dl b")
         bridge._primary_interface, bridge._primary_connected = None, False
-        bridge._primary_downlink = None   # §B #22: a live broker path would carry it
         _tick(q, 2)                                    # outage 2: ERROR again
         loud = [r for r in caplog.records if r.levelno >= logging.WARNING
                 and "DEFERRED" in r.getMessage()]
@@ -485,9 +484,12 @@ class TestPortReviewTwin_2026_11_11:
             bridge._connect_secondary()
         assert ("secondary_connected", False) in seen
 
-    def test_22_a_downlink_broadcast_crosses_with_the_leg_flagged_down(self, bridge):
-        """F7: the 'not connected' defer ran ahead of the downlink branch, so a
-        broadcast the broker path could carry was held until it aged out."""
+    def test_22r_a_down_leg_holds_a_downlink_broadcast_and_publishes_nothing(self, bridge):
+        """§B #22 REVERTED (Fable r3, CONFIRMED with the real injector + a fake
+        broker): with the defer after the downlink branch, a held row read
+        `delivered` whenever the broker took the publish — but a leg flagged
+        down usually means meshtasticd, the topic's only subscriber, is down.
+        The row is HELD and nothing is published."""
         q, msg_id, _ = _enqueue_for_primary(bridge, "broker path")
         bridge._primary_interface, bridge._primary_connected = None, False
         inj = MagicMock()
@@ -495,8 +497,8 @@ class TestPortReviewTwin_2026_11_11:
         inj.inject_nodeinfo.return_value = True
         bridge._primary_downlink = inj
         _tick(q, 1)
-        assert _row(q, msg_id)["status"] == "delivered"
-        assert inj.inject.call_count == 1
+        assert _row(q, msg_id)["status"] == "pending"
+        assert inj.inject.call_count == 0
 
     def test_22_control_a_dm_on_a_down_leg_is_still_held(self, bridge):
         from gateway.mesh_bridge import BridgedMeshMessage
@@ -558,7 +560,7 @@ class TestDrainOffersEveryQueue:
         assert _row(q, msg_id)["status"] == "delivered"
         assert bridge.stats.get("dual_path_suppressed_secondary") == 1
 
-    def test_22_through_the_loop_a_downlink_broadcast_crosses_with_the_leg_down(self, bridge):
+    def test_22r_through_the_loop_a_down_leg_holds_a_downlink_broadcast(self, bridge):
         q, msg_id, _ = _enqueue_for_primary(bridge, "loop broker path")
         bridge._primary_interface, bridge._primary_connected = None, False
         inj = MagicMock()
@@ -566,7 +568,8 @@ class TestDrainOffersEveryQueue:
         inj.inject_nodeinfo.return_value = True
         bridge._primary_downlink = inj
         _loop_pass(bridge)
-        assert _row(q, msg_id)["status"] == "delivered"
+        assert _row(q, msg_id)["status"] == "pending"
+        assert inj.inject.call_count == 0
 
     def test_through_the_loop_a_dm_with_no_destination_is_refused_not_held(self, bridge):
         from gateway.mesh_bridge import BridgedMeshMessage
@@ -637,3 +640,29 @@ def test_A01_ma_a_refused_row_is_named_refused(bridge, caplog):
 def test_A02_ma_library_exit_counter_is_pre_seeded(bridge):
     """Fable r2 A02: healthy-zero vs meter-absent (hfm #9)."""
     assert bridge.stats["library_exit_caught"] == 0
+
+
+class TestRound3Pins_2026_11_11:
+    """Fable r3 (by running) surviving mutants + the MF/MA pre-seed asymmetry."""
+
+    def test_F5_library_exit_and_loop_fatal_counters_are_pre_seeded(self, bridge):
+        assert bridge.stats["library_exit_caught"] == 0
+        assert bridge.stats["loop_fatal_caught"] == 0
+
+    def test_B11_no_connected_event_when_the_install_is_refused(self, bridge):
+        """stop() began: the fresh handle is refused + closed — and must not be
+        announced as connected."""
+        seen = []
+        bridge.register_status_callback(lambda status, data: seen.append(status))
+        bridge._stop_event.set()
+        radio = MagicMock()
+        bridge._install_or_close("secondary", radio, True)
+        assert "secondary_connected" not in seen
+        assert bridge._secondary_interface is None
+
+    def test_X2_the_terminal_reason_rides_a_copy_never_the_callers_payload(self, bridge):
+        from gateway.message_queue_outage_mixin import TERMINAL_REASON_KEY
+        q = bridge._primary_to_secondary
+        payload = {"content": "x"}
+        q._fire_terminal("secondary", payload, "dropped", reason="expired")
+        assert TERMINAL_REASON_KEY not in payload

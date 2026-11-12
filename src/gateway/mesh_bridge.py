@@ -1253,6 +1253,12 @@ class MeshtasticPresetBridge(MeshBridgeDrainMixin):
             # Port review r1 F2: permanent — dead-letter on THIS attempt
             # (MA's SendRefused), never a retryable False that re-counts it.
             raise SendRefused("dm_no_destination")
+        # MF §B #22 REVERTED (Fable r3): a down leg usually = meshtasticd down,
+        # the downlink's only subscriber; a broker accepting the publish is NOT
+        # delivery (held rows read `delivered`, lost). Keep this defer first.
+        if not connected or not interface:
+            self._defer_link_down(dest_name, "not connected")
+
         try:
             # Format message with prefix if enabled
             content = msg.content
@@ -1317,10 +1323,6 @@ class MeshtasticPresetBridge(MeshBridgeDrainMixin):
             # teardown signal. After the downlink branch: that path goes via
             # the broker, not the socket (F4). Residual, UNKNOWN by design: a
             # write racing a mid-call socket drop cannot be seen from here.
-            # MF §B #22: the not-connected defer sits HERE, after the downlink
-            # branch — a broadcast the broker path can carry is not held.
-            if not connected or not interface:
-                self._defer_link_down(dest_name, "not connected")
             if _write_target_gone(interface):
                 self._defer_link_down(
                     dest_name, f"{type(interface).__name__} has no open "
