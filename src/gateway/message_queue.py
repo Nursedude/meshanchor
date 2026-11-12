@@ -414,13 +414,34 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
     # the next log line so operators don't have to grep counts.
     NO_SENDER_LOG_INTERVAL = 600
 
+    #: enqueue_with_reason()'s rejection names (BR-T #6, MF port; MA also
+    #: names its two extra refusals): losses enqueue() reports as one None.
+    REJECT_DEDUP = "dedup"
+    REJECT_QUEUE_FULL = "queue_full"
+    REJECT_NO_SENDER = "no_sender"
+    REJECT_UNSENDABLE = "unsendable"
+
     def enqueue(self, payload: Dict[str, Any], destination: str,
                 priority: MessagePriority = MessagePriority.NORMAL,
                 max_retries: int = 3, deduplicate: bool = True,
                 created_at: Optional[datetime] = None,
                 source: Optional[str] = None) -> Optional[str]:
+        """Add a message to the queue; the id, or None if rejected (use
+        enqueue_with_reason() to tell the rejections apart)."""
+        return self.enqueue_with_reason(
+            payload, destination, priority=priority, max_retries=max_retries,
+            deduplicate=deduplicate, created_at=created_at, source=source)[0]
+
+    def enqueue_with_reason(self, payload: Dict[str, Any], destination: str,
+                            priority: MessagePriority = MessagePriority.NORMAL,
+                            max_retries: int = 3, deduplicate: bool = True,
+                            created_at: Optional[datetime] = None,
+                            source: Optional[str] = None,
+                            ) -> "tuple[Optional[str], Optional[str]]":
         """
         Add a message to the queue.
+
+        Returns ``(message id, None)`` if enqueued, else ``(None, REJECT_*)``.
 
         Args:
             payload: Message payload dictionary
@@ -463,7 +484,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             with self._lock:
                 self._stats.setdefault("no_sender_dropped", 0)
                 self._stats["no_sender_dropped"] += 1
-            return None
+            return None, self.REJECT_NO_SENDER
 
         if source:
             # BIC-2: the row remembers its leg for every later lifecycle
@@ -510,7 +531,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                                  else _dc.DropReason.UNSENDABLE),
                     note=str(refusal)[:80],
                 )
-                return None
+                return None, self.REJECT_UNSENDABLE
 
         # Check for duplicates
         if deduplicate and self._is_duplicate(content_hash, destination):
@@ -527,7 +548,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                 protocol=destination, source=source,
                 drop_reason=_dc.DropReason.DEDUP,
             )
-            return None
+            return None, self.REJECT_DEDUP
 
         # Periodic auto-cleanup of old delivered/dead_letter messages
         self._maybe_auto_cleanup()
@@ -557,7 +578,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
                         drop_reason=_dc.DropReason.QUEUE_PRESSURE,
                         note=f"depth={depth}/{self._max_queue_size}",
                     )
-                    return None
+                    return None, self.REJECT_QUEUE_FULL
 
         # Generate unique ID
         # The ms-timestamp + content-hash pair alone is NOT unique:
@@ -612,7 +633,7 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             protocol=destination, source=source,
         )
 
-        return msg_id
+        return msg_id, None
 
     def get_pending(self, destination: Optional[str] = None,
                     limit: int = 100) -> List[QueuedMessage]:

@@ -287,7 +287,9 @@ def test_every_gateway_enqueue_names_a_source():
             for node in ast.walk(fn):
                 if (isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Attribute)
-                        and node.func.attr == "enqueue"
+                        # enqueue_with_reason too (BR-T #6 port, 11-11):
+                        # a new API name must not walk past this pin
+                        and node.func.attr in ("enqueue", "enqueue_with_reason")
                         and not any(k.arg == "source" for k in node.keywords)
                         and (path.name, fn.name) not in _SOURCELESS_ENQUEUE):
                     missing.append(f"{path.name}:{node.lineno} in {fn.name}()")
@@ -372,7 +374,9 @@ def test_the_mesh_preset_bridge_names_a_transport_not_an_interface():
     sources = [k.value for node in ast.walk(tree)
                if isinstance(node, ast.Call)
                and isinstance(node.func, ast.Attribute)
-               and node.func.attr == "enqueue"
+               # BR-T #6 port (2026-11-11): the bridge enqueues through
+               # enqueue_with_reason (names a full queue apart from a repeat)
+               and node.func.attr in ("enqueue", "enqueue_with_reason")
                for k in node.keywords if k.arg == "source"]
     assert sources and all(isinstance(v, ast.Constant)
                            and v.value == "meshtastic" for v in sources)

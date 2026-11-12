@@ -395,6 +395,10 @@ _OPERATOR_STORE_MODULES = (
     # through ITS OWN import, so the map_data_collector line above never
     # covered it (2026-11-09, found porting MAP-H H14 before any red run).
     "utils.node_history",
+    # mesh_bridge_queues/p2s.db + s2p.db — MeshtasticPresetBridge() resolves
+    # the home through ITS OWN import; only per-file fixtures covered it
+    # (2026-11-11, found porting MF BR-T #4–#18 before any red run).
+    "gateway.mesh_bridge",
     # mqtt_nodeless.json — the operator's saved MQTT settings. Ported from
     # MeshForge's 10-31 gate on 2026-11-01, after the SAME accident repeated
     # here: a red-first run against the OLD TUI save_mqtt_config (it resolves
