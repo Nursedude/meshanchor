@@ -800,3 +800,17 @@ def test_B19_connect_tcp_itself_never_announces_connected(bridge):
     lk = _leg_lock(bridge, "primary")
     bridge._close_taken("primary", iface)
     assert not lk.locked()
+
+
+def test_B19_connect_mqtt_itself_never_announces_connected(bridge):
+    """R4-F3 (Fable r4, port of MF 429a00b9): B19 pinned only the tcp
+    connector; a `<leg>_connected` notify put back inside _connect_mqtt
+    survived. The event belongs to _install_or_close (§B #21)."""
+    bridge._notify_status = MagicMock()
+    fake_mqtt = MagicMock()
+    fake_mqtt.return_value.connect.return_value = True
+    with patch("gateway.mesh_bridge.MQTTMeshInterface", fake_mqtt):
+        iface, ok = bridge._connect_mqtt(
+            bridge.bridge_config.secondary, "secondary", lambda p: None)
+    assert ok is True and iface is fake_mqtt.return_value
+    assert bridge._notify_status.call_count == 0
