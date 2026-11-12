@@ -111,8 +111,12 @@ class TestSendBoundary:
         msg = BridgedMeshMessage(source_preset="LONG_FAST", source_id="!aaaa0001",
                                  destination_id=None, content="old dm",
                                  channel=0, is_broadcast=False)
-        with patch("gateway.mesh_bridge.assert_iface_tx_allowed"):
-            assert bridge._send_to_secondary(msg.to_payload()) is False
+        # MA twin (port review r1 F2): refused PERMANENTLY via MA's
+        # SendRefused (dead-letter on this attempt) where MF returns False.
+        from gateway.message_queue_models import SendRefused
+        with patch("gateway.mesh_bridge.assert_iface_tx_allowed"), \
+                pytest.raises(SendRefused):
+            bridge._send_to_secondary(msg.to_payload())
         assert radio.sent == []
         assert bridge.stats.get("dm_no_destination") == 1
 
@@ -257,6 +261,10 @@ class TestRound3OneValidator:
         sent = []
         orig = radio.sendText
         radio.sendText = lambda *a, **k: (sent.append(k), orig(*a, **k))[1]
-        with patch("gateway.mesh_bridge.assert_iface_tx_allowed"):
-            assert bridge._send_to_secondary(msg.to_payload()) is False
+        # MA twin (port review r1 F2): refused PERMANENTLY via MA's
+        # SendRefused (dead-letter on this attempt) where MF returns False.
+        from gateway.message_queue_models import SendRefused
+        with patch("gateway.mesh_bridge.assert_iface_tx_allowed"), \
+                pytest.raises(SendRefused):
+            bridge._send_to_secondary(msg.to_payload())
         assert sent == []

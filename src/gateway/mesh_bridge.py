@@ -41,7 +41,7 @@ from ._mesh_bridge_legs import (  # MF025 headroom; port of MF's split
     LINK_DOWN_EPISODE_GAP_S, LINK_DOWN_RETRY_S, MESH_BRIDGE_MAX_AGE_S,
     _library_gave_up, _write_target_gone)
 from .message_queue import PersistentMessageQueue, MessagePriority, RetryPolicy
-from .message_queue_models import SendDeferred
+from .message_queue_models import SendDeferred, SendRefused
 from utils.safe_import import safe_import
 from utils.paths import get_real_user_home
 from utils.tx_guard import assert_iface_tx_allowed
@@ -235,6 +235,15 @@ class MeshtasticPresetBridge:
             'link_lost': 0,
             'start_time': None,
         }
+        # Port review r1 F3: the BR-T #4–#18 counters are pre-seeded like
+        # link_lost — healthy-zero vs meter-absent (hfm #9).
+        for _key in ('dm_no_destination', 'direction_filtered',
+                     'queue_full_rejected', 'receive_errors',
+                     'link_down_deferrals', 'loop_fatal_caught',
+                     'queue_no_sender_rejected', 'queue_unsendable_rejected'):
+            self.stats.setdefault(_key, 0)
+        # F8: one WARNING per MA-only queue rejection kind per interval.
+        self._queue_reject_warned: Dict[str, float] = {}
 
         # Optional true-origin downlink injector for the primary (meshtasticd)
         # leg — makes cross-bridge traffic show as the real source node on
@@ -1033,10 +1042,11 @@ class MeshtasticPresetBridge:
                 except re.error:
                     pass
 
-            if not is_broadcast and dm_destination(packet) is None:  # BR-T #18
-                bump_stat(self, 'dm_no_destination')
-                return bridge_event("drop", source, text, "dm_no_destination")
-            to_id = to_id if is_broadcast else dm_destination(packet)
+            if not is_broadcast:                       # BR-T #18: read ONCE (r1 F9)
+                to_id = dm_destination(packet)
+                if to_id is None:
+                    bump_stat(self, 'dm_no_destination')
+                    return bridge_event("drop", source, text, "dm_no_destination")
             preset = (self.bridge_config.primary.preset if source == "primary"
                       else self.bridge_config.secondary.preset)
 
@@ -1091,9 +1101,19 @@ class MeshtasticPresetBridge:
                     return bridge_event("drop", source, text, "queue_full")
                 if rejected != PersistentMessageQueue.REJECT_DEDUP:
                     # MA-only: the queue's no_sender / unsendable refusals are
-                    # losses too — named, never read as a harmless repeat.
-                    logger.warning(f"Message from {source} REJECTED by the "
-                                   f"queue to {dest} ({rejected}) — not bridged")
+                    # losses too — counted and named, never read as a harmless
+                    # repeat; the WARNING is throttled like the queue's own
+                    # (r1 F8: one line per message flooded the log).
+                    bump_stat(self, f'queue_{rejected}_rejected')
+                    now = time.monotonic()
+                    last = self._queue_reject_warned.get(str(rejected))
+                    if (last is None or now - last
+                            > PersistentMessageQueue.NO_SENDER_LOG_INTERVAL):
+                        self._queue_reject_warned[str(rejected)] = now
+                        logger.warning(
+                            f"Message from {source} REJECTED by the queue to "
+                            f"{dest} ({rejected}) — not bridged (further "
+                            f"rejections counted in queue_{rejected}_rejected)")
                     return bridge_event("drop", source, text, str(rejected))
                 logger.debug(f"Message from {source} deduplicated by queue")
                 return bridge_event("drop", source, text, "queue_dedup")
@@ -1246,7 +1266,9 @@ class MeshtasticPresetBridge:
             bump_stat(self, 'dm_no_destination')
             logger.error(f"Forward to {dest_name} REFUSED: DM with no destination "
                          f"(never sendText(destinationId=None)): {msg.content[:50]}")
-            return False
+            # Port review r1 F2: permanent — dead-letter on THIS attempt
+            # (MA's SendRefused), never a retryable False that re-counts it.
+            raise SendRefused("dm_no_destination")
         if not connected or not interface:
             self._defer_link_down(dest_name, "not connected")
 
