@@ -391,6 +391,11 @@ class MeshtasticPresetBridge(MeshBridgeDrainMixin):
         self._running = True
         self._stop_event.clear()
         self.stats['start_time'] = datetime.now()
+        # stop() closes the downlink injector terminally; a restart in place
+        # (commands/gateway restart() reuses this object) must reopen it, or
+        # every downlink silently degrades to the toradio fallback (#25 r3).
+        if self._primary_downlink is not None:
+            self._primary_downlink.reopen()
 
         # Start connection threads
         self._primary_thread = threading.Thread(
