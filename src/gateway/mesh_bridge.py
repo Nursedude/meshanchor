@@ -36,6 +36,7 @@ from .config import (
     ECHO_LOOP_INVARIANT_PREFIXES,
 )
 from ._mesh_bridge_mqtt import MQTTMeshInterface  # re-exported (MF025 split)
+from .mqtt_downlink_inject import downlink_label, downlink_status
 from ._mesh_bridge_legs import (  # MF025 headroom; port of MF's split
     bridge_event, bump_stat, dm_destination, node_dest, queue_drop_witness,
     LINK_DOWN_EPISODE_GAP_S, LINK_DOWN_RETRY_S, MESH_BRIDGE_MAX_AGE_S,
@@ -394,7 +395,7 @@ class MeshtasticPresetBridge(MeshBridgeDrainMixin):
         # stop() closes the downlink injector terminally; any stop() -> start()
         # on this object must reopen it, or every downlink silently degrades
         # to the toradio fallback (#25 r3; r4 I3: no in-app restart path
-        # reaches this class today â defensive).
+        # reaches this class today — defensive).
         if self._primary_downlink is not None:
             self._primary_downlink.reopen()
 
@@ -494,6 +495,8 @@ class MeshtasticPresetBridge(MeshBridgeDrainMixin):
                 'mode': 'mqtt' if sec.use_mqtt else 'tcp',
             },
             'direction': self.bridge_config.direction,
+            'downlink': downlink_status('mesh-' + downlink_label(pri.preset), self._primary_downlink, built=True,
+                                        configured=(pri.injection_mode or '').lower() == 'downlink'),
             'uptime_seconds': uptime,
             'statistics': self.stats.copy(),
             'queue': {

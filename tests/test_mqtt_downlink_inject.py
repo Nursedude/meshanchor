@@ -245,6 +245,7 @@ class _FakeBroker:
         self.packet_types = []
         self.sessions = 0
         self.stop_reading = False   # True: leave bytes unread (fill the socket)
+        self._kick = False          # kick(): close the live session once
         self._srv = socket.socket()
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._srv.bind(("127.0.0.1", 0))
@@ -278,6 +279,9 @@ class _FakeBroker:
         buf = b""
         with conn:
             while not self._stop.is_set():
+                if self._kick:
+                    self._kick = False
+                    return                  # with conn: closes the socket
                 if self.stop_reading:
                     time.sleep(0.05)
                     continue
@@ -300,6 +304,10 @@ class _FakeBroker:
                         conn.sendall(bytes([0xD0, 0x00]))
                     if ptype == 3 and mode == "drop":
                         return
+
+    def kick(self):
+        """Drop the current session from the broker side."""
+        self._kick = True
 
     def close(self):
         self._stop.set()
@@ -596,3 +604,285 @@ class TestInjectorCloseAndPins:
         inj.close()
         monkeypatch.undo()
         assert _until(lambda: _paho_threads() == base, t=3)
+
+
+class TestDownlinkCounters:
+    """#25 counters slice (operator 11-12: "anything that stalls is not an
+    outcome - it's something to measure"). Every call lands in EXACTLY one
+    named counter; a lost session yields an upper-bound stall witness."""
+
+    @staticmethod
+    def _counts(inj):
+        return {k: v for k, v in inj.stats()["counts"].items() if v}
+
+    def test_ok_counts_ok(self, fake_broker):
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        assert inj.inject_nodeinfo(ORIGIN, "long", "sh") is True
+        assert self._counts(inj) == {"ok": 2}
+        assert inj.stats()["calls"] == 2
+
+    def test_no_connack_then_refused_fast(self, fake_broker):
+        b, inj = fake_broker("silent")
+        assert inj.inject("one", ORIGIN) is False
+        assert inj.inject("two", ORIGIN) is False
+        assert self._counts(inj) == {"no_connack": 1, "refused_fast": 1}
+
+    def test_refused_session(self, fake_broker):
+        b, inj = fake_broker("refuse")
+        assert inj.inject("one", ORIGIN) is False
+        assert self._counts(inj) == {"refused": 1}
+
+    def test_connect_error(self, monkeypatch):
+        from utils import tx_guard
+        with tx_guard.allow_targets("127.0.0.1:1"):
+            inj = DownlinkInjector("127.0.0.1", 1, "meshforge", PSK_B64)
+            try:
+                assert inj.inject("one", ORIGIN) is False
+                assert self._counts(inj) == {"connect_error": 1}
+            finally:
+                inj.close()
+
+    def test_closed(self, fake_broker):
+        b, inj = fake_broker("ok")
+        inj.close()
+        assert inj.inject("one", ORIGIN) is False
+        assert self._counts(inj) == {"closed": 1}
+
+    def test_build_error(self, fake_broker):
+        b, inj = fake_broker("ok")
+        assert inj._publish("text", ORIGIN, lambda: 1 / 0) is False
+        assert self._counts(inj) == {"build_error": 1}
+
+    def test_unusable(self):
+        inj = DownlinkInjector("127.0.0.1", 1, "meshforge", "")
+        assert inj.inject("one", ORIGIN) is False
+        assert self._counts(inj) == {"unusable": 1}
+
+    def test_not_written(self, fake_broker, monkeypatch):
+        b, inj = fake_broker("ok")
+        assert inj.inject("warm", ORIGIN) is True
+        client = inj._client
+        real_publish = client.publish
+
+        def queued_never_written(*a, **k):
+            info = real_publish("meshforge/unused", b"", qos=0)
+            info.wait_for_publish(timeout=1)
+            info._published = False
+            info._condition = threading.Condition()
+            return info
+        monkeypatch.setattr(client, "publish", queued_never_written)
+        assert inj.inject("stalled", ORIGIN) is False
+        assert self._counts(inj) == {"ok": 1, "not_written": 1}
+
+    def test_every_outcome_has_a_test_above(self):
+        # Closed enum, closed consumer (honest_failure_modes #7): a new
+        # outcome must come with its own test here.
+        from gateway.mqtt_downlink_inject import DOWNLINK_OUTCOMES
+        tested = {"ok", "no_connack", "refused", "connect_error", "not_written",
+                  "refused_fast", "closed", "build_error", "unusable", "tx_blocked"}
+        assert set(DOWNLINK_OUTCOMES) == tested
+
+    def test_tx_blocked(self, fake_broker):
+        from utils import tx_guard
+        from unittest.mock import patch as _patch
+        b, inj = fake_broker("ok")
+        with _patch("gateway.mqtt_downlink_inject.assert_tx_allowed",
+                    side_effect=tx_guard.TransmitBlocked({"target": "x"})):
+            assert inj.inject("one", ORIGIN) is False
+        assert self._counts(inj) == {"tx_blocked": 1}
+
+    def test_stall_witness_counts_sends_inside_the_window(self, fake_broker, monkeypatch):
+        # Broker accepts, then goes mute (no PINGRESP): paho drops the session
+        # at ~2 x KEEPALIVE_S. Both sends returned True inside the window.
+        from gateway import mqtt_downlink_inject as mdi
+        monkeypatch.setattr(mdi, "KEEPALIVE_S", 1)
+        b, inj = fake_broker("mute")
+        assert inj.inject("one", ORIGIN) is True
+        assert inj.inject("two", ORIGIN) is True
+        b.mode = "silent"
+        assert _until(lambda: inj.stats()["sessions_lost"] == 1, t=5)
+        time.sleep(2.5)     # paho retries the silent broker meanwhile
+        st = inj.stats()
+        assert st["sessions_lost"] == 1      # retries are not lost sessions
+        assert st["possibly_lost"] == 2
+        assert st["window_s"] == 2 * 1 + 2.5
+
+    def test_control_clean_close_is_not_a_lost_session(self, fake_broker):
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        inj.close()
+        time.sleep(0.3)
+        st = inj.stats()
+        assert st["sessions_lost"] == 0 and st["possibly_lost"] == 0
+
+    def test_sends_older_than_the_window_are_not_counted(self, fake_broker, monkeypatch):
+        from gateway import mqtt_downlink_inject as mdi
+        monkeypatch.setattr(mdi, "KEEPALIVE_S", 1)
+        b, inj = fake_broker("ok")                  # answers PINGREQ: stays up
+        assert inj.inject("old", ORIGIN) is True
+        time.sleep(mdi.stall_window_s() + 0.5)      # older than the window
+        b.mode = "silent"
+        b.kick()                                    # broker drops the session
+        assert _until(lambda: inj.stats()["sessions_lost"] == 1, t=5)
+        assert inj.stats()["possibly_lost"] == 0
+
+
+class TestDownlinkStatusLine:
+    """Writer (bridge_cli status block) and reader (TUI) share ONE format."""
+
+    def test_line_round_trips_through_the_shared_regex(self, fake_broker):
+        from gateway.mqtt_downlink_inject import DOWNLINK_LINE_RE, format_downlink_line
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        line = format_downlink_line({"label": "LONG_FAST", **inj.stats()})
+        m = DOWNLINK_LINE_RE.search("    " + line)
+        assert m and m.group("label") == "LONG_FAST"
+        assert "session up" in m.group("body") and "ok 1" in m.group("body")
+        assert "<=0 possibly lost" in m.group("body")
+
+    def test_idle_injector_says_idle_not_zero(self):
+        from gateway.mqtt_downlink_inject import DOWNLINK_LINE_RE, format_downlink_line
+        line = format_downlink_line({"label": "rns", "idle": True})
+        m = DOWNLINK_LINE_RE.search(line)
+        assert m and "idle" in m.group("body") and "ok 0" not in line
+
+
+class TestDownlinkStatusWriters:
+    """The gateway's ~30 s status block carries the line (single + multi)."""
+
+    def test_print_status_prints_the_downlink_line(self, capsys):
+        from gateway.bridge_cli import print_status
+        print_status({"running": True,
+                      "downlink": {"label": "rns", "idle": True}})
+        assert "Downlink[rns]: idle" in capsys.readouterr().out
+
+    def test_print_status_prints_a_mesh_bridge_line(self, capsys):
+        # MeshAnchor's bridge_cli runs ONE bridge and has no multi printer
+        # (MF's print_multi_status twin): the mesh label through print_status.
+        from gateway.bridge_cli import print_status
+        print_status({"running": True, "downlink": {
+            "label": "mesh-LONG_FAST", "counts": {"ok": 2}, "connected": True}})
+        out = capsys.readouterr().out
+        assert "Downlink[mesh-LONG_FAST]: session up · lost-sessions 0" in out
+        assert "ok 2" in out and out.count("Downlink[") == 1
+
+    def test_downlink_status_helper_states(self):
+        from unittest.mock import MagicMock
+        from gateway.mqtt_downlink_inject import downlink_status
+        assert downlink_status("x", None, configured=False, built=True) is None
+        assert downlink_status("x", None, configured=True, built=False) == {"label": "x", "idle": True}
+        assert downlink_status("x", None, configured=True, built=True) == {"label": "x", "unavailable": True}
+        inj = MagicMock(); inj.stats.return_value = {"calls": 1}
+        assert downlink_status("x", inj, configured=True, built=True) == {"label": "x", "calls": 1}
+
+
+class TestDownlinkCountersRound1:
+    """Counters slice, non-author round 1 (Fable by running), each finding."""
+
+    def test_window_covers_the_measured_detection_delay(self):
+        # F1: noticed up to 11.9 s after CONNACK at K=5 on real mosquitto;
+        # 2K+1 = 11 undercounted 3/3. The window must cover 2K + 2 (two
+        # 1 s loop-tick checks), with margin.
+        from gateway import mqtt_downlink_inject as mdi
+        assert mdi.stall_window_s() >= 2 * mdi.KEEPALIVE_S + 2
+        assert mdi.KEEPALIVE_S == 5 and mdi.stall_window_s() >= 11.9
+
+    def test_teardown_disarms_the_witness(self, fake_broker):
+        # F3: ok session, close(), reopen(), a failed connect -> must NOT be
+        # a lost session (both sends were delivered).
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        inj.close()
+        assert inj._witness_up is False
+        inj.reopen()
+        b.mode = "silent"
+        assert inj.inject("two", ORIGIN) is False
+        time.sleep(0.5)
+        assert inj.stats()["sessions_lost"] == 0
+
+    def test_publish_that_discovers_the_dead_session_counts_it(self, fake_broker, monkeypatch):
+        # F4: not_written tears down before paho's callback can see the
+        # current client — the publish path must count the loss itself.
+        b, inj = fake_broker("ok")
+        assert inj.inject("warm", ORIGIN) is True
+        client = inj._client
+        real_publish = client.publish
+
+        def queued_never_written(*a, **k):
+            info = real_publish("meshforge/unused", b"", qos=0)
+            info.wait_for_publish(timeout=1)
+            info._published = False
+            info._condition = threading.Condition()
+            return info
+        monkeypatch.setattr(client, "publish", queued_never_written)
+        assert inj.inject("stalled", ORIGIN) is False
+        st = inj.stats()
+        assert st["sessions_lost"] == 1 and st["possibly_lost"] == 1
+
+    def test_callback_guards_each_pinned(self, fake_broker):
+        # F8 M6/M7/M19: every guard on the witness callbacks, alone.
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        client = inj._client
+        on_disc, on_conn = client.on_disconnect, client.on_connect
+        on_disc(object(), None, 7)                      # a STALE client's loss
+        assert inj.stats()["sessions_lost"] == 0        # M6
+        on_disc(client, None, 0)                        # our own clean disconnect
+        assert inj.stats()["sessions_lost"] == 0        # M7
+        assert inj._witness_up is True
+        on_disc(client, None, 7)                        # a real loss
+        assert inj.stats()["sessions_lost"] == 1
+        on_conn(client, None, {}, 5)                    # a REFUSED session
+        assert inj._witness_up is False                 # M19: not armed
+        on_disc(client, None, 7)
+        assert inj.stats()["sessions_lost"] == 1
+
+    def test_one_send_is_never_counted_twice(self, fake_broker):
+        # F8 M4: two losses in a row; the sends before the first count once.
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        assert inj.inject("two", ORIGIN) is True
+        inj._note_session_lost()
+        inj._note_session_lost()
+        assert inj.stats()["possibly_lost"] == 2
+
+    def test_line_carries_the_real_witness_numbers(self):
+        # F8 M27 + F7: the numbers are the stats', and the state word is not
+        # a counter's name.
+        from gateway.mqtt_downlink_inject import format_downlink_line
+        line = format_downlink_line({"label": "rns", "counts": {"ok": 9}, "connected": False,
+                                     "sessions_lost": 2, "possibly_lost": 7, "window_s": 12.5})
+        assert "lost-sessions 2 · <=7 possibly lost" in line
+        assert line.index("lost-sessions") < line.index("ok 9")     # witness first
+        closed = format_downlink_line({"label": "rns", "closed": True, "counts": {}})
+        assert "]: injector closed · " in closed
+
+    def test_state_word_follows_the_session(self, fake_broker):
+        # F8 M26/M28: the state word comes from paho's real session state.
+        from gateway.mqtt_downlink_inject import format_downlink_line
+        b, inj = fake_broker("ok")
+        assert inj.inject("one", ORIGIN) is True
+        assert "]: session up · " in format_downlink_line({"label": "x", **inj.stats()})
+        b2, inj2 = fake_broker("silent")
+        assert inj2.inject("one", ORIGIN) is False
+        assert "]: no session · " in format_downlink_line({"label": "x", **inj2.stats()})
+
+    def test_unavailable_line_is_clean_text(self):
+        # F5 + F8 M9: the "unavailable" branch, and no mojibake in it.
+        from gateway.mqtt_downlink_inject import DOWNLINK_LINE_RE, format_downlink_line
+        line = format_downlink_line({"label": "rns", "unavailable": True})
+        assert "unavailable \u2014 downlink is configured" in line
+        assert all(ord(c) < 0x80 or ord(c) >= 0xa0 for c in line)   # no C1 controls
+        assert DOWNLINK_LINE_RE.search(line)
+
+    def test_odd_labels_round_trip(self):
+        # F6: free-form presets survive writer -> regex -> reader; no preset
+        # can collide with the RNS row.
+        from gateway.mqtt_downlink_inject import (DOWNLINK_LINE_RE, downlink_label,
+                                                  format_downlink_line)
+        for raw in ("odd]preset", "A: B [x]", "with\nnewline", "", None, "LONG_FAST"):
+            label = "mesh-" + downlink_label(raw)
+            m = DOWNLINK_LINE_RE.search(format_downlink_line({"label": label, "counts": {}}))
+            assert m and m.group("label") == label
+        assert "mesh-" + downlink_label("rns") != "rns"

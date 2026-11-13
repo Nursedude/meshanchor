@@ -24,6 +24,7 @@ from gateway import (
 
 from utils.service_check import check_service, check_port
 from gateway.config_validators import RNS_TRANSPORT_REMOVED  # shared with validate_bridge_mode
+from gateway.mqtt_downlink_inject import format_downlink_line  # one line format (TUI reads it)
 
 # Setup logging — use canonical logging_config (avoids basicConfig conflicts)
 from utils.logging_config import setup_logging, get_logger
@@ -154,6 +155,11 @@ def print_status(status: dict):
     node_stats = status.get('node_stats', {})
     if node_stats:
         print(f"Nodes tracked: {node_stats.get('total', 0)}")
+
+    # #25 counters (port of MF): the injector's status line — the TUI reads it
+    # back with the writer's own regex (DOWNLINK_LINE_RE).
+    if status.get('downlink'):
+        print(format_downlink_line(status['downlink']))
 
     print(f"{'='*50}")
     print("Press Ctrl+C to stop and return to menu\n")
