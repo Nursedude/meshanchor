@@ -156,8 +156,9 @@ def print_status(status: dict):
     if node_stats:
         print(f"Nodes tracked: {node_stats.get('total', 0)}")
 
-    # #25 counters (port of MF): the injector's status line — the TUI reads it
-    # back with the writer's own regex (DOWNLINK_LINE_RE).
+    # #25 counters (port of MF): the injector's status line, in MF's format
+    # (DOWNLINK_LINE_RE). NOTE: unlike MF, MeshAnchor's TUI does NOT read it
+    # back yet — deferred ma-downlink-counters-tui-surface-2026-11-12.
     if status.get('downlink'):
         print(format_downlink_line(status['downlink']))
 
