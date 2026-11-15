@@ -1,6 +1,7 @@
 # MeshAnchor Prometheus Metrics
 
-MeshAnchor exports metrics in Prometheus format for monitoring, alerting, and visualization with Grafana.
+MeshAnchor exports metrics in Prometheus format for any Prometheus scraper. Grafana dashboards and the exporter's Grafana-only
+endpoints were removed 2026-11-14 (unused; operator; MeshForge twin).
 
 ## Quick Start
 
@@ -170,16 +171,6 @@ def collect_my_metrics():
 
 exporter.register_collector(collect_my_metrics)
 ```
-
-## Grafana Dashboards
-
-Pre-built dashboards are available in the `dashboards/` directory:
-
-- `meshanchor-overview.json` - System overview
-- `meshanchor-nodes.json` - Node metrics
-- `meshanchor-gateway.json` - Gateway status
-
-See `dashboards/README.md` for import instructions.
 
 ## Endpoints
 

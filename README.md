@@ -84,7 +84,7 @@ yours.
 | **MQTT monitoring** | Nodeless mesh observation, protobuf decode, traffic inspector | MQTT broker |
 | **RF engineering** | Link budget, Fresnel zone, FSPL, coverage maps, NOAA space weather | — |
 | **AI diagnostics** | Offline knowledge base; optional AI assist with your own Claude API key or subscription | — |
-| **Prometheus / Grafana** | 50+ metrics, 5 pre-built dashboards | — |
+| **Prometheus** | 50+ metrics on a scrape endpoint | — |
 
 Optional add-on, installed from the TUI when you want it: **NomadNet**, a
 terminal LXMF client for Reticulum users.
@@ -152,7 +152,7 @@ MeshForge, untested here; **Code-Ready** = implemented, awaiting hardware).
   with your own Claude API key (in-TUI assistant) or subscription (Claude Code
   in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
 
-The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->388<!--/STAT--> test files.
+The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->389<!--/STAT--> test files.
 
 **Full inventory, with proven vs. unvalidated called out:
 [docs/capabilities.md](docs/capabilities.md)**

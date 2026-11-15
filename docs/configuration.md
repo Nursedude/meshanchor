@@ -40,7 +40,7 @@ Gateway-specific templates in `config_templates/`:
 | 5000 | Map Server | **MeshAnchor** | Live NOC map + REST API |
 | 5001 | WebSocket | **MeshAnchor** | Real-time message broadcast |
 | 8081 | Config API | **MeshAnchor** | RESTful config management |
-| 9090 | Prometheus metrics | **MeshAnchor** | Grafana-compatible JSON API |
+| 9090 | Prometheus metrics | **MeshAnchor** | Prometheus scrape endpoint |
 
 ---
 

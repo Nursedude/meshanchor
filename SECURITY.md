@@ -68,7 +68,7 @@ All user input is validated before use:
 
 - Default binding to `127.0.0.1` (localhost only)
 - HTTPS for external API calls (NOAA SWPC, GitHub)
-- Local services (Prometheus, Grafana, HamClock) use HTTP on localhost only
+- Local services (Prometheus, HamClock) use HTTP on localhost only
 - SSL certificate verification enabled by default in agent protocol
 
 ### Secure Defaults

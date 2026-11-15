@@ -84,7 +84,7 @@ The full capability inventory, including what is proven in the field and what st
 | MQTT subscriber | 68 | Nodeless node tracking, protobuf decode |
 | Traffic inspector | -- | Packet capture, protocol tree, display filters |
 | RNS packet sniffer | -- | Wireshark-grade capture, announce tracking |
-| Prometheus exporter | -- | 50+ metric families, Grafana-compatible |
+| Prometheus exporter | -- | 50+ metric families (Prometheus scrape) |
 | Node tracker | 68 | Unified node inventory, 15m offline threshold, 24h stale purge |
 
 ### Known Limitations
@@ -98,7 +98,7 @@ The full capability inventory, including what is proven in the field and what st
 ### Testing Reality Check
 
 MeshAnchor's automated tests (run `python3 -m pytest tests/ --co -q` for the
-live count — never a hand-typed number here) span <!--STAT:testfiles-->388<!--/STAT--> test files. However, automated tests
+live count — never a hand-typed number here) span <!--STAT:testfiles-->389<!--/STAT--> test files. However, automated tests
 validate code paths with mocks — they do not replace field testing. Every feature
 listed above needs validation with **real radios and real mesh traffic** before it can
 be considered reliable.

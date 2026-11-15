@@ -1,5 +1,5 @@
 """
-Metrics Handler — Historical network metrics, trends, Prometheus, Grafana.
+Metrics Handler — Historical network metrics, trends, Prometheus.
 
 Converted from metrics_mixin.py as part of the mixin-to-registry migration.
 """
@@ -58,7 +58,6 @@ class MetricsHandler(BaseHandler):
             ("recent", "Recent Metrics"),
             ("export", "Export Metrics (CSV)"),
             ("prometheus", "Prometheus Server"),
-            ("grafana", "Grafana Dashboards"),
             ("cleanup", "Database Maintenance"),
             ("back", "Back"),
         ]
@@ -74,7 +73,6 @@ class MetricsHandler(BaseHandler):
                 "recent": ("Recent Changes", self._metrics_recent),
                 "export": ("Export Metrics", self._metrics_export),
                 "prometheus": ("Prometheus Server", self._metrics_prometheus),
-                "grafana": ("Grafana Dashboards", self._grafana_menu),
                 "cleanup": ("Database Maintenance", self._metrics_cleanup),
             }
             entry = dispatch.get(choice)
@@ -401,144 +399,3 @@ class MetricsHandler(BaseHandler):
                 self.ctx.dialog.msgbox("Cleanup Complete", "Database maintenance completed successfully.")
             except Exception as e:
                 self.ctx.dialog.msgbox("Error", f"Cleanup failed:\n{e}")
-
-    def _grafana_menu(self):
-        import shutil
-        grafana_running = False
-        grafana_url = "http://localhost:3000"
-        try:
-            from utils.service_check import check_service
-            grafana_status = check_service('grafana-server')
-            grafana_running = grafana_status.available
-        except Exception as e:
-            logger.debug("Grafana status check failed: %s", e)
-        src_dir = Path(__file__).parent.parent.parent
-        dashboards_dir = src_dir / "dashboards"
-        dashboard_files = list(dashboards_dir.glob("meshanchor-*.json")) if dashboards_dir.exists() else []
-        status_lines = []
-        if grafana_running:
-            status_lines.append(f"Grafana: RUNNING at {grafana_url}")
-        else:
-            status_lines.append("Grafana: NOT RUNNING")
-        status_lines.append(f"Dashboards available: {len(dashboard_files)}")
-        while True:
-            choices = [
-                ("status", "Grafana Status"), ("open", "Open Grafana (browser)"),
-                ("dashboards", "View Dashboard Files"), ("install", "Install Grafana"),
-                ("import", "Import Dashboard Instructions"), ("back", "Back"),
-            ]
-            choice = self.ctx.dialog.menu("Grafana Dashboards", "\n".join(status_lines), choices)
-            if choice is None or choice == "back":
-                break
-            if choice == "status":
-                self._grafana_status()
-            elif choice == "open":
-                self._grafana_open(grafana_url)
-            elif choice == "dashboards":
-                self._grafana_list_dashboards(dashboard_files)
-            elif choice == "install":
-                self._grafana_install()
-            elif choice == "import":
-                self._grafana_import_instructions(dashboard_files)
-
-    def _grafana_status(self):
-        import shutil
-        lines = ["GRAFANA STATUS", "=" * 50, ""]
-        try:
-            result = subprocess.run(['systemctl', 'status', 'grafana-server'], capture_output=True, text=True, timeout=10)
-            for line in result.stdout.split('\n')[:10]:
-                lines.append(line)
-        except FileNotFoundError:
-            lines.append("systemctl not available")
-        except Exception as e:
-            lines.append(f"Error checking status: {e}")
-        lines.append("")
-        import shutil
-        if shutil.which('grafana-server'):
-            lines.append("grafana-server: INSTALLED")
-        else:
-            lines.extend(["grafana-server: NOT FOUND", "", "Install with: sudo apt install grafana"])
-        self.ctx.dialog.msgbox("Grafana Status", "\n".join(lines))
-
-    def _grafana_open(self, url):
-        import threading
-        def open_browser():
-            try:
-                subprocess.run(['xdg-open', url], timeout=10)
-            except (subprocess.SubprocessError, OSError, FileNotFoundError) as e:
-                logger.debug("Failed to open Grafana URL: %s", e)
-        threading.Thread(target=open_browser, daemon=True).start()
-        self.ctx.dialog.msgbox("Opening Grafana", f"Opening {url} in browser...\n\nDefault login:\n  Username: admin\n  Password: admin")
-
-    def _grafana_list_dashboards(self, dashboard_files):
-        if not dashboard_files:
-            self.ctx.dialog.msgbox("No Dashboards", "No MeshAnchor dashboard files found.")
-            return
-        lines = ["AVAILABLE DASHBOARDS", "=" * 50, ""]
-        for f in dashboard_files:
-            lines.append(f"  {f.name}")
-        lines.extend(["", f"Location: {dashboard_files[0].parent}", "", "Import these via Grafana UI:", "  Dashboards > Import > Upload JSON"])
-        self.ctx.dialog.msgbox("Dashboard Files", "\n".join(lines))
-
-    def _grafana_install(self):
-        instructions = """GRAFANA INSTALLATION (Raspberry Pi / Debian)
-==================================================
-
-Step 1: Add Grafana GPG key
-  curl -fsSL https://apt.grafana.com/gpg.key | \\
-    sudo gpg --dearmor -o /usr/share/keyrings/grafana.gpg
-
-Step 2: Add Grafana repository
-  echo "deb [signed-by=/usr/share/keyrings/grafana.gpg] \\
-    https://apt.grafana.com stable main" | \\
-    sudo tee /etc/apt/sources.list.d/grafana.list
-
-Step 3: Install Grafana
-  sudo apt update
-  sudo apt install grafana
-
-Step 4: Enable and start service
-  sudo systemctl enable grafana-server
-  sudo systemctl start grafana-server
-
-After install:
-  - Access at http://localhost:3000
-  - Default login: admin / admin
-  - Add Prometheus data source (http://localhost:9090)
-  - Import MeshAnchor dashboards from dashboards/ folder
-"""
-        self.ctx.dialog.msgbox("Install Grafana", instructions)
-
-    def _grafana_import_instructions(self, dashboard_files):
-        dash_path = str(dashboard_files[0].parent) if dashboard_files else "dashboards/"
-        instructions = f"""IMPORT MESHANCHOR DASHBOARDS
-==================================================
-
-1. Open Grafana: http://localhost:3000
-
-2. Add Prometheus data source:
-   Configuration > Data Sources > Add > Prometheus
-   URL: http://localhost:9090
-
-3. Import dashboards:
-   Dashboards > Import > Upload JSON file
-
-   Dashboard files location:
-   {dash_path}
-
-   Available dashboards:
-"""
-        for f in dashboard_files:
-            instructions += f"   - {f.name}\n"
-        instructions += """
-4. Select your Prometheus data source
-
-5. Click Import
-
-The dashboards will show:
-- Node counts and status
-- Gateway connections
-- Message queue depth
-- Service health
-"""
-        self.ctx.dialog.msgbox("Import Instructions", instructions)

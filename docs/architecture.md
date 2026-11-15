@@ -158,7 +158,6 @@ scripts/
 ├── meshanchor-launcher.sh # Shell wrapper
 └── verify_post_install.sh # Post-install health check
 
-dashboards/                # 5 Grafana monitoring dashboards
 ├── meshanchor-overview.json  # Health, services, queues
 ├── meshanchor-nodes.json     # Per-node RF metrics
 ├── meshanchor-gateway.json   # Gateway bridge status
@@ -167,7 +166,7 @@ dashboards/                # 5 Grafana monitoring dashboards
 
 templates/                 # Config templates (meshtasticd, reticulum, MQTT, systemd)
 config_templates/          # RNS gateway configuration templates
-tests/                     # <!--STAT:testfiles-->388<!--/STAT--> test files
+tests/                     # <!--STAT:testfiles-->389<!--/STAT--> test files
 docs/                      # REST API, metrics, usage guide, visual guide
 examples/                  # Example configurations
 web/                       # Node map, LOS visualization (browser)
