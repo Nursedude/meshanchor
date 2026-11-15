@@ -124,6 +124,7 @@ class AuthEndpointsMixin:
         ``_operator_ok`` is set for THIS request so a consumer-side re-check
         (``_refuse_side_effect_get``) costs no second store read."""
         self._operator_ok = False
+        self._renew_cookie_token = None   # one-shot; see end_headers
         if method == "GET" and path not in self.OPERATOR_GETS:
             return False
         if method != "GET" and path in self.SESSIONLESS_WRITES:
@@ -145,7 +146,20 @@ class AuthEndpointsMixin:
                                   "a session cookie without this page's Origin is not this browser")
             return True
         self._operator_ok = True
+        self._renew_cookie_token = token
         return False
+
+    def end_headers(self):
+        """Renew the session cookie on a request that PASSED the operator gate
+        (MF twin, 11-14). The cookie's Max-Age was set once at /login while the
+        server slid its idle window, so a browser was logged out 30 d after
+        pairing however often it was used. Same token, fresh Max-Age — never a
+        new session. One-shot: popped here so a kept-alive connection cannot
+        carry it into the next response; /logout never reaches the setter."""
+        token = self.__dict__.pop("_renew_cookie_token", None)
+        if token:
+            self.send_header("Set-Cookie", web_auth.set_cookie_value(token))
+        super().end_headers()
 
     def _refuse_side_effect_get(self, canonical: str) -> bool:
         """The gate at the CONSUMER (adversarial pass 2026-10-14, F1): a
