@@ -53,6 +53,7 @@ from .meshcore_radio_config import (
     _empty_radio_state,
 )
 from .meshcore_contact_capture_mixin import MeshCoreContactCaptureMixin
+from .meshcore_observer_mixin import MeshCoreObserverMixin
 from .meshcore_dm_ack_mixin import MeshCoreDmAckMixin
 from .meshcore_oracle_mixin import MeshCoreOracleMixin
 from .meshcore_dm_reply import PendingDmAcks
@@ -128,7 +129,8 @@ from .meshcore_outbound_mixin import (  # noqa: E402,F401
 
 
 class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleMixin,
-                      MeshCoreContactCaptureMixin, MeshCoreOutboundMixin,
+                      MeshCoreContactCaptureMixin, MeshCoreObserverMixin,
+                      MeshCoreOutboundMixin,
                       BaseMessageHandler):
     """
     Handles MeshCore companion radio connection and message processing.
@@ -372,6 +374,7 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                 self._meshcore = MeshCoreSimulator()
                 await self._meshcore.start()
                 self._setup_simulator_events()
+                self._observer_note_unwired("simulation mode")
                 self._connected = True
                 return
 
@@ -557,6 +560,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             self._subscriptions.append(sub)
             # Allowlisted contact capture (repliable_contacts; inert if empty)
             self._init_contact_capture(EventType)
+            # CS-1 observer: RX_LOG_DATA -> local broker (inert unless enabled)
+            self._init_observer(EventType)
 
             logger.debug("MeshCore event subscriptions registered")
 

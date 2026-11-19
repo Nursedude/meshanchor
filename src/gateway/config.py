@@ -327,6 +327,14 @@ class MeshCoreConfig:
     # not appearing. Empty = inert (nothing marked, no absences claimed).
     our_contacts: list = field(default_factory=list)
 
+    # CS-1 MeshCore observer (2026-11-18): every companion RX_LOG_DATA packet
+    # -> meshcoretomqtt shape on meshcore/<IATA>/<own key>/packets at the LOCAL
+    # broker (127.0.0.1:1883), for our CoreScope. OFF by default; the IATA is
+    # declared per box (empty = every packet refused as bad_iata, loudly).
+    # Outward legs (community instances) are a later, separate switch.
+    observer_enabled: bool = False
+    observer_iata: str = ""
+
     # Testing
     simulation_mode: bool = False         # Run without hardware (fake events)
 
@@ -391,13 +399,21 @@ class MeshCoreConfig:
         # Radio-WRITE opt-ins accept a real JSON boolean only. A hand-typed
         # "false" is truthy and used to opt the radio in (review 2026-10-31
         # F1); anything that is not True/False refuses, loudly.
-        for flag in ("apply_desired_on_connect", "sync_clock_on_connect"):
+        # observer_enabled joins them (CS-1 review r1 LOW-4): off is the
+        # outward-safe side, so a non-bool can never switch the observer on.
+        # The refusal is also KEPT (D5, Fable r2 L2) so a status surface can
+        # say "off because the config said 'true'" rather than reading like
+        # intent. A plain attribute, not a dataclass field: asdict()/save()
+        # never writes it back into gateway.json.
+        self._config_errors: Dict[str, str] = {}
+        for flag in ("apply_desired_on_connect", "sync_clock_on_connect",
+                     "observer_enabled"):
             val = getattr(self, flag)
             if not isinstance(val, bool):
-                logging.getLogger(__name__).error(
-                    "gateway.json meshcore.%s=%r is not a JSON boolean "
-                    "(true/false, unquoted) — treating as false (no radio write)",
-                    flag, val)
+                msg = (f"gateway.json meshcore.{flag}={val!r} is not a JSON boolean "
+                       "(true/false, unquoted) — treating as false (off)")
+                logging.getLogger(__name__).error(msg)
+                self._config_errors[flag] = msg
                 setattr(self, flag, False)
 
 

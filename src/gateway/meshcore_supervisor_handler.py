@@ -42,6 +42,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional
 from .base_handler import BaseMessageHandler
 from .canonical_message import CanonicalMessage, Protocol
 from .meshcore_handler import _clear_active_handler, _set_active_handler
+from .meshcore_observer import derive_state, disabled_snapshot, observer_enabled
 from utils.meshcore_supervisor_client import (
     MeshCoreSupervisorClient,
     SupervisorRemoteError,
@@ -106,6 +107,29 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
     # BaseMessageHandler abstract methods
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # CS-1 observer: NOT carried in supervisor mode (D3, review r1 MED-1).
+    # Enabled here = never silently inert: one WARNING per connect and a
+    # state that says why nothing is observed.
+    # ------------------------------------------------------------------
+
+    def _observer_cfg(self) -> Any:
+        return getattr(getattr(self, "config", None), "meshcore", None)
+
+    def _init_observer(self) -> None:
+        if observer_enabled(self._observer_cfg()):
+            logger.warning(
+                "MeshCore observer is enabled but supervisor mode "
+                "(meshcore-radio.service) does not carry it: nothing is observed")
+
+    def observer_snapshot(self) -> Dict[str, Any]:
+        cfg = self._observer_cfg()
+        if not observer_enabled(cfg):
+            return disabled_snapshot(cfg)
+        return {"state": derive_state(
+            enabled=True, mode="supervisor", radio="up", setup="ok",
+            last_outcome="none")}
+
     def connect(self) -> bool:
         """Open the supervisor socket and subscribe to events."""
         if self._client is not None and self._client.connected:
@@ -129,6 +153,7 @@ class MeshCoreSupervisorHandler(BaseMessageHandler):
         self._client = client
         self._connected = True
         _set_active_handler(self)
+        self._init_observer()
         # Reflect the radio's ACTUAL state from the supervisor hello, not just
         # "handler attached to supervisor" — reporting "connected" unconditionally
         # latched the health monitor True even when the radio was down, and the
