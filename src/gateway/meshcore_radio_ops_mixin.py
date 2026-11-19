@@ -195,7 +195,23 @@ class MeshCoreRadioOpsMixin:
         gets swapped out from under us (reconnect creates a fresh task).
         """
         # Fire one immediately so neighbors don't have to wait a full
-        # interval after a daemon restart to hear from us.
+        # interval after a daemon restart to hear from us — but, across
+        # RECONNECTS within one process (handler teardown review, 2026-11-19;
+        # monotonic, hfm #6):
+        #   - never sooner than ``interval`` after the last SUCCESSFUL advert
+        #     (r1 LOW-1: a flapping link sent one advert per reconnect), and
+        #   - never sooner than ``interval / 2`` after the last ATTEMPT: an
+        #     ack-lost send may already have keyed the radio (r3 LOW-A), while
+        #     a failed attempt delays the next session by at most half an
+        #     interval, never 2x (r2 LOW-1).
+        wait = self._heartbeat_initial_wait(interval)
+        if wait > 0:
+            try:
+                await self._async_wait(wait)
+            except asyncio.CancelledError:
+                return
+            if self._stop_event.is_set() or not self._connected:
+                return
         await self._fire_heartbeat_advert(flood)
         while not self._stop_event.is_set() and self._connected:
             try:
@@ -206,11 +222,29 @@ class MeshCoreRadioOpsMixin:
                 return
             await self._fire_heartbeat_advert(flood)
 
+    def _heartbeat_initial_wait(self, interval: float) -> float:
+        """Seconds to wait before a session's first advert (0 = now)."""
+        now = time.monotonic()
+        wait = 0.0
+        for stamp, floor in ((getattr(self, "_last_heartbeat_advert_at", None), interval),
+                             (getattr(self, "_last_heartbeat_attempt_at", None), interval / 2)):
+            if stamp is not None:
+                since = now - stamp
+                if 0 <= since < floor:      # a clock that went backward: no wait
+                    wait = max(wait, floor - since)
+        return wait
+
     async def _fire_heartbeat_advert(self, flood: bool) -> None:
-        """Send one heartbeat advert. Logs at INFO; never raises."""
+        """Send one heartbeat advert. Logs at INFO; never raises Exception."""
+        self._last_heartbeat_attempt_at = time.monotonic()   # may already be on air
         try:
             await self._radio.send_advert(flood=flood)
+            self._last_heartbeat_advert_at = time.monotonic()   # WENT OUT
             logger.info("MeshCore advert heartbeat fired (flood=%s)", flood)
+        except asyncio.CancelledError:
+            # a witness for a send cut off mid-ack (r3: 147 TX, zero lines)
+            logger.info("MeshCore advert heartbeat cancelled mid-send (flood=%s)", flood)
+            raise
         except Exception as e:
             logger.warning(f"MeshCore advert heartbeat failed: {e}")
 

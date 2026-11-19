@@ -83,6 +83,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# A lost session's close is bounded: an unbounded await parked the loop
+# holding the persistent registration and ignoring stop (teardown review r1
+# LOW-2). Same bound as the sync disconnect().
+_TEARDOWN_CLOSE_TIMEOUT_S = 5.0
+# A connect only counts as a reconnect SUCCESS (resetting the backoff) once
+# the session has stayed up this long — a session that dies at once keeps
+# backing off instead of reconnecting every few seconds (r1 LOW-1).
+_SESSION_STABLE_S = 60.0
+
 
 
 # meshcore_py is an optional external dependency
@@ -314,7 +323,8 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
                     await self._connect()
 
                     if self._connected:
-                        self._reconnect.record_success()
+                        # success is recorded once the session proves stable
+                        self._session_up_since = time.monotonic()
                         self.health.record_connection_event("meshcore", "connected")
                         logger.info("MeshCore connection established")
                         self._inbound_policy.log_posture(self)
@@ -327,6 +337,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
 
                 # Connected — process events and outbound messages
                 if self._connected:
+                    up_since = getattr(self, "_session_up_since", None)
+                    if up_since is not None and time.monotonic() - up_since >= _SESSION_STABLE_S:
+                        self._reconnect.record_success()
+                        self._session_up_since = None
                     await self._process_outbound()
                     await self._poll_channel_messages()
 
@@ -342,8 +356,10 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             except Exception as e:
                 category = self.health.record_error("meshcore", e)
                 logger.error(f"MeshCore loop error ({category}): {e}")
-                self._connected = False
                 self.health.record_connection_event("meshcore", "error", str(e))
+                # the same end as the OSError branch: teardown + disconnected
+                # status + health event (r1 INFO-2)
+                await self._handle_disconnection(str(e))
                 self._reconnect.record_failure()
                 delay = self._reconnect.get_delay()
                 await self._async_wait(delay)
@@ -506,12 +522,9 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
 
         except Exception as e:
             logger.error(f"Failed to connect to MeshCore: {e}")
-            self._connected = False
-            # If we registered persistent before the failure path, drop it.
-            try:
-                _get_meshcore_connection_manager().unregister_persistent()
-            except Exception:
-                pass
+            # The session may already be OPEN and subscribed (e.g. the fetch
+            # start raised after _subscribe_events): close it, don't leak it.
+            await self._teardown_session()
 
     def _subscribe_events(self) -> None:
         """Subscribe to meshcore_py events for message and node tracking."""
@@ -931,24 +944,28 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
 
     def disconnect(self) -> None:
         """Disconnect from MeshCore companion radio."""
+        session = self._meshcore
         if self._meshcore and self._loop:
             try:
                 future = asyncio.run_coroutine_threadsafe(
                     self._async_disconnect(), self._loop
                 )
-                future.result(timeout=5)
+                future.result(timeout=_TEARDOWN_CLOSE_TIMEOUT_S)
             except Exception as e:
                 logger.debug(f"Error during MeshCore disconnect: {e}")
 
         self._connected = False
         self._meshcore = None
         self._subscriptions.clear()
-        # Drop the persistent registration so future short-lived consumers
-        # can probe the device freely.
+        # Drop OUR persistent registration (identity, never the owner name:
+        # the same rule as _teardown_session — teardown review r1 INFO-1)
+        # so future short-lived consumers can probe the device freely.
         try:
-            _get_meshcore_connection_manager().unregister_persistent()
+            mgr = _get_meshcore_connection_manager()
+            if session is not None and mgr.get_meshcore() is session:
+                mgr.unregister_persistent()
         except Exception as e:
-            logger.debug(f"Error unregistering MeshCore persistent owner: {e}")
+            logger.warning(f"MeshCore persistent unregister failed: {e}")
         # Release the module-level handle if we were the active handler.
         _clear_active_handler(self)
         self._notify_status("meshcore_disconnected")
@@ -1034,15 +1051,43 @@ class MeshCoreHandler(MeshCoreRadioOpsMixin, MeshCoreDmAckMixin, MeshCoreOracleM
             except Exception as e:
                 logger.debug(f"Error closing MeshCore connection: {e}")
 
+    async def _teardown_session(self) -> None:
+        """THE one way a lost session ends, so the next connect can succeed.
+
+        Close the session, drop our references and subscriptions, and drop
+        OUR persistent registration — only if the registered link IS this
+        session (a foreign owner is never ours to unregister).
+
+        Before 2026-11-19 the loop-exception paths left the registration in
+        place, and ``acquire_for_connect`` refuses while ANY persistent owner
+        is registered — including our own ``gateway-bridge`` — so the
+        handler never reconnected until a process restart (CS-1 review r4).
+        """
+        session = self._meshcore
+        self._connected = False
+        self._session_up_since = None
+        try:
+            await asyncio.wait_for(self._async_disconnect(), _TEARDOWN_CLOSE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning("MeshCore session close timed out after %.0fs — "
+                           "dropping the session anyway", _TEARDOWN_CLOSE_TIMEOUT_S)
+        except Exception as e:
+            logger.debug(f"Disconnect cleanup error: {e}")
+        self._meshcore = None
+        self._subscriptions.clear()
+        if session is None:
+            return
+        try:
+            mgr = _get_meshcore_connection_manager()
+            if mgr.get_meshcore() is session:
+                mgr.unregister_persistent()
+        except Exception as e:  # a stuck registration blocks every reconnect: say so
+            logger.warning(f"MeshCore persistent unregister failed: {e}")
+
     async def _handle_disconnection(self, reason: str = "") -> None:
         """Handle lost MeshCore connection."""
         logger.info(f"MeshCore connection lost: {reason}")
-        self._connected = False
-
-        try:
-            await self._async_disconnect()
-        except Exception as e:
-            logger.debug(f"Disconnect cleanup error: {e}")
+        await self._teardown_session()
 
         self.health.record_connection_event("meshcore", "disconnected", reason)
         self._notify_status("meshcore_disconnected")
