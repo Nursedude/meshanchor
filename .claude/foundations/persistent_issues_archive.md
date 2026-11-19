@@ -479,3 +479,38 @@ cause class — recurrent on moc1).
 
 ---
 
+---
+
+## Moved from persistent_issues.md (2026-11-19, MF012 size cap)
+
+## Issue #20: Service Detection & Status Display — ALL DONE
+
+All 3 components resolved:
+
+1. **Service Detection**: Simplified to systemctl-only for systemd services (SSOT)
+2. **Status Display**: Separates "service state" from "detection capability" —
+   never shows "FAILED" when service is running
+3. **RX Messages**: `event_bus.py` → `websocket_server.py` → TUI live feed
+
+### RNS Socket Detection
+RNS uses abstract Unix domain sockets (`\0rns/{instance_name}`), not UDP port 37428.
+Use `check_rns_shared_instance()` (3-tier: Unix socket → TCP → UDP fallback).
+
+### Prevention
+- UI must always distinguish "service state" from "detection capability"
+- Use `check_rns_shared_instance()` for all rnsd checks (never raw UDP)
+
+---
+
+## Issue #33: MeshCore Connection Contract — ARCHIVED (2026-05-05)
+
+MeshCore radio opened only via `utils.meshcore_connection`. Long-running
+owner uses `acquire_for_connect(owner=...)` + `register_persistent`;
+short-lived consumers use `MeshCoreConnection()` context manager. Lint
+MF014 + `tests/test_regression_guards.py::TestMeshCoreConnectionContract`
+keep raw `MeshCore.create_serial`/`serial.Serial(...)` out of the tree.
+Supervisor IPC contract in `src/supervisor/protocol.py` (NDJSON, Unix
+socket at `/run/meshcore-radio/meshcore-radio.sock`) for cross-process
+consumers. **Full writeup**: `persistent_issues_archive.md` Issue #33.
+
+---

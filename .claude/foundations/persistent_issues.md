@@ -54,6 +54,8 @@ Full history in `persistent_issues_archive.md`.
 | #19 RNS path_table discovery | `path_table` not `destinations`; delayed re-checks. Body in archive | — |
 | #27 rnsd is OPTIONAL | Two independent transports (MQTT, RNS); preset bridging needs only mosquitto. Body in archive | — |
 | GTK Issues (#2, #11, #13–#15) | GTK4 removed in v0.5.x | — |
+| #20 Service Detection & Status | systemctl SSOT; status separates service state from detection; rnsd via `check_rns_shared_instance()`, never raw UDP. Body in archive | — |
+| #33 MeshCore Connection Contract | Radio opened only via `utils.meshcore_connection` (`acquire_for_connect` + `register_persistent`). Body in archive | Lint MF014 + guard |
 | #34 map handler thread pile-up | Slow-peer `/fleet/rollup` piled 526 handler threads; `/fleet/slo` timed out while `/healthz` stayed fast. In-flight semaphore cap-8 (#128) is the gating fix; restart `meshanchor-map` to recover. Body in archive | commits `8fa73309`+`3787d977` |
 
 ---
@@ -139,25 +141,6 @@ Delivery is **best-effort** — inherent to mesh networking. Message queue persi
 Always show "Sent (delivery not guaranteed)" or "Queued" status.
 
 Files: `commands/messaging.py`, `gateway/rns_bridge.py`, `gateway/message_queue.py`
-
----
-
-## Issue #20: Service Detection & Status Display — ALL DONE
-
-All 3 components resolved:
-
-1. **Service Detection**: Simplified to systemctl-only for systemd services (SSOT)
-2. **Status Display**: Separates "service state" from "detection capability" —
-   never shows "FAILED" when service is running
-3. **RX Messages**: `event_bus.py` → `websocket_server.py` → TUI live feed
-
-### RNS Socket Detection
-RNS uses abstract Unix domain sockets (`\0rns/{instance_name}`), not UDP port 37428.
-Use `check_rns_shared_instance()` (3-tier: Unix socket → TCP → UDP fallback).
-
-### Prevention
-- UI must always distinguish "service state" from "detection capability"
-- Use `check_rns_shared_instance()` for all rnsd checks (never raw UDP)
 
 ---
 
@@ -289,19 +272,6 @@ MeshAnchor status says "rnsd: RUNNING (shared instance available)" when rnsd is 
 - `check_process_running()` now verifies all pgrep hits via `/proc/cmdline`
 - Status display always distinguishes process detection from shared instance availability
 - `find_blocking_interfaces()` runs regardless of rnsd state for pre-startup diagnostics
-
----
-
-## Issue #33: MeshCore Connection Contract — ARCHIVED (2026-05-05)
-
-MeshCore radio opened only via `utils.meshcore_connection`. Long-running
-owner uses `acquire_for_connect(owner=...)` + `register_persistent`;
-short-lived consumers use `MeshCoreConnection()` context manager. Lint
-MF014 + `tests/test_regression_guards.py::TestMeshCoreConnectionContract`
-keep raw `MeshCore.create_serial`/`serial.Serial(...)` out of the tree.
-Supervisor IPC contract in `src/supervisor/protocol.py` (NDJSON, Unix
-socket at `/run/meshcore-radio/meshcore-radio.sock`) for cross-process
-consumers. **Full writeup**: `persistent_issues_archive.md` Issue #33.
 
 ---
 
@@ -772,28 +742,17 @@ of a multi-word node name.
 
 ## MeshCore handler never reconnected after a loop exception — persistent owner never dropped (2026-11-19)
 
-**Tell** (journal of the unit hosting the gateway bridge, looping at backoff):
+**Tell** (the bridge's journal, looping at backoff; messaging down until a restart):
 `acquire_for_connect: persistent owner 'gateway-bridge' already active — refusing second connect from 'gateway-bridge'`
-followed by `MeshCore connect aborted — could not acquire MESHCORE_CONNECTION_LOCK or persistent owner active`.
-MeshCore messaging is down and stays down until a process restart.
 
-**Cause**: after either `_async_run` loop-exception branch (`OSError`/`ConnectionError`
-→ `_handle_disconnection`, or the generic `except Exception`), the handler's OWN
-persistent-owner registration was never dropped, and `acquire_for_connect` refuses
-while ANY persistent owner is registered. The generic branch also left the session
-open; a fetch error after subscribing in `_connect` did too. Since `35dccd32`.
+**Cause**: after either `_async_run` loop-exception branch the handler's OWN
+persistent registration was never dropped, and `acquire_for_connect` refuses
+while ANY owner is registered. Since `35dccd32`.
 
-**Fixed** `6bc69b0e`: ONE `_teardown_session()` on all three end paths (close bounded
-5 s with a WARNING, `_meshcore=None`, subscriptions cleared, unregister ONLY if the
-registered link IS this session — identity, never the owner name); both branches emit
-the disconnected status; backoff success only after a 60 s stable session; advert
-heartbeat bounded across reconnects (no advert < interval after the last success, no
-attempt < interval/2 after the last attempt). Guard: `tests/test_meshcore_handler_teardown.py`
-(real `_connect`/`_async_run` + the REAL connection manager, red-test-first).
-Found by the CS-1 observer non-author review; 4 teardown review rounds by running.
-
-**Still open (need real meshcore_py)**: a close that swallows `CancelledError` still
-parks the loop holding the registration; a timed-out close leaves a zombie session
-whose callbacks can still fire; a dead link that never raises into the loop is never
-detected (both workers swallow command errors). MeshForge's twin handler has no
-persistent-owner manager and is not affected.
+**Fixed** `6bc69b0e` — one `_teardown_session()` on all three end paths (close
+bounded 5 s; unregister only if the link IS this session); 60 s stable-session
+backoff; advert heartbeat bounded across reconnects. Guard:
+`tests/test_meshcore_handler_teardown.py` (real `_connect`/`_async_run` + real
+connection manager). **Open** (need real meshcore_py): a close swallowing
+`CancelledError` still parks; a timed-out close leaves a zombie session; a dead
+link that never raises is never detected. MeshForge's twin is not affected.
