@@ -16,6 +16,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0-beta] - 2026-11-19
+
+182 commits since 0.3.0-beta (to `1ccf730f`). The theme: **a message either arrives or the
+operator is told why** — on every leg, in numbers, without leaving the app.
+Everything below is deployed on the canonical NOC; "field-validated" is claimed
+only where it says so.
+
+### Added
+- **Delivery truth per leg (BIC-2).** Delivery is counted per leg (MeshCore,
+  Meshtastic, RNS) over 15 min / 1 h / 24 h. The persistent queue and the direct
+  sends name the leg a message was for; a refused RNS ingress is recorded as
+  *refused*, not silence; every Mesh→RNS message ends *delivered* or *dropped*.
+- **RNS outage behaviour.** When RNS is down, Mesh→RNS messages wait (up to
+  24 h) instead of being counted as failures or lost; a partial fan-out retries
+  only the legs that failed.
+- **CS-1 observer (OFF by default).** The MeshCore companion's received on-air
+  packets (RX_LOG_DATA) go to the local MQTT broker in the meshcoretomqtt
+  packet shape, for a CoreScope analyzer. MeshCore > Daemon Control shows its
+  status as one line — `[OK]` / `[OFF]` / `[FAULT]` / `[UNKNOWN]` — and a
+  detail view. It reads UNKNOWN (and says why) whenever the daemon, the bridge
+  or the status file can't be trusted; `ok` means *queued*, not *stored*.
+- **Companion clock.** The MeshCore radio's clock is measured and shown; it is
+  synced only if you opt in.
+- **Known Blind Spots** page: what the fleet cannot see, with since-dates.
+- **MeshChatX** listen address is a setting (`MESHCHATX_HOST`), not a hand edit.
+
+### Fixed
+- **MeshCore reconnect:** a lost companion session is torn down one way, so the
+  handler reconnects; the advert heartbeat keeps its cadence across reconnects.
+- **Bridge correctness:** a private message never leaves on a MeshCore channel;
+  a Meshtastic DM is never fanned out to the LXMF broadcast list; an oversize
+  Meshtastic send is refused, never reported as sent; a DM gets a DM-sized byte
+  budget; a requeued channel message airs on its own slot or not at all; a
+  message lost to a full internal queue is counted and said.
+- **Fresh MeshCore-primary install (#151):** six silent blockers fixed;
+  meshtasticd is opt-in on a fresh box and never demoted on a re-run.
+- **systemd units:** one rule for every user-unit template — an update never
+  copies a placeholder over an installed unit.
+- **Bot replies** no longer miss MeshCore for ~10 min after a restart, and
+  are no longer answered twice.
+- **MQTT settings:** the TUI edits what you meant (intent), keeps a saved TLS
+  choice, and one writer at a time.
+- **Web:** the operator login no longer expires 30 days after pairing.
+
+### Security
+- The rnsd storage permission walk is symlink-safe, leaves hardlinks alone and
+  never widens a root-owned key.
+- RNS→MeshCore ingress allowlist (open until you declare a list).
+- Grafana removed (dashboards, TUI submenu, exporter endpoints).
+- RNS fork pin `rns 1.3.9+mf.0` / `lxmf 1.0.1+mf.14` (includes the rnsh
+  auth-bypass fix).
+
+### Known limits
+- Not yet validated: coverage maps with live GPS, sustained concurrent 3-way
+  traffic, the CS-1 observer switched ON (it needs CoreScope units first).
+
 ## [0.3.0-beta] - 2026-10-15
 
 ### Added

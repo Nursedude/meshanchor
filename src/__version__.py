@@ -6,9 +6,9 @@ Forked from MeshForge (https://github.com/Nursedude/meshforge)
 MeshAnchor is the MeshCore-primary sister project to MeshForge.
 """
 
-__version__ = "0.3.0-beta"
-__version_info__ = (0, 3, 0, 'beta')
-__release_date__ = "2026-10-15"
+__version__ = "0.4.0-beta"
+__version_info__ = (0, 4, 0, 'beta')
+__release_date__ = "2026-11-19"
 __app_name__ = "MeshAnchor"
 __app_description__ = "MeshCore Network Operations Center"
 __app_tagline__ = "Anchor. Bridge. Monitor."
@@ -18,6 +18,20 @@ __sister_project__ = "MeshForge (https://github.com/Nursedude/meshforge)"
 
 # Version history
 VERSION_HISTORY = [
+    {
+        "version": "0.4.0-beta",
+        "date": "2026-11-19",
+        "status": "beta",
+        "changes": [
+            "DELIVERY TRUTH (BIC-2): per-leg delivery counts (MeshCore, Meshtastic, RNS) over 15 m / 1 h / 24 h; the persistent queue and the direct sends name their leg; a refused RNS ingress is recorded as refused, not silence; every Mesh->RNS message ends delivered or dropped; an RNS outage defers Mesh->RNS rows for up to 24 h instead of losing them.",
+            "BRIDGE CORRECTNESS: a private message never leaves on a MeshCore channel; a Meshtastic DM is never fanned out to the LXMF list; an oversize send is refused, never reported sent; a channel row airs on its resolved slot or not at all; every loss is named and counted.",
+            "MESHCORE: a lost companion session is torn down one way so the handler reconnects (advert cadence kept across reconnects); the companion radio's clock is measured and synced only on opt-in.",
+            "CS-1 OBSERVER (OFF by default): companion RX_LOG_DATA to the local MQTT broker in the meshcoretomqtt packet shape, for CoreScope. Its witness shows in the TUI (MeshCore > Daemon Control) as one line: [OK]/[OFF]/[FAULT]/[UNKNOWN], never healthy when blind; 'ok' means queued, not stored.",
+            "INSTALL: six silent blockers on a fresh MeshCore-primary install fixed (#151); meshtasticd is opt-in on a fresh box; one rule for every user-unit template; MeshChatX installer follows upstream to GitHub and its listen address is a setting.",
+            "SECURITY: the rnsd storage walk is symlink-safe and never widens a root-owned key; an RNS->MeshCore ingress allowlist (open until a list is declared); Grafana removed; rns fork pin 1.3.9+mf.0 (rnsh auth-bypass fix).",
+            "FLEET: Known Blind Spots registry; one fleet-host-list implementation that errors on an unreadable list instead of falling through; MQTT settings edited as intent from the TUI.",
+        ],
+    },
     {
         "version": "0.3.0-beta",
         "date": "2026-10-15",

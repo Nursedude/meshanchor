@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.3.0--beta-blue.svg" alt="Version"></a>
+  <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/version-0.4.0--beta-blue.svg" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-yellow.svg" alt="Python"></a>
   <a href="https://github.com/Nursedude/meshanchor"><img src="https://img.shields.io/badge/tests-passing-blue.svg" alt="Tests"></a>
@@ -128,7 +128,7 @@ so a checkout anywhere else is not the code that gets installed.
 
 ---
 
-## What Works (v0.3.0-beta)
+## What Works (v0.4.0-beta)
 
 Each line carries its status from [docs/capabilities.md](docs/capabilities.md)
 (**Field-Validated** = run on real hardware; **Inherited** = field-tested in
@@ -151,6 +151,19 @@ MeshForge, untested here; **Code-Ready** = implemented, awaiting hardware).
 - **AI diagnostics** *(Inherited)* — offline knowledge base; optional AI assist
   with your own Claude API key (in-TUI assistant) or subscription (Claude Code
   in the repo) — [how](docs/capabilities.md#ai-assist--optional-and-yours-to-configure)
+
+**New in v0.4.0-beta** — all *Code-Ready*: deployed on the canonical NOC, not yet
+field-validated as described ([CHANGELOG](CHANGELOG.md#040-beta---2026-11-19)):
+
+- **Delivery truth per leg** — per-leg delivery counts (MeshCore / Meshtastic /
+  RNS); every Mesh→RNS message ends delivered or dropped; an RNS outage defers
+  those messages (up to 24 h) instead of losing them
+- **Bridge correctness** — private messages never leave on a channel; oversize
+  sends are refused, never reported as sent; every loss is named
+- **MeshCore reconnect** — a lost companion session is torn down cleanly and the
+  handler reconnects
+- **CS-1 observer** *(OFF by default)* — on-air packets to the local MQTT broker
+  for CoreScope; its status line in the TUI never reads healthy when it can't see
 
 The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->393<!--/STAT--> test files.
 
