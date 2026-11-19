@@ -769,3 +769,31 @@ from 2.3.7 (inert leg); channel sends ignore the radio's OK/ERROR and nothing
 chunks by bytes for MeshCore (a 189-byte emoji reply is logged "re-emitted"
 and never airs — 12:12 HST leaderboard); `[MC:<label>]` lifts the LAST token
 of a multi-word node name.
+
+## MeshCore handler never reconnected after a loop exception — persistent owner never dropped (2026-11-19)
+
+**Tell** (journal of the unit hosting the gateway bridge, looping at backoff):
+`acquire_for_connect: persistent owner 'gateway-bridge' already active — refusing second connect from 'gateway-bridge'`
+followed by `MeshCore connect aborted — could not acquire MESHCORE_CONNECTION_LOCK or persistent owner active`.
+MeshCore messaging is down and stays down until a process restart.
+
+**Cause**: after either `_async_run` loop-exception branch (`OSError`/`ConnectionError`
+→ `_handle_disconnection`, or the generic `except Exception`), the handler's OWN
+persistent-owner registration was never dropped, and `acquire_for_connect` refuses
+while ANY persistent owner is registered. The generic branch also left the session
+open; a fetch error after subscribing in `_connect` did too. Since `35dccd32`.
+
+**Fixed** `6bc69b0e`: ONE `_teardown_session()` on all three end paths (close bounded
+5 s with a WARNING, `_meshcore=None`, subscriptions cleared, unregister ONLY if the
+registered link IS this session — identity, never the owner name); both branches emit
+the disconnected status; backoff success only after a 60 s stable session; advert
+heartbeat bounded across reconnects (no advert < interval after the last success, no
+attempt < interval/2 after the last attempt). Guard: `tests/test_meshcore_handler_teardown.py`
+(real `_connect`/`_async_run` + the REAL connection manager, red-test-first).
+Found by the CS-1 observer non-author review; 4 teardown review rounds by running.
+
+**Still open (need real meshcore_py)**: a close that swallows `CancelledError` still
+parks the loop holding the registration; a timed-out close leaves a zombie session
+whose callbacks can still fire; a dead link that never raises into the loop is never
+detected (both workers swallow command errors). MeshForge's twin handler has no
+persistent-owner manager and is not affected.
