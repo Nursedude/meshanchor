@@ -187,7 +187,10 @@ def _fetch_box(alias: str, base_url: str, method: str,
             if sp_slo is None and isinstance(spool.get("radio_probe"), dict):
                 rp = spool["radio_probe"]
                 connected, mode = radio_connection_from_probe(
-                    bool(rp.get("tcp_listening")), bool(rp.get("usb_present")))
+                    bool(rp.get("tcp_listening")), bool(rp.get("usb_present")),
+                    # NOT bool(): None (unknown/old writer) must stay unknown;
+                    # the shared function counts only a real True as held.
+                    rp.get("usb_held"))
                 sp_slo = {"radio": {"connected": connected, "mode": mode}}
             if sp_status is not None or sp_slo is not None:
                 status, slo, error = sp_status, sp_slo, None

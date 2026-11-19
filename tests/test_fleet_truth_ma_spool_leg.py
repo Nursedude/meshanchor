@@ -83,6 +83,25 @@ def test_a_map_less_peer_gets_its_blocks_from_raw_state(spool):
     assert snap["slo"] == {"radio": {"connected": True, "mode": "tcp"}}
 
 
+def test_a_held_usb_radio_reads_connected_serial(spool):
+    # meshanchor-server's own shape (measured 2026-11-19): no :4403, the RAK
+    # on ttyACM0 held by the MA daemon. Presence alone would read unverified;
+    # the holder is what makes it a radio (MF radio-probe arc, MA port).
+    spool("meshanchor-server",
+          radio_probe={"tcp_listening": False, "usb_present": True, "usb_held": True})
+    snap = ftc._fetch_box("meshanchor-server", _closed_base(), "config", "meshanchor-server")
+    assert snap["slo"] == {"radio": {"connected": True, "mode": "serial"}}
+
+
+def test_an_unheld_or_unknown_usb_device_reads_unverified(spool):
+    for held, mode in ((False, "usb_unheld"), (None, "usb_holder_unknown"),
+                       ("true", "usb_holder_unknown")):
+        spool("lab", radio_probe={"tcp_listening": False, "usb_present": True,
+                                  "usb_held": held})
+        snap = ftc._fetch_box("lab", _closed_base(), "config", "lab")
+        assert snap["slo"] == {"radio": {"connected": None, "mode": mode}}, held
+
+
 def test_a_stale_raw_watchdog_reads_not_ok(spool):
     spool("moc3", raw_watchdog={"ts": time.time() - 3600, "ok": True})
     snap = ftc._fetch_box("moc3", _closed_base(), "config", "moc3")
