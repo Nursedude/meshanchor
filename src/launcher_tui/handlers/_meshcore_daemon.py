@@ -34,9 +34,12 @@ class MeshCoreDaemonMixin:
 
     def _meshcore_daemon_control(self):
         while True:
-            status_line = self._daemon_status_summary()
+            unit = self._daemon_unit_state()
+            status_line = (f"{self.DAEMON_SERVICE}: {unit}\n"
+                           f"{self._observer_status_summary(unit_state=unit)}")
             choices = [
                 ("status", "Service Status      systemctl is-active + show"),
+                ("observer", "CS-1 Observer       witness (daemon_status.json)"),
                 ("start", "Start               sudo systemctl start"),
                 ("stop", "Stop                sudo systemctl stop (kills chat)"),
                 ("restart", "Restart             sudo systemctl restart"),
@@ -53,6 +56,7 @@ class MeshCoreDaemonMixin:
                 return
             dispatch = {
                 "status": self._daemon_show_status,
+                "observer": self._daemon_show_observer,
                 "start": self._daemon_start,
                 "stop": self._daemon_stop,
                 "restart": self._daemon_restart,
@@ -68,6 +72,10 @@ class MeshCoreDaemonMixin:
     def _daemon_status_summary(self) -> str:
         """One-line status for the menu subtitle. is-active is fast and
         works without sudo, so we use it instead of a full status dump."""
+        return f"{self.DAEMON_SERVICE}: {self._daemon_unit_state()}"
+
+    def _daemon_unit_state(self) -> str:
+        """The literal is-active word (also the observer line's unit fact)."""
         import subprocess
         try:
             # Raw is-active (allowlisted in TestServiceCheckContract): this
@@ -80,7 +88,59 @@ class MeshCoreDaemonMixin:
             state = result.stdout.strip() or result.stderr.strip() or "unknown"
         except Exception as e:
             state = f"error: {e}"
-        return f"{self.DAEMON_SERVICE}: {state}"
+        return state
+
+    # CS-1 observer witness: the daemon exports observer_snapshot() into
+    # daemon_status.json (gateway_bridge.meshcore_observer); this is its
+    # one reader in the TUI. Degraded reads say UNKNOWN, never healthy.
+    _OBSERVER_TAGS = {"ok": "OK", "off": "OFF", "bad": "FAULT", "unknown": "UNKNOWN"}
+
+    def _observer_status_summary(self, unit_state: str = None) -> str:
+        try:
+            from gateway.meshcore_observer_status import observer_status_line
+            tone, line = observer_status_line(unit_state=unit_state)
+        except Exception as e:
+            tone, line = "unknown", f"UNKNOWN — {type(e).__name__}: {e}"
+        tag = self._OBSERVER_TAGS.get(tone, "UNKNOWN")
+        # One line: daemon-supplied text (an exception message) may carry
+        # newlines, which would push the whiptail menu (review r3).
+        out = " ".join(f"CS-1 observer [{tag}]: {line}".split())
+        try:
+            from gateway.meshcore_observer_status import SUBTITLE_MAX as cap
+        except Exception:
+            cap = 76
+        return out if len(out) <= cap else out[:cap - 1] + "…"
+
+    def _daemon_show_observer(self):
+        import json
+        clear_screen()
+        print("=== CS-1 MeshCore observer ===\n")
+        unit = self._daemon_unit_state()
+        try:
+            from gateway.meshcore_observer_status import read_observer
+            view = read_observer(unit_state=unit)
+            tag = self._OBSERVER_TAGS.get(view.tone, "UNKNOWN")
+            line, raw, why, ctx = view.line, view.raw, view.raw_reason, view.context
+        except Exception as e:
+            tag, line, raw, why, ctx = "UNKNOWN", f"UNKNOWN — {type(e).__name__}: {e}", \
+                None, f"{type(e).__name__}: {e}", {}
+        print(f"  CS-1 observer [{tag}]: {line}\n")
+        # The facts the verdict was derived from — the same single read.
+        age = ctx.get("file_age_s")
+        print(f"  status file age : {'?' if age is None else f'{int(age)}s'}")
+        print(f"  daemon status   : {ctx.get('daemon_status')!r}")
+        print(f"  gateway bridge  : running={ctx.get('bridge_running')!r} "
+              f"alive={ctx.get('bridge_alive')!r}")
+        print(f"  systemd unit    : {ctx.get('unit_state', unit)!r}\n")
+        if raw is None:
+            print(f"  (no exported witness: {why})")
+        else:
+            print("  exported witness, as written (judge it by the facts above):")
+            print(json.dumps(raw, indent=2, sort_keys=True, default=str))
+        print("\n  Turn on: meshcore.observer_enabled = true in the gateway config,"
+              "\n  then restart meshanchor-daemon. 'ok' = queued to the local broker,"
+              "\n  not proof that CoreScope stored the packet.")
+        self.ctx.wait_for_enter()
 
     def _daemon_show_status(self):
         import subprocess

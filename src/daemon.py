@@ -1068,6 +1068,11 @@ class DaemonController:
                 "version": __version__,
                 "profile": self._profile_name,
                 "status": status,
+                # Readers derive staleness from the writer's own cadence
+                # (CS-1 observer export; one constant, two consumers).
+                "status_file_interval": (
+                    self._config.status_file_interval if self._config else 30
+                ),
             },
             "services": (
                 self._registry.get_all_status() if self._registry else {}

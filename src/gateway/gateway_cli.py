@@ -15,6 +15,8 @@ Usage:
 import logging
 from typing import Optional
 
+from .meshcore_observer_status import STATUS_KEY, observer_status_for
+
 logger = logging.getLogger(__name__)
 
 _active_bridge = None
@@ -116,6 +118,7 @@ def get_gateway_stats() -> dict:
             'messages_rns_to_mesh': 0,
             'errors': 0,
             'bounced': 0,
+            STATUS_KEY: observer_status_for(None),
         }
 
     try:
@@ -138,6 +141,12 @@ def get_gateway_stats() -> dict:
         # Include delivery confirmation stats
         if hasattr(_active_bridge, 'delivery_tracker'):
             result['delivery'] = _active_bridge.delivery_tracker.get_stats()
+        # CS-1 witness export: derived from the live handler at write time.
+        # A stopped bridge exports no snapshot: its sticky last outcome would
+        # read as a live 'ok' (review r1 I1).
+        result[STATUS_KEY] = (observer_status_for(_active_bridge)
+                              if _active_bridge._running is True
+                              else observer_status_for(None))
         return result
     except Exception as e:
         logger.error(f"Error getting gateway stats: {e}")
@@ -150,6 +159,8 @@ def get_gateway_stats() -> dict:
             'messages_rns_to_mesh': 0,
             'errors': 0,
             'bounced': 0,
+            STATUS_KEY: {'state': 'unobservable',
+                         'reason': f'gateway status raised: {type(e).__name__}: {e}'},
         }
 
 
