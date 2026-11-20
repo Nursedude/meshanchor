@@ -165,7 +165,7 @@ field-validated as described ([CHANGELOG](CHANGELOG.md#040-beta---2026-11-19)):
 - **CS-1 observer** *(OFF by default)* — on-air packets to the local MQTT broker
   for CoreScope; its status line in the TUI never reads healthy when it can't see
 
-The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->396<!--/STAT--> test files.
+The test suite (live count: `python3 -m pytest tests/ --co -q`) spans <!--STAT:testfiles-->397<!--/STAT--> test files.
 
 **Full inventory, with proven vs. unvalidated called out:
 [docs/capabilities.md](docs/capabilities.md)**
