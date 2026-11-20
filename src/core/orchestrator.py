@@ -45,7 +45,10 @@ from utils.service_check import (
     _sudo_cmd,
     _sudo_write,
     ServiceState as _CheckState,
+    unit_boot_history,
 )
+
+from core.startup_hold import hold_decision, hold_summary
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -165,6 +168,8 @@ class ServiceOrchestrator:
         # wrong hardware config.  Should return True if user selected a new
         # config and startup should be retried.
         self._config_recovery_cb: Optional[Callable[[], bool]] = None
+        self.held_services: Dict[str, str] = {}
+        self.held_by_dependency: Dict[str, str] = {}
 
         # Load configuration
         self._load_config()
@@ -1041,12 +1046,15 @@ class ServiceOrchestrator:
     # Orchestration
     # ─────────────────────────────────────────────────────────────
 
-    def startup(self, graceful: bool = False) -> bool:
+    def startup(self, graceful: bool = False,
+                hold_operator_stops: bool = False) -> bool:
         """
         Start all managed services in correct order.
 
         Args:
             graceful: If True, continue even when services fail (for no-radio scenarios)
+            hold_operator_stops: UI-launch mode — hold what was stopped this
+                boot (core.startup_hold); ``meshanchor-noc --start`` leaves it False.
 
         Returns:
             True if all required services are running and healthy (or graceful mode)
@@ -1076,12 +1084,17 @@ class ServiceOrchestrator:
 
         success = True
         failed_services = []
+        self.held_services, self.held_by_dependency = {}, {}
 
         for service_name in self.STARTUP_ORDER:
             config = self.SERVICES.get(service_name)
             if not config:
                 continue
 
+            if hold_operator_stops and hold_decision(
+                    service_name, config.systemd_name, config.dependencies,
+                    self.held_services, self.held_by_dependency, unit_boot_history):
+                continue
             # Skip if dependency already failed (don't cascade)
             dep_failed = False
             for dep in config.dependencies:
@@ -1112,8 +1125,9 @@ class ServiceOrchestrator:
                     logger.warning(f"Optional service {service_name} failed to start")
 
         if success:
-            logger.info("═══ All services started ═══")
-            self._emit('all_ready')
+            if not hold_summary(self.held_services, self.held_by_dependency):
+                logger.info("═══ All services started ═══")
+                self._emit('all_ready')
         elif graceful:
             logger.warning("═══ Startup completed with failures (graceful mode) ═══")
             if failed_services:

@@ -35,7 +35,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
 from utils.boundary_timing import timed_boundary
@@ -1080,6 +1080,75 @@ def _unit_verb_argv(verb: str, unit: str, user: bool = False) -> List[str]:
     if user:
         return _operator_user_prefix() + ['systemctl', '--user', verb, unit]
     return _sudo_cmd(['systemctl', verb, unit])
+
+
+#: Closed vocabulary of :func:`unit_boot_history` — consumers switch on it.
+BOOT_HISTORY_VERDICTS = (
+    'active', 'stopping', 'stopped_this_boot', 'not_started_this_boot',
+    'failed', 'absent', 'unknown',
+)
+
+
+def unit_boot_history(
+    unit: str, user: bool = False, timeout: int = 5
+) -> Tuple[str, Optional[str]]:
+    """What has this unit done THIS BOOT? -> ``(verdict, inactive_since)``.
+
+    Separates an operator's stop from a unit that never came up, using
+    systemd's own record (MEASURED 2026-11-19 on the manager box): a unit that was
+    up this boot and is now ``inactive`` keeps a non-zero
+    ``ActiveEnterTimestampMonotonic``; one that never came up reads ``0``.
+    The monotonic stamp is per-boot, so it is immune to the RTC-less wall
+    clock (honest_failure_modes #6); the wall-clock ``inactive_since`` is for
+    DISPLAY only.
+
+    Verdicts (:data:`BOOT_HISTORY_VERDICTS`):
+      ``active`` (incl. activating/reloading), ``stopping`` (deactivating —
+      a stop job in flight, NOT active: a UI launch must not treat a daemon
+      going down as up), ``stopped_this_boot`` (inactive, was up this boot — a stop or a clean
+      exit), ``not_started_this_boot``, ``failed``, ``absent`` (no unit file),
+      ``unknown`` (query failed / unparseable — NEVER folded into inactive).
+
+    Read-only ``systemctl show`` (never sudo), bounded by ``timeout``.
+    """
+    # Read-only: never sudo. User scope routes to the operator's manager.
+    argv = (_operator_user_prefix() + ['systemctl', '--user']) if user \
+        else ['systemctl']
+    argv += ['show', unit, '--property=LoadState,ActiveState,'
+             'ActiveEnterTimestampMonotonic,InactiveEnterTimestamp']
+    try:
+        with timed_boundary("systemd.show", target=unit):
+            r = subprocess.run(argv, capture_output=True, text=True,
+                               timeout=timeout)
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug("unit %s boot history unreadable: %s", unit, e)
+        return 'unknown', None
+    if r.returncode != 0:
+        return 'unknown', None
+    props: Dict[str, str] = {}
+    for line in r.stdout.splitlines():
+        key, sep, val = line.partition('=')
+        if sep:
+            props[key.strip()] = val.strip()
+    since = props.get('InactiveEnterTimestamp') or None
+    if props.get('LoadState') == 'not-found':
+        return 'absent', None
+    state = props.get('ActiveState')
+    if state in ('active', 'activating', 'reloading'):
+        return 'active', None
+    if state == 'deactivating':
+        return 'stopping', None
+    if state == 'failed':
+        return 'failed', since
+    if state != 'inactive':
+        return 'unknown', None
+    try:
+        entered = int(props.get('ActiveEnterTimestampMonotonic', ''))
+    except ValueError:
+        return 'unknown', None
+    if entered > 0:
+        return 'stopped_this_boot', since
+    return 'not_started_this_boot', None
 
 
 def is_user_unit_active(unit: str, timeout: int = 5) -> Optional[bool]:
