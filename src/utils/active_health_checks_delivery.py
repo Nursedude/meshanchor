@@ -20,6 +20,7 @@ import time
 from typing import Any, List, Optional
 
 from utils.active_health_probe_core import HealthResult
+from utils.live_store_guard import LiveStoreRefused
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ def check_queue_backlog(
         try:
             from gateway.message_queue import PersistentMessageQueue
             stats = PersistentMessageQueue().get_stats()
+        except LiveStoreRefused:  # session shell: refused the live queue
+            return HealthResult(healthy=True, reason="queue_stats_refused_session")
         except Exception:
             return HealthResult(healthy=True, reason="queue_stats_unavailable")
     try:

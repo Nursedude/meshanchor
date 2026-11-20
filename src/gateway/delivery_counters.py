@@ -67,6 +67,7 @@ from gateway import delivery_legs
 from utils.db_helpers import connect_tuned
 from utils.delivery_labels import canonical_protocol, lane_of
 from utils.paths import get_real_user_home
+from utils.live_store_guard import refuse_live_store
 
 
 logger = logging.getLogger(__name__)
@@ -436,6 +437,9 @@ class DeliveryCounters:
         run_preflight: bool = True,
     ) -> None:
         self._db_path = db_path or default_db_path()
+        # A Claude-session driver outside pytest must not write the live DB
+        # (MF 10-17: ~1,000 fabricated rows read as conf_rate 0.0 for 10 days).
+        refuse_live_store(self._db_path, "MESHANCHOR_DELIVERY_COUNTERS_DB")
         self._ring_cap = int(ring_cap)
         self._lock = threading.Lock()
         # Write-path health (Issue #63 / reliability backlog #2).

@@ -21,6 +21,11 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'launcher_tui'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# utils.live_store_guard: this suite isolates its own stores (the session
+# fixtures below), so the session-driver guard stands down — set at IMPORT so
+# collection-time constructions are covered too.
+os.environ["LIVE_STORE_GUARD_UNDER_PYTEST"] = "1"
+
 # Detect CI environment
 CI = os.environ.get('CI', 'false').lower() == 'true'
 MESHANCHOR_CI = os.environ.get('MESHANCHOR_CI', 'false').lower() == 'true'

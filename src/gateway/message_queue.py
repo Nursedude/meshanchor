@@ -24,6 +24,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any
 from contextlib import contextmanager
@@ -31,6 +32,7 @@ from contextlib import contextmanager
 # Import centralized path utility for sudo compatibility
 from utils.db_helpers import connect_tuned
 from utils.paths import get_real_user_home
+from utils.live_store_guard import refuse_live_store
 from utils.timeouts import MESSAGE_STALE as _MESSAGE_STALE_TIMEOUT
 
 # UPDATE ... RETURNING needs SQLite >= 3.35; cleanup_stale falls back to
@@ -147,10 +149,17 @@ class PersistentMessageQueue(MessageQueueLifecycleMixin, MessageQueueOutageMixin
             retry_policy: Optional RetryPolicy for intelligent retry decisions.
                          If not provided, uses default RETRY_DELAYS behavior.
         """
-        if db_path is None:
-            config_dir = get_real_user_home() / ".config" / "meshanchor"
-            config_dir.mkdir(parents=True, exist_ok=True)
-            db_path = str(config_dir / "message_queue.db")
+        default = db_path is None
+        if default:
+            # MESHANCHOR_MESSAGE_QUEUE_DB: the scratch knob (mirrors
+            # MESHANCHOR_DELIVERY_COUNTERS_DB) a driver points at a tmp file.
+            db_path = os.environ.get("MESHANCHOR_MESSAGE_QUEUE_DB") or str(
+                get_real_user_home() / ".config" / "meshanchor" / "message_queue.db")
+        # A Claude-session driver outside pytest must not write the live queue
+        # (its lifecycle events flow into delivery_counters too).
+        refuse_live_store(db_path, "MESHANCHOR_MESSAGE_QUEUE_DB")
+        if default:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._db_path = db_path
         self._max_queue_size = max_queue_size
