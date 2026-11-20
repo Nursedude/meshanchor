@@ -328,9 +328,15 @@ class TestMeshforgeMapsHandler:
         ctx = MagicMock()
         ctx.wait_for_enter = MagicMock()
         h.ctx = ctx
+        # webbrowser.get() is patched too (2026-11-20, strace-observed): the real
+        # one probes the desktop — xdg-settings -> xdg-mime -> dbus-send x2 —
+        # so the test depended on the box's session bus (the host fence refused it).
         with patch(
             "launcher_tui.handlers.meshforge_maps.webbrowser.open"
         ) as mock_open, patch(
+            "launcher_tui.handlers.meshforge_maps.webbrowser.get",
+            return_value=MagicMock(name="browser"),
+        ), patch(
             "launcher_tui.handlers.meshforge_maps.clear_screen", create=True
         ):
             h._open_browser()
