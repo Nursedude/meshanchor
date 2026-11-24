@@ -64,7 +64,14 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Kill job if tests hang
+    # 15, not 10 (raised 2026-11-24, operator). Measured: the last 24 test jobs
+    # (12 runs x 3.10/3.11) ran 7.3-9.6 min; run 45453445924 attempt 1 was
+    # CANCELLED at 10m05s on a YAML-comment-only commit and its re-run passed
+    # in 9m14s — a red that meant "slow", not "broken". Clear of normal
+    # runtime, not a notch above it (MeshForge's ci.yml carries the same
+    # reasoning for its 45). The HANG guard is the per-test `--timeout=30`
+    # below, which names the test; this cap is only the backstop.
+    timeout-minutes: 15  # backstop; per-test --timeout=30 is the hang guard
     permissions:
       contents: read
     strategy:
