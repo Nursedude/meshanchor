@@ -60,6 +60,17 @@ roles:
                                      # reads inert, never dark.
       meshtasticd: disabled          # MeshCore-primary; meshtasticd egress-only/off
       meshanchor-gateway: disabled   # RF bridge deliberately off on the NOC
+    # 🛑 DELIBERATE ABSENCE — meshchatx (operator words 2026-11-23 00:09 HST:
+    # "stop and disable it"; Sideband on Android covers the use). The
+    # `meshchatx` USER unit (systemd --user, run via
+    # ~/.config/meshanchor/meshchatx_wrapper.sh) is STOPPED + DISABLED on this
+    # role's box. Do NOT restore, refresh or "fix" it — MeshForge's
+    # `install_meshchatx.sh --refresh` included. Reverse ONLY on operator words:
+    #   systemctl --user enable --now meshchatx
+    # A comment, not a key: `services` is SYSTEM units (converged by --apply)
+    # and `user_timers` observes timers only — no block here observes a user
+    # SERVICE yet, so a key would read as checked when nothing checks it.
+    # Twin note: MeshForge docs/fleet_roles.yaml (meshanchor-noc), 2026-11-24.
     # `systemd --user` timers (see the note below the roles). DECLARE-AND-OBSERVE:
     # role_drift reports a mismatch, `--apply` never touches a user unit.
     # Declared from a live survey cross-checked against `systemctl --user
