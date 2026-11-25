@@ -476,3 +476,30 @@ def test_logout_clears_and_never_renews(server, store):
     assert set_cookie and "Max-Age=0" in set_cookie
     assert cookie not in set_cookie, "logout must not hand the token back"
 
+
+
+# ── LOGIN-UX (4), 11-24 (MeshForge twin a3bccf0f): a phone keyboard opens in
+# CAPITALS for the code. MEASURED at the lab 11-24 (code minted 14:05:28 HST
+# by `date`): pairing from an iPhone, the operator read the lowercase keyboard
+# as "can't do lower case" — the server always took any case
+# (``_normalize_code``), the page never said so to the keyboard.
+
+def test_code_field_asks_the_keyboard_for_capitals_and_no_autocorrect(server):
+    srv, _ = server
+    page = _req(srv, "GET", "/login")[1].decode("utf-8")
+    tag = page[page.index('<input id="c"'):]
+    tag = tag[:tag.index(">") + 1]
+    for attr in ('autocapitalize="characters"', 'autocorrect="off"', 'spellcheck="false"'):
+        assert attr in tag, (attr, tag)
+
+
+@pytest.mark.parametrize("shape", [str.lower, lambda c: f"{c[:4]}-{c[4:]}".lower(),
+                                   lambda c: f" {c[:4]} {c[4:]} "],
+                         ids=["lower", "lower-dashed", "spaced"])
+def test_a_code_in_any_case_or_separator_logs_in(server, store, shape):
+    """The other half: what a phone keyboard sends anyway still works."""
+    srv, _ = server
+    code = shape(store.start_pairing())
+    status, body, _ = _req(srv, "POST", "/login", json.dumps({"code": code}),
+                           dict(JSON, Origin=_origin(srv)))
+    assert status == 200, (code, body)
