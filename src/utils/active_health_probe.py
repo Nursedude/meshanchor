@@ -784,8 +784,18 @@ def create_gateway_health_probe(
         # Resolve both knobs NOW so an ignored value is witnessed at
         # startup, not first at the next rnstatus timeout — mid-incident
         # (review 2026-10-28). Still re-read per call, so a retune applies.
-        _ahp_core._rpc_confirm_ticks()
+        ticks = _ahp_core._rpc_confirm_ticks()
         _ahp_core._rnstatus_slow_factor()
+        if ticks > 1 and fails > 1:
+            # one debounce layer per pipeline (active_health_probe_core):
+            # this framework already needs `fails` failing checks, so the
+            # env knob STACKS a second layer — say the real-wedge latency
+            logger.warning(
+                "rnsd_rpc: %s=%d stacks on fails=%d — a real RPC wedge now "
+                "takes %d checks (~%d s) to read UNHEALTHY; raise the knob "
+                "only on a probe built with fails=1",
+                _RPC_CONFIRM_TICKS_ENV, ticks, fails, ticks * fails,
+                ticks * fails * interval)
         probe.register_check(
             "rnsd_interface",
             lambda: probe.check_rns_interface_down_peer_reachable(),

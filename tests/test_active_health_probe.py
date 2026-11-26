@@ -1233,3 +1233,39 @@ class TestUserTimerSilenceNeedsAWorkingJournal:
             oks=[], coverage=False)
         assert res.healthy is False
         assert "t.service" in res.reason
+
+
+# ── deferred watchdog-knob-witness-residue (c), 2026-11-26 ─────────────────
+# One debounce layer per pipeline (active_health_probe_core comment): raising
+# MESHANCHOR_RNS_RPC_CONFIRM_TICKS above 1 on a probe built with fails > 1
+# STACKS two debounces, so a real rnsd-RPC wedge takes fails x ticks checks to
+# surface. Building that probe must say so, once, at construction.
+def _stacked_probe(monkeypatch, caplog, ticks, fails):
+    import logging
+    from types import SimpleNamespace
+    from utils import active_health_probe as ahp
+    from utils import active_health_probe_core as core
+    core._rejected_knobs.clear()
+    if ticks is None:
+        monkeypatch.delenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", raising=False)
+    else:
+        monkeypatch.setenv("MESHANCHOR_RNS_RPC_CONFIRM_TICKS", ticks)
+    profile = SimpleNamespace(required_services=["rnsd", "mosquitto"],
+                              optional_services=["meshtasticd"], feature_flags={})
+    with patch.object(ahp, '_unmanaged_services', return_value=set()), \
+         patch("utils.profile_services._active_profile", return_value=profile), \
+         caplog.at_level(logging.WARNING):
+        ahp.create_gateway_health_probe(interval=30, fails=fails)
+    core._rejected_knobs.clear()
+    return [r.getMessage() for r in caplog.records if "stack" in r.getMessage()]
+
+
+def test_confirm_ticks_stacked_on_fails_warns_with_the_latency(monkeypatch, caplog):
+    msgs = _stacked_probe(monkeypatch, caplog, "3", 3)
+    assert len(msgs) == 1
+    assert "9 checks" in msgs[0] and "270 s" in msgs[0]
+
+
+@pytest.mark.parametrize("ticks, fails", [("3", 1), ("1", 3), (None, 3)])
+def test_one_debounce_layer_is_silent(monkeypatch, caplog, ticks, fails):
+    assert _stacked_probe(monkeypatch, caplog, ticks, fails) == []
