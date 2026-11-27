@@ -546,7 +546,15 @@ class MQTTBridgeHandler(BaseMessageHandler):
         from .rns_bridge import BridgedMessage
         from .bridge_health import MessageOrigin
 
+        # The ORIGINATOR from the wire `from` (MF 9554f06 class; one reader:
+        # wire_ids). `sender` is the radio that UPLINKED it -- on a localhost
+        # broker always this box's own radio. With no usable `from`: a valid
+        # `sender` (normalised lower-case `!xxxxxxxx`), else the raw `sender`
+        # as before (MA has no UNKNOWN_ORIGIN) -- coerced to str, since a
+        # non-str one later hits `source_id[-4:]` (review 11-26 nit 3).
         sender = data.get('sender', '')
+        from_id = mqtt_json_origin(
+            data, sender if isinstance(sender, str) else '')
         to_num = data.get('to', 0)
         payload = data.get('payload', {})
         text = payload.get('text', '') if isinstance(payload, dict) else str(payload)
@@ -572,7 +580,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
 
         msg = BridgedMessage(
             source_network="meshtastic",
-            source_id=sender,
+            source_id=from_id,
             destination_id=to_id,
             content=text,
             is_broadcast=is_broadcast,
@@ -591,7 +599,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
             from commands import messaging
             dest = None if is_broadcast else to_id
             messaging.store_incoming(
-                from_id=sender,
+                from_id=from_id,
                 content=text,
                 network="meshtastic",
                 to_id=dest,
@@ -603,7 +611,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
         # Queue for bridging if routing rules allow
         if self._message_queue is not None:
             if self._should_bridge and not self._should_bridge(msg):
-                logger.debug(f"Message from {sender} blocked by routing rules")
+                logger.debug(f"Message from {from_id} blocked by routing rules")
             else:
                 try:
                     self._message_queue.put_nowait(msg)
@@ -631,7 +639,7 @@ class MQTTBridgeHandler(BaseMessageHandler):
             emit_message(
                 direction='rx',
                 content=text,
-                node_id=sender,
+                node_id=from_id,   # the originator, as queue + store
                 channel=channel,
                 network='meshtastic',
                 raw_data={

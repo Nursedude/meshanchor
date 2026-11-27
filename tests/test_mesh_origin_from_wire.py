@@ -14,9 +14,9 @@ node-DB string a neighbour can set (``user.id``), so it is a fallback only when
 ``from`` is absent, and only as ``'!'`` + 8 hex. ``gateway/wire_ids.py`` is
 byte-identical with MeshForge's.
 
-NOT ported here (own row): the MQTT bridge handler's TEXT path still
-attributes to ``sender`` (the uplinker) — MeshForge's older 9554f06 change,
-which MeshAnchor never got and which bbae6ee8 built on.
+The MQTT bridge handler's TEXT path (MeshForge's older 9554f06 class, which
+bbae6ee8 built on) followed in a second commit the same day — see
+``TestMqttBridgeHandlerTextPath``.
 """
 import json
 import threading
@@ -273,3 +273,57 @@ class TestMeshToRnsHandler:
         pkt["fromId"] = "!0000beef"            # neighbour-set user.id
         self._receive(handler, pkt)
         assert handler._message_queue.get_nowait().source_id == "!a2e95ba4"
+
+
+# ── MQTT bridge handler TEXT path (MF 9554f06 class, twin-ported 2026-11-26) ─
+
+class TestMqttBridgeHandlerTextPath:
+    """MA's ``_bridge_text_message`` attributed every MQTT-json text to
+    ``sender`` — the radio that UPLINKED it, on a localhost broker always this
+    box's own radio — so RNS, the store and the live feed all named the
+    gateway, never the node that spoke. The originator is the wire ``from``.
+    With no usable ``from``: a valid ``sender`` (normalised), else the raw
+    string ``sender`` as before (MA has no UNKNOWN_ORIGIN sentinel); a
+    non-str ``sender`` becomes ``''``."""
+
+    @staticmethod
+    def _drive(data):
+        from gateway.mqtt_bridge_handler import MQTTBridgeHandler
+        h = MQTTBridgeHandler.__new__(MQTTBridgeHandler)
+        h._message_queue = MagicMock()
+        h._stats_lock = threading.Lock()
+        h.stats = {"errors": 0}
+        h._should_bridge = None
+        h._message_callback = None
+        store = MagicMock()
+        with patch.dict('sys.modules', {'commands': MagicMock(messaging=store),
+                                        'commands.messaging': store}), \
+                patch("utils.event_bus.emit_message") as emit:
+            h._bridge_text_message(dict(data, to=0xFFFFFFFF, channel=0,
+                                        payload={"text": "x"}),
+                                   topic="msh/US/2/json/meshforge/!aabb0042")
+        queued = h._message_queue.put_nowait.call_args[0][0].source_id
+        stored = store.store_incoming.call_args.kwargs["from_id"]
+        fed = emit.call_args.kwargs["node_id"]
+        return queued, stored, fed
+
+    def test_rns_store_and_feed_name_the_originator(self):
+        assert self._drive({"from": SENDER, "sender": "!aabb0042"}) == \
+            ("!a2e95ba4",) * 3
+
+    @pytest.mark.parametrize("data,expected", [
+        ({"from": 0xFFFFFFFF, "sender": "!aabb0042"}, "!aabb0042"),  # broadcast is no sender
+        ({"from": -1, "sender": "!aabb0042"}, "!aabb0042"),
+        ({"from": 0x1A2E95BA4, "sender": "!aabb0042"}, "!aabb0042"),
+        ({"from": "junk", "sender": "!aabb0042"}, "!aabb0042"),
+        ({"sender": "!aabb0042"}, "!aabb0042"),
+        ({"sender": "gw-1"}, "gw-1"),                # old attribution kept
+        ({"sender": "!AABB0042"}, "!aabb0042"),      # valid -> normalised (nit 1)
+        ({"sender": 12345}, ""),                     # non-str never reaches [-4:]
+        ({"sender": None}, ""),
+        ({"from": SENDER, "sender": "gw-1"}, "!a2e95ba4"),   # from decides (nit 4)
+        ({"from": SENDER}, "!a2e95ba4"),
+        ({}, ""),
+    ])
+    def test_no_usable_from_keeps_the_old_attribution(self, data, expected):
+        assert self._drive(data) == (expected,) * 3
