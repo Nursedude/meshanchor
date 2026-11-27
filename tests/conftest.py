@@ -8,11 +8,14 @@ Handles CI-specific settings:
 - Shared TUI handler test infrastructure (FakeDialog, make_handler_context)
 """
 
+import itertools
 import os
 import sys
 import warnings
 import weakref
 from contextlib import ExitStack
+
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -269,8 +272,49 @@ def _reset_node_tracker_singleton():
     _reset()
 
 
+_ISOLATION_SEQ = {}
+
+
+def _fresh_isolation_dir(root):
+    """A NEW, empty directory under ``root`` — O(1), never a scan (CI-1 twin
+    port of MeshForge dcf6d571, 2026-11-26).
+
+    ``tmp_path_factory.mktemp`` (and every ``tmp_path`` request) picks its number
+    by scanning EVERY entry of the basetemp root, so paying it per test in an
+    autouse fixture made the suite quadratic in its own size (MeshForge
+    cProfile diff 11-18: +98.6 ms/test late in the run; the gate is
+    ``tests/test_conftest_tmp_cost.py``). Children are sharded 1,000 per parent
+    so no directory grows without bound; ``exist_ok=False`` + skip means a test
+    is never handed a directory that already existed."""
+    root = Path(root)
+    seq = _ISOLATION_SEQ.setdefault(str(root), itertools.count())
+    while True:
+        n = next(seq)
+        d = root / f"s{n // 1000:04d}" / f"t{n % 1000:03d}"
+        d.parent.mkdir(exist_ok=True)
+        try:
+            d.mkdir(exist_ok=False)
+            return d
+        except FileExistsError:
+            continue
+
+
+@pytest.fixture(scope="session")
+def _isolation_root(tmp_path_factory):
+    """ONE ``mktemp`` for the session; per-test children via ``_fresh_isolation_dir``."""
+    return tmp_path_factory.mktemp("per_test_isolation")
+
+
+@pytest.fixture
+def _per_test_isolation_dir(_isolation_root):
+    """ONE fresh empty directory per test for the autouse isolation fixtures.
+    Function-scoped, but it requests only the SESSION root — the CI-1 gate
+    allows exactly this shape."""
+    return _fresh_isolation_dir(_isolation_root)
+
+
 @pytest.fixture(autouse=True)
-def _isolate_node_cache_files(tmp_path_factory):
+def _isolate_node_cache_files(_per_test_isolation_dir):
     """Keep the node-cache writers out of the operator's live data directory.
 
     ``UnifiedNodeTracker._save_cache`` writes TWO files: the one
@@ -297,7 +341,7 @@ def _isolate_node_cache_files(tmp_path_factory):
     ``src.``). Patching only the alias in front of you is precisely the
     half-covered guard this fixture exists to prevent.
     """
-    root = tmp_path_factory.mktemp("node_cache_isolation")
+    root = _per_test_isolation_dir   # CI-1: O(1), never the basetemp scan
     targets = [
         ('utils.paths.MeshAnchorPaths.rns_nodes_cache_path', root / "rns_nodes.json"),
         ('src.utils.paths.MeshAnchorPaths.rns_nodes_cache_path', root / "rns_nodes.json"),
