@@ -30,6 +30,89 @@ from handler_registry import HandlerRegistry
 # Fixtures
 # ---------------------------------------------------------------------------
 
+_BROWSER_BINARIES = frozenset({
+    "xdg-open", "sensible-browser", "x-www-browser", "www-browser",
+    "lynx", "w3m", "links", "elinks",
+    "chromium", "chromium-browser", "google-chrome", "firefox", "firefox-esr",
+})
+
+
+def _browser_in_argv(argv):
+    """The browser binary an argv would launch, or None.
+
+    Looks past wrappers (``sudo -u pi xdg-open URL``) by checking every
+    element's basename, so a privilege-dropping launch is caught too.
+    """
+    if isinstance(argv, (str, bytes)):
+        argv = [argv]
+    for part in argv or ():
+        name = os.path.basename(os.fsdecode(part)) if isinstance(part, (str, bytes)) else ""
+        if name in _BROWSER_BINARIES:
+            return name
+    return None
+
+
+@pytest.fixture
+def no_desktop(monkeypatch):
+    """Nothing a handler does may open on the operator's desktop.
+
+    Three doors, all shut: no DISPLAY/WAYLAND_DISPLAY to inherit; the
+    ``webbrowser`` API refuses (returns False); and any subprocess whose argv
+    names a browser binary (xdg-open, lynx, chromium, ...) raises
+    FileNotFoundError before it spawns. Shutting only DISPLAY is not enough:
+    topology then falls back to ``lynx`` with a 300 s timeout.
+
+    Yields the list of refused launches (name, argv) -- the witness of which
+    handlers tried.
+    """
+    import subprocess
+    import webbrowser
+
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    refused = []
+
+    def _refuse_api(name):
+        def refuse(url, *a, **k):
+            refused.append((f"webbrowser.{name}", [url]))
+            return False
+        return refuse
+
+    for name in ("open", "open_new", "open_new_tab"):
+        monkeypatch.setattr(webbrowser, name, _refuse_api(name))
+
+    real_popen = subprocess.Popen
+
+    class GuardedPopen(real_popen):
+        def __init__(self, args, *a, **k):
+            browser = _browser_in_argv(args)
+            if browser:
+                refused.append((browser, list(args) if not isinstance(args, (str, bytes)) else [args]))
+                raise FileNotFoundError(2, f"[no_desktop] refused browser launch: {browser}")
+            super().__init__(args, *a, **k)
+
+    # subprocess.run/call/check_output all resolve Popen from the module.
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+    yield refused
+
+
+def test_no_desktop_shuts_every_door(no_desktop):
+    """Pin the guard itself: each launch path is refused and witnessed."""
+    import subprocess
+    import webbrowser
+
+    assert "DISPLAY" not in os.environ
+    assert "WAYLAND_DISPLAY" not in os.environ
+    assert webbrowser.open("http://127.0.0.1:8080") is False
+    with pytest.raises(FileNotFoundError):
+        subprocess.run(["sudo", "-u", "pi", "xdg-open", "http://x"], timeout=5)
+    with pytest.raises(FileNotFoundError):
+        subprocess.Popen(["/usr/bin/lynx", "/tmp/x.html"])
+    assert [b for b, _ in no_desktop] == ["webbrowser.open", "xdg-open", "lynx"]
+    # A non-browser command still runs.
+    assert subprocess.run(["true"], timeout=5).returncode == 0
+
+
 class FakeDialog:
     """Minimal dialog stub for testing handler dispatch."""
 
@@ -265,7 +348,7 @@ class TestFullRegistryIntegration:
                 f"Section {section!r} has no menu items"
             )
 
-    def test_all_tags_dispatch(self, registry, no_network):
+    def test_all_tags_dispatch(self, registry, no_network, no_desktop):
         """Every registered tag should dispatch successfully.
 
         ``no_network`` makes this hermetic. Dispatch actually RUNS each
@@ -293,6 +376,11 @@ class TestFullRegistryIntegration:
         ``subprocess.run``). Patching ``socket.socket`` cannot reach another
         interpreter, so that path can still block on a slow box. Left as a
         separate finding rather than papered over here.
+
+        ``no_desktop`` (2026-11-26): dispatch inherited the session's
+        DISPLAY, and a handler's open-in-browser launched a REAL Chromium on
+        the operator's desktop that outlived pytest (the suite unit then sat
+        'deactivating' until systemd SIGKILLed it).
         """
         for section in registry.section_names:
             for tag, _ in registry.get_menu_items(section):
