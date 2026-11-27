@@ -36,6 +36,7 @@ someone to discover from a green tick.
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import sys
 
@@ -68,9 +69,15 @@ def _annotate_parents(tree):
             child.parent = parent
 
 
+@functools.lru_cache(maxsize=1)
 def _rns_attr_paths():
     """(module, dotted_path, 'file:line') for every real attribute access
-    rooted at the NAME ``RNS`` or ``LXMF``."""
+    rooted at the NAME ``RNS`` or ``LXMF``.
+
+    Cached (a TUPLE, so no caller can mutate the shared result): every test
+    here scans the same unchanging src/ tree, and each scan re-parsed all
+    ~500 files -- ~7 s a call, 4 calls, the costliest file in the suite
+    after the TUI sweep (ma-ci-310-at-10min-cap profile, 2026-11-27)."""
     out = []
     for dirpath, dirnames, files in os.walk(SRC_DIR):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
@@ -101,7 +108,7 @@ def _rns_attr_paths():
                     continue
                 out.append((cur.id, ".".join(reversed(parts)),
                             f"{rel}:{node.lineno}"))
-    return out
+    return tuple(out)
 
 
 @pytest.fixture(scope="module")
