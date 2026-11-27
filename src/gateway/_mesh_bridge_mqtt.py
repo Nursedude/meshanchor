@@ -17,6 +17,7 @@ import logging
 from typing import Optional, Dict, Callable
 
 from .config import MeshtasticConfig
+from .wire_ids import mqtt_json_origin
 from utils.safe_import import safe_import
 
 logger = logging.getLogger("gateway.mesh_bridge")
@@ -166,7 +167,9 @@ class MQTTMeshInterface:
             if msg_type != 'text':
                 return
 
-            sender = data.get('sender', '')
+            # The ORIGINATOR from the wire `from`; the uplinking `sender`
+            # only when `from` is unusable (one reader: wire_ids, MF bbae6ee8).
+            from_id = mqtt_json_origin(data)
             to_num = data.get('to', 0)
             payload = data.get('payload', {})
             text = payload.get('text', '') if isinstance(payload, dict) else str(payload)
@@ -177,9 +180,12 @@ class MQTTMeshInterface:
             to_id = f"!{to_num:08x}" if to_num else None
             is_broadcast = to_num == 0xFFFFFFFF
 
-            # Build a packet dict compatible with _process_receive
+            # Build a packet dict compatible with _process_receive. Only the
+            # resolved `fromId` rides along -- never a numeric `from`: the
+            # bridge's packet_origin lets a present `from` decide alone, so an
+            # invalid one would erase the sender fallback (MF r1 review HIGH).
             packet = {
-                'fromId': sender,
+                'fromId': from_id,
                 'toId': to_id or '!ffffffff',
                 'channel': data.get('channel', 0),
                 'rxSnr': data.get('snr'),

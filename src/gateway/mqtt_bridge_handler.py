@@ -82,6 +82,7 @@ from utils.paths import get_real_user_home as _get_real_user_home_fn
 from utils.service_check import check_service as _check_service
 from utils.service_check import check_port as _check_port
 from utils.tx_guard import DEFAULT_MESH_TCP_PORT, assert_tx_allowed
+from .wire_ids import mqtt_json_origin, wire_node_num
 
 if TYPE_CHECKING:
     from .bridge_health import BridgeHealthMonitor
@@ -497,9 +498,9 @@ class MQTTBridgeHandler(BaseMessageHandler):
         if msg_id and self._is_duplicate(msg_id):
             return
 
-        # Update node tracking
-        from_num = data.get('from', 0)
-        if from_num:
+        # Update node tracking -- only a valid wire originator (MF r3 11-17: a
+        # truthy malformed `from` keyed the update on the uplinker).
+        if wire_node_num(data.get('from')):
             self._update_node_from_mqtt(data)
 
         # Handle text messages for bridging
@@ -656,12 +657,9 @@ class MQTTBridgeHandler(BaseMessageHandler):
         sites). Same sender-vs-from class as MeshForge's 9554f06
         text-attribution fix; parity port of MeshForge 0ce2a65. `from`
         is the originating node; fall back to `sender` only when `from`
-        is absent.
+        is unusable (the one wire_ids rule, MF bbae6ee8).
         """
-        from_num = data.get('from', 0)
-        if from_num:
-            return f"!{from_num:08x}"
-        return data.get('sender', '')
+        return mqtt_json_origin(data)
 
     def _update_node_from_mqtt(self, data: dict) -> None:
         """Update node tracker from MQTT message data."""
@@ -729,6 +727,12 @@ class MQTTBridgeHandler(BaseMessageHandler):
         try:
             from .node_tracker import UnifiedNode
 
+            # A nodeinfo is a node naming ITSELF. A `from` that is PRESENT but
+            # not a node names nobody: the uplinker fallback would write the
+            # payload's name onto the UPLINKER's node (MF r4 11-17). An ABSENT
+            # `from` keeps its sender fallback.
+            if 'from' in data and not wire_node_num(data.get('from')):
+                return
             node_id = self._originator_id(data)
             payload = data.get('payload', {})
             if not isinstance(payload, dict) or not node_id:
